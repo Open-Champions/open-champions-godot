@@ -245,8 +245,13 @@ change that size. Bars are 100×8, the status frame and glow are 160×46, and
 the button is 83×38. The frame tiles stay 32×32 and the center stays
 320×224. The original-art catalogue page and crop use those used sizes.
 `hudTextGlyphs` centers an ASCII string with the existing half-pixel run and
-a caller tint, defaulting to `0x80808080`. The HUD view draws that run from
-the loaded font page when the observation supplies `name` and `level`.
+a required caller tint; there is no default. The HUD view takes the colours
+from `docs/hud-dynamic.md` section 3. The level number uses base
+`0x80323c3c`. While a level is pending it uses the pending-level colour of the
+pulse. The view draws it only when the observation supplies `level` and
+`acknowledged_level`. The name is refused, and the reason is in
+`text_refusals`. Its colour depends on the arena colour, `player_slotColor`,
+the blink mask `0x505b04` and `ui_fitText`, and play observes none of these.
 
 ## Remaining gates
 

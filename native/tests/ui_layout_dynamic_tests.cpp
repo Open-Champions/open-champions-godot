@@ -625,20 +625,22 @@ int main(int argc, char **argv) {
       for (int k = 0; k < 8; ++k)
         put16(hud_font, go + i * 16 + k * 2, glyphs[i][k]);
     Bytes view{hud_font.data(), hud_font.size()};
-    auto drawn = T::hudTextGlyphs(view, {'A'}, 73, 17);
+    // The tint is a required argument (audit FONT-1). 0x80323c3c is the status
+    // text base colour (research-ui 3e39392 docs/hud-dynamic.md section 3).
+    auto drawn = T::hudTextGlyphs(view, {'A'}, 73, 17, 0x80323c3c);
     expect(drawn.size() == 1 && drawn[0].x_half == 142 && drawn[0].y == 17 &&
                drawn[0].source.x == 0 && drawn[0].source.y == 0 &&
                drawn[0].source.width == 1 && drawn[0].source.height == 1 &&
-               drawn[0].tint == 0x80808080,
+               drawn[0].tint == 0x80323c3c,
            "HUD name glyph is centered in half pixels");
     auto tinted = T::hudTextGlyphs(view, {'A'}, 134, 44, 0x80ffffff);
     expect(tinted.size() == 1 && tinted[0].y == 44 && tinted[0].tint == 0x80ffffff,
            "caller tint is kept");
-    expect(T::hudTextGlyphs(view, {}, 73, 17).empty() &&
-               T::hudTextGlyphs(view, {0}, 73, 17).empty(),
+    expect(T::hudTextGlyphs(view, {}, 73, 17, 0x80323c3c).empty() &&
+               T::hudTextGlyphs(view, {0}, 73, 17, 0x80323c3c).empty(),
            "empty HUD text draws nothing");
     hud_font[2] = 99;
-    expect(T::hudTextGlyphs(view, {'A'}, 73, 17)[0].x_half == 142,
+    expect(T::hudTextGlyphs(view, {'A'}, 73, 17, 0x80323c3c)[0].x_half == 142,
            "header +2 does not move the glyph");
     if (argc < 2)
       throw std::runtime_error("hud_r3 vectors directory required");
