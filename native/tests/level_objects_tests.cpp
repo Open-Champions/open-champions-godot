@@ -203,6 +203,19 @@ int main(int argc, char **argv) {
     put(0x4f7210, NAME, 4);
     put(0x4f7214, 0, 1); // signed level byte 0 -> monster level 2
     put(0x4f7240, 0, 4); // default/terminator row
+    const std::string skelight_class = "Skelight";
+    for (std::size_t i = 0; i < skelight_class.size(); ++i)
+      put(0x532d58 + static_cast<std::uint32_t>(i),
+          static_cast<std::uint8_t>(skelight_class[i]), 1);
+    put(0x532d58 + static_cast<std::uint32_t>(skelight_class.size()), 0, 1);
+    for (const auto &entry : std::array<std::pair<std::uint32_t, std::string>, 3>{{
+             {0x532cc8, "RiderDisease"}, {0x532dc8, "UndeadKnight1"},
+             {0x532e80, "raloszek"}}}) {
+      for (std::size_t i = 0; i < entry.second.size(); ++i)
+        put(entry.first + static_cast<std::uint32_t>(i),
+            static_cast<std::uint8_t>(entry.second[i]), 1);
+      put(entry.first + static_cast<std::uint32_t>(entry.second.size()), 0, 1);
+    }
     const std::vector<std::uint8_t> balance{1, 0, 0x1c, 0xd6,
                                             100, 0, 100, 0, 100, 0, 100, 0, 100, 0};
     rta::SharedRandom stat_seed(20973);
@@ -223,6 +236,48 @@ int main(int argc, char **argv) {
           stat_mem.u16(stat_at + 0xd0) == 3 && stat_mem.u16(stat_at + 0xd2) == 6 &&
           stat_mem.u16(stat_at + 0xd4) == 27 &&
           stat_mem.u32(stat_at + 0xd8) == 0x41a00000u, "exact combat statistics");
+    rta::SharedRandom skel_seed(20973);
+    sc::Host skel_host;
+    skel_host.bind_seed(&skel_seed);
+    skel_host.start_single_player();
+    skel_host.set_executable(stats_image.view());
+    skel_host.set_level_stats(level_name, balance.data(), balance.size());
+    const auto skel = blob({{"Skelight", {0, 0, 0}, 0, {"name=stat-skelight"}}});
+    check(skel_host.adopt_objects(skel.data(), skel.size()), "Skelight adopted");
+    rta::Pool skel_pool;
+    const auto skel_at = skel_pool.allocate(0x468);
+    check(skel_host.is_built(skel_at),
+          "Skelight built (built=" + std::to_string(skel_host.counts().objects_built) +
+          ", unbuilt=" + std::to_string(skel_host.counts().objects_unbuilt) +
+          ", absent=" + std::to_string(skel_host.counts().objects_not_created) + ")");
+    const auto &skel_mem = skel_host.variables().memory;
+    check(skel_mem.u32(skel_at + 0x228) == 0x41a8355bu &&
+          skel_mem.u32(skel_at + 0x22c) == 0x41a8355bu,
+          "Skelight's level override reaches hit points");
+    check(skel_mem.u32(skel_at + 0x460) == 1u &&
+          skel_mem.u8(skel_at + 0x3c8 + 8) == 4u &&
+          (skel_mem.u8(skel_at + 0x3c8 + 4) & 1u) == 1u,
+          "Skelight's level and embedded weapon holder");
+    for (const auto &[cls, size, should_build] :
+         std::array<std::tuple<std::string, std::uint32_t, bool>, 3>{{
+             {"UndeadKnight1", 0x478, true}, {"raloszek", 0x480, true},
+             {"RiderDisease", 0x478, false}}}) {
+      rta::SharedRandom class_seed(20973);
+      sc::Host class_host;
+      class_host.bind_seed(&class_seed);
+      class_host.start_single_player();
+      class_host.set_executable(stats_image.view());
+      class_host.set_level_stats(level_name, balance.data(), balance.size());
+      const auto record = blob({{cls, {0, 0, 0}, 0, {}}});
+      check(class_host.adopt_objects(record.data(), record.size()), cls + " adopted");
+      rta::Pool class_pool;
+      check(class_host.is_built(class_pool.allocate(size)) == should_build,
+            cls + (should_build ? " built" : " refused"));
+      if (!should_build)
+        check(class_host.counts().build_refusals.count(
+                  "mounted Horsemen needs Nightmare_ctor") == 1,
+              "mounted constructor refusal is explicit");
+    }
     std::cout << "PASS level-objects: " << checks << " checks, " << built << " built, " << stubs
               << " stubs\n";
     return 0;

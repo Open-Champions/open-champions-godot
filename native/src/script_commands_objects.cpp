@@ -84,8 +84,8 @@ const Ported kPorted[] = {
 // The SnoBadge equality test (level_factory_table.inc row 39; factory block
 // 0x15a494 passes variant 1). The Badger prefix row passes 0.
 constexpr std::uint32_t SNOBADGE_TEST = 0x532a30;
-constexpr std::uint32_t HORSEMEN_FOOT_FIRST = 0x532cc8;
-constexpr std::uint32_t HORSEMEN_RIDER_FIRST = 0x532dc8;
+constexpr std::uint32_t HORSEMEN_RIDER_FIRST = 0x532cc8;
+constexpr std::uint32_t HORSEMEN_FOOT_FIRST = 0x532dc8;
 
 struct Refused : std::runtime_error {
   using std::runtime_error::runtime_error;
@@ -344,6 +344,13 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     return v;
   });
   mem.poke(CREATURE_SERIAL, 1, variables_->memory.u8(CREATURE_SERIAL));
+  if (stats_ready_) {
+    mem.poke(0x4f714c, 4, monster_level_);
+    for (std::size_t i = 0; i < level_name_.size(); ++i)
+      mem.poke(0x44fe18 + static_cast<std::uint32_t>(i), 1,
+               static_cast<unsigned char>(level_name_[i]));
+    mem.poke(0x44fe18 + static_cast<std::uint32_t>(level_name_.size()), 1, 0);
+  }
   std::uint32_t scratch = SCRATCH;
   auto place = [&](const std::string &text) -> std::uint32_t {
     const auto at = scratch;
@@ -415,7 +422,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       combat::Tables tables;
       tables.fixed_levels = {U"stomedal", U"innpit"};
       combat::World world;
-      world.monster_level = monster_level_;
+      world.monster_level = static_cast<Raw>(m.mem.load(0x4f714c, 4));
       world.num_players = variables_->memory.u32(0x4d8ae0);
       world.difficulty = variables_->memory.u32(script_items::G_DIFFICULTY);
       world.medal_mission = variables_->memory.u32(0x4f713c);
