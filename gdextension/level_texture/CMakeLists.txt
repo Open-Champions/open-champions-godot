@@ -36,6 +36,9 @@ add_library(champions-level-texture-preview SHARED
     ../../native/src/core_math.cpp
     ../../native/src/core_state.cpp
     ../../native/src/level_flow.cpp
+    ../../native/src/objects_lifetime.cpp
+    ../../native/src/objects_scheduler.cpp
+    ../../native/src/objects_queries.cpp
     ../../native/src/creature_hp.cpp
     ../../native/src/creature_movement.cpp
     ../../native/src/creature_water.cpp
