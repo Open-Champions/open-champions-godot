@@ -396,6 +396,32 @@ and wave 14 with scripts off, including every script count. Only `time.*`,
 Water entries and ticks in water stay 4 and 252 of 3,024 observed. Drawing
 does not touch the creature `water_test` grid.
 
+The level whose water uses both sets is index 20. It was found with one
+headless run per level over indices 0–27, comparing each level's mesh count
+with its surface count.
+
+Captures (gitignored `work/private/captures-r16/`, 1280×720, windowed,
+inspected): index 20, plus the first 3 water levels from index 28 on
+(indices 28, 29 and 30). water-draw's own captures covered the first 3 water
+levels from index 0. Play, creature and overview for each: 12 PNGs, 0 failed
+checks. The windowed run from index 28 went on to play all 35 water levels in
+28–110, with 0 failures and 35 textures decoded.
+
+| Index | Tiles | What the captures show |
+|---|---|---|
+| 20 | 48 (both sets) | Bright orange sheets over a round pit and one side patch. Texture detail is visible up close. Where two tiles overlap, the overlap is brighter, because each tile blends on its own. |
+| 28 | 37 | Small pale grey-green patches in the overview. None is in the play camera's view. |
+| 29 | 11 | One small grey-green patch in the overview. Not in the play view. |
+| 30 | 772 | Many orange square sheets across the level. Up close they are flat with faint texture and hard square edges. One sheet draws over nearer rock. |
+
+None shows a ripple. Every tile is flat, as expected while the claim seed is
+refused.
+
+Exported app (`build/exports/wave16-final`, headless): the 12-level set, with
+and without `--scripts`, and the three arena indices with `--scripts`. Each
+equals wave 15 apart from timing, plus the new water-texture counts (5, 5 and
+3 decoded at 64×64, 0 refused).
+
 Still refused or not done:
 - No ripples. The claim-frame seed is refused, so every block starts as a zero
   grid and stays flat. A real tile samples one texel of the water texture.
