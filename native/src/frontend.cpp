@@ -510,6 +510,8 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
 }
 
 void Flow::import_result(bool ok, const Character &c, const std::string &error) {
+  if (screen_ != Screen::CharClass && screen_ != Screen::LoadGame)
+    throw Refusal("no import was requested");
   if (!ok) {
     error_ = error.empty() ? "import refused" : error;
     return;

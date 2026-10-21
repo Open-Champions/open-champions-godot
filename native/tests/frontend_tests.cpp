@@ -343,6 +343,7 @@ void import_vectors() {
   for (const auto &r : g.take_requests())
     crypt = crypt || (r.kind == "start_play" && r.arg == "crypt");
   expect(crypt, "import from load asks for the slot's level");
+  reject([&] { g.import_result(true, c); }, "unrequested import refused");
 }
 
 void pause_vectors() {
