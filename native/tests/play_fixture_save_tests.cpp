@@ -206,17 +206,20 @@ void full_combat() {
       if (cut != std::string::npos) last = line.substr(cut);
     }
   }
-  // Slot 6 is the Soul (research-combat-ctors e9777eb constructor, set-state
-  // and run prologue); slots 4 and 5 stay empty: on the round-5 placement the
-  // Skeleton's first scan calls the refused Skeleton_isEnemy and the AntQueen
-  // asks for state 3, whose switch is not executed. The Soul's demon tests are
-  // in the trace, so the save/load comparison covers them.
-  bool soul = false, others = false;
+  // Slot 4 is the AntQueen at (-110, 110) (AntQueen_run in every state,
+  // research-combat-ctors-2 5b92837) and slot 6 the Soul (research-combat-ctors e9777eb); slot 5 stays
+  // empty: a Skeleton stops at its first sighting, in Skeleton_run state 3 and
+  // creature_allyInLineOfFire, which are not executed. The AntQueen's states
+  // and the Soul's demon tests are in the trace, so the save/load comparison
+  // covers them.
+  bool queen = false, soul = false, skeleton = false;
   for (const auto &a : whole.scene->actors()) {
+    queen = queen || (a.slot == 4 && a.present);
     soul = soul || (a.slot == 6 && a.present);
-    others = others || ((a.slot == 4 || a.slot == 5) && a.present);
+    skeleton = skeleton || (a.slot == 5 && a.present);
   }
-  check(soul && !others, "the Full fight places the Soul in slot 6 and nothing in slots 4 and 5");
+  check(queen && soul && !skeleton,
+        "the Full fight places the AntQueen in slot 4, the Soul in slot 6 and nothing in slot 5");
   std::cout << "full combat round 5: " << whole.demon_tests << " demon tests, " << whole.shield_samples
             << " Holy Shield sample points\n";
   check(whole.demon_tests == 300 / 16 + 1, "the Soul tests for a demon every 16 frames of the live fight");
@@ -240,8 +243,7 @@ void wave12_extensions() {
     if (t == 4) check(refuses([&] { scene.spawn_creature(0); }), "an unexecuted constructor is refused");
     if (t == 5) scene.spawn_creature(8); // Gnaw
     if (t == 6) check(refuses([&] { scene.spawn_creature(7); }), "one own-machine creature per session");
-    // Potions 1 and 2 stop the session later on (a Fire's destructor, the gas
-    // run); they are checked apart below.
+    // Potions 1 and 2 are checked apart below.
     if (t == 60) scene.drop_potion(3);
     if (t >= 95 && t % 12 == 0) scene.press_attack(true);
   };
@@ -258,27 +260,51 @@ void wave12_extensions() {
   };
   for (unsigned kind : {1u, 2u}) {
     // LooseFire_ctor and poisonGasSpell_ctor run (research-combat-ctors
-    // 98c081a). Kind 1's fires burn for 100 runs; the first one to end reaches
-    // Fire_dtor 0x3c5050, whose body was not read. Kind 2's cloud reaches
-    // poisonGasSpell_run 0x1fd0f0 (combat round 6, not ported) on the next
-    // frame.
+    // 98c081a). Kind 1's fires burn for 100 runs and end through Fire_dtor
+    // 0x3c5050, the LooseFire at frame F + 121 through LooseFire_dtor
+    // (research-combat-ctors-2 combat-ctors-2.md section 6). Kind 2's cloud
+    // runs poisonGasSpell_run 0x1fd0f0 (combat round 6) and ends through
+    // poisonGasSpell_dtor. Both run until the idle fight's own end.
     FullRun r = full_start();
     r.scene->drop_potion(kind);
     std::string error;
     int ticks = 0;
-    for (; ticks < TICKS && error.empty(); ++ticks) {
+    for (; ticks < 2000 && error.empty(); ++ticks) {
       const auto o = r.scene->advance(0);
       if (o.failed) error = o.error;
     }
-    const char *want = kind == 1 ? "Fire_dtor 0x3c5050" : "poisonGasSpell_run 0x1fd0f0";
-    check(error.find(want) != std::string::npos,
-          "potion " + std::to_string(kind) + " stops at " + want + ": '" + error + "'");
+    check(ticks > (kind == 1 ? 130 : 30),
+          "potion " + std::to_string(kind) + " runs past its round-1 stop: " + std::to_string(ticks) +
+              " '" + error + "'");
     std::cout << "potion " << kind << " stops at ready tick " << ticks << ": " << error << "\n";
+  }
+  {
+    // How far the idle Full fight runs with the AntQueen in slot 4, and where a
+    // spawned Skeleton stops: past Skeleton_isEnemy, at its first sighting in
+    // Skeleton_run state 3 (full-placement.md section 4).
+    for (bool skeleton : {false, true}) {
+      FullRun r = full_start();
+      std::string error;
+      int ticks = 0;
+      for (; ticks < 4000 && error.empty(); ++ticks) {
+        if (skeleton && ticks == 3)
+          r.scene->spawn_creature(6);
+        const auto o = r.scene->advance(0);
+        if (o.failed) error = o.error;
+      }
+      if (skeleton)
+        check(error.find("Skeleton_run state 3") != std::string::npos,
+              "a spawned Skeleton gets past Skeleton_isEnemy and stops at state 3: '" + error + "'");
+      else
+        check(ticks > 300, "the idle Full fight with the AntQueen runs past 300 ticks: '" + error + "'");
+      std::cout << (skeleton ? "spawned Skeleton" : "idle Full fight") << " stops at ready tick "
+                << ticks << ": " << error << "\n";
+    }
   }
   FullRun whole = full_start();
   run(whole, 0, TICKS);
-  check(whole.scene->actors().size() == 5 && whole.scene->own_creature_class() == "Gnaw",
-        "the own-machine creature is observed in slot 3, beside the Soul");
+  check(whole.scene->actors().size() == 6 && whole.scene->own_creature_class() == "Gnaw",
+        "the own-machine creature is observed in slot 3, beside the AntQueen and the Soul");
   FullRun first = full_start();
   run(first, 0, SAVE_AT);
   const auto presentation = FX::sim::save_world(*first.world);
@@ -301,7 +327,7 @@ void wave12_extensions() {
 // combat-ctors: a Soul built by its executed constructor in slot 3 (the
 // fixture's Soul is in slot 6) and potion 1's LooseFire and Fire objects
 // (fx_spawn id 5) are journaled; a save made while the fires burn continues
-// byte for byte, to the same stop at the first Fire's unread destructor.
+// byte for byte, through the fires' and the LooseFire's destructors.
 void combat_ctors_extensions() {
   constexpr int SAVE_AT = 60, LIMIT = 300;
   auto ops = [](FS::CombatScene &scene, int t) {
@@ -334,8 +360,14 @@ void combat_ctors_extensions() {
   Stop whole_stop;
   run(whole, 0, LIMIT, whole_stop);
   check(whole.scene->own_creature_class() == "Soul", "the Soul is the slot-3 creature");
-  check(whole_stop.tick > SAVE_AT && whole_stop.error.find("Fire_dtor 0x3c5050") != std::string::npos,
-        "potion 1 burns past the save point and stops at Fire_dtor: '" + whole_stop.error + "'");
+  int left = 0;
+  for (auto a : whole.scene->session().world().actors()) {
+    auto table = whole.scene->session().world().read(a + 0x48);
+    left += table == 0x50f208 || table == 0x50e2b8;
+  }
+  check((whole_stop.tick < 0 || whole_stop.tick > 130) && left == 0,
+        "potion 1's fires and LooseFire end through their destructors: " +
+            std::to_string(whole_stop.tick) + " '" + whole_stop.error + "'");
   FullRun first = full_start();
   Stop first_stop;
   run(first, 0, SAVE_AT, first_stop);

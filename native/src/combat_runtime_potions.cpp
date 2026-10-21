@@ -4,10 +4,11 @@
 // tools/difftest_potion_ctors.py, 0 mismatches): LooseFire_ctor 0x202b70 with
 // fx_spawn id 5 0x1f0ae0 and Fire_ctor 0x2020e0, Fire_run 0x1f34e0,
 // LooseFire_run 0x202c48, LooseFire_onTouch 0x1fcb70 and poisonGasSpell_ctor
-// 0x202de8. The three inline destructors (symbols/runtime.tsv) and
-// poisonGasSpell_run 0x1fd0f0 (combat round 6) are not ported; a fire touching
-// a player or a creature builds descriptor type 0x15, which damage_apply here
-// does not take.
+// 0x202de8. The fire entry of a touch (descriptor type 0x15 through the real
+// damage_apply, and the burn it leaves) is research-combat-ctors-2
+// docs/spec/fire-touch.md (ref_fire_touch.py, executed by
+// difftest_fire_touch.py). The destructors are combat_ctors_2.cpp's;
+// poisonGasSpell_run is combat_runtime_round6.cpp's (combat round 6).
 namespace champions::simulation::rta::combat_runtime {
 int damage_with_descriptor(World::State &, Address, Address, Raw, Raw,
                            const combat::Descriptor &, Raw, Raw);
@@ -34,6 +35,9 @@ std::int32_t rem(Raw a, Raw b) {
 // The table words a constructor installs enter the image with the first
 // object of the class (as the DiseaseCloud's), with the type-info descriptor's
 // name word in mangled form (symbols/runtime.tsv getters and descriptors).
+// Slots 7, 10, 11 and 12 are the GameObject defaults 0x3c7eb0, 0x3c7ec8,
+// 0x3c7ef0 and 0x3c7ef8, which all 156 classes outside the Creature branch
+// hold (research docs/runtime.md section 4.4, Observed).
 void World::State::potion_table(Address table, Raw getter, Address desc,
                                 const char *name,
                                 std::initializer_list<std::pair<unsigned, Raw>> slots) {
@@ -41,6 +45,11 @@ void World::State::potion_table(Address table, Raw getter, Address desc,
     return;
   w(table, 2, 0);
   w(table + 4, getter);
+  for (auto p : {std::pair<unsigned, Raw>{7, 0x3c7eb0}, {10, 0x3c7ec8}, {11, 0x3c7ef0},
+                 {12, 0x3c7ef8}}) {
+    w(table + 8 * p.first, 2, 0);
+    w(table + 8 * p.first + 4, p.second);
+  }
   for (auto &p : slots) {
     w(table + 8 * p.first, 2, 0);
     w(table + 8 * p.first + 4, p.second);
@@ -156,6 +165,7 @@ void World::State::loosefire_on_touch(Address obj, Address other) {
   if (owner && !number(vcall(owner, 20, {iv(other)})))
     return;
   auto flags = u(other + 0xc);
+  combat::Descriptor desc(4, std::vector<std::int64_t>{-1, 0, 0, 0});
   if (flags & 0x60) {
     std::int32_t value = CREATURE_STRENGTH;
     if (flags & 0x40) {
@@ -163,13 +173,13 @@ void World::State::loosefire_on_touch(Address obj, Address other) {
       value = level >= 2 && level <= 5 ? level : 1;
     }
     note("LooseFire_onTouch", {obj, other, FIRE_ENTRY, Raw(value)});
-    throw Unsupported("damage_apply descriptor type 0x15 (LooseFire_onTouch, value " +
-                      std::to_string(value) + "): the fire entry is not executed");
+    desc[0] = {FIRE_ENTRY, value, value, 0};
   }
-  combat::Descriptor empty(4, std::vector<std::int64_t>{-1, 0, 0, 0});
+  // damage_apply(toucher, owner or the fire, 10000000, 0, 0, 0x100c040,
+  // descriptor, 0; 0.0, 0.0); its result is dropped (fire-touch.md section 2).
   note("damage_apply", {other, owner ? owner : obj, TOUCH_RATING, TOUCH_FLAGS});
   damage_with_descriptor(*this, other, owner ? owner : obj, TOUCH_RATING, TOUCH_FLAGS,
-                         empty, 0, 0);
+                         desc, ZERO, ZERO);
 }
 // poisonGasSpell_ctor 0x202de8 (block, position, life, radius, word, owner,
 // damage): a GameObject with one shared draw, no Spell base.

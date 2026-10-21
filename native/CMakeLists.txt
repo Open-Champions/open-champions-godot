@@ -256,6 +256,12 @@ if(BUILD_TESTING)
             --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
             --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     endforeach()
+    # The fire entry of a LooseFire touch and its burn tick (research
+    # combat-ctors-2 fire-touch.md) on the combat-damage harness.
+    add_test(NAME fire-touch-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_fire_touch_vectors.py"
+        "$<TARGET_FILE:champions-combat-damage-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/fire_touch.tsv.gz")
     foreach(component image execute host)
         set(suite "amx-${component}")
         add_executable(champions-${suite}-tests tests/amx_${component}_tests.cpp)

@@ -12,8 +12,9 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  // Slot 3 is the optional one-per-session creature. Slot 6 is the Full
-  // fixture's Soul; slots 4 and 5 (AntQueen, Skeleton) stay empty (full_setup).
+  // Slot 3 is the optional one-per-session creature. Slots 4 and 6 are the
+  // Full fixture's AntQueen and Soul; slot 5 (Skeleton) stays empty
+  // (full_setup).
   std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
@@ -246,16 +247,23 @@ struct Session::State {
       for (Raw off : {0x1cu, 0x24u})
         clips[Raw(world->read(definition + off))] = Clip{30, {{10u, Raw(1)}}};
     }
+    // Slot 4: an AntQueen at (-110, 110), facing the player, 120 HP, built by
+    // its executed constructor (World::spawn_class). AntQueen_run runs in
+    // every state (research-combat-ctors-2 5b92837, antqueen-run.md); the
+    // research probe ran her 3,000 idle ticks at (0, 140) without reaching an
+    // unexecuted body (full-placement.md 3.1). The placement is authored: the
+    // round-5 (0, 100) puts her in the walk-and-combo lane, where the player's
+    // swings hit her and her blood stops the session at GutChunk_ctor (its
+    // PhProp_ctor is not executed). In this corner of the flat ground (+-128)
+    // she still sees the player at ready tick 33 and runs states 3, 8, 9, 0x17
+    // and 0x18, and the authored combat scenarios end before she arrives.
     // Slot 6: a Soul on the placement the round-5 fixture used (-60, 100),
-    // facing the player, 120 HP, built by its executed constructor
-    // (research-combat-ctors e9777eb; World::spawn_class). Creature_setCharm puts
-    // it on team 0, and it wanders in states 0 and 1 for the whole fight.
-    // Slots 4 and 5 stay empty. The AntQueen and the Skeleton are built by
-    // their executed constructors too (spawn_creature), but on the round-5
-    // placement they stop this fight early on refusals the job keeps: the
-    // Skeleton's first target scan (ready tick 32) calls Skeleton_isEnemy
-    // 0x2a7e04, a recording stub of the research, and the AntQueen sees the
-    // player and requests state 3, whose switch is not executed (tick 33).
+    // facing the player, 120 HP. Creature_setCharm puts it on team 0, and it
+    // wanders in states 0 and 1 for the whole fight.
+    // Slot 5 stays empty: a Skeleton gets past Skeleton_isEnemy now, but stops
+    // at its first sighting of the player, in Skeleton_run state 3 and
+    // creature_allyInLineOfFire, which are not executed (full-placement.md
+    // section 4). It can still be built through spawn_creature.
     auto place = [&](unsigned slot, const char *cls, int x, int y) {
       C::Spawn s;
       s.position[0] = from_int(Raw(x));
@@ -266,6 +274,7 @@ struct Session::State {
         throw C::Unsupported("combat fixture actor has no flat ground");
       handles[slot] = world->retain(world->spawn_class(cls, s));
     };
+    place(4, "AntQueen", -110, 110);
     place(6, "Soul", -60, 100);
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);

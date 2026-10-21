@@ -6,6 +6,7 @@
 #include <functional>
 #include <iostream>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 // Round-5 host checks and the exact vector replay.
@@ -152,46 +153,67 @@ void live_fight() {
               h.w->read(soul + 0x232, 2) == 0 && h.w->read(soul + 0xf4) == 0 &&
               (h.w->read(soul + 0xa8, 8) >> 63),
           "Soul_ctor: permanent charm on team 0, state 0 without its draw, active");
-    check(threw_message([&] { h.w->take_damage(soul, q, 0, from_int(5)); }, "Soul_takeDamage"),
-          "Soul_takeDamage stays refused");
-    check(threw_message([&] { h.w->take_damage(s, q, 0, from_int(5)); }, "Skeleton_takeDamage"),
-          "Skeleton_takeDamage stays refused");
-    check(threw_message([&] { h.w->destroy(q); }, "AntQueen_dtor 0x3c3c10"),
-          "AntQueen_dtor stays refused");
+    // Research-combat-ctors-2 (combat-ctors-2.md sections 5 and 6).
+    auto soul_hp = h.w->read(soul + 0x228), soul_seed = h.w->read(soul + 0x44);
+    h.w->take_damage(soul, q, 0, from_int(5));
+    check(h.w->read(soul + 0x228) == soul_hp && h.w->read(soul + 0x3b0, 2) != 0x7fff &&
+              h.w->read(soul + 0x44) == soul_seed,
+          "Soul_takeDamage ignores an attacker that is not a Demon");
+    h.w->write(C::FRAME, 4, 77);
+    h.w->take_damage(s, q, 0, from_int(5));
+    check(h.w->read(s + 0x3b0, 2) == 0x7fff && h.w->read(s + 0x304) == 77,
+          "Skeleton_takeDamage is Creature_takeDamage");
+    h.w->clear_history();
+    h.w->destroy(q);
+    bool gone = true;
+    for (auto a : h.w->actors())
+      gone = gone && a != q;
+    check(gone && has_event(*h.w, "sub_202500", q + 0x320) &&
+              has_event(*h.w, "AnimState_dtor", q + 0x114),
+          "AntQueen_dtor runs Creature_dtor and frees the block");
+    h.w->clear_history();
+    h.w->destroy(s);
+    gone = true;
+    for (auto a : h.w->actors())
+      gone = gone && a != s;
+    check(gone, "Skeleton_dtor frees the block");
   }
   {
-    // The Skeleton's first target scan calls Skeleton_isEnemy, a recording stub.
+    // The Skeleton's target scans run Skeleton_isEnemy (combat-ctors-2.md
+    // section 4); its first sighting of the player requests state 3, whose
+    // switch arm is not executed (full-placement.md section 4).
     Host h;
     player(h);
     place(h, "Skeleton", 60, 100);
     std::string error;
     int ticks = 0;
     try {
-      for (; ticks < 200; ++ticks)
+      for (; ticks < 400; ++ticks)
         h.w->tick();
     } catch (const std::exception &e) {
       error = e.what();
     }
-    check(error.find("Skeleton_isEnemy 0x2a7e04") != std::string::npos && ticks < 64,
-          "the Skeleton's first scan refuses at Skeleton_isEnemy: " + error);
+    check(error.find("Skeleton_run state 3") != std::string::npos,
+          "the Skeleton gets past Skeleton_isEnemy and stops at state 3: " + error);
   }
   {
-    // AntQueen sees the player and asks for state 3, which her set-state
-    // enters (walk tracks, +0x3c4 = 0xabe0); the switch there stays refused.
+    // AntQueen sees the player and enters state 3 (walk tracks, +0x3c4 =
+    // 0xabe0); AntQueen_run now runs every state (antqueen-run.md).
     Host h;
     player(h);
     auto q = place(h, "AntQueen", 0, 100);
     std::string error;
+    std::set<Raw> states;
     try {
-      for (int t = 0; t < 200; ++t)
+      for (int t = 0; t < 400; ++t) {
         h.w->tick();
+        states.insert(Raw(h.w->read(q + 0x232, 2)));
+      }
     } catch (const std::exception &e) {
       error = e.what();
     }
-    check(error.find("AntQueen_run state 3") != std::string::npos &&
-              h.w->read(q + 0x232, 2) == 3 && h.w->read(q + 0x3c4, 2) == 0xabe0 &&
-              h.w->read(q + 0xb8) == 0x430c0000,
-          "AntQueen reaches state 3 and refuses its switch: " + error);
+    check(error.empty() && states.count(3) && states.count(8),
+          "AntQueen chases in state 3 and takes off in state 8: " + error);
   }
   {
     // Far from every activity centre: the Skeleton and the Soul return before

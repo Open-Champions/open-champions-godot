@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/arena_monsters.hpp"
+#include "champions/combat_ctors.hpp"
 #include "champions/combat_damage.hpp"
 #include "champions/combat_runtime.hpp"
 #include "champions/combat_stats.hpp"
@@ -54,26 +55,6 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
 // 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
 inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =
     "DiseaseCloud_dtor 0x3cd480 (slot 1 of 0x5186f0): body not read";
-// AntQueen_dtor 0x3c3c10, Skeleton_dtor 0x3cc5b8, Soul_dtor 0x3cc72c: research
-// symbols/runtime.tsv names them (inline destructors); no body was read.
-inline bool potion_dtor(Raw fn) {
-  return fn == LOOSEFIRE_DTOR || fn == FIRE_DTOR || fn == POISON_GAS_DTOR;
-}
-// LooseFire_dtor 0x3c6778, Fire_dtor 0x3c5050, poisonGasSpell_dtor 0x3c7878:
-// symbols/runtime.tsv names them; no body was read (potion-ctors.md keeps them
-// recording stubs).
-inline std::string potion_dtor_refusal(Raw fn) {
-  const char *name = fn == LOOSEFIRE_DTOR ? "LooseFire_dtor 0x3c6778"
-                     : fn == FIRE_DTOR    ? "Fire_dtor 0x3c5050"
-                                          : "poisonGasSpell_dtor 0x3c7878";
-  return std::string(name) + ": body not read";
-}
-inline std::string ctor_class_dtor_refusal(Raw fn) {
-  const char *name = fn == 0x3c3c10   ? "AntQueen_dtor 0x3c3c10"
-                     : fn == 0x3cc5b8 ? "Skeleton_dtor 0x3cc5b8"
-                                      : "Soul_dtor 0x3cc72c";
-  return std::string(name) + ": body not read";
-}
 struct World::State {
   enum class Kind { Creature, Player, Missile, Thrown, Effect, Spell };
   struct Actor : Object {
@@ -198,6 +179,14 @@ struct World::State {
   void note(std::string name, std::vector<std::uint64_t> args = {});
   void install_services();
   void install_ctor_services();
+  // The AntQueen, Skeleton, Soul, Fire, LooseFire and poison-gas destructors
+  // (research-combat-ctors-2 combat-ctors-2.md section 6; CT::class_dtor) with
+  // the World's handle, iterator and pool services behind their call-outs.
+  void class_dtor(Address, Raw fn, Raw flags);
+  bool dtor_services = false;
+  // The stack descriptor of the hit in progress (AntQueen_run states 7, 9 and
+  // 10 pass (0x17, v, v, 0)); 0 for none.
+  const combat::Descriptor *hit_descriptor = nullptr;
   // Thrown potions 1 and 2 (combat_runtime_potions.cpp).
   void potion_table(Address table, Raw getter, Address desc, const char *name,
                     std::initializer_list<std::pair<unsigned, Raw>> slots);

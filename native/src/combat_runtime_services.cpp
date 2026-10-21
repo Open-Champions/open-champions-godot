@@ -1,6 +1,42 @@
 #include "combat_runtime_internal.hpp"
 namespace champions::simulation::rta::combat_runtime {
 namespace {
+// The stack descriptor AntQueen_run states 7, 9 and 10 build
+// (combat_ctors_2.cpp poison_descriptor): ("desc", ((0x17, v, v, 0), None,
+// None, None)). Every other argument is not one.
+std::optional<combat::Descriptor> stack_descriptor(const Value &v) {
+  using K = A::CallbackResult::Kind;
+  auto p = std::get_if<A::CallbackResult>(&v);
+  if (!p || p->kind != K::tuple || p->elements.size() != 2 ||
+      p->elements[0].kind != K::text || p->elements[0].data != "desc")
+    return std::nullopt;
+  combat::Descriptor d(4, std::vector<std::int64_t>{-1, 0, 0, 0});
+  const auto &slots = p->elements[1].elements;
+  for (std::size_t k = 0; k < slots.size() && k < 4; ++k) {
+    if (slots[k].kind != K::tuple)
+      continue;
+    std::vector<std::int64_t> e;
+    for (const auto &x : slots[k].elements)
+      e.push_back(x.negative ? -std::int64_t(x.magnitude) : std::int64_t(x.magnitude));
+    if (e.size() != 4)
+      throw Unsupported("stack descriptor entry shape");
+    // The halfwords are stored signed (ref_combat descriptors hold s16 values).
+    for (std::size_t f = 1; f < 4; ++f)
+      e[f] = s16(Raw(e[f]));
+    d[k] = e;
+  }
+  return d;
+}
+struct DescriptorScope {
+  World::State &s;
+  const combat::Descriptor *saved;
+  DescriptorScope(World::State &s_, const combat::Descriptor *d) : s(s_), saved(s_.hit_descriptor) {
+    s.hit_descriptor = d;
+  }
+  ~DescriptorScope() { s.hit_descriptor = saved; }
+};
+} // namespace
+namespace {
 // FullServices.PRESENTATION of the composed runtime (traced, ignored).
 const std::set<std::string> FULL_PRESENTATION = {
     "fx_spawn",          "particle_spawn",       "sound_playOnObject",
@@ -159,8 +195,11 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   }
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
-  if (slot == 1 && potion_dtor(fn))
-    throw Unsupported(potion_dtor_refusal(fn));
+  if (slot == 1 && combat_ctors::is_class_dtor(fn)) {
+    note("destroy", {self});
+    class_dtor(self, fn, ar(0));
+    return iv(0);
+  }
   if (slot == 6 && fn == LOOSEFIRE_TOUCH) {
     loosefire_on_touch(self, ar(0));
     return iv(0);
@@ -246,10 +285,11 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
   }
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
-  if (slot == 1 && (fn == 0x3c3c10 || fn == 0x3cc5b8 || fn == 0x3cc72c))
-    throw Unsupported(ctor_class_dtor_refusal(fn));
-  if (slot == 1 && potion_dtor(fn))
-    throw Unsupported(potion_dtor_refusal(fn));
+  if (slot == 1 && combat_ctors::is_class_dtor(fn)) {
+    note("destroy", {self});
+    class_dtor(self, fn, number(args.at(0)));
+    return iv(0);
+  }
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
                     fn == 0x3c6888)) {
     note("destroy", {self});
@@ -272,8 +312,8 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Holder.v21", "Skeleton_shatter", "AntQueen_pickFlyDest",
-        "model_getSamplePoint"}) {
+        "Holder.v21", "Skeleton_shatter", "model_getSamplePoint", "AntWave_ctor",
+        "cxx_throwBadTypeid"}) {
     std::string n = name;
     model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &a) {
       return service(n, a);
@@ -565,11 +605,15 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     throw Unsupported("Holder.v11: dropping a held part as a physics prop is not executed");
   if (n == "Skeleton_shatter")
     throw Unsupported("Skeleton_shatter 0x2a7ef0 is a recording stub of the research");
-  if (n == "AntQueen_pickFlyDest")
-    throw Unsupported("AntQueen_pickFlyDest 0x238150 is a recording stub of the research");
   if (n == "model_getSamplePoint")
-    throw Unsupported("model_getSamplePoint for Soul_setState 0x21's burst is not "
-                      "a World service");
+    throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
+                      "0x21, Soul_takeDamage with sample points) is not a World "
+                      "service");
+  if (n == "AntWave_ctor")
+    throw Unsupported("AntWave_ctor 0x238654 is not executed (antqueen-run.md "
+                      "section 7; state 0x19 has no requester)");
+  if (n == "cxx_throwBadTypeid")
+    return iv(0);
   if (n == "handle_clear") {
     if (full())
       list_head(ar(0));
@@ -653,6 +697,10 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       return A::Slide{out.hit, out.normal};
     return iv(out.hit);
   }
+  // terrain_height 0x183820 (AntQueen_pickFlyDest's probe, and the arena
+  // bodies): the Full World's terrain_height service when it has one.
+  if (full() && n == "terrain_height" && services.terrain_height)
+    return iv(services.terrain_height(v(1), ar(2)));
   if (n == "terrain_heightBelow" || (full() && n == "terrain_height")) {
     if (!services.height_below)
       throw Unsupported("height service missing");
@@ -820,10 +868,21 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     if (n == "creature_findPlayerInCone")
       return iv(find_player_in_cone(ar(0), ar(1), ar(2), ar(3), ar(4)));
     if (n == "Creature_hitTargetAtReach") {
+      if (auto d = stack_descriptor(a.at(5))) {
+        DescriptorScope scope(*this, &*d);
+        return iv(hit_target_at_reach(ar(0), ar(1), ar(2), ar(3), ar(4), 0, ar(6)));
+      }
       if (ar(5))
         throw Unsupported("weapon descriptor");
       return iv(hit_target_at_reach(ar(0), ar(1), ar(2), ar(3), ar(4), 0,
                                     ar(6)));
+    }
+    if (n == "Creature_hitTargetOrPlayerInArc") {
+      if (auto d = stack_descriptor(a.at(7))) {
+        DescriptorScope scope(*this, &*d);
+        return iv(hit_target_or_player(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6), 0,
+                                       ar(8), ar(9)));
+      }
     }
     if (n == "Creature_hitTargetInArcEdge" ||
         n == "Creature_hitTargetOrPlayerInArc") {

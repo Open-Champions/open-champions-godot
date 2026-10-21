@@ -57,40 +57,26 @@ bool ctor_class(const std::string &name) {
 constexpr Raw SKELCOM_TOKEN = 0xc1200000, CLASS_TOKEN = 0xc1100000;
 constexpr Address SKELCOM_ENTRIES = 0x48; // five weapon rows of 0x70 bytes
 const char *const SKELETON_TYPE_NAME = "Skeleton";
-// Bodies of documented table words that stay refusals or are the base:
-// recording stubs of the research (combat-ctors.md section 8), slot 3's empty
-// overrides (docs/monsters-2.md), and AntQueen's takeDamage, a plain jump to
-// Creature_takeDamage (docs/monsters-2.md "AntQueen").
+// Bodies of documented table words. Executed in research-combat-ctors-2
+// (combat-ctors-2.md): Skeleton_isEnemy, the three take-damage slots, the
+// type-info getters and the destructors (CT::install_round2). Still refused:
+// Skeleton slot 12 (Skeleton_onNearbyEvent 0x2a7688, full-placement.md
+// section 4 row 5). Slot 3's empty overrides are docs/monsters-2.md's.
 void install_ctor_refusals(A::Model &m) {
+  CT::install_round2(m);
   auto refuse = [](std::string what) {
     return [what](A::Model &, Address, const std::vector<Value> &) -> Value {
       throw Unsupported(what);
     };
   };
-  m.class_bodies[0x2a774c] =
-      refuse("Skeleton_takeDamage 0x2a774c is a recording stub of the research "
-             "(combat-ctors.md section 8)");
-  m.class_bodies[0x2aa908] =
-      refuse("Soul_takeDamage 0x2aa908 (the Demon test) is a recording stub of "
-             "the research (combat-ctors.md section 8)");
-  m.class_bodies[0x2a7e04] =
-      refuse("Skeleton_isEnemy 0x2a7e04 is a recording stub of the research "
-             "(combat-ctors.md section 8)");
   m.class_bodies[0x2a7688] =
-      refuse("Skeleton slot 12 0x2a7688 (nearby event) is not executed");
+      refuse("Skeleton slot 12 0x2a7688 (Skeleton_onNearbyEvent) is not executed "
+             "(full-placement.md section 4)");
   auto empty = [](A::Model &, Address, const std::vector<Value> &) -> Value {
     return std::int64_t(0);
   };
   m.class_bodies[0x2378f4] = empty; // AntQueen slot 3 (empty)
   m.class_bodies[0x2aab60] = empty; // Soul slot 3 (empty)
-  m.class_bodies[0x2378fc] = [](A::Model &model, Address self,
-                                const std::vector<Value> &args) -> Value {
-    if (args.size() != 3)
-      throw Error("takeDamage takes three arguments");
-    model.base_take_damage(self, number(args[0]), number(args[1]),
-                           number(args[2]));
-    return std::monostate{};
-  };
 }
 const OwnClass *find_name(const std::string &name) {
   for (const auto &row : kOwn)
@@ -202,18 +188,23 @@ void World::State::apply_own_state(Address c, const char *cls, Raw requested) {
 }
 // Gnaw_run 0x267654 (ref_monsters_1.gnaw_run, monsters-1.md section 2.1): the
 // prologue, then the own-machine switch with the step's event word.
-// AntQueen_run 0x236f78, Skeleton_run 0x2a6864 and Soul_run 0x2a9870: the
-// executed prologue (combat_ctors), then the switch for states 0 and 1. The
-// switch's decisions are own_machines (own-state-machines.md sections 8, 9,
-// 11) with combat round 5's calls: AntQueen's fade (0x2385dc) and bank
-// (0x238448) and slot 25 with 0; Skeleton's slot 25 with 0, then 1 for the
-// bow's second sight; Soul's phase-gated isDemonNear. A state past 1 refuses.
+// AntQueen_run 0x236f78 runs whole (research-combat-ctors-2). Skeleton_run
+// 0x2a6864 and Soul_run 0x2a9870: the executed prologue (combat_ctors), then
+// the switch for states 0 and 1. The switch's decisions are own_machines
+// (own-state-machines.md sections 9 and 11) with combat round 5's calls:
+// Skeleton's slot 25 with 0, then 1 for the bow's second sight; Soul's
+// phase-gated isDemonNear. A state past 1 refuses (full-placement.md section
+// 4 ranks Skeleton_run state 3 and creature_allyInLineOfFire as not executed).
 void World::State::ctor_class_run(Address a, const std::string &cls) {
   actor(a);
+  if (cls == "AntQueen") {
+    // AntQueen_run 0x236f78 in full, every state (research-combat-ctors-2
+    // antqueen-run.md; CT::antqueen_run).
+    CT::antqueen_run(model, a);
+    return;
+  }
   bool go = true;
-  if (cls == "AntQueen")
-    CT::antqueen_run_prologue(model, a);
-  else if (cls == "Skeleton")
+  if (cls == "Skeleton")
     go = CT::skeleton_run_prologue(model, a);
   else
     go = CT::soul_run_prologue(model, a);
@@ -229,10 +220,7 @@ void World::State::ctor_class_run(Address a, const std::string &cls) {
   probe.clock = u(a + 0x300);
   probe.timer = u(a + 0xf4);
   probe.flight = u(a + 0x3d4);
-  // AntQueen state 0 compares the signed track count at +0x118 with 4 (round
-  // 5); the machine compares an unsigned queue.
-  probe.queue = cls == "AntQueen" && state == 0 ? (s8m(a + 0x118) < 4 ? 0u : 4u)
-                                                : b(a + 0x118);
+  probe.queue = b(a + 0x118);
   probe.anim = h(a + 0x11a);
   probe.cflags = u(a + 0xa8);
   probe.kind = u(a + 0x3d0);
@@ -255,11 +243,7 @@ void World::State::ctor_class_run(Address a, const std::string &cls) {
     throw Unsupported("no draw in states 0 and 1");
   };
   probe.side_hook = [&](const std::string &name) {
-    if (name == "aq_ground" && cls == "AntQueen")
-      fade_bank_tracks(a);
-    else if (name == "aq_air" && cls == "AntQueen")
-      update_bank(a);
-    else if (name == "demon" && cls == "Soul")
+    if (name == "demon" && cls == "Soul")
       probe.demon = is_demon_near(a);
     else if (name == "move_by" && cls == "Soul") {
       // The same zero-vector Creature_moveBy the prologue already made
@@ -502,6 +486,31 @@ Address World::State::spawn_ctor_class(const std::string &name, const Spawn &v) 
   else
     CT::soul_ctor(model, a, 0, v.position, v.facing, 0, 0, placed);
   return a;
+}
+// Slot 1 of the six classes (combat-ctors-2.md section 6): CT::class_dtor on
+// the model, whose call-outs are the World's handle_clear, iter_*, Spell.v1
+// and pool_free services. sub_202500 (+0x320, 2; it frees only with bit 0) and
+// AnimState_dtor are recorded. objNames_remove refuses: no World object has a
+// property list at +0x2c, so the name scan never reaches it.
+void World::State::class_dtor(Address a, Raw fn, Raw flags) {
+  actor(a);
+  if (!dtor_services) {
+    for (const char *name : {"sub_202500", "AnimState_dtor", "objNames_remove"}) {
+      std::string n = name;
+      model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &args) {
+        if (n == "objNames_remove")
+          throw Unsupported("objNames_remove: the World keeps no object names");
+        std::vector<std::uint64_t> words;
+        for (const auto &x : args)
+          words.push_back(std::uint64_t(number(x)));
+        note(n, std::move(words));
+        return iv(0);
+      };
+    }
+    dtor_services = true;
+  }
+  CT::class_dtor(model, fn, a, flags);
+  animations.erase(a);
 }
 Address World::State::spawn_class(const std::string &name, const Spawn &v) {
   if (name == "Skelight")

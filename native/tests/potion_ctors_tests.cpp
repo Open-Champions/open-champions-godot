@@ -2,7 +2,10 @@
 // research ref_potion_ctors at e9777eb) through the combat World: LooseFire_ctor with
 // fx_spawn id 5 and Fire_ctor, Fire_run, LooseFire_run, LooseFire_onTouch and
 // poisonGasSpell_ctor. The words each body stores, the shared seed and its draw count
-// are compared; addresses and handle words are not.
+// are compared; addresses and handle words are not. Research-combat-ctors-2
+// (5b92837) adds the three destructors (combat-ctors-2.md section 6), the fire
+// entry of a touch (fire-touch.md; the damage_apply rows themselves are
+// fire-touch-exact) and poisonGasSpell_run (combat round 6).
 #include "champions/combat_runtime.hpp"
 #include <fstream>
 #include <functional>
@@ -73,6 +76,12 @@ const C::Event *last(const C::World &w, const std::string &name) {
     if (e.name == name)
       out = &e;
   return out;
+}
+bool alive(const C::World &w, C::Address a) {
+  for (auto x : w.actors())
+    if (x == a)
+      return true;
+  return false;
 }
 std::string refusal(const std::function<void()> &fn) {
   try {
@@ -146,8 +155,9 @@ void fire_run(const Case &c) {
   check(Raw(h.w->read(fire + 0x4c, 2)) == c.after[0] && Raw(h.w->read(fire + 0x44)) == c.after[1],
         c.name + " life and own seed after");
   check(h.w->read(C::SHARED_SEED) == seed, c.name + " no shared draw");
-  check(c.deleted == (why.find("Fire_dtor 0x3c5050") != std::string::npos) &&
-            (c.deleted || why.empty()),
+  // Slot 1 with 3 runs Fire_dtor 0x3c5050: GameObject_dtor and pool_free.
+  check(why.empty() && c.deleted == !alive(*h.w, fire) &&
+            c.deleted == bool(last(*h.w, "destroy")),
         c.name + " deletion through slot 1: '" + why + "'");
 }
 void loosefire_run(const Case &c) {
@@ -157,8 +167,8 @@ void loosefire_run(const Case &c) {
   h.w->write(lf + 0x50, 4, c.in[0]);
   h.w->write(C::FRAME, 4, c.in[1]);
   auto why = refusal([&] { h.w->run_actor(lf); });
-  check(bool(c.in[2]) == (why.find("LooseFire_dtor 0x3c6778") != std::string::npos) &&
-            (c.in[2] || why.empty()),
+  // LooseFire_dtor 0x3c6778: the owner handle cleared, GameObject_dtor, free.
+  check(why.empty() && bool(c.in[2]) == !alive(*h.w, lf),
         c.name + " LooseFire_run end test: '" + why + "'");
 }
 void touch(const Case &c) {
@@ -179,6 +189,7 @@ void touch(const Case &c) {
   h.w->write(0x4f719c, 4, c.in[3]);
   h.w->write(C::FRAME, 4, c.in[0]);
   h.w->clear_history();
+  auto seed = Raw(h.w->read(C::SHARED_SEED));
   auto why = refusal([&] { h.w->touch(lf, other); });
   std::istringstream out(c.out);
   std::string tag;
@@ -188,14 +199,25 @@ void touch(const Case &c) {
     check(why.empty() && !last(*h.w, "damage_apply") && !last(*h.w, "LooseFire_onTouch"),
           c.name + " no damage: '" + why + "'");
   } else if (tag == "ENTRY") {
-    // damage_apply's descriptor type 0x15 stays refused; the value is checked.
+    // The entry (0x15, v, v, 0) through the real damage_apply (fire-touch.md
+    // section 2): it always hits, and the burn +0x340 is stored as 2 - 2 x the
+    // fire resistance (0 here). A touch makes 7 shared draws, 8 or 9 with a
+    // player thrower (its stun roll, and a critical roll with a bonus).
     check(v[0] == 0x15 && v[1] == v[2] && v[3] == 0, c.name + " entry shape");
     auto note = last(*h.w, "LooseFire_onTouch");
     check(note && note->args.size() == 4 && note->args[2] == 0x15 && note->args[3] == v[1],
           c.name + " fire entry value");
-    check(why.find("descriptor type 0x15") != std::string::npos &&
-              why.find("value " + std::to_string(v[1])) != std::string::npos,
-          c.name + " refuses at type 0x15: '" + why + "'");
+    auto apply = last(*h.w, "damage_apply");
+    check(why.empty() && apply && Raw(apply->args[0]) == other &&
+              Raw(apply->args[1]) == (v[6] ? owner : lf) && Raw(apply->args[2]) == v[4] &&
+              Raw(apply->args[3]) == v[5],
+          c.name + " damage_apply with the fire entry: '" + why + "'");
+    int draws = 0;
+    for (Raw s = seed; s != Raw(h.w->read(C::SHARED_SEED)) && draws < 64; ++draws)
+      s = Raw(std::uint64_t(s) * 0x19660d + 0x3c6ef35f);
+    check(h.w->read(other + 0x340) == 0x40000000 && draws >= 7 && draws <= 9,
+          c.name + " the burn " + std::to_string(h.w->read(other + 0x340)) + " and the draws: " +
+              std::to_string(draws));
   } else {
     auto note = last(*h.w, "damage_apply");
     check(note && note->args.size() == 4 && Raw(note->args[0]) == other &&
@@ -221,9 +243,27 @@ void gas(const Case &c) {
   for (const auto &e : h.w->events())
     draws += e.name == "shared_draw";
   check(Raw(h.w->read(C::SHARED_SEED)) == c.seed[0] && Raw(draws) == c.seed[1], c.name + " one shared draw");
+  // poisonGasSpell_run 0x1fd0f0 (combat round 6, combat_runtime_round6.cpp):
+  // it runs until its end frame +0x5c, then slot 1 with 3 runs
+  // poisonGasSpell_dtor 0x3c7878. A radius of 0x7fffffff asks for 2^31 / 10
+  // particles a frame, which the World's history budget refuses.
   h.w->write(C::FRAME, 4, c.in[1] + 1);
-  auto why = refusal([&] { h.w->run_actor(obj); });
-  check(why.find("poisonGasSpell_run 0x1fd0f0") != std::string::npos, c.name + " the gas run stays refused");
+  std::string why;
+  try {
+    h.w->run_actor(obj);
+  } catch (const std::exception &e) {
+    why = e.what();
+  }
+  if (c.in[6] == 0x7fffffff) {
+    check(why.find("budget") != std::string::npos, c.name + " a huge radius: '" + why + "'");
+    return;
+  }
+  check(why.empty() && alive(*h.w, obj) == (c.in[5] > 1), c.name + " the gas run: '" + why + "'");
+  if (!alive(*h.w, obj))
+    return;
+  h.w->write(C::FRAME, 4, Raw(h.w->read(obj + 0x5c)));
+  why = refusal([&] { h.w->run_actor(obj); });
+  check(why.empty() && !alive(*h.w, obj), c.name + " the cloud ends through its destructor: '" + why + "'");
 }
 } // namespace
 int main(int argc, char **argv) {

@@ -136,7 +136,8 @@ bool modelled_object_dtor(Raw fn) {
 void delete_self(World::State &s, Address obj, const char *cls) {
   s.note("delete_self", {obj, Raw(3)});
   auto fn = s.u(s.u(obj + 0x48) + 12);
-  if (!modelled_object_dtor(fn) && fn != DISEASE_CLOUD_DTOR)
+  if (!modelled_object_dtor(fn) && fn != DISEASE_CLOUD_DTOR &&
+      !combat_ctors::is_class_dtor(fn))
     throw Unsupported(std::string(cls) +
                       " ends through its slot 1, whose destructor is not in the "
                       "research");

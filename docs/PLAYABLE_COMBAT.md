@@ -128,7 +128,7 @@ are unchanged and remain the defaults of their own selections.
 Set-up is the research composed runtime's walk-and-combo scenario: a strength-40
 player with a 30–40 / attack 50 / type 8 weapon, a 120-HP Skelight 80 ahead
 facing the player, plus a second 120-HP Skelight 40 behind for blocking and Holy
-Strike (skill 16, rank 1). Round 5 added three more authored actors (an AntQueen, a Skeleton and a Soul in slots 4-6); the 2026-10-21 audit (CAI-4) removed them because their constructors were not executed. Since combat-ctors (research-combat-ctors e9777eb) the three constructors, set-states and run prologues are executed, and the Soul is back in slot 6 at (-60, 100): `Creature_setCharm(-1, 0)` puts it on team 0 with a permanent charm, and it wanders in states 0 and 1 for the whole fight. Slots 4 and 5 stay empty: on the round-5 placement the Skeleton's first target scan (ready tick 32) calls `Skeleton_isEnemy` `0x2a7e04`, and the AntQueen sees the player and requests state 3 (tick 33); both stay refusals of this job (a recording stub, and a switch state past 1). The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
+Strike (skill 16, rank 1). Round 5 added three more authored actors (an AntQueen, a Skeleton and a Soul in slots 4-6); the 2026-10-21 audit (CAI-4) removed them because their constructors were not executed. Since combat-ctors (research-combat-ctors e9777eb) the three constructors, set-states and run prologues are executed, and the Soul is back in slot 6 at (-60, 100): `Creature_setCharm(-1, 0)` puts it on team 0 with a permanent charm, and it wanders in states 0 and 1 for the whole fight. Since combat-ctors round 2 (research-combat-ctors-2 5b92837) `AntQueen_run` runs in every state, and the AntQueen is back in slot 4, ahead of the Soul; the research probe ran her 3,000 idle ticks without meeting an unexecuted body. She stands at (-110, 110), an authored corner of the flat ground: at the round-5 (0, 100) the player's combo swings hit her and her blood stops the session at `GutChunk_ctor`. She still sees the player at ready tick 33 and runs her chase, flight, stings and landing. Slot 5 stays empty: a Skeleton gets past `Skeleton_isEnemy` `0x2a7e04` now and stops at its first sighting of the player, in `Skeleton_run` state 3 and `creature_allyInLineOfFire`, which are not executed. The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
 Services are `flat_fixture_services()` with the session's terrain height,
 `dialog_isOpen` = paused, no loot class. Animation is the research `PlayerAnim`
 fixture (player clips 20 ticks; creature swings 30 ticks with mask 0x1 on tick
@@ -181,13 +181,14 @@ continues byte-identically (`fixture-save`, `wave12_extensions`).
   GnomeNavigator, Mermaid, NPC and Natasla refuse ("constructor is not
   executed") before the World is touched. Over 300 ready ticks with the
   player attacking (`playable_wave_smoke_wave12.gd`) Gnaw, Skelight and Soul
-  run; Gnaw ends in its chase state 3. The Skeleton stops the session at its
-  first target scan (`Skeleton_isEnemy`, ready tick 32); the AntQueen is hit by
-  the attacking player first and bleeds into the `GutChunk_ctor` call, which has
-  no World handler (tick 28; as a Gnaw's blood). A Skelight placed at (0, 80) is
-  nearer the fixture's Soul than the player: the Soul is on team 0, so the
-  Skelight attacks it and the hit stops at `Soul_takeDamage` (tick 30), a
-  recording stub of the research.
+  run; Gnaw ends in its chase state 3. Since combat-ctors round 2 the Skeleton
+  gets past `Skeleton_isEnemy` and stops the session at its first sighting of
+  the player, in `Skeleton_run` state 3 (ready tick 33; not executed). The
+  AntQueen chases the player until his hit bleeds her into the `GutChunk_ctor`
+  call, which has no World handler (tick 52; as a Gnaw's blood). A Skelight
+  placed at (0, 80) is nearer the fixture's Soul than the player and attacks
+  it; `Soul_takeDamage` ignores an attacker that is not a Demon, and the
+  Skelight runs the whole 299 ticks.
   A hit that bleeds a Gnaw, its death and a missing flat ground still stop the
   session.
 - **Thrown potions 1–3** (`combat_drop_potion(kind)`, buttons Potion 1/2/3).
@@ -197,12 +198,14 @@ continues byte-identically (`fixture-save`, `wave12_extensions`).
   ring's LightEffect and floor decal and the session keeps running. Kind 1
   builds five `LooseFire_ctor` `0x202b70` objects, each with 3 or 4 `Fire`
   objects through `fx_spawn` id 5 (research-combat-ctors 98c081a); the fires
-  burn for 100 runs and the first one to end stops the session at
-  `Fire_dtor` `0x3c5050` (ready tick 101 in `fixture-save`), whose body was
-  not read. A fire touching a player or a creature on a frame divisible by 20
-  stops it at `damage_apply` descriptor type 0x15. Kind 2 builds its
-  `poisonGasSpell_ctor` `0x202de8` cloud and stops on the next frame at
-  `poisonGasSpell_run` `0x1fd0f0` (combat round 6, not ported).
+  burn for 100 runs and end through `Fire_dtor` `0x3c5050`, the LooseFire
+  through `LooseFire_dtor` (research-combat-ctors-2). A fire touching a player
+  or a creature on a frame divisible by 20 applies its entry `(0x15, v, v, 0)`
+  through `damage_apply` and leaves the burn the creature tick then hits with.
+  Kind 2 builds its `poisonGasSpell_ctor` `0x202de8` cloud, which runs
+  `poisonGasSpell_run` `0x1fd0f0` (combat round 6, merged from
+  combat-runtime-6) and ends through `poisonGasSpell_dtor`. In `fixture-save`
+  both run until the idle fight's own party wipe (ready ticks 725 and 787).
 - **Holy Shield.** The Full fixture plants the sample model and the pose, then
   `arm_fixture_holy_shield` attaches a shield on skill 16. A player hit with
   mana and a pose follows `model_getSamplePoint` at scale 1 (241 particles).
