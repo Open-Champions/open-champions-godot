@@ -59,7 +59,7 @@ def check(platform, player, extension_suffix):
         if any(marker in data for marker in private_markers):
             raise ValueError(f'{platform}: private path in embedded resource {name}')
     print(f'{platform}-x64: PASS; 3 files, {len(resources)} checksummed resources, '
-          'matching release libraries, no game data or private paths')
+          'matching release libraries, no game-data suffixes or checked private markers')
 
 
 if __name__ == '__main__':

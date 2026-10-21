@@ -828,7 +828,7 @@ preview and HUD draw per level. Checks were 26, 26 and 8, all passing.
 BLEND-7 caused nine mixed-pass material refusals among each 12-level preview
 run, but no level failed. The package contains no game data.
 
-## Wave 22 (2026-10-21): mission rows and text help, 111 / 111
+## Wave 22 (2026-10-21): mission rows, text, FX, streaming, and cross exports, 111 / 111
 
 The four-slice, 60-ready-tick `w22on --scripts` and `w22off` runs each tried,
 loaded and played **111 / 111 / 111** levels, with 230 passed checks, zero
@@ -861,3 +861,33 @@ quest variables **183 → 184**, waits **29 → 30** and stub refusals
 `audio.frames_pushed`, `time.load_ms`, `time.play_ms` and summed process peak
 vary with load and the larger text state; their measured wave-21 and wave-22
 values are recorded in that report. No other deterministic count changed.
+
+The final five-branch rerun again tried, loaded, and played **111/111** levels
+in each mode, with **230 passed checks**, zero failed checks, and empty refusal
+lists. Every gameplay, quest, script, help, and dialog count matches the
+two-branch sweep above. `blend-fx` changes rendered creature materials, and
+`win-linux` changes build/export paths; neither changes the sweep simulation.
+`perf-2` preserves all stable counts and the Full trace. The scripted sweep's
+`text.frames_drawn.bust` changed **30 → 34** because the HUD's `_process(delta)`
+counts displayed frames while the scene advances under different scheduling;
+this is a draw-time observation, not a fixed-tick script count. `help_frame`
+still totals **713** and all eight help boxes are confirmed. The exact
+changed-key attribution against wave 21 is in the
+[wave-22 report](../work/loop-playable-integration-r22-report.md).
+
+| Runtime measure (four process sum) | Two-branch on | Final on | Two-branch off | Final off |
+|---|---:|---:|---:|---:|
+| `memory.static_peak_bytes` | 2,201,931,956 | 1,531,496,240 | 2,199,602,500 | 1,529,047,064 |
+| `time.load_ms` | 48,140 | 39,958 | 45,263 | 39,898 |
+| `time.play_ms` | 59,466 | 79,226 | 54,337 | 78,462 |
+| `audio.frames_pushed` | 2,181,265 | 2,691,153 | 2,046,001 | 2,646,961 |
+
+The memory reduction is attributable to `perf-2`'s single streamed terrain
+and retained global VAT. Timings and audio delivery depend on concurrent
+machine load and frame scheduling; these aggregates do not isolate a speedup.
+The exported wave-22 app passes the real-data 60-tick smoke **12/12** without
+scripts, **12/12** with scripts, and **3/3** arena levels with scripts, with
+26, 26, and 8 checks respectively and no failures or refusal list. All 12
+creature previews draw in each main run; the nine BLEND-7 mixed-pass material
+refusals of wave 21 are gone after `blend-fx`. No private level imagery is
+stored in the repository or export.
