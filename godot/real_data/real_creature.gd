@@ -1,18 +1,21 @@
 extends RefCounted
 
 # Texture for the explicitly chosen creature preview model. Association and
-# rules: research docs/formats/model-texture.md and render-pipeline sections 6
-# and 9. Header +0x18 is ALPHA_1. The documented equations are 1, 2, 9, 0x2a,
-# 0x44, 0x48, and 0x64/0x68 plus a FIX byte. TEST_1 passes alpha < 0x7f. Each
-# packet's PRIM says whether blending is on. Flag 0x10 draws the environment
-# image first (ALPHA_2 = 0x64 + header +0x20), then the base equation over it.
-# A register the ALPHA table does not list stays opaque and labelled.
+# rules: research t3/research-textures 1528708, docs/formats/model-texture.md
+# and docs/spec/render-pipeline.md 4.7, 6 and 9.6. Header +0x18 is ALPHA_1.
+# The documented equations are 1, 2, 9, 0x2a, 0x44, 0x48, and 0x64/0x68 plus
+# a FIX byte up to 0x80. TEST_1 passes alpha < 0x7f. Each packet's PRIM says
+# whether blending is on. Flag 0x10 adds the context-2 environment pass, drawn
+# before the base pass (ALPHA_2 = 0x64 + header +0x20), then the base
+# equation over it. A register the ALPHA table does not list, or a FIX above
+# 0x80, stays opaque and labelled.
 var texture: ImageTexture
 var environment: ImageTexture
 var alpha1 := 0
 var equation := 0
 var alpha_fix := 0
 var fix2 := 0
+var two_pass := false # header flag 0x10
 var meshes: Array = [] # bound meshes in model order
 var materials: Dictionary = {} # blend state -> ShaderMaterial
 var applied := 0
@@ -48,10 +51,13 @@ func bind(archive: String, rows: Array, model: int) -> Dictionary:
 	equation = int(result.get("equation", 0))
 	alpha_fix = int(result.get("alpha_fix", 0))
 	fix2 = int(result.get("fix2", 0))
+	two_pass = bool(result.get("two_pass", false))
 	meshes = result.meshes
-	gated = equation == 0
+	# render-pipeline.md 6 gives F = FIX / 128 and nothing for F > 1, so a FIX
+	# above 0x80 is gated like an unlisted equation (native refuses it too).
+	gated = equation == 0 or alpha_fix > 128
 	materials.clear()
-	return {"ok": true, "alpha1_documented": not gated, "two_pass": bool(result.get("two_pass", false))}
+	return {"ok": true, "alpha1_documented": not gated, "two_pass": two_pass}
 
 func set_environment(image: ImageTexture) -> void:
 	if environment == image: return
@@ -72,9 +78,12 @@ func _equation_rgb(dst: String) -> String:
 		_: return "src"
 
 # base_blend / env_blend: 1 on, 0 off, -1 mixed or unstated.
-# env_mesh: every packet of this mesh has the context-2 tag.
+# env_mesh: native `environment`, flag 0x10 and every packet of this mesh
+# has the context-2 tag. ALPHA_2 is written only under flag 0x10
+# (model-texture.md), so the composite also needs two_pass here, and a
+# header +0x20 of at most 0x80.
 func _material(base_blend: int, env_blend: int, env_mesh: bool) -> ShaderMaterial:
-	var composite := env_mesh and environment != null and equation != 0 and base_blend != -1 and env_blend != -1
+	var composite := env_mesh and two_pass and fix2 <= 128 and environment != null and equation != 0 and base_blend != -1 and env_blend != -1
 	var key := "%d|%d|%d|%d|%d|%s" % [equation, alpha_fix, fix2, base_blend, env_blend, "env" if composite else "fb"]
 	if materials.has(key): return materials[key]
 	var sample_screen := composite and env_blend == 1 and fix2 < 128
@@ -93,7 +102,7 @@ func _material(base_blend: int, env_blend: int, env_mesh: bool) -> ShaderMateria
 		elif equation == 0x44 or equation == 0x48:
 			alpha = " ALPHA = as_w;\n"
 		elif equation == 0x64 or equation == 0x68:
-			alpha = " ALPHA = clamp(fix_w, 0.0, 1.0);\n"
+			alpha = " ALPHA = fix_w;\n"
 		elif equation == 2:
 			albedo = " ALBEDO = src * (1.0 - as_w);\n"
 	var code := "shader_type spatial;\n" + render
@@ -101,20 +110,31 @@ func _material(base_blend: int, env_blend: int, env_mesh: bool) -> ShaderMateria
 	code += "uniform float fix_w = 0.0;\n"
 	if composite:
 		code += "uniform sampler2D env_texture : source_color, filter_linear, repeat_enable;\n"
+		code += "uniform vec2 env_size = vec2(128.0);\n"
 		code += "uniform float env_w = 1.0;\n"
 		if sample_screen:
 			code += "uniform sampler2D screen_texture : hint_screen_texture, filter_linear, repeat_disable;\n"
+		# render-pipeline.md 4.7 (V): program 0x44 writes the second UV per
+		# vertex, (192 + 64 c.x, 192 + 64 c.y) texels with c = the camera-space
+		# unit normal x 0.99, and the GS interpolates it. Godot's view y is up
+		# and the game camera's y is down, so y is negated. Computed here, not
+		# per pixel, and before Godot flips back-face normals. A zero normal
+		# stays at texel 192.
+		code += "varying vec2 env_uv;\n"
+		code += "void vertex() {\n vec3 n = MODELVIEW_NORMAL_MATRIX * NORMAL;\n float len2 = dot(n, n);\n"
+		code += " vec2 c = len2 > 0.0 ? vec2(n.x, -n.y) * inversesqrt(len2) * 0.99 : vec2(0.0);\n"
+		code += " env_uv = (vec2(192.0) + 64.0 * c) / env_size;\n}\n"
 	code += "void fragment() {\n vec4 texel = texture(base_texture, UV);\n"
 	# TEST_1 0x507f5: pass while raw alpha is below 0x7f. The decoder stores
 	# min(255, raw * 255 / 128), so raw 0x7f is byte 253.
 	code += " bool keep = texel.a * 255.0 < 252.5;\n"
 	code += " vec3 src = texel.rgb * COLOR.rgb;\n float as_w = clamp(texel.a, 0.0, 1.0);\n"
 	if composite:
-		# Godot view y is up. The game camera y is down, so the documented
-		# (192 + 64 n) coordinate flips that axis. A zero normal stays at 192.
-		code += " vec3 n = NORMAL;\n float len2 = dot(n, n);\n"
-		code += " vec2 c = len2 > 0.0 ? vec2(n.x, -n.y) * inversesqrt(len2) : vec2(0.0);\n"
-		code += " vec2 env_uv = vec2(192.0 + 64.0 * c.x, 192.0 + 64.0 * c.y) / vec2(textureSize(env_texture, 0));\n"
+		# Assumption (I, render-pipeline.md 9.6 "draw the environment texture
+		# first"): the environment pass covers every pixel of the mesh and the
+		# composite writes depth once, so a texel that fails TEST_1 shows the
+		# environment sample. Model setup writes TEST_1 only; the TEST_2 and
+		# ZBUF of the original's context-2 pass are not documented.
 		code += " vec3 env_src = texture(env_texture, env_uv).rgb * COLOR.rgb;\n vec3 pass1 = env_src;\n"
 		if env_blend == 1:
 			if sample_screen:
@@ -139,6 +159,7 @@ func _material(base_blend: int, env_blend: int, env_mesh: bool) -> ShaderMateria
 	material.set_shader_parameter("fix_w", float(alpha_fix) / 128.0)
 	if composite:
 		material.set_shader_parameter("env_texture", environment)
+		material.set_shader_parameter("env_size", Vector2(environment.get_size()))
 		material.set_shader_parameter("env_w", float(fix2) / 128.0)
 	material.set_meta("native_fx_vertex_colors", true) # ALBEDO uses COLOR
 	materials[key] = material

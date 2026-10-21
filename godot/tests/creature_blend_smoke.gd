@@ -25,6 +25,7 @@ func _creature(equation: int, alpha_byte: int, blend: int, env: ImageTexture = n
 	creature.alpha_fix = 32
 	creature.fix2 = fix2
 	creature.environment = env
+	creature.two_pass = env != null
 	creature.meshes = [{"visible_by_default": true, "uv": PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO]), "blend": blend, "environment": env != null, "environment_blend": env_blend}]
 	return creature
 
@@ -82,7 +83,54 @@ func run() -> void:
 	var env := ImageTexture.create_from_image(env_image)
 	var mapped := _creature(9, 127, 1, env, 1, 128)
 	var mapped_material := mapped._material(1, 1, true)
-	check(mapped_material.shader.code.contains("192.0 + 64.0") and mapped_material.shader.code.contains("src + pass1 * as_w") and not mapped_material.shader.code.contains("hint_screen_texture"), "fix 128 composites the environment without reading the framebuffer")
+	check(mapped_material.shader.code.contains("src + pass1 * as_w") and not mapped_material.shader.code.contains("hint_screen_texture"), "fix 128 composites the environment without reading the framebuffer")
+	var code := mapped_material.shader.code
+	var vertex_at := code.find("void vertex()")
+	var fragment_at := code.find("void fragment()")
+	check(vertex_at >= 0 and fragment_at > vertex_at and code.find("MODELVIEW_NORMAL_MATRIX * NORMAL") > vertex_at and code.find("MODELVIEW_NORMAL_MATRIX * NORMAL") < fragment_at
+		and code.contains("inversesqrt(len2) * 0.99") and code.contains("vec2(n.x, -n.y)") and code.contains("varying vec2 env_uv")
+		and code.find("NORMAL", fragment_at) < 0 and code.find("192.0", fragment_at) < 0,
+		"the environment UV is computed per vertex from the view normal x 0.99 and only sampled per pixel")
+	var unflagged := _creature(9, 127, 1, env, 1, 128)
+	unflagged.two_pass = false
+	check(not unflagged._material(1, 1, true).shader.code.contains("env_texture"), "no environment pass without header flag 0x10")
+	var heavy := _creature(9, 127, 1, env, 1, 129)
+	check(not heavy._material(1, 1, true).shader.code.contains("env_texture"), "header +0x20 above 0x80 draws no environment pass")
+	# A quad whose left and right vertex normals lean -0.6 / +0.6 in view x,
+	# over a horizontal gradient (column i = red 2i). With TEST_1 failing
+	# (alpha byte 255) the pixel is the environment sample alone. The UV is
+	# interpolated per vertex: at pixel column 8 the view x of c is
+	# 0.99 * lerp(-0.6, 0.6, t); a per-pixel renormalised normal would give
+	# about 3 texels less. This winding is a Godot back face, where the
+	# fragment NORMAL is flipped; the vertex-stage UV is not.
+	var ramp := Image.create(128, 128, false, Image.FORMAT_RGBA8)
+	for y in 128:
+		for x in 128: ramp.set_pixel(x, y, Color8(2 * x, 0, 0, 255))
+	var ramp_env := ImageTexture.create_from_image(ramp)
+	var leaning := ArrayMesh.new()
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(-1, -1, 0), Vector3(1, -1, 0), Vector3(1, 1, 0), Vector3(-1, -1, 0), Vector3(1, 1, 0), Vector3(-1, 1, 0)])
+	var left := Vector3(-0.6, 0, 0.8)
+	var right := Vector3(0.6, 0, 0.8)
+	arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array([left, right, right, left, right, left])
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+	leaning.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	foreground.mesh = leaning
+	var sampled := _creature(9, 255, 1, ramp_env, 1, 128)
+	foreground.material_override = sampled._material(1, 1, true)
+	for i in 4: await process_frame
+	var ramp_red := viewport.get_texture().get_image().get_pixel(8, 32).r
+	var t := (8.5 / 32.0) / 2.0
+	var nx := lerpf(-0.6, 0.6, t)
+	var per_vertex := fposmod(192.0 + 64.0 * 0.99 * nx, 128.0)
+	var per_pixel := fposmod(192.0 + 64.0 * nx / sqrt(nx * nx + 0.64), 128.0)
+	var expect := 2.0 * (per_vertex - 0.5) / 255.0
+	check(absf(ramp_red - expect) < 0.01 and absf(ramp_red - 2.0 * (per_pixel - 0.5) / 255.0) > 0.015,
+		"the environment UV interpolates per vertex (red %f, expected %f)" % [ramp_red, expect])
+	foreground.mesh = quad
+	var fixed := _creature(0x64, 127, 1)
+	check(fixed._material(1, -1, false).shader.code.contains("ALPHA = fix_w;"), "0x64 uses F = FIX / 128 without a clamp")
 	foreground.material_override = mapped_material
 	pixel = await _pixel(viewport)
 	check(pixel.r < 0.2 and pixel.g > 0.7 and pixel.b > 0.3 and pixel.b < 0.8, "equation 9 over a solid environment adds half of that environment")
