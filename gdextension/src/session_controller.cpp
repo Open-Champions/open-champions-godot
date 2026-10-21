@@ -277,29 +277,32 @@ Dictionary ChampionsSessionController::present_observation(
   if (player_) {
     const auto p = observed_player();
     result["player_ready"] = true;
-    result["player_hp_known"] = p.current_known;
+    // The character record is not linked to the simulated player: the original
+    // mirrors record HP into the object inside Player_run (research-menus
+    // docs/player.md), and native play has no such mirror. So hp, max_hp, mana
+    // and max_mana above stay the simulation's own values, which are the ones
+    // the simulation uses and the HUD draws. The record's values are reported
+    // separately for menus and saves, never drawn as bars.
+    result["player_record_currents_known"] = p.current_known;
     result["name"] = String::utf8(p.name.c_str());
     result["player_class"] = p.player_class;
     result["level"] = p.level;
     result["acknowledged_level"] = p.acknowledged;
     result["experience"] = p.experience;
     result["gold"] = p.gold;
-    result["max_mana_raw"] = int64_t(p.max_mana);
-    result["max_mana"] = display_float(p.max_mana);
+    result["record_max_hp_raw"] = int64_t(p.max_hp);
+    result["record_max_hp"] = display_float(p.max_hp);
+    result["record_max_mana_raw"] = int64_t(p.max_mana);
+    result["record_max_mana"] = display_float(p.max_mana);
     if (player_tables_ && p.acknowledged >= 1 && p.acknowledged <= 80) {
       result["experience_base"] = player_tables_->experience[std::size_t(p.acknowledged - 1)];
       result["experience_next"] = player_tables_->experience[std::size_t(p.acknowledged)];
     }
     if (p.current_known) {
-      result["hp_raw"] = int64_t(p.hp);
-      result["hp"] = display_float(p.hp);
-      result["max_hp_raw"] = int64_t(p.max_hp);
-      result["max_hp"] = display_float(p.max_hp);
-      result["mana_raw"] = int64_t(p.mana);
-      result["mana"] = display_float(p.mana);
-    } else {
-      result.erase("mana");
-      result.erase("mana_raw");
+      result["record_hp_raw"] = int64_t(p.hp);
+      result["record_hp"] = display_float(p.hp);
+      result["record_mana_raw"] = int64_t(p.mana);
+      result["record_mana"] = display_float(p.mana);
     }
   } else {
     result["player_ready"] = false;

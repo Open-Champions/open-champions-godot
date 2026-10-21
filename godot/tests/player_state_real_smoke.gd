@@ -82,7 +82,7 @@ func run() -> void:
 	var value: Dictionary = scene.controller.get_observation()
 	report.level_entered = int(scene.session_started and scene.real.current >= 0)
 	report.player_ready = int(value.get("player_ready", false))
-	report.max_mana_known = int(value.has("max_mana_raw"))
+	report.max_mana_known = int(value.has("record_max_mana_raw"))
 	report.gold_record_known = int(value.has("gold"))
 	for key in ["level_text", "experience", "mana_bar", "gold"]:
 		report[key] = int(key in scene.play_hud.drawn)
@@ -128,7 +128,7 @@ func run() -> void:
 				report.plain_load_ok = int(plain.load_session_file(plain_path))
 				if report.plain_load_ok:
 					var plain_restored: Dictionary = plain.controller.get_observation()
-					report.native_roundtrip = int(plain_restored.get("player_ready", false) and plain_restored.get("gold", -1) == value.get("gold", -2) and plain_restored.get("max_mana_raw", -1) == value.get("max_mana_raw", -2))
+					report.native_roundtrip = int(plain_restored.get("player_ready", false) and plain_restored.get("gold", -1) == value.get("gold", -2) and plain_restored.get("record_max_mana_raw", -1) == value.get("record_max_mana_raw", -2))
 		plain.queue_free()
 	scene.queue_free()
 	var complete := true
