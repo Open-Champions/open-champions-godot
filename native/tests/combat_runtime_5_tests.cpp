@@ -130,6 +130,31 @@ void live_fight() {
   bow.w->run_actor(sk);
   check(bow.w->read(sk + 0x232, 2) == 0, "a bow skeleton with nothing to see stays in state 0");
 }
+// The armed shield's run (0x2e8428) steps its clock on every player tick and
+// ends through the base Spell destructor once the duration passes.
+void shield_lifetime() {
+  Host h;
+  C::Spawn s;
+  auto player = h.w->spawn_player(0, s);
+  C::SkillSetup holy;
+  holy.stats[0] = {1, 100, 0};
+  holy.stats[1] = {1, 1, 0};
+  h.w->give_skill(16, holy);
+  auto spell = h.w->arm_fixture_holy_shield(player);
+  check(h.w->read(spell + 0x20) == from_int(1), "the duration is statistic 1 in seconds");
+  int destroyed_at = -1, runs = 0;
+  for (int t = 0; t < 70 && destroyed_at < 0; ++t) {
+    h.w->clear_history();
+    h.w->run_actor(player);
+    for (const auto &e : h.w->events()) {
+      runs += e.name == "particleGroup_setMatrix";
+      if (e.name == "destroy_spell" && !e.args.empty() && Raw(e.args[0]) == spell)
+        destroyed_at = t;
+    }
+  }
+  check(runs == 60 && destroyed_at == 60, "a 1 s shield runs 60 times and ends on the 61st call: " +
+                                              std::to_string(runs) + ", " + std::to_string(destroyed_at));
+}
 Raw hexword(const std::string &s) { return Raw(std::stoul(s, nullptr, 16)); }
 std::vector<Raw> words_of(std::istringstream &ss) {
   std::vector<Raw> out;
@@ -484,8 +509,10 @@ int main(int argc, char **argv) {
     set_fpu();
     if (argc == 2)
       vectors(argv[1]);
-    else
+    else {
       live_fight();
+      shield_lifetime();
+    }
     std::cout << checks << " round-5 checks passed\n";
     return 0;
   } catch (const std::exception &e) {
