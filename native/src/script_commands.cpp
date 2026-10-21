@@ -1,4 +1,5 @@
 #include "champions/script_commands.hpp"
+#include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
 #include <cstring>
 #include <stdexcept>
@@ -13,6 +14,9 @@ const Row kRows[COMMANDS] = {
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
+// missionMenu_run (research t3/research-quests docs/quests.md section 4):
+// g_paused, the pending level name and its orientation byte.
+constexpr std::uint32_t PAUSED_WORD = 0x41b4f4, PENDING_WORD = 0x41b6d0, ORIENT_WORD = 0x41b720;
 
 // Documented commands whose binder path reads, on the objects its name
 // argument finds, the creature flag 0x20, hit points at +0x228 or the type
@@ -28,6 +32,9 @@ const StubRead kStubReads[] = {
     {"friendly", 0x200},          {"unFriendly", 0x200},    {"hideMonster", 0x200},
     {"showMonster", 0x200},       {"getHitPoints", 0x200},  {"setHitPoints", 2},
     {"countLiveObjects", 0x80},   {"showOnMap", 100},
+    // setCFlag tests the creature flag 0x20 on each object it finds
+    // (research-quests 7efd3ce tools/ref_natives.py n_setCFlag).
+    {"setCFlag", 0x200},
 };
 const StubRead *stub_read(const char *name) {
   for (const auto &read : kStubReads)
@@ -96,6 +103,18 @@ std::array<std::uint32_t, 3> vec_of(const builtins::Variables::ServiceValue &val
     return *vec;
   throw amx::HostFault("scene value is not a vector");
 }
+bool campaign_command(const char *name) {
+  static const char *names[] = {
+      "addQuest", "removeQuest", "getv", "setv", "addv", "setMissionAvailable",
+      "getMissionAvailable", "grantMission", "getMissionComplete", "setEvil", "getEvil",
+      "setMadeDecision", "getMadeDecision", "grantGold", "grantSilver", "grantBronze",
+      "getMedal", "setPlayerFlag", "getPlayerFlag", "givePlayerGold", "givePlayerExp",
+      "activateMissionMenu", "setCFlag"};
+  for (const char *each : names)
+    if (std::strcmp(name, each) == 0)
+      return true;
+  return false;
+}
 } // namespace
 
 const Row &row(std::size_t index) {
@@ -106,10 +125,47 @@ const Row &row(std::size_t index) {
 
 Host::Host()
     : variables_(std::make_unique<builtins::Variables>()),
+      campaign_(std::make_unique<quests::Campaign>()),
       effects_(std::make_unique<champions::rta::fx::sim::EffectWorld>()) {
   install();
+  bind_campaign();
 }
 Host::~Host() = default;
+
+void Host::bind_campaign() {
+  auto scene = variables_->scene_service;
+  variables_->scene_service = [this, scene](const std::string &name,
+                                            const std::vector<builtins::Variables::ServiceValue> &args)
+      -> std::uint32_t {
+    if (name == "creature_startBossMusic") {
+      campaign_->note_boss_music();
+      return 0;
+    }
+    // This host has no dialog machine. The open proceeds when that call is 0.
+    if (name == "dialog_isOpen")
+      return 0;
+    if (name == "missionMenu_open") {
+      const auto slot = args.empty() ? 0u : word_of(args[0]);
+      campaign_->open_menu(static_cast<int>(slot));
+      return 0;
+    }
+    if (scene)
+      return scene(name, args);
+    throw amx::HostFault("undocumented scene service");
+  };
+  variables_->player_service = [this](const std::string &name,
+                                      const std::vector<std::uint32_t> &args) -> std::uint32_t {
+    if (name == "player_giveExp" && campaign_->has_xp_table() && args.size() >= 2) {
+      // The record may have changed since the last quest command.
+      mirror();
+      campaign_->give_exp_to(static_cast<int>(args[0]), static_cast<std::int32_t>(args[1]));
+      quests::write_exp(*campaign_, *variables_, static_cast<int>(args[0]));
+      return 0;
+    }
+    throw amx::HostFault(name + " callback required");
+  };
+}
+void Host::mirror() { quests::mirror_from_variables(*campaign_, *variables_); }
 
 void Host::install() {
   const auto known = variables_->natives();
@@ -181,21 +237,21 @@ amx::NativeMap Host::command_map() {
   const auto inner = variables_->natives();
   amx::NativeMap out;
   for (std::size_t i = 0; i < COMMANDS; ++i) {
-    if (kRows[i].effect != Effect::Documented) {
-      out.emplace(kRows[i].name, [this, i](amx::Machine &machine, const std::vector<amx::Cell> &)
-                                     -> std::optional<amx::Address> {
-        refuse(i, machine);
-        return 0;
-      });
-      continue;
-    }
     const auto found = inner.find(kRows[i].name);
     const auto function = found->second;
+    const bool documented = kRows[i].effect == Effect::Documented;
     const bool sync_seed = std::strcmp(kRows[i].name, "getRand") == 0;
     const bool entrance = std::strcmp(kRows[i].name, "setEntrance") == 0;
-    out.emplace(kRows[i].name, [this, i, function, sync_seed, entrance](
+    const bool cflag = std::strcmp(kRows[i].name, "setCFlag") == 0;
+    out.emplace(kRows[i].name, [this, i, function, documented, sync_seed, entrance, cflag](
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
+      // Undocumented commands refuse, except the quest commands whose bodies
+      // are in the quest and mission model (QUESTS.md).
+      if (!documented && !quests::route_undocumented(kRows[i].name, *campaign_)) {
+        refuse(i, machine);
+        return 0;
+      }
       if (sync_seed && seed_refused()) {
         refuse(i, machine);
         return 0;
@@ -206,6 +262,14 @@ amx::NativeMap Host::command_map() {
         return 0;
       }
       counts_.executed[i] += 1;
+      if (cflag) {
+        try {
+          campaign_->note_cflag(static_cast<int>(machine.cell(machine.params + 8)),
+                                machine.cell(machine.params + 12) != 0);
+        } catch (const std::exception &) {
+          campaign_->note_cflag(-1, false);
+        }
+      }
       if (sync_seed)
         sync_seed_in();
       auto result = function(machine, params);
@@ -213,6 +277,8 @@ amx::NativeMap Host::command_map() {
         sync_seed_out();
       if (entrance)
         apply_entrance();
+      if (campaign_command(kRows[i].name))
+        mirror();
       return result;
     });
   }
@@ -230,6 +296,34 @@ void Host::sync_seed_in() { variables_->memory.word(SEED_WORD, external_seed_->s
 void Host::sync_seed_out() { external_seed_->state = variables_->memory.word(SEED_WORD); }
 void Host::apply_entrance() { flow_.entrance = variables_->memory.cstr(ENTRANCE_WORD); }
 void Host::bind_seed(SharedRandom *next) { external_seed_ = next; }
+level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
+  mirror();
+  auto result = quests::change_level(*campaign_, flow_, options, {});
+  quests::mirror_to_variables(*campaign_, *variables_);
+  return result;
+}
+bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
+  mirror();
+  const bool launch = campaign_->tick_menu(button, inputs);
+  const auto &menu = campaign_->menu();
+  if (menu.paused)
+    variables_->memory.word(PAUSED_WORD, 1u);
+  if (launch) {
+    variables_->memory.string(PENDING_WORD, menu.pending);
+    variables_->memory.byte(ORIENT_WORD, static_cast<std::uint8_t>(menu.orient));
+    flow_.pending.request(menu.pending, level_flow::ORIENT_NONE);
+  }
+  return launch;
+}
+std::vector<std::uint8_t> Host::save_campaign() {
+  mirror();
+  return campaign_->save();
+}
+void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
+  auto next = quests::Campaign::load(bytes);
+  *campaign_ = std::move(next);
+  quests::restore_variables(*campaign_, *variables_);
+}
 
 bool Host::load(const amx::ByteVector &image) {
   machine_.reset();

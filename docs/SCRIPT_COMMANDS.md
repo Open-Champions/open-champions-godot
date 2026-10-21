@@ -54,7 +54,11 @@ stub's position or angle (`moveMonster`, `addParticleOnObject`,
 
 Combat runtime, creature AI, audio and HUD have no command whose whole effect
 is documented. Those commands, and every partly documented or unknown command,
-increment that command's refusal count. The binder does not run.
+increment that command's refusal count. The binder does not run, except
+`setCFlag`, `activateMissionMenu`, and `givePlayerExp` once an experience
+table is set. Those three, and the commands that stay refused, are specified
+in [QUESTS.md](QUESTS.md). `setCFlag` tests the creature flag 0x20 on each
+object its name finds, so it is also refused when any of them is a stub.
 
 A refusal has no answer. The host looks at the script code after the call,
 using the opcode table of research `docs/script.md` section 1. When

@@ -4,7 +4,7 @@ set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
-    champions-script-builtins champions-level-flow champions-fx-sim)
+    champions-script-builtins champions-level-flow champions-fx-sim champions-quests)
 set_target_properties(champions-script-commands PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-script-commands PRIVATE /W4 /utf-8 /fp:strict)
@@ -40,3 +40,7 @@ if(BUILD_TESTING AND TARGET champions-archive)
     set_tests_properties(script-commands-measure-usage PROPERTIES WILL_FAIL TRUE)
     set_tests_properties(script-commands-measure-empty PROPERTIES PASS_REGULAR_EXPRESSION "scripts_started 0")
 endif()
+
+# The host links champions-quests; define it here so every build that includes
+# this file (native and the GDExtension) has the target.
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/quests_targets.cmake")

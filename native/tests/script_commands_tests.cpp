@@ -354,6 +354,9 @@ void test_stub_objects() {
   std::vector<Call> calls;
   for (const char *name : names)
     calls.push_back({name, {2000}});
+  // setCFlag (a quest command, QUESTS.md) tests creature flag 0x20 on each
+  // object it finds, so a stub refuses it too.
+  calls.push_back({"setCFlag", {2000, 26, 1}});
   calls.push_back({"addParticleOnObject", {0, 2000, 0, 0, 0, 0, 0, 0}});
   auto built = build_calls({{"start", calls}}, {{2000, "gate"}});
   sc::Host host;
@@ -370,7 +373,11 @@ void test_stub_objects() {
     check(host.counts().executed[index] == 0 && host.counts().refused[index] == 1,
           std::string("refused on a stub: ") + name);
   }
-  check(host.counts().stub_refusals == 4, "stub refusals counted");
+  const auto cflag = static_cast<std::size_t>(index_of("setCFlag"));
+  check(host.counts().executed[cflag] == 0 && host.counts().refused[cflag] == 1 &&
+            host.campaign().events().cflag_bit26 == 0,
+        "refused on a stub: setCFlag");
+  check(host.counts().stub_refusals == 5, "stub refusals counted");
   check(gate && grid_cell(gate) && !off_grid(host, gate),
         "a refused hideMonster leaves the stub on the grid");
   check(host.counts().executed[static_cast<std::size_t>(index_of("addParticleOnObject"))] == 1,
