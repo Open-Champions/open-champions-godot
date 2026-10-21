@@ -571,6 +571,8 @@ void World::State::tick() {
   }
   w(0x403a08, 1, n);
   run_objects();
+  if (full())
+    combat_ctors::hud_tick_gold(model);
   w(FRAME, u(FRAME) + 1);
   if (full())
     for (unsigned k = 0; k < 4; ++k) {
@@ -630,6 +632,13 @@ Raw World::State::skill_rank(Raw slot, Raw id) const {
 }
 void World::State::full_fixtures() {
   // research ref_combat_full.FullRuntime.__init__, in order.
+  // Gold's executed run, touch and destructor slots: research-combat-ctors-4
+  // gold-run.md and symbols/runtime.tsv at 6baf4cd.
+  for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},
+                                                  {6,0x157a9c}}) {
+    w(0x511a88+8*entry.first,2,0);
+    w(0x511a88+8*entry.first+4,entry.second);
+  }
   constexpr std::pair<unsigned, Raw> missile[] = {
       {0, 0x3c62c0}, {1, 0x151454}, {2, 0x3c7e88},  {3, 0x3c7e90},
       {4, 0x15153c}, {5, 0x15253c}, {6, 0x152a18},  {7, 0x3c7eb0},

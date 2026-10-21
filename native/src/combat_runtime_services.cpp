@@ -206,6 +206,10 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     loosefire_on_touch(self, ar(0));
     return iv(0);
   }
+  if (slot == 6 && fn == 0x157a9c) {
+    combat_ctors::gold_on_touch(model,self,ar(0));
+    return iv(0);
+  }
   switch (fn) {
   case 0x2da610:
     multifire_on_hit(self, ar(0));
@@ -314,7 +318,7 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2",
+        "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
         "model_getSamplePoint", "AntWave_ctor",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
         "CT_type_info_equals"}) {
@@ -391,6 +395,7 @@ void World::State::install_services() {
                          "model_draw",
                          "model_getMeshJoint",
                          "anim_getJointMatrix",
+                         "anim_advanceUnitSpeed",
                          "rigidbody_init",
                          "quat_fromMat3",
                          "quat_normalize",
@@ -633,6 +638,8 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "PhProp_ctor2")
     { combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
         std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));return iv(0); }
+  if (n == "Gold_ctor2")
+    { combat_ctors::gold_ctor2(model,ar(0),v(1),ar(2));return iv(0); }
   if (n == "model_getSamplePoint")
     throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
                       "0x21, Soul_takeDamage with sample points) is not a World "
@@ -817,6 +824,12 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getBounds")
     return A::Bounds{};
+  if (n == "anim_advanceUnitSpeed") {
+    // The end bit is supplied by the loaded clip at runtime. Synthetic
+    // fixtures have no clip and preserve their anim-state bytes.
+    note(n,{ar(0),ar(1),ar(2),ar(3)});
+    return iv(0);
+  }
   if (n == "isNearView")
     return iv(is_near_view(ar(0), ar(2)));
   if (n == "model_getAttachPoint") {
@@ -1171,6 +1184,11 @@ void World::State::run(Address a) {
   if (fn == 0x1ee050) {
     note("run", {a});
     light_effect_run(a);
+    return;
+  }
+  if (fn == 0x157b58) {
+    note("run",{a});
+    combat_ctors::gold_run(model,a);
     return;
   }
   if (fn == FIRE_RUN || fn == LOOSEFIRE_RUN) {

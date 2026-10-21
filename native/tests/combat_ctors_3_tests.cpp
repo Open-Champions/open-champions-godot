@@ -196,6 +196,64 @@ void prop_cases() {
   check(get(gold+0x4c,1)==0x29&&get(gold+0x50,4)==1234,"gold countdown and frame");
   check((get(gold+0xc,4)&0x220c)==0x220c,"gold object flags");
 }
+void gold_round4_cases() {
+  // Replay test_ref_gold.py's whole-life, clip-end, refusal and credit edges.
+  constexpr A::Address gold=0x180000,player=0x190000;
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  auto get=[&](A::Address a,unsigned n){return mem.load(a,n);};
+  for (const char *n:{"res_find","sound_playOnObject","anim_advanceUnitSpeed",
+                       "obj_stopRunning","obj_delete"})
+    m.callbacks[n]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+      return std::int64_t(0);
+    };
+  put(0x44fdcc,4,1000);put(0x404460,4,0x5678);
+  for (unsigned k=0;k<16;++k) put(0x44f140+4*k,4,
+      k==0||k==5||k==10?0x3f800000:k==15?0x42c80000:0);
+  for (unsigned k=0;k<4;++k) {
+    put(0x4f6710+4*k,4,k<2?200:250);
+    put(0x4f6730+4*k,4,(k&1)?590:50);
+  }
+  put(gold+0x4c,1,41);put(gold+0x50,4,1000);put(gold+0x80,4,120);
+  put(gold+0x10,4,0x41200000);put(gold+0x14,4,0x41a00000);
+  for (unsigned tick=1;tick<=41;++tick) {
+    put(0x44fdcc,4,1000+tick);
+    CT::gold_run(m,gold);
+  }
+  check(get(gold+0x4c,1)==0,"gold countdown opens after 41 ticks");
+  unsigned clinks=0;
+  for (const auto &call:m.calls)
+    if (call.name=="res_find"&&std::get<std::int64_t>(call.args[1])==0x532838)
+      ++clinks;
+  check(clinks==1,"gold clinks at 18 ticks");
+  put(player+0xc,4,0x4060);put(player+0x3c8,4,2);
+  CT::gold_on_touch(m,gold,player);
+  check(get(gold+0x80,4)==0&&get(0x86a900+0x1c,4)==120,
+        "touch empties pile and fills first floater");
+  check(get(0x86a900+0x20,1)==2&&get(0x86a900+0x18,4)==1041,
+        "floater belongs to toucher slot and current frame");
+  for (unsigned tick=1;tick<=42;++tick) {
+    put(0x44fdcc,4,1041+tick);CT::hud_tick_gold(m);
+  }
+  check(get(0x4d8af0+2*0x4c30+0xe4,4)==0,"gold waits 43 ticks");
+  put(0x44fdcc,4,1084);CT::hud_tick_gold(m);
+  check(get(0x4d8af0+2*0x4c30+0xe4,4)==15,"first gold payment is one eighth");
+  for (unsigned tick=44;tick<130;++tick) {
+    put(0x44fdcc,4,1041+tick);CT::hud_tick_gold(m);
+  }
+  check(get(0x4d8af0+2*0x4c30+0xe4,4)==120,
+        "full amount goes to toucher after pending payments");
+  check(get(0x4d8af0+0xe4,4)==0,"other player gets none");
+  put(gold+0x80,4,50);put(player+0xc,4,0x20060);
+  CT::gold_on_touch(m,gold,player);
+  check(get(gold+0x80,4)==50,"prediction copy cannot pick up gold");
+  put(player+0xc,4,0x4060);
+  for (unsigned k=0;k<8;++k) put(0x86a900+0x24*k+0x1c,4,9);
+  put(player+0x3c8,4,3);put(0x4d8af0+3*0x4c30+0xe4,4,99999989);
+  CT::gold_on_touch(m,gold,player);
+  check(get(0x4d8af0+3*0x4c30+0xe4,4)==99999999,
+        "busy floaters credit immediately with cap");
+}
 }
 int main() {
   try {
@@ -205,6 +263,7 @@ int main() {
     charm_cases();
     shatter_cases();
     prop_cases();
+    gold_round4_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

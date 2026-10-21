@@ -172,4 +172,9 @@ void phprop_ctor2(A::Model &, Address prop, const Vec3 &position, Raw facing,
                   Address texture_name, std::uint64_t parts, Raw launch,
                   Address item, Raw scale);
 void gold_ctor2(A::Model &, Address gold, const Vec3 &position, Raw amount);
+void gold_run(A::Model &, Address gold);
+void gold_on_touch(A::Model &, Address gold, Address toucher);
+void hud_add_gold_floater(A::Model &, Raw slot, const Vec3 &position, Raw amount);
+void hud_tick_gold(A::Model &);
+void hud_flush_gold(A::Model &);
 } // namespace champions::simulation::rta::combat_ctors
