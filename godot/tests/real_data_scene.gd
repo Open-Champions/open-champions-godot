@@ -261,8 +261,13 @@ func take_script_counts() -> void:
 	add("scripts.missing_entries", int(counts.get("missing_entries", 0)))
 	add("scripts.objects_registered", int(counts.get("objects_registered", 0)))
 	add("scripts.objects_refused", int(counts.get("objects_refused", 0)))
-	for name in counts.get("executed", {}): add("executed." + str(name), int(counts.executed[name]))
-	for name in counts.get("refused", {}): add("refused." + str(name), int(counts.refused[name]))
+	for name in counts.get("executed", {}):
+		add("executed." + str(name), int(counts.executed[name]))
+		add("levels_executed." + str(name))
+	for name in counts.get("refused", {}):
+		add("refused." + str(name), int(counts.refused[name]))
+		add("levels_refused." + str(name))
+	if int(counts.get("started", 0)) > 0: add("scripts.levels_started")
 
 func write_summary() -> Dictionary:
 	var summary := {"counts": counts, "refusals": reasons, "failures": failures}
