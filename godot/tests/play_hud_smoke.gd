@@ -82,7 +82,7 @@ func _run() -> void:
 	var opened_menu := pending_level.duplicate()
 	opened_menu["level_menu_opened"] = true
 	hud.observe_play(opened_menu, true)
-	check(hud.glow_alpha == 4, "level menu opening resets the glow before the next draw")
+	check(hud.glow_alpha == 0 and not "level_up_glow" in hud.drawn, "level menu opening resets and suppresses the glow")
 	for key in ["experience", "level_text", "name_text", "level_up_glow", "portrait", "quick_slots", "gold", "minimap"]:
 		if key != "level_up_glow": check(not str(hud.refusals.get(key, "")).is_empty(), key + " refused with a reason")
 	for key in ["status_gates", "health_flash", "mana_cooldown", "pending_dead_bit"]:

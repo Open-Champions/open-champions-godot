@@ -77,10 +77,11 @@ func observe(value: Dictionary) -> void:
 	# hud-dynamic.md section 3: local slot, present live object, HP > 0,
 	# pending level. The alpha advances once per displayed draw and persists
 	# until hud_run opens the level menu (section 2).
-	if value.get("level_menu_opened", false) == true:
+	var level_menu_opened: bool = value.get("level_menu_opened", false) == true
+	if level_menu_opened:
 		glow_alpha = 0
 	var pending_level := typeof(value.get("level")) == TYPE_INT and typeof(value.get("acknowledged_level")) == TYPE_INT and int(value.level) > int(value.acknowledged_level)
-	var glow_ready: bool = pending_level and value.get("player_object_present", false) == true and value.get("player_object_dead", true) == false and value.get("player_hp_known", false) == true and valid_bar(value, "hp", "max_hp") and float(value.hp) > 0.0
+	var glow_ready: bool = not level_menu_opened and pending_level and value.get("player_object_present", false) == true and value.get("player_object_dead", true) == false and value.get("player_hp_known", false) == true and valid_bar(value, "hp", "max_hp") and float(value.hp) > 0.0
 	if glow_ready:
 		var tick := int(value.get("ready_ticks", 0))
 		var adjunct: Dictionary = dynamic_service.status_adjuncts(0, tick, int(origins.origins[0]), glow_alpha, 0, false, 0, 0, false, false, 0)
