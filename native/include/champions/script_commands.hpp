@@ -3,6 +3,7 @@
 // Commands whose callee research executed at t3/research-script 52984db also
 // run that binder, and the host answers the call. Every other command is a
 // counted refusal. The composition census stays the 9649e6b table.
+#include "champions/dialog.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
@@ -12,6 +13,7 @@
 #include "champions/script_effects.hpp"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -85,6 +87,57 @@ struct Queue {
 class RefusedResult : public amx::HostFault {
 public:
   using amx::HostFault::HostFault;
+};
+
+// NPC dialog wiring (docs/DIALOG.md). attach_dialog opts the host in: the
+// dialog built-ins then run against a champions-dialog machine instead of
+// being refused. Without it the host behaves exactly as before.
+struct DialogLevel {
+  // The level name: message 0 loads "<level>.lmp" and finds "<name>.dbin" in it.
+  std::string level;
+  // Lump entries ending in .dbin, under their exact names.
+  std::map<std::string, std::vector<std::uint8_t>> files;
+  // The level stream directory (ntsc_dialog.bin): entry name -> offset, length.
+  std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> stream;
+};
+struct DialogServices {
+  // text_lookup. Required: a conversation is refused without it.
+  std::function<dialog::Wide(const std::string &)> text;
+  // text_drawWrapped(56, 0, text, 524, 0, 0, 19) of dialog_showNode: the height.
+  std::function<std::int64_t(const dialog::Wide &)> layout_height;
+  // The run task's measuring pass (docs/dialog.md 5.1 step 9): the characters
+  // text_drawWrapped(56, y, text, 524, 295, bottom, 19) shows with this budget
+  // (0x44e028). budget < 0 is the unlimited budget the draw pass leaves.
+  std::function<std::int64_t(const dialog::Wide &, std::int64_t y, std::int64_t budget, int bottom)> shown;
+};
+// What dialog_runTask reads from the voice stream. The default answers are
+// those of a line with no audio entry (docs/dialog.md 4 step 4): the held
+// entry reports ready, nothing is queued or playing.
+struct DialogVoice {
+  std::int64_t held_ready = 1, queue_count = 0, position = 0, status = 0;
+};
+struct DialogInputs {
+  // The raw pad word of the reading slot, pressed this tick (0x4028dc).
+  std::uint32_t pad = 0;
+  Raw fade = ONE;          // g_uiFadeIn[0]
+  int text_option = 1;     // 0x4fdcc8, options file default 1
+  bool pause_menu = false; // task "pauseMenu"
+  DialogVoice voice;
+  // Camera_lookAt's arrival and the float at 0x44f130 (unverified, see
+  // docs/DIALOG.md "Camera"). Without a camera the move arrives at once.
+  std::int64_t camera_arrived = 1;
+  Raw look = ZERO;
+};
+struct DialogCounts {
+  std::uint64_t uses = 0, use_no_candidate = 0, use_ambiguous = 0, use_blocked_open = 0;
+  std::map<std::string, std::uint64_t> interact; // Creature_interact results
+  std::uint64_t start_messages = 0, opens = 0, open_gate_refused = 0;
+  std::map<std::string, std::uint64_t> refused; // refusals by reason
+  std::uint64_t nodes_shown = 0, choices_taken = 0, scripts_run = 0;
+  std::uint64_t missing_entries = 0, ends = 0, pending_levels = 0, post_actions = 0;
+  std::uint64_t deferred_shops = 0, shop_requests = 0;
+  std::uint64_t stalls = 0, client_leaves = 0, ticks_open = 0, voice_lines = 0, silent_lines = 0;
+  std::uint64_t anm_reads = 0;
 };
 
 // One level script. Not copied: its command closures capture this.
@@ -178,7 +231,45 @@ public:
   std::vector<std::uint8_t> save_campaign();
   void load_campaign(const std::vector<std::uint8_t> &);
 
+  // ---- NPC dialog (docs/DIALOG.md) ----
+  void attach_dialog(DialogLevel level, DialogServices services);
+  bool dialog_attached() const { return dialog_attached_; }
+  const dialog::Dialog &dialog() const { return dialog_; }
+  const DialogCounts &dialog_counts() const { return dialog_counts_; }
+  // Objects this level lets the player talk to: a documented creature class
+  // with showName and dialogScript (docs/DIALOG.md "Who can be talked to").
+  std::vector<std::uint32_t> talkers() const;
+  // Player_interact for slot 0's use button at the player's raw position, then
+  // Creature_interact on the nearest talker (docs/dialog.md 2.1-2.2). Returns
+  // the result word: "no candidate", "dialog open", or Creature_interact's.
+  std::string use(int slot, const std::array<Raw, 3> &player);
+  // Talk to one talker by address (tests and the census): Creature_interact.
+  std::string interact(std::uint32_t address, int slot, const std::array<Raw, 3> &player);
+  // dialog_runTask once (priority 110, before the Script task at 125).
+  void dialog_tick(const DialogInputs &);
+  // dialog_drawTask once: the calls, for the presentation.
+  std::vector<dialog::Event> dialog_draw(Raw fade, int text_option, int glyph,
+                                         std::int64_t stream_status = 0);
+  // Calls outside the dialog state since the last take (voice, camera, shop).
+  std::vector<dialog::Event> take_dialog_events();
+  // Not in the original: ends a conversation that a refused script stalled
+  // (docs/DIALOG.md "Refusals"). Runs dialog_free and clears the dialog's
+  // freeze and HUD words. False when nothing is stalled.
+  bool dialog_leave();
+  bool dialog_stalled() const { return dialog_stalled_; }
+  const std::string &dialog_stall_reason() const { return dialog_stall_reason_; }
+
 private:
+  void dialog_push();
+  void dialog_pull();
+  std::uint32_t dialog_scene(const std::string &, const std::vector<builtins::Variables::ServiceValue> &);
+  std::int32_t dialog_run_script(const std::string &name, bool condition);
+  void dialog_message(const dialog::Bytes &msg);
+  dialog::Object *dialog_view(std::uint32_t address, const std::array<Raw, 3> *player);
+  template <class F> bool dialog_guard(const char *what, F &&fn);
+  void dialog_drain_log();
+  void dialog_complete_read();
+
   void install();
   void bind_campaign();
   void mirror();
@@ -226,6 +317,22 @@ private:
   bool counted_complete_ = false;
   amx::Cell last_value_ = 0;
   std::string last_fault_;
+  bool dialog_attached_ = false;
+  DialogLevel dialog_level_;
+  DialogServices dialog_services_;
+  dialog::Dialog dialog_;
+  dialog::Host dialog_host_;
+  std::map<std::uint32_t, std::unique_ptr<dialog::Object>> dialog_views_;
+  std::map<std::string, std::vector<dialog::Node>> dialog_files_;
+  dialog::Object dialog_player_;
+  DialogCounts dialog_counts_;
+  std::vector<dialog::Event> dialog_events_;
+  bool dialog_stalled_ = false;
+  std::string dialog_stall_reason_;
+  int dialog_depth_ = 0;
+  // A dialog built-in is running: the binder's camera, message, shop and menu
+  // seams it calls are answered by the dialog wiring.
+  bool in_dialog_command_ = false;
   // Declared last so the machine, whose natives capture this, dies first.
   std::shared_ptr<amx::Machine> machine_;
 };

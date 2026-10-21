@@ -3,10 +3,11 @@ include_guard(GLOBAL)
 set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 add_library(champions-script-commands
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
-    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp")
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
-    champions-script-builtins champions-level-flow champions-fx-sim champions-quests)
+    champions-script-builtins champions-level-flow champions-fx-sim champions-quests champions-dialog)
 # The native build provides champions-native-audio. The Godot extension compiles
 # the same file as champions-native-audio-binding-core and links it after this
 # static library, so the Playback references resolve there.

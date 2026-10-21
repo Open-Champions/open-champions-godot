@@ -467,7 +467,8 @@ void Dialog::show_node(Host &host, int index) {
   const auto count = std::int64_t(visible.size());
   for (std::int64_t i = 0; i < count; ++i)
     choice_y[std::size_t(i)] = CHOICE_BASE - LINE * (count - i);
-  total = std::max<std::int64_t>(host.layout_height + LINE * count - HEIGHT_SLACK, 0);
+  const auto height = host.layout ? host.layout(text) : host.layout_height;
+  total = std::max<std::int64_t>(height + LINE * count - HEIGHT_SLACK, 0);
 }
 
 void Dialog::queue_line_audio(Host &host, const Node &n) {
@@ -575,6 +576,8 @@ void Dialog::on_end(Host &host) {
     orient = 0xFF;
   }
   log.push_back(ev("post_action"));
+  if (on_post_action)
+    on_post_action();
   if (store_pending) {
     if (!host.network) {
       log.push_back(ev("shop", {I(active_player), I(0), I(1)}));
@@ -624,7 +627,9 @@ std::vector<Bytes> Dialog::tick(Host &host, TickIO &io) {
   std::vector<Bytes> sent;
   const auto send = [&](Bytes msg) {
     log.push_back(ev("send", {Arg{msg}}));
-    sent.push_back(std::move(msg));
+    sent.push_back(msg);
+    if (on_send)
+      on_send(msg);
   };
   prompt_shown = 0;
   if (cam_move != 0) {
@@ -735,7 +740,7 @@ std::vector<Bytes> Dialog::tick(Host &host, TickIO &io) {
   log.push_back(ev("wrapped", {I(BODY_X), I(ROW0 + LINE - scroll), S("body"), I(BODY_W), I(BODY_TOP),
                                I(bottom), I(LINE)}));
   log.push_back(ev("text_end"));
-  shown = io.shown;
+  shown = io.measure ? io.measure(ROW0 + LINE - scroll, revealing ? reveal : -1, bottom) : io.shown;
   if (revealing && reveal_done == 0) {
     if (shown < reveal)
       reveal_done = 1;
@@ -984,6 +989,67 @@ std::string Dialog::trigger(Host &host, Object &obj) {
     return "busy";
   host.run_script(script->second);
   return "script";
+}
+
+// ---- text table ---------------------------------------------------------------------
+TextTable TextTable::parse(const std::uint8_t *data, std::size_t size) {
+  TextTable out;
+  if (!data)
+    throw Refused("no text table");
+  std::size_t at = 0;
+  while (true) {
+    if (at >= size)
+      throw Refused("text table ends without its terminating key");
+    if (data[at] == 0)
+      break;
+    std::size_t len = 0;
+    while (at + len < size && data[at + len])
+      ++len;
+    if (at + len >= size)
+      throw Refused("text key runs past the table");
+    const std::string key(reinterpret_cast<const char *>(data + at), len);
+    std::size_t text = (at + len + 2) & ~std::size_t(1);
+    Wide units;
+    while (true) {
+      if (text + 1 >= size)
+        throw Refused("text runs past the table");
+      const auto u = static_cast<std::uint16_t>(data[text] | data[text + 1] << 8);
+      text += 2;
+      if (!u)
+        break;
+      units.push_back(u);
+    }
+    out.table_.emplace(key, std::move(units)); // an earlier equal key stays
+    ++out.entries_;
+    at = text;
+  }
+  return out;
+}
+
+namespace {
+std::string strip_quotes(const std::string &key) {
+  std::string out;
+  for (char c : key)
+    if (c != '"')
+      out.push_back(c);
+  return out;
+}
+} // namespace
+
+bool TextTable::contains(const std::string &key) const { return table_.count(strip_quotes(key)) != 0; }
+
+Wide TextTable::lookup(const std::string &key) const {
+  const auto stripped = strip_quotes(key);
+  const auto found = table_.find(stripped);
+  if (found != table_.end())
+    return found->second;
+  // Which spelling the miss text copies is not stated for a quoted key.
+  if (stripped != key)
+    throw Refused("missing text key with double quotes");
+  Wide out{'N', 'F', ':'};
+  for (std::size_t i = 0; i < key.size() && i < 16; ++i)
+    out.push_back(static_cast<std::uint8_t>(key[i]));
+  return out;
 }
 
 std::int64_t prop_int(const std::string &raw) {

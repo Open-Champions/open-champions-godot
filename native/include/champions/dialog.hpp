@@ -167,6 +167,9 @@ struct Host {
   std::map<std::string, std::int64_t> anm_length, vag_length;
   std::map<std::string, std::pair<std::int64_t, std::int64_t>> anm_entry;
   std::int64_t layout_height = 0;
+  // text_drawWrapped(56, 0, text, 524, 0, 0, 19) of dialog_showNode; when set
+  // it answers instead of layout_height.
+  std::function<std::int64_t(const Wide &)> layout;
   std::vector<std::string> ran;
   // A level-script host; without one the scripts table answers.
   ScriptRunner runner;
@@ -188,6 +191,10 @@ struct TickIO {
   Raw fade = ZERO;
   int text_option = 1;
   std::int64_t shown = 0;
+  // The measuring pass itself: the characters text_drawWrapped shows at y with
+  // this budget (-1: unlimited) and clip bottom. When set it answers instead
+  // of shown.
+  std::function<std::int64_t(std::int64_t y, std::int64_t budget, int bottom)> measure;
   std::vector<std::pair<std::string, std::int64_t>> asked;
 
   std::int64_t camera_step(int frames);
@@ -259,6 +266,14 @@ public:
   std::int64_t shown = 0;            // 0x44e028
   std::int64_t last_position = 0;    // 0x4fdce0
   std::vector<Event> log;
+  // Offline, net_sendGameMsg calls the handler at once on the sender's buffer
+  // (research docs/spec/game-messages.md 1.2). When set, a message the run
+  // task sends is handed here as it is sent, so later steps of the same run
+  // see its effect. The reference model leaves it unset and returns them.
+  std::function<void(const Bytes &)> on_send;
+  // script_runPostAction, at its place in the end handler (message 3). The
+  // reference only logs it.
+  std::function<void()> on_post_action;
 
   bool is_open() const { return node.has_value(); }
   void clear_text();
@@ -305,6 +320,25 @@ private:
   void reset_focus_anim();
   Object *find_speaker(Host &, const std::string &name, int player);
   bool audio_ready_branch(TickIO &);
+};
+
+// ---- text table (research docs/data-tables.md section 6) ---------------------------
+// gtext.uni in GTEXT.LMP: a zero-terminated ASCII key, padding to
+// (start + len + 2) & ~1, then UTF-16LE text ending in a zero unit; the list
+// ends at a key that starts with a zero byte. text_lookup 0x173c84 drops
+// double quotes from the key; of two equal keys the earlier is found; a miss
+// returns "NF:" and the first 16 characters of the key.
+class TextTable {
+public:
+  static TextTable parse(const std::uint8_t *data, std::size_t size);
+  Wide lookup(const std::string &key) const;
+  bool contains(const std::string &key) const;
+  std::size_t entries() const { return entries_; }
+  std::size_t keys() const { return table_.size(); }
+
+private:
+  std::map<std::string, Wide> table_;
+  std::size_t entries_ = 0;
 };
 
 // obj_getPropInt: the leading decimal integer (atoi rules), 0 when none.

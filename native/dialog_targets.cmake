@@ -16,7 +16,7 @@ endif()
 
 if(BUILD_TESTING AND TARGET champions-script-commands AND NOT TARGET champions-dialog-tests)
   add_executable(champions-dialog-tests "${CHAMPIONS_DIALOG_ROOT}/tests/dialog_tests.cpp")
-  target_link_libraries(champions-dialog-tests PRIVATE champions-dialog champions-script-commands)
+  target_link_libraries(champions-dialog-tests PRIVATE champions-script-commands)
   if(MSVC)
     target_compile_options(champions-dialog-tests PRIVATE /W4 /utf-8 /fp:strict)
   else()
@@ -25,4 +25,16 @@ if(BUILD_TESTING AND TARGET champions-script-commands AND NOT TARGET champions-d
   add_test(NAME dialog COMMAND champions-dialog-tests
     "${CHAMPIONS_DIALOG_ROOT}/tests/dialog_vectors.tsv"
     "${CHAMPIONS_DIALOG_ROOT}/tests/dialog_contract.json")
+endif()
+
+if(TARGET champions-dialog AND TARGET champions-script-commands AND TARGET champions-archive
+   AND TARGET champions-native-audio AND TARGET champions-ui-layout-dynamic AND NOT TARGET champions-dialog-census)
+  add_executable(champions-dialog-census "${CHAMPIONS_DIALOG_ROOT}/src/dialog_census.cpp")
+  target_link_libraries(champions-dialog-census PRIVATE champions-script-commands champions-archive
+    champions-native-audio champions-ui-layout-dynamic)
+  if(MSVC)
+    target_compile_options(champions-dialog-census PRIVATE /W4 /utf-8 /fp:strict)
+  else()
+    target_compile_options(champions-dialog-census PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+  endif()
 endif()

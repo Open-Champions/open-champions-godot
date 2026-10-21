@@ -150,6 +150,16 @@ bool inferred_route(const char *name) {
   return std::strcmp(name, "setCFlag") == 0 || std::strcmp(name, "selectSetCFlag") == 0;
 }
 
+// The dialog built-ins (docs/DIALOG.md). With a dialog attached their binder
+// bodies run; their seams are answered by script_dialog.cpp.
+bool dialog_command(const char *name) {
+  static const char *names[] = {"startDialog", "dialogRunning", "forceMutexRelease", "activateStore",
+                                "newWorldPost", "changeSwoop", "startWithSwoopDone"};
+  for (const char *each : names)
+    if (std::strcmp(name, each) == 0)
+      return true;
+  return false;
+}
 bool campaign_command(const char *name) {
   static const char *names[] = {
       "addQuest", "removeQuest", "getv", "setv", "addv", "setMissionAvailable",
@@ -299,12 +309,15 @@ amx::NativeMap Host::command_map() {
     const bool sync_seed = std::strcmp(kRows[i].name, "getRand") == 0;
     const bool entrance = std::strcmp(kRows[i].name, "setEntrance") == 0;
     const bool cflag = std::strcmp(kRows[i].name, "setCFlag") == 0;
-    out.emplace(kRows[i].name, [this, i, function, documented, sync_seed, entrance, cflag](
+    const bool dialog_cmd = dialog_command(kRows[i].name);
+    out.emplace(kRows[i].name, [this, i, function, documented, sync_seed, entrance, cflag, dialog_cmd](
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
       // Undocumented commands refuse, except the quest commands whose bodies
-      // are in the quest and mission model (QUESTS.md).
-      if (!documented && !quests::route_undocumented(kRows[i].name, *campaign_)) {
+      // are in the quest and mission model (QUESTS.md) and, with a dialog
+      // attached, the dialog built-ins (DIALOG.md).
+      const bool dialog_route = dialog_cmd && dialog_attached_;
+      if (!documented && !dialog_route && !quests::route_undocumented(kRows[i].name, *campaign_)) {
         refuse(i, machine);
         return 0;
       }
@@ -338,6 +351,24 @@ amx::NativeMap Host::command_map() {
       }
       if (sync_seed)
         sync_seed_in();
+      // With a dialog attached, the words the binder and the machine share
+      // are copied in before and back after every command.
+      struct DialogSync {
+        Host &host;
+        bool on, was;
+        DialogSync(Host &h, bool attached, bool command) : host(h), on(attached), was(h.in_dialog_command_) {
+          if (on) {
+            host.dialog_push();
+            host.in_dialog_command_ = was || command;
+          }
+        }
+        ~DialogSync() {
+          if (on) {
+            host.in_dialog_command_ = was;
+            host.dialog_pull();
+          }
+        }
+      } dialog_sync(*this, dialog_attached_, dialog_route);
       auto result = function(machine, params);
       if (sync_seed)
         sync_seed_out();
