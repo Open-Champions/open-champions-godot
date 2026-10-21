@@ -33,7 +33,7 @@ func run() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--ready-ticks="):
 			target_ticks = maxi(600, int(arg.trim_prefix("--ready-ticks=")))
-	directory = "user://playable-wave-smoke-play"
+	directory = "user://playable-wave-smoke-play-%d" % OS.get_process_id()
 	root.content_scale_size = root.size
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(directory))
 	if not output.is_empty(): DirAccess.make_dir_recursive_absolute(output)

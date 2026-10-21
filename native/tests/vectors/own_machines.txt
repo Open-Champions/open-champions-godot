@@ -1,5 +1,8 @@
 # Synthetic own-machine ticks. Defaults match the reference tick:
 # clock 1000, queue 1, other fields 0. 253 cases.
+# research-anim 5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b
+# tools/ref_own_machines.py sha256 c6d2ffc52eaa2a1b887e119de0e43e1c2478d74760ba7032ad8f20eec7316e5b
+# tools/test_ref_own_machines.py sha256 c0ce6946ca5d6ad27abdd6c6e5dcf396db46fb096344488f21c42cd7fc052f40
 CASE Gnaw 0
 F seen 1
 REQ 3

@@ -48,7 +48,8 @@ Environment-mapped chunks (flag 0x10) use the documented camera rows, quarter
 turn, scroll and environment UV formula. The first pass is context-2 ALPHA
 0x2a and the second pass is ALPHA 9. The environment image is caller-supplied;
 this adapter does not infer a lump name. Until that image is set, the surface
-keeps the second pass against the framebuffer. Per-vertex environment UV was
+draws its base pass opaque: the ALPHA 9 second pass is only documented over the
+context-2 first pass. Per-vertex environment UV was
 not re-difftested against VU program 0x48. Scroll stays 0 unless the caller
 sets level-option bit 2, because that word is runtime state and not a WORLD
 field. Console send order is layers 0 through 7, with same-texture groups in
@@ -84,6 +85,7 @@ The implementation uses:
 | `docs/formats/level-draw.md` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `c0a78f862fde79f5c33f957a037369c44b21ec714ad49c72eba14ada5953d0ea` |
 | `tools/ref_leveldraw.py` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `936cd0ee0cce9d1d9006459984e76ba6c56ff014ebdbc8d1b8c08c33eaf63bca` |
 | `tools/test_ref_leveldraw.py` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `fc48e00b86ea240fd43a02115bd44b90a983b5aaea291a68be828c5416115031` |
+| `docs/spec/render-pipeline.md` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `3eb890d80325c7b04a584de04af8360fc8f4c0e412d3a21656b4e99db570a04b` |
 | `docs/formats/water-draw.md` | `a9486c7f0052e533d3cc5c88f3d98d8f07bffdce` | `a6d827ef663f5783512b8f2a1a72f874b543f96ffead241346dc73ad59f619aa` |
 | `tools/ref_waterdraw.py` | `a9486c7f0052e533d3cc5c88f3d98d8f07bffdce` | `7c2a005a39784d65b2e65ff8f321e1bd0a580820ccf202c2f77f0f6d27cb77b7` |
 | `tools/test_ref_waterdraw.py` | `a9486c7f0052e533d3cc5c88f3d98d8f07bffdce` | `d8a28cf81b05234a26eeb4041227e300cf7488972da7f285ac812cb5e082dea9` |

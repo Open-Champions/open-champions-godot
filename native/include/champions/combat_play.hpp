@@ -72,17 +72,20 @@ public:
   // fixture's own authored ones, not original spawn data. A refusal leaves
   // the session unchanged when it happens before the World is touched.
   // spawn_creature: one World::spawn_class own-machine creature (creature-ai)
-  // in slot 3, at (0, 80) facing the player, with the fixture's 120-HP
-  // Skelight spawn values. Once per session.
+  // in slot 3, at (0, 80) facing the player, on the fixture's 120-HP authored
+  // placement. Once per session. Only Skelight and Gnaw (Gnaw_ctor's class
+  // words) can be built; the other eight classes refuse because their
+  // constructors were not executed.
   void spawn_creature(const std::string &own_class);
   const std::string &own_creature_class() const; // empty until spawned
   // drop_potion: a thrown potion of kind 1..3 (combat-runtime-4
   // playerProjectile_run) at the player's position with the Thrown defaults
   // and zero velocity. The throw call site and its arc are not contracted.
   void drop_potion(unsigned kind);
-  // Holy Shield is not offered: SpellHolyShield_absorb needs the model
-  // sample-point services (no player model here), and give_skill(16) would
-  // rewrite the fixture's Holy Strike table.
+  // Holy Shield is armed on the Holy Strike skill already in the table
+  // (arm_fixture_holy_shield). give_skill(16) is not called again. The
+  // player's model at +0x544 has one sample point and +0x114 holds a
+  // one-joint pose, so absorb follows the round-5 sample points.
   // The World is the sole actor owner. Read access for observers; the
   // mutable reference exists only for explicit effect hooks (damage/queries).
   const combat_runtime::World &world() const;

@@ -144,7 +144,9 @@ What changed in the real-data scene:
   starts at `level_flow::story_start_ground` (cold story, one player, marker
   identity search, `player_ctor_z` at radius 12; docs/LEVEL_FLOW.md section
   17) instead of the origin, and refuses a level only when that snap has no
-  ground. `session_control::Config::start` carries the position; saves keep it
+  ground. When a marker took, that start is the marker before
+  `Player1_ctor`'s `findFreeSpot` (`start.pre_search` is true, up to 36 units
+  from the original) and no `start.facing` is published. `session_control::Config::start` carries the position; saves keep it
   (terrain marker byte 2). Terrain loaded without objects keeps the historical
   origin start and probes.
 - **Session mesh cap.** `present_geometry` merges each chunk's batches into
@@ -396,6 +398,32 @@ and wave 14 with scripts off, including every script count. Only `time.*`,
 Water entries and ticks in water stay 4 and 252 of 3,024 observed. Drawing
 does not touch the creature `water_test` grid.
 
+The level whose water uses both sets is index 20. It was found with one
+headless run per level over indices 0–27, comparing each level's mesh count
+with its surface count.
+
+Captures (gitignored `work/private/captures-r16/`, 1280×720, windowed,
+inspected): index 20, plus the first 3 water levels from index 28 on
+(indices 28, 29 and 30). water-draw's own captures covered the first 3 water
+levels from index 0. Play, creature and overview for each: 12 PNGs, 0 failed
+checks. The windowed run from index 28 went on to play all 35 water levels in
+28–110, with 0 failures and 35 textures decoded.
+
+| Index | Tiles | What the captures show |
+|---|---|---|
+| 20 | 48 (both sets) | Bright orange sheets over a round pit and one side patch. Texture detail is visible up close. Where two tiles overlap, the overlap is brighter, because each tile blends on its own. |
+| 28 | 37 | Small pale grey-green patches in the overview. None is in the play camera's view. |
+| 29 | 11 | One small grey-green patch in the overview. Not in the play view. |
+| 30 | 772 | Many orange square sheets across the level. Up close they are flat with faint texture and hard square edges. One sheet draws over nearer rock. |
+
+None shows a ripple. Every tile is flat, as expected while the claim seed is
+refused.
+
+Exported app (`build/exports/wave16-final`, headless): the 12-level set, with
+and without `--scripts`, and the three arena indices with `--scripts`. Each
+equals wave 15 apart from timing, plus the new water-texture counts (5, 5 and
+3 decoded at 64×64, 0 refused).
+
 Still refused or not done:
 - No ripples. The claim-frame seed is refused, so every block starts as a zero
   grid and stays flat. A real tile samples one texel of the water texture.
@@ -403,3 +431,99 @@ Still refused or not done:
   disturbs the drawn grid.
 - Water draws without a depth test, as documented, so a pool can draw over
   nearer rock.
+
+## Audit fixes, level spawn (2026-10-21): 108 / 111
+
+Audit findings LS-1, LS-2, LS2-1..3 (docs/LEVEL_FLOW.md). Counts only, same
+disc copy.
+
+What changed:
+- A story start whose `Player1` took is the marker before `Player1_ctor`'s
+  `findFreeSpot` (`start.pre_search`), and no `start.facing` is published:
+  the live `g_randSeed` there is not documented.
+- `story_start_ground` no longer infers the mode-A arena start from the
+  records (no floor, no Player1, an `ArenaPlayerStart`). The original reaches
+  those three archives only through the mode-A table, which the session does
+  not read and does not select, so they are refused again. The explicit
+  `level_flow::arena_mode_a_start_ground` (pre-search ring centre) is not
+  called by the session.
+
+Sweep: four headless slices, no level script (the wave-16 control recipe),
+60 ready ticks. Compared with wave 16's control sweep:
+
+| Measure | Wave 16 control | Audit fixes |
+|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **108 / 111** |
+| Refused (all reasons) | 0 | 3 (`library-load`: no ground at the story start) |
+| Story ground / marker taken / pre-search | 111 / 98 / — | 108 / 95 / 95 |
+| Levels with water / water tiles shown | 48 / 9,451 | 45 / 9,308 |
+| Checks passed / failed | 119 / 0 | 116 / 0 |
+
+Every other difference is the three refused levels' meshes, lights, water
+and ticks; the wave-13 108-level counts are back.
+
+`champions-level-spawn-measure`: paired 111, origin-test 18 with story
+ground 18, cold 3, cold story 0 (was 3), cold mode-A pre-search ground 3;
+every other line unchanged.
+
+## Wave 17 (2026-10-21): audit fixes, quests and arena merged, 111 / 111
+
+`codex/audit-fixes`, `codex/quests` and `codex/arena` are merged. Counts
+only, same disc copy, same four-slice recipe (`work/run-slices-r17.sh`, 60
+ready ticks, light and recipe JSON).
+
+What changed for real data:
+- The three cold arena archives load again, now through the documented path
+  rather than the structural guess the audit removed (LS2-2). The scene reads
+  the arena name tables from the folder's executable at run time
+  (`arena.tables_read`; 13 and 7 entries; nothing is stored). A level whose
+  story snap has no ground starts with `level_flow::arena_mode_a_start_ground`
+  only when the mode-A table lists it (research-levels 13fafa4 section 18.1).
+  On this disc that is the same three indices (`start.arena_mode_a` 3). Their
+  start is the pre-search ring centre with no facing.
+- Every taken story marker is pre-search (`start.pre_search` 98, LS-1), so
+  no start facing is published.
+- Constant-light chunks are lit on the level's base level (TEX-2/3): 1,244
+  chunks, base 0x80 on 108 levels and 0x40 on 3.
+- With scripts on, the audit's script-host fixes (SC-1..7) and the quests
+  merge apply: an entry enters preStart, objects, start; a used refused
+  answer stops the entry; `getRand` is refused because the play session binds
+  no seed; every objects.ob record is a stub, so a command that reads a
+  creature flag, hit points or a type name on one is refused (`setCFlag` now
+  too). The quest campaign is reported under `campaign.*`.
+
+| Measure | Wave 16 (`r16` / `r16n`) | Wave 17 (`r17 --scripts` / `r17n`) |
+|---|---|---|
+| Tried / loaded / played | 111 / 111 / 111 both | **111 / 111 / 111 both** |
+| Refused levels / failed checks | 0 / 0 | 0 / 0 |
+| Story ground / marker taken / pre-search / mode A | 111 / 98 / — / — | 111 / 98 / 98 / 3 |
+| Meshes / surfaces / textured | 174,456 / 174,457 / 174,408 | same |
+| Water levels / tiles / textures decoded | 48 / 9,451 / 48 | same |
+| Ready ticks / checks passed | 6,549 / 119 | same |
+| Scripts attached / started / faults / objects | 111 / 76 / 0 / 17,398 | same |
+| Scripts wait / complete | 41 / 37 | 14 / 28 |
+| Refusal stops / stub refusals | — | 39 / 102 |
+| Executed / refused command calls | 22,371 / 1,375 | 4,192 / 669 |
+| `getRand` executed / refused | 2,161 / 0 | 0 / 5 |
+| Campaign: quest variables (non-zero) | — | 158 (56) |
+
+The table is the final tree (`r17b --scripts` 5 min 28 s, `r17bn` 5 min 41 s).
+Those runs equal the first wave-17 sweep on every count apart from timing.
+The scene's refusal list is now empty: the first sweep listed "level light
+refused: loaded level name unknown" for every level, a stale entry from
+`fx.reset()` that is cleared now; all 111 levels applied their light record.
+
+Other wave-17 counts: `campaign.quest_lines`, the mission bits and the menu,
+medal and experience events are 0 in 60 ticks. The session's binder has no
+planted player count, and the measure tool plants one (QUESTS.md).
+
+`champions-quests-measure`, `champions-arena-measure` (identical to the arena
+branch's run) and `champions-level-spawn-measure` (paired 111, cold 3, cold
+start floor 3) were rerun on this tree. Their counts are in QUESTS.md,
+ARENA_MODES.md and above.
+
+Exported app (`build/exports/wave17-final`, headless, 60 ticks): the 12-level
+set with and without `--scripts`, and indices 69–71 with `--scripts`: 12 / 12,
+12 / 12 and 3 / 3, 0 failures, 0 refusals. Against wave 16 the only changes
+are the arena-table read, `start.pre_search`, the constant-light counts, the
+three mode-A starts and, with scripts, the script-host refusals above.

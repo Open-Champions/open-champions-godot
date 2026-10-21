@@ -85,8 +85,18 @@ func continuation_cases() -> void:
 	scene.actions.play.pressed.emit()
 	var static_mesh: MeshInstance3D = scene.terrain_root.get_child(0)
 	check(not static_mesh.get_meta("native_fx_world_dynamic", true) and "constant chunk light" in scene.terrain_label.text, "0x2000 wins over 0x200 and does not take point lights")
+	# The base level is the loaded level's (render-pipeline 5.1). The synthetic
+	# fixture has none, so the constant colour is refused: base texture only.
+	var unlit_colours = static_mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	check((unlit_colours == null or unlit_colours.is_empty()) and "gated" in scene.terrain_label.text, "constant chunk light is refused without the level's base level")
+	# The loaded level's light record (synthetic row alpha, base 0x40) supplies it.
+	scene.fx.select_level_light(ProjectSettings.globalize_path("res://tests/fixtures/level_lights_synthetic.json"), "alpha")
+	scene.fx.light_world()
 	var static_colours: PackedColorArray = static_mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
-	check(static_colours.size() == 3 and static_colours[0].is_equal_approx(Color.WHITE) and static_colours[1].is_equal_approx(Color.WHITE), "0x2000 at base 128 clamps 230 to 255")
+	check(scene.fx.level_light_active and static_colours.size() == 3 and static_colours[0].is_equal_approx(Color.WHITE) and static_colours[1].is_equal_approx(Color.WHITE), "0x2000 at the level's base 0x40 clamps 294 to 255")
+	var modulate_scale = static_mesh.material_override.get_shader_parameter("modulate_scale")
+	check(modulate_scale != null and is_equal_approx(float(modulate_scale), 255.0 / 128.0), "the constant colour is presented as texel x colour / 128")
+	scene.fx.select_level_light("", "")
 	check(static_mesh.material_override.render_priority == 4 and static_mesh.sorting_offset == 0.0, "0x2200 is layer 4 and the only packet keeps send index 0")
 	print("PLAYABLE_TEXTURE_RESULT ",JSON.stringify({"decoded_size":[40,20],"native_vertex_colours":colours.size(),"save_restore":true,"environment":true,"console_depth":true,"automap_mapping":true,"automap_pixels":false}))
 

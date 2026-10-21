@@ -287,7 +287,10 @@ func _update_menu() -> void:
 		actions[id].disabled = stopped or paused
 	if creature_choice != null:
 		creature_choice.visible = full
-		creature_choice.disabled = stopped or paused or raw_observation.get("combat_actors", []).size() > 3
+		var spawned := false
+		for row in raw_observation.get("combat_actors", []):
+			spawned = spawned or int(row.get("slot", -1)) == 3
+		creature_choice.disabled = stopped or paused or spawned
 	# Pause/stop release the native pad (release_input); mirror it on the toggle.
 	if paused or stopped or not full: actions.combat_block.set_pressed_no_signal(false)
 	if combat:
@@ -927,5 +930,5 @@ func _attach_audio() -> void:
 	audio.configure(self,status)
 	controller.play_audio_tick.connect(audio.ready_tick)
 	_add_action("audio_boss", "Synthetic boss music (Broon)", func():
-		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / override gated)")
+		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / no music volume option / override gated)")
 	_add_action("audio_boss_stop", "Stop boss music", func(): audio.boss_leave())

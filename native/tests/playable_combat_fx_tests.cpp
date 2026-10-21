@@ -128,8 +128,16 @@ void walk_and_combo() {
       if (!first_hit_frame) first_hit_frame = Raw(s.world().read(C::FRAME)) - 1;
       if (killed_at < 0 && !lt(0, Raw(s.world().read(a + 0x228)))) killed_at = t;
     }
-    if (has(s, "obj_delete")) deleted_at = t;
-    if (has(s, "destroy")) destroyed_at = t;
+    if (has(s, "obj_delete")) {
+      // Holy Shield's absorb light is a different object. Only the Skelight's
+      // own delete ends this combo.
+      for (const auto &e : s.tick_events())
+        if (e.name == "obj_delete" && !e.args.empty() && e.args[0] == a) deleted_at = t;
+    }
+    if (has(s, "destroy")) {
+      for (const auto &e : s.tick_events())
+        if (e.name == "destroy" && !e.args.empty() && e.args[0] == a) destroyed_at = t;
+    }
   }
   variants.erase(0);
   // combat-player-melee.md 3: hit on frame start + 16 at speed 1; the combo step
@@ -212,7 +220,15 @@ void holy_strike() {
   const int flight = int(std::ceil((dx - bolt - double(rs)) / 7.5));
   int damage_frame = -1;
   std::size_t particles_at_cast = world.particles.live().size(), glows = 0;
+  std::set<C::Address> strike_lights;
+  auto lights = [&] {
+    std::set<C::Address> found;
+    for (auto o : s.world().actors())
+      if (s.world().read(o + 0x48) == C::VT_LIGHTEFFECT) found.insert(o);
+    return found;
+  };
   for (int t = 0; t < 30 && damage_frame < 0; ++t) {
+    auto before_lights = lights();
     advance(s);
     const auto before = fx.counts().glows;
     fx.draw_slots();
@@ -221,6 +237,8 @@ void holy_strike() {
     if (damaged(s, a)) {
       damage_frame = int(s.world().read(C::FRAME)) - 1;
       check(has(s, "light") && has(s, "destroy"), "the hit tick makes the LightEffect and the bolt ends in its own run");
+      for (auto o : lights())
+        if (!before_lights.count(o)) strike_lights.insert(o);
     }
   }
   std::cout << "holy strike: cast frame " << cast_frame << " damage frame " << damage_frame << " skelight radius " << rs
@@ -231,12 +249,23 @@ void holy_strike() {
         "the bolt's own-generator puffs reach the effect world");
   check(world.missing_definitions == 0, "every puff definition key is in the supplied JSON");
   check(glows >= 1, "HolyStrike_draw makes its glow while the bolt lives");
+  // Holy Shield absorb can reuse this pool block for a later light. Count the
+  // hit's light until it first disappears.
   int light_frames = 0;
+  bool seen = false;
   for (int t = 0; t < 70; ++t) {
     advance(s);
     bool lit = false;
-    for (auto o : s.world().actors()) lit = lit || s.world().read(o + 0x48) == C::VT_LIGHTEFFECT;
-    if (lit) ++light_frames;
+    for (auto o : strike_lights) {
+      bool live = false;
+      for (auto id : s.world().actors()) live = live || id == o;
+      lit = lit || (live && s.world().read(o + 0x48) == C::VT_LIGHTEFFECT);
+    }
+    if (lit) {
+      seen = true;
+      ++light_frames;
+    } else if (seen)
+      break;
   }
   check(light_frames >= 58 && light_frames <= 61, "the LightEffect lives one second (60 frames): " + std::to_string(light_frames));
   check(fx.counts().unrouted.count("LightEffect light part (no colour arguments in the combat trace)"),

@@ -42,10 +42,22 @@ End-flag reads run when the low three bits are clear; a voice that ends during
 the first mix is reclaimed on the tick that enters with the counter at 8.
 `audio_sendVolumes` is due after the increment, when the new value's low four
 bits are clear. The payload of that call is not documented, so the model counts
-`volume_sends()` and does not change the mix. `g_drawFrame` starts at 0x400 and
+`volume_sends()` and does not change the mix. `tick()` does not run
+`music_updateDucking`: one call is executed, but where it is called, how often
+and in which order against the queue service (which changes the stream statuses
+it reads) are not documented, so the owner calls `step_duck()` explicitly.
+`g_drawFrame` starts at 0x400 and
 moves only through `advance_draw_frame()`. The two counters are independent.
 The stream-driver timer still steps volumes at output sample 480, then every
 288 samples. That timer is not the frame cadence.
+
+A new `Playback` holds the process-start images. `end_session()` is a client
+session boundary, not an original routine: it stops the three streams as
+`audio_streamStop` does, ends effect voices and sequences, drops the level
+directory and discards unread output, and keeps the process-lifetime words
+(both frame counters, the duck words, the music volume, the stream volume words
+and the driver timer). The level-load advances of those counters were not
+executed and are not applied.
 
 ### Effects
 
@@ -97,12 +109,13 @@ Sources: `add_stream` (registered PCM), `set_global_vat` (`MOUTH.VAT`) and
 
 | Call | Original |
 |---|---|
+| `set_music_volume(bits)` | The player's `g_musicVolume` 0x4f8944 option as a raw float pattern. The research gives the address but no stored value, so there is no default: until it is set, `music_play_global`, `music_play_level` and a named `play_boss_music` throw `Unsupported` without changing state, a `step_duck()` that would send throws `Unsupported`, and the level poll's `music_playLevel` call is refused and counted in `refused_music_polls()`. |
 | `music_play_global(name, flags)` | `music_playGlobal` 0x2110e0: stream 2, `flags \| 0x22`, only when `g_musicVolume` compares `>= 0x3d4ccccc` and the row's length is nonzero. |
 | `music_play_level(name, flags)` | `music_playLevel` 0x215f48: the same gate, OR and length check. |
 | `play_menu_music(wait)` | `frontend_run`: global `mx_maintheme_l.vag`, flags 5 if waiting, else 1. This path does not use the music gate. |
 | `boss_music_name(type, object)` / `play_boss_music` | The 11-row `creature_bossMusicName` table (the type is compared without case; the cyclops object names are compared the same way). No boss name is a no-op. Otherwise stream 2 is stopped, then one `mouth.vat` span is queued with `music_playGlobal(name, 0x103)` → 0x123. A second boss replaces the queued span. A closed gate, or a missing or zero-length row, leaves the stream stopped and queues nothing. |
 | `stop_boss_music(type, object)` | Appends the empty flags-2 marker only when that creature has a boss name. `stop_boss_music()` is the marker alone, for a caller that already decided to stop. |
-| `set_duck(argument)` / `step_duck()` | `music_setDuck` writes `1 - argument` to the target. Each step, while stream 1 status has bit 0x20, sets the target to `0x3e4cccd0` and adds `0x3c888888`, which holds at `0x3e5ddde1`. The current scalar eases by `0x3c23d70a` and snaps if one step would pass the target. `actintro` with a nonzero language byte stores the scalar as integer 0. A changed scalar is sent only when stream 2 status has bit 0x20; the channel word is `scalar * g_musicVolume * 0x3f480000`. Arithmetic is the R5900 truncate model. The channel word scales stream 2 after the first send. |
+| `set_duck(argument)` / `step_duck()` | `music_setDuck` writes `1 - argument` to the target. `step_duck()` is one `music_updateDucking` call, made only by the owner. Each step, while stream 1 status has bit 0x20, sets the target to `0x3e4cccd0` and adds `0x3c888888`, which holds at `0x3e5ddde1`. The current scalar eases by `0x3c23d70a` and snaps if one step would pass the target. `actintro` with a nonzero language byte stores the scalar as integer 0. A changed scalar is sent only when stream 2 status has bit 0x20; the channel word is `scalar * g_musicVolume * 0x3f480000`. Arithmetic is the R5900 truncate model. The channel word is recorded in `music_channel()` and does not change the mix: how the driver volume RPC 0x80 applies it to the output is not documented, so stream 2's gain stays `volume*scale`. |
 | `poll_level(draw)` | `mainloop_pollAmbientAudio`. The countdown is decremented; at zero it resets to `14400 + draw` (draw 0..7199 from the cosmetic RNG, supplied by the caller), and unless stream 2's current or queued flags contain 0x20, the first level entry containing `_env_` or `mx_theme` is queued with `music_playLevel(name, 0x102)`. When `g_drawFrame`'s low four bits are clear and stream 0 is idle, the first `amb_` entry is queued on stream 0 with flags 3. The same draw frames are when the group-volume refresh is due; table `0x41bac8` is not specified, so no group volumes are written. The process image of the countdown is `0x2a30`. A level load's store of that word was not re-executed, so `set_level_vat` still takes the caller's countdown. The poll does not advance `g_drawFrame`. |
 
 Voice lines (stream 1, `0x28` then `release_stream` at the dialog key) and the intro
@@ -117,7 +130,8 @@ soundtrack (`porko_l.vag` on stream 0, held) use `queue_stream` and
   the stream pitch. Whether that label means 48 kHz playback is not settled.
 - Not modeled: the `sound_muteFor` countdown, delayed sample starts, `.anm`
   multi-event sound tables (a sequence here is one sample), the values in group
-  volume table 0x41bac8, the `audio_sendVolumes` payload, SPU memory exhaustion
+  volume table 0x41bac8, the `audio_sendVolumes` payload, how the duck's
+  `audio_setChannelVolume(2, ...)` word reaches the output, SPU memory exhaustion
   (silent address 0x5000), SPU four-tap interpolation and the final hardware mix.
   Reverb is off in every observed level row, and none is applied. An entry with
   neither flag 2 nor flag 4 still waits while one is active.
@@ -155,6 +169,8 @@ audio.pump_frames(4096)                                 # FIFO -> generator
 | `animation_event(mask, clip_role, sample_name, position)` with clip_role 0 attack, 1 locomotion, 2 other | voice or −1 |
 | `queue_level_entry(stream, name, flags)`, `queue_global_entry(stream, name, flags)`, `queue_stop(stream)` | bool |
 | `release_stream(stream)`, `set_stream_scale(stream, scale)`, `set_two_channel_output(bool)`, `set_frozen(bool)`, `set_sfx_volume(volume)` | — |
+| `set_music_volume(volume)` | bool; the player's 0..1 option as a float. Music is refused until it is called |
+| `end_session()` | — ; keeps the process-lifetime counters and duck words |
 | `play_menu_music(wait)`, `play_boss_music(type, object_name)`, `stop_boss_music()` | bool |
 | `get_stream_time(stream)` | seconds at 24 kHz |
 | `get_gated_flag_entries()` | count |

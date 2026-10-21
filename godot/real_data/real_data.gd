@@ -26,6 +26,7 @@ var world: RefCounted = null # RealWorld presenter of the current level
 var level_lights_path := "" # user's fx_level_lights.py --json output, if chosen
 var fonts: Array[Dictionary] = [] # {path, row_index, fingerprint} FNT rows found
 var creature: RefCounted = null # RealCreature texture of the current preview
+var arena_tables: Dictionary = {} # counts from the executable's arena tables, if read
 var last_error := ""
 
 func configure(owner: Control, cache: String) -> void:
@@ -49,6 +50,13 @@ func open_disc(path: String) -> bool:
 	if levels.is_empty():
 		return _fail("No GOB with a matching level TEX was found.")
 	disc_dir = path
+	# The arena name tables, read from the folder's executable at run time
+	# (docs/ARENA_MODES.md). They select the mode-A start for a level that is
+	# listed there and has no story start. Without an executable that start
+	# stays refused.
+	arena_tables = {}
+	if files.has("slus_209.73"):
+		arena_tables = scene.controller.load_arena_tables(files["slus_209.73"])
 	_install_presentation()
 	return true
 
@@ -146,7 +154,7 @@ func load_level(index: int) -> Dictionary:
 	# Level-spawn story start (docs/LEVEL_FLOW.md section 17) from this level's
 	# objects.ob. Without it the session keeps the historical origin start.
 	var objects := read_entry(level.gob, level.stem + ".lmp", "objects.ob")
-	scene.controller.set_terrain_start_objects(world_path, objects)
+	scene.controller.set_terrain_start_objects(world_path, objects, str(level.stem))
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
 	library._add_candidate(session_path)
@@ -171,7 +179,7 @@ func load_level(index: int) -> Dictionary:
 	var water_image := read_entry(level.gob, "waterenv.lmp", ".tex")
 	var water_texture: Dictionary = world.set_water_texture(water_image)
 	var terrain: Dictionary = scene.controller.get_terrain()
-	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0))}
+	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_tiles_refused": int(water_texture.get("tiles_refused", 0))}
 
 # Explicit model/clip choice from a chosen LMP. Returns the first model row and
 # clip row the native sampler accepts; this is a cosmetic user selection only.

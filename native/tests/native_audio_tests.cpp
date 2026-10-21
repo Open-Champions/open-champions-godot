@@ -455,6 +455,7 @@ void music() {
                                {"mx_ba_droon_l.vag", 0x1000, 1},
                                {"", 0x1800}});
   Playback p;
+  p.set_music_volume(float_one); // fixture option, as tools/difftest_audio.py sets G_MUSIC
   p.set_global_vat(zero_vat(0x1800), parse_vat_directory(view(gdir), 0x1800), 0);
   check(p.play_menu_music(true) && !p.play_boss_music("orc") && p.queued_count(2) == 1,
         "a creature with no boss name leaves stream 2 alone");
@@ -479,6 +480,7 @@ void music() {
                                {"", 0x2000}});
   const auto level_entries = parse_vat_directory(view(ldir), 0x2000);
   Playback l;
+  l.set_music_volume(float_one);
   check(l.draw_frame() == draw_frame_image && l.frame() == sound_frame_image &&
             l.level_countdown() == level_countdown_image,
         "process images of the two frame counters and the amb countdown");
@@ -598,6 +600,7 @@ void playback_vectors() {
   check(cadence.frame() == 16 && cadence.volume_sends() == 1, "entering 0xF sends volumes");
 
   Playback duck;
+  duck.set_music_volume(float_one);
   duck.add_stream("v", stream_pcm(1000));
   duck.queue_stream(1, "v", 0x20);
   duck.queue_stream(2, "v", 0x20);
@@ -608,6 +611,7 @@ void playback_vectors() {
   check(duck.set_duck(0x3e4ccccdu) == 0x3f4cccccu && duck.duck_current() == live.current,
         "set_duck writes the target and leaves the current scalar");
   Playback intro_play;
+  intro_play.set_music_volume(float_one);
   intro_play.add_stream("v", stream_pcm(1000));
   intro_play.set_level_name("actintro");
   intro_play.set_language(1);
@@ -625,6 +629,7 @@ void playback_vectors() {
         "a closed music gate stops stream 2 and queues nothing");
 
   Playback missing;
+  missing.set_music_volume(float_one);
   missing.set_global_vat(zero_vat(0x800),
                          parse_vat_directory(view(directory({{"other.vag", 0, 1}, {"", 0x800}})), 0x800), 0);
   missing.queue_stream(2, "other.vag", 1);
@@ -632,6 +637,7 @@ void playback_vectors() {
             !missing.streams()[2].active,
         "a missing boss row stops stream 2 and queues nothing");
   Playback empty_row;
+  empty_row.set_music_volume(float_one);
   empty_row.set_global_vat(
       {}, parse_vat_directory(view(directory({{"mx_ba_broon_l.vag", 0, 1}, {"pad.vag", 0}, {"", 0}})), 0),
       0);
@@ -764,8 +770,121 @@ void short_loops() {
   for (int i = 0; i < 8; ++i) p.tick();
   check(!p.drain(4096).empty(), "mixed without leaving the data");
 }
+// Audit AUD-2: music_updateDucking's audio_setChannelVolume(2, ...) argument is
+// executed (docs/audio-playback.md 222-224), but how the driver applies it to
+// the output is not documented. The word is recorded and stream 2's gain stays
+// the status volume times the stream scale.
+void duck_channel_not_mixed() {
+  Playback p;
+  p.set_music_volume(float_one);
+  Pcm silent;
+  silent.left.assign(200000, 0);
+  silent.right.assign(200000, 0);
+  p.add_stream("voice", silent);
+  p.add_stream("music", stream_pcm(200000));
+  p.queue_stream(1, "voice", 0x20);
+  p.queue_stream(2, "music", 0x20);
+  ticks(p, 40); // promoted on frame 0; 86 driver steps of +0xc0 reach 0x3fff
+  check(p.streams()[2].active && p.streams()[2].volume == Playback::full_volume,
+        "music stream at full status volume");
+  p.step_duck();
+  check(p.duck_sent() && p.music_channel() != float_one, "the duck sent and recorded its channel word");
+  p.drain(Playback::fifo_limit);
+  p.tick();
+  const auto out = p.drain(800);
+  check(out.size() == 800 && out[0][0] == 0.125f && out[799][0] == 0.125f && out[0][1] == -0.125f,
+        "the channel word does not scale stream 2's mix");
+}
+// Audit AUD-3: the research executes one music_updateDucking call; its call
+// site, cadence and order inside sound_update are not documented, so tick()
+// does not run it. Callers run step_duck() explicitly.
+void duck_not_in_tick() {
+  Playback p;
+  p.add_stream("v", stream_pcm(100000));
+  p.queue_stream(1, "v", 0x20);
+  p.queue_stream(2, "v", 0x20);
+  ticks(p, 8);
+  check(p.duck_current() == duck_current_image && p.duck_target() == duck_target_image &&
+            !p.duck_sent(),
+        "tick() leaves the duck words at their images");
+}
+// Audit AUD-1: g_musicVolume 0x4f8944 has no documented stored value
+// (docs/audio-playback.md 225, docs/audio-save.md 278), so music that reads it
+// is refused until the caller supplies the option.
+template <class F> bool refused(F &&f) {
+  try {
+    f();
+  } catch (const std::exception &) {
+    return true;
+  }
+  return false;
+}
+void music_volume_input() {
+  const auto gdir = directory({{"mx_ba_broon_l.vag", 0, 1}, {"", 0x800}});
+  Playback p;
+  p.set_global_vat(zero_vat(0x800), parse_vat_directory(view(gdir), 0x800), 0);
+  check(refused([&] { p.music_play_global("mx_ba_broon_l.vag", 0); }) && p.queued_count(2) == 0,
+        "music_playGlobal refuses without a caller-supplied music volume");
+  check(!p.music_volume(), "there is no default music volume");
+  p.add_stream("theme", stream_pcm(100));
+  p.queue_stream(2, "theme", 0x21);
+  check(!p.play_boss_music("orc") && p.queued_count(2) == 1, "a creature with no boss name never reads it");
+  check(refused([&] { p.play_boss_music("fatcyclops", "broon"); }) && p.queued_count(2) == 1,
+        "a boss start refuses before its stream-2 stop");
+  p.tick();
+  check(p.stream_status(2) == 0x21 && refused([&] { p.step_duck(); }) &&
+            p.duck_current() == duck_current_image && p.duck_target() == duck_target_image,
+        "a duck send needs the volume; the refused step changes nothing");
+  const auto ldir = directory({{"mx_theme_b.vag", 0}, {"amb_x_l.vag", 0x800}, {"", 0x1000}});
+  Playback l;
+  l.set_level_vat(zero_vat(0x1000), parse_vat_directory(view(ldir), 0x1000), 0, 1);
+  check(l.poll_level(0) && l.refused_music_polls() == 1 && l.queued_count(2) == 0 &&
+            l.queued_count(0) == 1 && l.level_countdown() == 14400,
+        "the level poll refuses only its music_playLevel call");
+  l.set_music_volume(music_volume_gate);
+  check(l.music_volume() == music_volume_gate && l.music_play_level("mx_theme_b.vag", 0x102) &&
+            l.queued_count(2) == 1,
+        "a supplied volume at the gate opens it");
+}
+// Audit AUD-4: g_soundFrame and g_drawFrame are process-lifetime words, and the
+// duck words are process statics (docs/audio-playback.md 210-212, 260-265). A
+// client session boundary keeps them instead of restoring the process images.
+void session_boundary() {
+  const auto ldir = directory({{"mx_theme_b.vag", 0}, {"amb_x_l.vag", 0x800}, {"", 0x1000}});
+  Playback p;
+  p.set_music_volume(float_one);
+  p.add_effect("fx", effect_pcm(3000, 48000, true));
+  p.add_stream("v", stream_pcm(100000));
+  p.set_level_vat(zero_vat(0x1000), parse_vat_directory(view(ldir), 0x1000), 0, 1);
+  p.queue_stream(1, "v", 0x20);
+  p.queue_stream(2, "v", 0x20);
+  ticks(p, 5);
+  p.advance_draw_frame();
+  p.step_duck();
+  const auto seq = p.start_sequence("fx", 1.0, {}, 0);
+  check(p.play_sample("fx", 1.0, 1.0, std::nullopt) >= 0 && seq >= 0 && p.queue_stream(2, "v", 1),
+        "session has voices, a sequence and queued music");
+  const auto duck = p.duck_current(), target = p.duck_target();
+  const auto volume = p.streams()[2].volume;
+  p.end_session();
+  bool silent = true;
+  for (const auto &v : p.voices())
+    silent = silent && !v.active;
+  for (std::size_t i = 0; i < Playback::stream_limit; ++i)
+    silent = silent && !p.streams()[i].active && p.queued_count(i) == 0;
+  check(silent && p.buffered_frames() == 0 && !p.poll_level(0) && !p.stop_sequence(seq),
+        "the boundary ends streams, voices, sequences, the level poll and unread output");
+  check(p.frame() == 5 && p.draw_frame() == draw_frame_image + 1 && p.duck_current() == duck &&
+            p.duck_target() == target && p.music_volume() == float_one &&
+            p.streams()[2].volume == volume && volume != 0,
+        "process-lifetime words survive the boundary");
+}
 int main() {
   try {
+    session_boundary();
+    duck_channel_not_mixed();
+    duck_not_in_tick();
+    music_volume_input();
     replaced_directory();
     short_loops();
     formats();

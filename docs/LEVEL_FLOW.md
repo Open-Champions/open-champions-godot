@@ -11,7 +11,7 @@ research commit `13fafa465d5dad7acaeb1ee8becd30c4c8e4788b` (`t3/research-levels`
 round-4 arena wave start in `docs/level-flow.md` section 18), `docs/level-flow.md`,
 `ref_levels.py`, `test_ref_levels.py`, `difftest_levels.py`,
 `difftest_levels_r3.py`, `difftest_levels_r4.py`, and arithmetic dependencies
-`ref_world.py`, `ref_core.py` and `world_info.py`. Round 3 used `3ef714a`.
+`ref_world.py`, `ref_core.py`, `world_info.py` and `ref_objects.py`. Round 3 used `3ef714a`.
 Round 2 used `36036dab`. Round 1 used `18e1a34`.
 Water is an adapter to the separately pinned `codex/creature-water-2` Service.
 The research is static evidence, not a measured console run. This does not enable
@@ -57,14 +57,23 @@ render-frame elapsed time, or Godot physics as substitutes.
   cold story query another job can call: one player, identity search (the file
   position, or the incoming slot when no marker takes), then that snap.
   `ground` is true when the snapped z is not the floor sentinel. When that
-  snap has a floor, or a Player1 took, the result is unchanged and
-  `findFreeSpot` is not called. `entry_start_ground` is the same snap for an
-  explicit previous level, entrance, recall flag, gate, or owner-supplied
-  restore xy. A gate plan keeps the gate's own xy. `resolve_start` runs the
-  caller's search; the caller owns the seed and the object list.
-  `apply_act_entry` writes `None` into each recall destination when the act
-  changed, the card state is not 4, and no death task is running. Acts do not
-  choose a marker.
+  snap has a floor, or a Player1 took, `findFreeSpot` is not called. When a
+  `Player1` takes, the original runs `Player1_ctor`'s `findFreeSpot` (spread
+  36, radius 24) and draws facing from `g_randSeed`, whose value there is not
+  a fixed constant (section 17.2). The identity search is the research's
+  ground measurement, not that start, so the result sets `pre_search`: the xy
+  is the marker before the search (the original can be up to 36 away) and
+  `facing` is left empty. With no marker taken nothing is searched or drawn,
+  `pre_search` is false and `facing` is the incoming slot's.
+  `entry_start_ground` is the same snap for an explicit previous level,
+  entrance, recall flag, gate, or owner-supplied restore xy. A gate entry that
+  takes a `Portal` or `PortalHurt` throws `Unsupported`
+  (`GateAnyHeightOnDisc`): `JumpGate_ctor`'s anyHeight search was not re-run
+  on the disc (section 17.4). A gate flag with no portal takes nothing.
+  `resolve_start` runs the caller's search; the caller owns the seed and the
+  object list. `apply_act_entry` writes `None` into each recall destination
+  when the act changed, the card state is not 4, and no death task is running.
+  Acts do not choose a marker.
 - Arena wave start is `arena_initial_place` (a0 ≠ 0): `arena_ring_angle`,
   ring radius `ARENA_RING_MODE_A` (0x43340000, 180) or `ARENA_RING_MODE_B`
   (0x42100000, 36), search spread 36 then spread 240 from the same centre when
@@ -79,12 +88,26 @@ render-frame elapsed time, or Godot physics as substitutes.
   `player_ctor_z`. Slot 0's angle is 0 for every positive count, so its centre
   does not depend on count. `cos16(0)` times 180 is the radius; `sin16(0)`
   times 180 is not 0.
-- When the cold snap has no floor, no Player1 took, and an `ArenaPlayerStart`
-  is present, `story_start_ground` returns that mode-A wave ground. The search
-  uses an empty object list and seed 0, which is one of the two seeds section
-  18 executed. It is not the live cycle-counter seed. The class-constructor
-  radii stay refused. A level whose origin already has a floor stays on the
-  story path, including an arena start that sits on that floor.
+- `arena_mode_a_start_ground` is that start before the search: entry 0, the
+  slot-0 mode-A ring centre, and `player_ctor_z` there. `pre_search` is set
+  and `facing` is empty. The original's point and facing come from
+  `findFreeSpot` with the live `g_randSeed` and the real object list, neither
+  of which is documented (sections 17.2, 18.3); section 18.3 proves only that
+  the snap stays a floor for every seed and list on the three executed
+  archives. `ground` here is the snap at the centre.
+- `story_start_ground` has no arena fallback. Section 18.1 shows the three
+  cold archives are reached only through the mode-A table at 0x5037b8 (menu
+  `vs`, or net type 2/3), which this module does not read. Inferring mode A
+  from the records (no floor, no Player1, an `ArenaPlayerStart`) would apply
+  it to data the research never ran, so the story start stays the story snap
+  and reports no ground there. The caller that knows the level was loaded in
+  mode A (mode B set, 0x4f7124 clear: the executed case) calls
+  `arena_mode_a_start_ground` itself. The Godot session does so (wave 17)
+  only for a level whose story snap has no ground and whose name is in the
+  mode-A table it reads from the owner's executable at run time
+  (`arena_modes::read_names`, [ARENA_MODES.md](ARENA_MODES.md)); it publishes
+  `start.arena_mode` "A". Without that table, or for an unlisted level, it
+  still refuses.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared
@@ -227,10 +250,17 @@ These are explicit limits, not inferred approvals:
   the original functions in an emulator. They are implemented above.
 - Prose says 18 save-filter classes; the executable reference lists 17. The
   exact list is ported, with no invented eighteenth class.
-- `refuse_open` throws `Unsupported` for the items that were not executed: the
+- `refuse_open` throws `Unsupported` for an item named below. Production
+  paths call it for the net-peer index (`arena_net_peer_index`) and the gate
+  anyHeight search (`entry_start_ground`); the others are named limits that no
+  function here implements. Arena respawn (`arena_pickSpawnPoint` with a0 = 0)
+  was not executed by research-levels, but research-arena 17810bb executed it:
+  `arena_respawn` now forwards the registered spawn table to
+  `arena_modes::pick_spawn` with flag 0, and refuses an empty table or a hole
+  below count. `OpenItem::ArenaRespawn` stays as the name of the
+  research-levels gap. The items that were not executed: the
   live seed at `Player1_ctor`, the class-constructor radii inside
-  `findFreeSpot`, arena respawn (`arena_respawn`, `arena_pickSpawnPoint` with
-  a0 = 0), the arena name table (the index step is `arena_mode_a_next`; the
+  `findFreeSpot`, the arena name table (the index step is `arena_mode_a_next`; the
   names are not copied), the rest of `Player_ctor` after the radius store and
   the snap, readers of the copied orientation byte, a first-tick sentinel
   reject beyond the snap and the kill plane, a nonzero store of the arena
@@ -262,8 +292,14 @@ after the round-1/2 prefix. Round 4 appends after that prefix, so the earlier
 lines stay byte-identical: the mode-A steps, the record-byte offsets, the
 slot-0 ring centre, 34 solid-disc searches (seeds 0..15 and 20973, with and
 without one object), 32 hole-disc searches, and the radius-37 lattice
-(0 misses of 4293). `round4_cases` ports `Round4ArenaEntry` and the story
-fallback around `Round4Ground`. `champions-level-spawn-measure` reads a paired
+(0 misses of 4293), and nine mode-A starts on a height-3 synthetic field:
+the pre-search centre and the seeded search (seeds 0 and 20973, no objects)
+for three record lists, composed in the generator from the reference's
+`arena_register_spawn`, `arena_ring_centre`, `arena_initial_place`,
+`ref_objects.World.find_free_spot` and `player_ctor_z`. The research has no
+story-fallback function; that composition is native glue the research did not
+execute as one call. `round4_cases` ports `Round4ArenaEntry` and keeps only
+structural checks of the fallback. `champions-level-spawn-measure` reads a paired
 archive directory and prints counts only. The origin-test pass is unchanged.
 A second pass decodes geometry-skipped archives and counts a level only when
 radius 12 at the origin is the sentinel and an `ArenaPlayerStart` exists. It

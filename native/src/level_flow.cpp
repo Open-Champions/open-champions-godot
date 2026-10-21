@@ -1,6 +1,7 @@
 #include "champions/level_flow.hpp"
+
+#include "champions/arena_modes.hpp"
 #include "champions/core_math.hpp"
-#include "champions/objects.hpp"
 #include <algorithm>
 #include <limits>
 #include <set>
@@ -406,7 +407,8 @@ const char *open_item_reason(OpenItem item) {
   case OpenItem::RealObjectList:
     return "findFreeSpot's class-constructor radii were not executed";
   case OpenItem::ArenaRespawn:
-    return "arena respawn (arena_pickSpawnPoint a0 = 0) was not executed";
+    return "arena respawn (arena_pickSpawnPoint a0 = 0) was not executed in research-levels; "
+           "use arena_respawn, the research-arena port";
   case OpenItem::ArenaRotationTable:
     return "the arena name table is not copied; the index step is arena_mode_a_next";
   case OpenItem::PlayerCtorRemainder:
@@ -427,7 +429,30 @@ const char *open_item_reason(OpenItem item) {
   return "open level-start item";
 }
 void refuse_open(OpenItem item) { throw Unsupported(open_item_reason(item)); }
-void arena_respawn() { refuse_open(OpenItem::ArenaRespawn); }
+ArenaRespawnPick arena_respawn(const ArenaSpawnTable &table, std::uint32_t seed,
+                               bool network, const Vec3 &focus,
+                               const Vec3 &camera, const ArenaSeededSearch &search) {
+  if (table.count < 1 || std::size_t(table.count) > table.entries.size())
+    throw Unsupported("arena respawn needs a registered spawn table");
+  std::vector<arena_modes::SpawnPoint> points;
+  for (int i = 0; i < table.count; ++i) {
+    const auto &entry = table.entries[std::size_t(i)];
+    if (!entry.occupied)
+      throw Unsupported("arena respawn would read a spawn-table hole");
+    points.push_back({entry.point[0], entry.point[1], entry.point[2], entry.angle});
+  }
+  arena_modes::Search forward;
+  if (search)
+    forward = [&search](const Vec3 &centre, int spread, int radius, std::uint32_t &state) {
+      const auto found = search(centre, spread, radius, state);
+      return arena_modes::Spot{found.first, found.second};
+    };
+  // flag 0. slot, mode_a, scramble and the active count are read only by the
+  // a0 != 0 branch.
+  const auto pick = arena_modes::pick_spawn(0, 0, points.data(), table.count, seed, false, false,
+                                            network, focus, 0, forward, camera);
+  return {pick.pos, pick.facing, pick.seed};
+}
 void arena_net_peer_index() { refuse_open(OpenItem::NetPeerIndex); }
 std::int32_t arena_ring_angle(int slot, int active_count) {
   if (active_count <= 0)
@@ -507,12 +532,12 @@ ArenaSpawnTable arena_register_spawn(ArenaSpawnTable table, int index,
       ArenaSpawnSlot{point, static_cast<std::uint16_t>(angle & 0xffff), true};
   return table;
 }
-StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
-                                     int slot, int active_count,
-                                     const ArenaSearch &search,
-                                     const Height &height) {
-  if (!search || !height)
-    throw Error("arena wave start requires a search and terrain_height");
+namespace {
+// arena_init plants the origin at entry 0 with count 1. Each ArenaPlayerStart
+// (factory 0x15a284, index 0) overwrites entry 0; each ArenaPlayerAlternate
+// (0x15a2b0, index -1) appends (research-levels 13fafa4 docs/level-flow.md
+// 18.2). Empty when no Start was registered: that case was not executed.
+std::optional<Vec3> arena_entry0(const std::vector<Record> &records) {
   ArenaSpawnTable table;
   table.count = 1;
   table = arena_register_spawn(table, 0, Vec3{}, 0);
@@ -525,11 +550,23 @@ StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
       table = arena_register_spawn(table, -1, record.position, record.angle);
     }
   }
-  StoryGround out;
   if (!saw_start || table.entries.empty() || !table.entries[0].occupied)
+    return std::nullopt;
+  return table.entries[0].point;
+}
+} // namespace
+StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
+                                     int slot, int active_count,
+                                     const ArenaSearch &search,
+                                     const Height &height) {
+  if (!search || !height)
+    throw Error("arena wave start requires a search and terrain_height");
+  StoryGround out;
+  const auto entry = arena_entry0(records);
+  if (!entry)
     return out;
-  const auto placed = arena_initial_place(table.entries[0].point, slot,
-                                          active_count, true, search, false, 0);
+  const auto placed =
+      arena_initial_place(*entry, slot, active_count, true, search, false, 0);
   out.position = placed.pos;
   out.spawn_z = placed.pos[2];
   out.object_z = player_ctor_z(placed.pos, PLACEMENT_RADIUS, height);
@@ -537,6 +574,30 @@ StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
   out.facing = placed.facing;
   out.rank = 0;
   out.marker_taken = true;
+  out.ground = out.object_z != world_queries::NO_FLOOR;
+  return out;
+}
+StoryGround arena_mode_a_start_ground(const std::vector<Record> &records,
+                                      world_queries::Level &level) {
+  StoryGround out;
+  const auto entry = arena_entry0(records);
+  if (!entry)
+    return out;
+  // Slot 0, count 1, mode A: the centre findFreeSpot starts from (17.3,
+  // 18.2). The search's seed at that point and the class-constructor radii
+  // are not documented (17.2, 18.3), so no search runs: the xy is the
+  // pre-search centre and facing, which depends on the searched point, is
+  // left unset. 18.3 shows the snap stays a floor for every seed and object
+  // list on the three executed archives only; here ground is the snap at
+  // the centre.
+  const Vec3 centre = arena_ring_centre(*entry, 0, 1, true);
+  out.position = centre;
+  out.spawn_z = centre[2];
+  out.object_z = world_queries::terrain_height(level, PLACEMENT_RADIUS, centre);
+  out.position[2] = out.object_z;
+  out.rank = 0;
+  out.marker_taken = true;
+  out.pre_search = true;
   out.ground = out.object_z != world_queries::NO_FLOOR;
   return out;
 }
@@ -578,9 +639,18 @@ StoryGround ground_from(const StartResult &resolved, unsigned slot) {
   g.spawn_z = resolved.spawn.pos[slot][2];
   g.object_z = resolved.object_z[slot];
   g.position[2] = g.object_z;
-  g.facing = resolved.spawn.facing[slot];
   g.rank = resolved.spawn.rank;
   g.marker_taken = !resolved.took.empty();
+  // A taken marker runs Player1_ctor's findFreeSpot (spread 36, radius 24)
+  // and draws facing from g_randSeed, whose value at that point is not a
+  // fixed constant (research-levels 3ef714a docs/level-flow.md 17.1-17.2).
+  // The identity search and zero draw below are the research's ground
+  // measurement, not that start: the xy is the pre-search marker and the
+  // facing is left unset. With no marker taken, nothing is searched or drawn
+  // and the incoming slot keeps its facing (5.1).
+  g.pre_search = g.marker_taken;
+  if (!g.pre_search)
+    g.facing = resolved.spawn.facing[slot];
   g.ground = resolved.ground[slot];
   g.recall_cleared = resolved.recall_cleared;
   return g;
@@ -590,8 +660,15 @@ Height level_height(world_queries::Level &level) {
     return world_queries::terrain_height(level, radius, pos);
   };
 }
+// The identity search stands in for Player1_ctor's anyHeight-0 search only.
+// A gate arrival is JumpGate_ctor's anyHeight-1 search, which was not re-run
+// on the disc (research-levels 3ef714a docs/level-flow.md 17.4).
 FindSpot identity_spot() {
-  return [](const Vec3 &centre, Raw, Raw, bool) { return centre; };
+  return [](const Vec3 &centre, Raw, Raw, bool any_height) {
+    if (any_height)
+      refuse_open(OpenItem::GateAnyHeightOnDisc);
+    return centre;
+  };
 }
 Draw zero_draw() {
   return []() -> std::uint16_t { return 0; };
@@ -612,30 +689,13 @@ StoryGround story_start_ground(const SpawnState &incoming,
                                world_queries::Level &level) {
   Placement placement;
   placement.players = 1;
-  auto story = entry_start_ground(incoming, records, {}, placement, level);
-  if (story.ground || story.marker_taken)
-    return story;
-  bool start = false;
-  for (const auto &record : records)
-    if (record.cls == "ArenaPlayerStart")
-      start = true;
-  if (!start)
-    return story;
-  // Section 18 executed this empty-list search at seed 0 and at 20973.
-  // Seed 0 is the reference World's initial g_randSeed. It is not the live
-  // offline cycle-counter seed, which stays OpenItem::LiveFindFreeSpotSeed.
-  objects::World world(objects::CallbackPolicy::ReferenceBase);
-  world.shared = SharedRandom(0);
-  auto blocked = [&](Raw radius, const Vec3 &pos) {
-    return world_queries::terrain_test_flag1(level, radius, pos);
-  };
-  auto sampled = [&](Raw radius, const Vec3 &pos) {
-    return world_queries::terrain_height(level, radius, pos);
-  };
-  ArenaSearch search = [&](const Vec3 &centre, int spread, int radius, bool any) {
-    return world.find_free_spot(centre, spread, radius, any, blocked, sampled);
-  };
-  return arena_mode_a_wave_ground(records, 0, 1, search, level_height(level));
+  // No arena fallback here. A cold archive whose story snap is the sentinel
+  // is reached in the original only through the mode-A table at 0x5037b8
+  // (research-levels 13fafa4 docs/level-flow.md 18.1), which this module
+  // does not read; inferring mode A from the records would apply it to data
+  // the research never ran. A caller that knows the level was loaded in mode
+  // A calls arena_mode_a_start_ground.
+  return entry_start_ground(incoming, records, {}, placement, level);
 }
 void Pending::request(const std::string &s, std::uint8_t o) {
   name_limit(s, 0x50);

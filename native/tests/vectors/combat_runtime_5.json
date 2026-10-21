@@ -1,0 +1,19 @@
+{
+  "schema": "combat-runtime-5-v1",
+  "research_commit": "2980af166632b1c7fa585be6880c2f2dd506bfa7",
+  "references": {
+    "docs/spec/combat-round5.md": "88c15e5fb9de7bcfee7067c64258cc5acfa14ff0ef3836957e937bfdc1e4b566",
+    "docs/combat-runtime.md": "d65d84f71fdf75519705c2f21d72a8a56ef700188b8d102dbf18d21402f7b9ef",
+    "tools/ref_combat_round5.py": "488ae487234fba45bd1aa0e1c89b6ef740e4af7355d698230059895c1369bced",
+    "tools/test_ref_combat_round5.py": "9929eda89170347a739460a44d39053287fa5ea6209a5236b86c71004d7dbe71",
+    "tools/difftest_combat_round5.py": "c2c04846d1d6d5100aece39ab6ee3bc8761c6a47ad16ae408c0f1353f4b331f6",
+    "tools/ref_anim.py": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_combat_round4.py": "e4b83af89ac4d06d12be58b74259dc56664c8d1cf59cdb83098c15ace3c1e3dd",
+    "tools/ref_combat_runtime.py": "328fbc428e26d50ac5cdb455d1614cf35148216151ba7904bb2ef92984e25ddd"
+  },
+  "vector_sha256": "a232f105cdcc75981462b7c81fbb09d20bfea70c846a58b93a7f2f723a206204",
+  "content_sha256": "5d0e1271a2d4cf7aecddc0087d8b3a3f398d3628ded58ba0e1ed93ec58e73c70",
+  "cases": 18
+}

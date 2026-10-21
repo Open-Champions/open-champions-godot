@@ -2807,7 +2807,11 @@ uses host `cos` / `sin`. New refusals: `draw_haze`,
 `trig::refuse_block_sparks_angle` and
 `trig::refuse_creature_process_damage_angles`. Comments mark the existing
 block-spark and `process_damage` bodies that these refusals cover; the bodies
-themselves are unchanged. See [NATIVE_FX.md](NATIVE_FX.md).
+themselves are unchanged. Combat runtime round 5 replaces those two refusals
+with the executed registers (the sign-extended hit halfword plus `0x7fff`, the
+sign-extended facing, and the gib heading) and calls `fx::trig::cos16` /
+`sin16` there. Haze kind 3 and the haze screen axis stay refused. See
+[NATIVE_FX.md](NATIVE_FX.md) and [COMBAT_RUNTIME.md](COMBAT_RUNTIME.md).
 
 Changed vectors: only `fx_exact.tsv`, with 900 `emitter` rows and all 16
 `trig` rows (every 16-bit angle). No combat, session or other vector file
@@ -2983,3 +2987,220 @@ Limits:
 - The post action runs once at load.
 - No native Intel, Windows or Linux run (x86_64 is Rosetta only). No manual
   play is claimed.
+
+## Playable integration wave 16 — water-draw (documented water surface) — 2026-10-21
+
+Start `685c6e6`. `codex/water-draw` (`037e26d..be0f580`, three commits) is
+merged in `679b7d7`. See [WATER_DRAW.md](WATER_DRAW.md).
+
+Conflicts: `docs/REAL_DATA.md` (both sides kept: the wave-14/15 sections, then
+the water-draw section) and `godot/tests/real_data_scene.gd` (both
+`--scripts` and `--water` kept). No code change was needed beyond that.
+
+What it adds: `champions-water-draw`, the documented water colour, FIX blend,
+slope UVs, vertices and layer 3, with the wave stepped once per simulation
+tick. The level-texture extension compiles it into `ChampionsRealWorld`
+(`water_sync`, `water_texture`). `real_world.gd` replaces the neutral tile with
+one mesh that has a surface per water set. It uses `render_priority` 3,
+`depth_draw_never` and `depth_test_disabled`, and it textures the tiles from
+the level's first water `.tex`. The claim-frame seed is refused, so every
+block is a zero grid and real tiles stay flat. The main extension is unchanged.
+
+Verification (`work/playable-wave16/`):
+- Native Release arm64 and x86_64 builds pass, with 0 warnings on arm64. The
+  four universal extension builds pass.
+- Full CTest arm64 `-j3`: **200/200** on the first run, 772 s
+  (`player-exact` 130 s, `skills-a-exact` 31 s). The new test is
+  `water-draw`.
+- x86_64 Rosetta, `build/native-x64` `-j3`: **200/200** on the first run,
+  1,246 s, no timeouts (`player-exact` 187 s, `monsters-1-exact` 82 s,
+  `skills-a-exact` 50 s).
+- Real data (counts only, `work/run-slices-r16.sh`): **111 / 111** loaded and
+  played with scripts on (`r16 --scripts`) and with scripts off (`r16n`).
+  0 refused and 0 failed checks in both. 48 / 48 water textures decoded, all
+  64×64. Every other count equals wave 15 (scripts on) and wave 14 (scripts
+  off), apart from mesh surfaces, which rose by one: 174,457. One level uses
+  both water sets, so its water mesh has two surfaces. See
+  [REAL_DATA.md](REAL_DATA.md).
+- Windowed captures of four water levels (indices 20, 28, 29 and 30), checked
+  by eye. The sheets are flat, with no ripples, and are textured and tinted.
+  Overlapping tiles blend twice. A sheet draws over nearer rock because water
+  has no depth test.
+- Godot dev matrix **45/45**, the same set as wave 15. Full combat 2,616
+  checks, combined FX 1,876, wave-12 extensions 40, FX bridge refusals 33,
+  creature-anim 32 / 25 / 231, `native_fx_visual` 4 runs with no refusals.
+  `FULL_TRACE` is `8dc349c1…aa0c`.
+- Export matrix: 17 of 18 passed in the matrix run, then **18/18** after one rerun.
+  - The 36,000-tick 1280×720 Full run failed one check in the matrix: 108,822
+    checks, 1 failure, "stale clip clears cosmetic owner and restores static
+    mesh". This is the animation-picker refusal step. It rewrites the LMP and
+    restarts the clip. water-draw does not touch that path.
+  - Rerun alone, it passed 108,822 checks with 0 failures (152 s) and 63
+    captures.
+  - The cause of the single failure is not proven. No timestamp cache was
+    found in the scripts.
+  - Exported headless passed 2,616, 960×720 passed 2,742 and 800×600 passed
+    2,742, each with 63 captures.
+  - Every `FULL_TRACE` is `8dc349c1…aa0c`.
+- Exported app on real data: the 12-level set with and without `--scripts`,
+  and the three arena indices with `--scripts`. Each equals wave 15 apart
+  from timing and the new water-texture counts.
+
+App: `build/exports/wave16-final/Open Champions.app`.
+ZIP SHA-256: `317bdd38be2a83d088f3acaefdc7da4c5a7189d32e4a6ad2243c40fa9e6a71b6`.
+Main universal extension (unchanged from wave 15): `283420664a26c469ec66842379ca859c3d0c6c8160191b56dd36a7e6046ee95a`.
+Texture universal extension: `7ef534a2d01ee57ea6084db252639b6b10c8e5ebdfeed9f36536b1d9a950927c`.
+The packaged libraries are byte-identical to the local builds (x86_64 + arm64).
+
+Limits:
+- No ripples. The claim-frame weights, the drawer's splash point and the
+  simulation splash stay refused, so nothing seeds or disturbs the drawn grid.
+  A research job is working on them.
+- Level-option bit 8 (`filled_mask()`) is implemented and not turned on.
+- The play mesh uses world positions and the Godot camera frustum. The
+  documented ±1000 screen clip is tested only in `project_strips`.
+- No native Intel, Windows or Linux run (x86_64 is Rosetta only). No manual
+  play is claimed.
+
+## Playable integration wave 17 — audit fixes, quests, arena — 2026-10-21
+
+Start `77d1260`. Merged in order:
+
+| Branch | Tip | Merge |
+|---|---|---|
+| `codex/audit-fixes` (combat-runtime-5, the 50 high/medium Grok-audit fixes, `world_findFreeSpot`) | `bffec5f` | `d2e7a8b` (clean; tree equals `bffec5f`) |
+| `codex/quests` | `265904e` | `6d5033f` |
+| `codex/arena` | `a9af2e4` | `764ddff` (clean) |
+
+Quests conflicts, against the audit's script host (SC-1..7):
+- `script_commands.cpp`: undocumented commands go through `refuse()` (a used
+  answer stops the entry), except the three that `quests::route_undocumented`
+  routes. The `getRand` and stub gates follow.
+- `setCFlag` joins the stub-read list, limit 0x200: `ref_natives.n_setCFlag`
+  (research-quests 7efd3ce) tests creature flag 0x20 on each object found. The
+  stub test fails without the row and passes with it.
+- `quests_tests` and `quests_measure` use `run_prestart` / `adopt_objects` /
+  `run_start` (the audit removed `begin_level`). The synthetic quest script
+  ends `ZERO.pri`, `RETN`.
+- ROADMAP and SCRIPT_COMMANDS: both sides kept.
+
+### AntQueen, Skeleton and Soul stay refused
+
+combat-runtime-5 had added them to the Full fight. The audit (CAI-4) removed
+them. Evidence checked:
+- `t3/research-combat` `tools/difftest_combat_round5.py` (faa7033) executes
+  `AntQueen_run` 0x236f78, `Skeleton_run` 0x2a6864 and `Soul_run` 0x2a9870
+  (states 0/1 and the phase gate). Each runs on a zeroed 0x800-byte block with
+  a stub vtable. `docs/combat-runtime.md` records 101 of 607, 143 of 809 and
+  126 of 1062 instructions.
+- No tool on that branch calls the constructors 0x236c70, 0x2a5af4 or
+  0x2a9478. `docs/monsters-2.md` describes them as **Observed** (read, not
+  run). combat-runtime-5's `spawn_class` built all three through the Skelight
+  `spawn()` path, with size 0x3c8 and the base vtable.
+- `t3/research-combat-ctors` e9777eb (`docs/spec/combat-ctors.md` section 1)
+  confirms that round 5 never ran them. It now executes them, and a separate
+  native job will port them. They are not restored here. Thrown potions 1 and
+  2 (98c081a) and the music volume (22408a1) are documented there too, and
+  stay refused here for the same job.
+
+### Wiring the documented replacements
+
+- **Arena respawn pick.** `level_flow::arena_respawn` now forwards the
+  registered spawn table to `arena_modes::pick_spawn` with flag 0, which
+  research-arena 17810bb executed. It refuses an empty table or a hole below
+  count. `level-flow-exact` replays the three generated flag-0 cases through
+  it. `champions-level-flow` links `champions-arena-modes` (the new guarded
+  `arena_modes_library.cmake`), and the level-texture extension compiles
+  `arena_modes.cpp`.
+- **Arena mode A.** `arena_executable.{hpp,cpp}` moves the measure tool's ELF
+  table reader into the library, plus `read_names` and `mode_a_index`
+  (synthetic-ELF tests in `arena-modes-exact`). The arena measure output is
+  unchanged.
+  - `ChampionsSessionController.load_arena_tables(exe)` keeps the mode-A
+    names in memory and returns counts.
+  - `set_terrain_start_objects(path, objects, level_name)`: when the story
+    snap has no ground and the table lists the level, the start is
+    `arena_mode_a_start_ground`, and `start.arena_mode` is "A".
+  - `real_data.gd` reads the folder's `SLUS_209.73` when present.
+- **Campaign state.** `enable_level_script(script, objects, carry_campaign)`
+  can start the new host from the previous host's campaign image. It is off
+  by default, so sweep slices stay order-independent.
+  `script_command_counts().campaign` reports quest lines, mission bits,
+  variables and events.
+
+### Flaky "stale clip" check: cause found and fixed (`4e89ddb`)
+
+`playable_wave_smoke.gd` wrote its fixtures to `user://playable-wave-smoke`.
+Every checkout of the project and the exported app share one project name,
+so they share one `app_userdata/Open Champions/` folder. A smoke running at
+the same time in another worktree could rewrite `cosmetic.lmp`. The picker
+then opened a file that already held the 512 clip, so the test's own 512
+rewrite changed nothing. The SHA-256 fingerprint still matched, the restart
+succeeded, and the check failed.
+
+The directory is now per process (`OS.get_process_id()`) and is removed in
+`_finalize`.
+
+Four concurrent `combined-animation` runs, three rounds each:
+- Before: 4 of 12 failed. Two were "stale clip" and two were "short DAT
+  rejected", the same race on another fixture.
+- After: 0 of 12.
+
+The wave-17 dev and export matrices passed on their first runs.
+
+Also fixed (`ac1b0d9`): `fx.reset()` recorded "level light refused: loaded
+level name unknown" before the loader named the level, and a later
+successful selection never cleared it. Every real level reported it, even
+though all 111 applied their light record.
+
+### Verification (`work/playable-wave17/`)
+
+- Native Release builds pass on arm64 and x86_64 with 0 compiler warnings. The four universal
+  extension builds pass.
+- CTest arm64 `-j3`: **208/208** on the first run, 692 s (`player-exact`
+  140 s).
+- CTest x86_64 (Rosetta, `build/native-x64`): **208/208** on the first run, 1,284 s, no
+  timeouts (`player-exact` 179 s, `monsters-1-exact` 84 s, `skills-a-exact`
+  55 s). The binaries are Mach-O x86_64.
+- Real data: **111 / 111** loaded and played with scripts on and off, 0
+  refused, 0 failed checks, an empty refusal list (final tree, `r17b` /
+  `r17bn`). 3 levels start in arena mode A. See
+  [REAL_DATA.md](REAL_DATA.md).
+- Godot dev matrix **45/45** on the first run:
+  - Full combat 2,620 checks; combined FX 1,876; animation 1,809; play-short
+    1,341; level 1,643; wave-12 extensions 22; FX bridge refusals 33.
+  - creature-anim 32 / 25 / 231. `native_fx_visual` ran 4 times with no
+    refusals. `script_commands_smoke` passed.
+  - `FULL_TRACE` is `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035`
+    (21,990 bytes), the audit-fixes value.
+- Export matrix **18/18** on the first run. The 36,000-tick 1280×720 Full run
+  passed 108,826 checks with 0 failures and 63 captures. Exported headless
+  passed 2,620; 960×720 and 800×600 passed 2,746 each. Every `FULL_TRACE` is
+  `374e40c9…2035`.
+- Exported app on real data: 12 / 12, 12 / 12 with scripts, and 3 / 3 arena
+  levels, with 0 failures.
+
+App: `build/exports/wave17-final/Open Champions.app`. SHA-256 values are in
+`work/playable-wave17/export-artifacts.json`. Both extensions are packaged
+byte-identical to the local builds (x86_64 + arm64).
+
+### Regressions kept (each is an audit refusal with no documented replacement yet)
+
+- Full fight without AntQueen, Skeleton and Soul (CAI-4). Their constructors
+  are executed only in research-combat-ctors e9777eb, for a separate job.
+- Own classes other than Gnaw and Skelight refuse to spawn (CAI-4).
+- Thrown potions 1 and 2 stop a Full session (CR4-1). They are documented in
+  98c081a, for the same job.
+- No level or boss music until something supplies the music volume (AUD-1).
+  The default of 0.5 is documented in 22408a1, for the same job.
+- Level scripts:
+  - `getRand` is refused, because the play session binds no seed (SC-4).
+  - objects.ob records are stubs, so creature, HP and type reads refuse
+    (SC-5). This now includes `setCFlag`.
+  - A used refused answer stops its entry (SC-6).
+  - Executed command calls fell from 22,371 to 4,192 in the sweep.
+- The HUD overlay draws nothing (HUD-1..7). The medal box needs
+  `hud_drawMessageBox` and `menuList_draw`; campaign state alone does not
+  supply them.
+- The combat round-3/4 refusals (CR3-1..7), the removed env-pass guesses
+  (TEX) and the other audit refusals are as `codex/audit-fixes` left them.

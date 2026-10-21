@@ -42,6 +42,10 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          DISEASE_CLOUD_DTOR = 0x3cd480, PHANTOM_RUN = 0x161a54,
                          GUTCHUNK_SIZE = 0x268, PHANTOM_SIZE = 0x3d8,
                          DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64;
+// DiseaseCloud_dtor 0x3cd480: research symbols/runtime.tsv names it (slot 1 of
+// 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
+inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =
+    "DiseaseCloud_dtor 0x3cd480 (slot 1 of 0x5186f0): body not read";
 struct World::State {
   enum class Kind { Creature, Player, Missile, Thrown, Effect, Spell };
   struct Actor : Object {
@@ -144,6 +148,7 @@ struct World::State {
   void erase_later(Address);
   void walk(Address, const std::function<void(Address)> &);
   std::vector<Address> box(const Vec3 &, const Vec3 &, int);
+  std::pair<Vec3, int> find_free_spot(const Vec3 &, Raw, Raw, Raw);
   void run_objects();
   void tick();
   void run(Address);
@@ -332,6 +337,14 @@ struct World::State {
   Raw holy_shield_absorb(Address spell);
   Address attach_holy_shield(Address caster, Address skill, Raw level);
   void block_sparks_silent(Address, Raw silent);
+  // Round 5 (research ref_combat_round5, 2980af1).
+  void fade_bank_tracks(Address creature);
+  void update_bank(Address creature);
+  int is_demon_near(Address creature);
+  Raw holy_shield_sample(Address spell);
+  void holy_shield_run(Address spell);
+  void multifire_run(Address obj);
+  Address arm_fixture_holy_shield(Address player);
 };
 // Shared helpers of the round-2 bodies.
 Raw dbl_track_weight(Raw w, Raw s, std::uint64_t knee);

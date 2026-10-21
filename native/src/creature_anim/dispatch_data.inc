@@ -1,4 +1,4 @@
-// Numeric facts from 4f9b05746250c403eb16edbc1f578aefbebf2a2f. Regenerate with tools/generate_creature_dispatch.py.
+// Numeric facts from 5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b. Regenerate with tools/generate_creature_dispatch.py.
 static DispatchTable make_dispatch_0() { DispatchTable t; t.group="root";
 { auto &c=t.states[0]; c.baseline={{{"start",{12,1036831948,3}}},0};
 }

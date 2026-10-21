@@ -69,10 +69,7 @@ class Model {
   Value tagar_virtual(const std::string &, Address, unsigned, std::vector<Value>);
   void spell_destroy(Address);
   Value virtual_call(Address, unsigned, std::vector<Value>);
-  Raw own_draw(Address);
   void write_vec(Address, const Vec3 &);
-  void clear_path(Address);
-  void pick_wander_dest(Address);
   void zek_death_virtual(Address);
   void take_damage(Address, Raw attacker, Raw flags, Raw amount);
   Value horsemen_virtual(Address, unsigned, std::vector<Value>);
@@ -157,6 +154,11 @@ public:
   // Exceptions retain ordered partial state. Callbacks can write borrowed memory
   // and replace handlers, but must not destroy this model or its memory.
   FilterResult filter_state(Address creature, std::uint32_t requested);
+  // Base bodies a ported class setState calls (combat-world Gnaw_setState):
+  // GameObject_rand on +0x44, Creature_clearPath, Creature_pickWanderDest.
+  Raw own_draw(Address);
+  void clear_path(Address);
+  void pick_wander_dest(Address);
   void skelight_set_state(Address creature, std::uint32_t requested);
   void skelight_shatter(Address creature = 0, std::uint32_t argument = 0);
   void creature_ctor(Address, Raw type_name, const Vec3 &, Raw facing,

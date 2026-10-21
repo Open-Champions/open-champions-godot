@@ -1,5 +1,6 @@
 #include "native_audio_bridge.hpp"
 #include <cmath>
+#include <cstring>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <algorithm>
@@ -60,6 +61,8 @@ void ChampionsNativeAudio::_bind_methods() {
                        &ChampionsNativeAudio::set_two_channel_output);
   ClassDB::bind_method(D_METHOD("set_frozen", "frozen"), &ChampionsNativeAudio::set_frozen);
   ClassDB::bind_method(D_METHOD("set_sfx_volume", "volume"), &ChampionsNativeAudio::set_sfx_volume);
+  ClassDB::bind_method(D_METHOD("set_music_volume", "volume"), &ChampionsNativeAudio::set_music_volume);
+  ClassDB::bind_method(D_METHOD("end_session"), &ChampionsNativeAudio::end_session);
   ClassDB::bind_method(D_METHOD("play_menu_music", "wait_for_current"), &ChampionsNativeAudio::play_menu_music);
   ClassDB::bind_method(D_METHOD("play_boss_music", "creature_type", "object_name"),
                        &ChampionsNativeAudio::play_boss_music);
@@ -248,6 +251,24 @@ void ChampionsNativeAudio::set_sfx_volume(double volume) {
   }
 }
 
+// The player's g_musicVolume option (symbols/audio-save.tsv: float 0-1). The
+// executable's stored value is not documented, so music is refused until set.
+bool ChampionsNativeAudio::set_music_volume(double volume) {
+  if (!std::isfinite(volume) || volume < 0.0 || volume > 1.0) {
+    fail("music volume outside 0..1");
+    return false;
+  }
+  const float value = float(volume);
+  std::uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof bits);
+  model_.set_music_volume(bits);
+  last_error_ = String();
+  return true;
+}
+
+// Client session boundary; the process-lifetime counters and duck words stay.
+void ChampionsNativeAudio::end_session() { model_.end_session(); }
+
 bool ChampionsNativeAudio::play_menu_music(bool wait) {
   try {
     return model_.play_menu_music(wait);
@@ -317,6 +338,8 @@ Dictionary ChampionsNativeAudio::get_observation() const {
   out["dropped_frames"]=int64_t(model_.dropped_frames());
   out["failed_stream_entries"]=int64_t(model_.failed_stream_entries());
   out["level_countdown"]=int64_t(model_.level_countdown());
+  out["refused_music_polls"]=int64_t(model_.refused_music_polls());
+  out["music_volume_set"]=model_.music_volume().has_value();
   for(std::size_t i=0;i<model_.streams().size();++i) {
     const auto &s=model_.streams()[i]; Dictionary item;
     item["name"]=String::utf8(s.name.c_str()); item["active"]=s.active;

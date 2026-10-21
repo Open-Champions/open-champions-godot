@@ -100,6 +100,7 @@ func run() -> void:
 	check(scene.open_game_folder(str(args["game-folder"])), "game folder opens")
 	add("levels.candidates", scene.real.levels.size())
 	add("creature.archive_candidates", scene.creature_archives().size())
+	add("arena.tables_read" if scene.real.arena_tables.get("ok", false) else "arena.tables_unavailable")
 	check(scene.audio is RealAudio and scene.fx is RealFx, "real presenters installed")
 	add("audio.global_bank_found" if not scene.audio.global_bank.is_empty() else "audio.global_bank_missing")
 	var sheets: Dictionary = scene.fx.sheet_result
@@ -163,6 +164,7 @@ func run() -> void:
 		add("water.tiles_shown", int(result.get("water_tiles", 0)))
 		if int(result.get("water_tiles", 0)) > 0:
 			add("water.texture_ok" if result.get("water_texture_ok", false) else "water.texture_refused")
+			add("water.tiles_not_drawn", int(result.get("water_tiles_refused", 0)))
 			peak("water.texture_width", int(result.get("water_texture_width", 0)))
 			peak("water.texture_height", int(result.get("water_texture_height", 0)))
 		add("pieces.total", int(result.get("pieces", 0)))
@@ -173,6 +175,8 @@ func run() -> void:
 		var start: Dictionary = result.get("start", {})
 		add("start.story_ground" if not start.is_empty() else "start.origin")
 		if start.get("marker_taken", false): add("start.marker_taken")
+		if start.get("pre_search", false): add("start.pre_search")
+		if str(start.get("arena_mode", "")) == "A": add("start.arena_mode_a")
 		peak("memory.static_peak_bytes", int(Performance.get_monitor(Performance.MEMORY_STATIC_MAX)))
 		peak("memory.video_peak_bytes", int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 		var decoded: Dictionary = scene.terrain_root.get_meta("level_texture_pair").decoded if scene.terrain_root.has_meta("level_texture_pair") else {}
@@ -218,6 +222,17 @@ func run() -> void:
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
 		for t in range(ticks): scene.advance_step()
+		# Constant-light chunks (flags 0x100 / 0x2000 / 0x200) take the loaded
+		# level's base level from its light record; without one they are gated.
+		var constant_chunks := 0
+		var constant_lit := 0
+		for child in scene.terrain_root.get_children():
+			if child is MeshInstance3D and child.has_meta("level_constant_light"):
+				constant_chunks += 1
+				if int(child.get_meta("level_constant_base", -1)) > 0: constant_lit += 1
+		add("lights.constant_chunks", constant_chunks)
+		add("lights.constant_chunks_on_level_base", constant_lit)
+		if scene.fx.level_light_active: add("lights.level_base_0x%x" % int(scene.fx.level_light_record.get("base", 0)))
 		var started_before := int(counts.get("scripts.started", 0))
 		if scripted: take_script_counts()
 		if int(counts.get("scripts.started", 0)) > started_before: print("script_started_index ", index)
@@ -270,6 +285,8 @@ func take_script_counts() -> void:
 	add("scripts.missing_entries", int(counts.get("missing_entries", 0)))
 	add("scripts.objects_registered", int(counts.get("objects_registered", 0)))
 	add("scripts.objects_refused", int(counts.get("objects_refused", 0)))
+	add("scripts.refusal_stops", int(counts.get("refusal_stops", 0)))
+	add("scripts.stub_refusals", int(counts.get("stub_refusals", 0)))
 	for name in counts.get("executed", {}):
 		add("executed." + str(name), int(counts.executed[name]))
 		add("levels_executed." + str(name))
@@ -277,6 +294,9 @@ func take_script_counts() -> void:
 		add("refused." + str(name), int(counts.refused[name]))
 		add("levels_refused." + str(name))
 	if int(counts.get("started", 0)) > 0: add("scripts.levels_started")
+	var campaign: Dictionary = counts.get("campaign", {})
+	for key in campaign:
+		if key != "num_players": add("campaign." + str(key), int(campaign[key]))
 
 func write_summary() -> Dictionary:
 	var summary := {"counts": counts, "refusals": reasons, "failures": failures}

@@ -36,6 +36,24 @@ func _run() -> void:
 	assert(fx.level_light_active)
 	assert("level light record" in fx.status_text())
 	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1))["rgb"] == Vector3(64, 64, 64))
+	# LL-1: the row comes from the loaded level's own name (lighting.md 10.1).
+	# A JSON with no loaded level name is refused; the synthetic sun stays.
+	fx.level_light_name = ""
+	fx.reset()
+	if fx.level_light_active or not "level light refused: loaded level name unknown" in fx.refusals:
+		push_error("a level light JSON without the loaded level's name must not apply the default row")
+		quit(1)
+		return
+	if fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1))["rgb"] != Vector3(128, 128, 128):
+		push_error("the refused record must leave the synthetic base level")
+		quit(1)
+		return
+	# A loaded level whose name misses every pass takes the null-name row.
+	fx.select_level_light(fx.level_light_path, "missing")
+	if not fx.level_light_active or not fx.level_light_record.get("default_row", false) or int(fx.level_light_record.base) != 64:
+		push_error("a loaded level that misses the table takes the default row")
+		quit(1)
+		return
 	fx.level_light_path = ""
 	fx.reset()
 	assert(not fx.level_light_active)
