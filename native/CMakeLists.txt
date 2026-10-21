@@ -142,6 +142,11 @@ if(BUILD_TESTING)
     add_executable(champions-level-draw-tests tests/level_draw_tests.cpp)
     target_link_libraries(champions-level-draw-tests PRIVATE champions-level-texture)
     add_test(NAME level-draw COMMAND champions-level-draw-tests)
+    # TEX-6: the automap tile texture at WORLD +0x6c is undocumented (world.md);
+    # the measurement tool reports it as refused and never decodes it.
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/level-draw-measure-empty")
+    add_test(NAME level-draw-measure-atlas-refused COMMAND champions-level-draw-measure "${CMAKE_CURRENT_BINARY_DIR}/level-draw-measure-empty" "${CMAKE_CURRENT_BINARY_DIR}/level-draw-measure-out")
+    set_tests_properties(level-draw-measure-atlas-refused PROPERTIES PASS_REGULAR_EXPRESSION " atlas=undocumented " FAIL_REGULAR_EXPRESSION " atlas=[0-9]")
     add_executable(champions-water-draw-tests tests/water_draw_tests.cpp)
     target_link_libraries(champions-water-draw-tests PRIVATE champions-water-draw champions-level-texture)
     if(MSVC)

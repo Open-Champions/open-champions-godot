@@ -93,8 +93,9 @@ unknown.
 - Within one layer, later transparent packets use a nearer sort offset. Opaque
   equal-depth order can still follow Godot's opaque pass. The depth test
   remains greater-or-equal: nearer fragments win and equal depth passes.
-- Automap atlas pixels are drawn only when an existing decoder accepts the
-  WORLD header +0x6c image. The HUD window and which way screen Y points
+- The WORLD header +0x6c automap tile texture has no documented pixel format
+  (world.md: U), so nothing decodes it; `champions-level-draw-measure`
+  reports `atlas=undocumented`. Automap quads need a caller-supplied atlas. The HUD window and which way screen Y points
   relative to grid row 0 are not invented.
 - Dynamic light slot colours of call 0x149b90 are unchanged; those chunks keep
   `shade_world`.
