@@ -404,6 +404,8 @@ void World::State::destroy(Address a) {
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   if (fn == 0x3c3c10 || fn == 0x3cc5b8 || fn == 0x3cc72c)
     throw Unsupported(ctor_class_dtor_refusal(fn));
+  if (potion_dtor(fn))
+    throw Unsupported(potion_dtor_refusal(fn));
   if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);

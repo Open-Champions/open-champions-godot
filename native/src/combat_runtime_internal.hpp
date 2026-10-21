@@ -41,13 +41,33 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          DISEASE_RUN = 0x2d5854, DISEASE_CLOUD_RUN = 0x2ce6e0,
                          DISEASE_CLOUD_DTOR = 0x3cd480, PHANTOM_RUN = 0x161a54,
                          GUTCHUNK_SIZE = 0x268, PHANTOM_SIZE = 0x3d8,
-                         DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64;
+                         DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64,
+                         // Thrown potion endings (potion-ctors.md).
+                         VT_LOOSEFIRE = 0x50e2b8, VT_FIRE = 0x50f208,
+                         VT_POISON_GAS = 0x50d500, LOOSEFIRE_SIZE = 0x54,
+                         FIRE_SIZE = 0x50, POISON_GAS_SIZE = 0x70,
+                         LOOSEFIRE_DTOR = 0x3c6778, LOOSEFIRE_RUN = 0x202c48,
+                         LOOSEFIRE_TOUCH = 0x1fcb70, FIRE_DTOR = 0x3c5050,
+                         FIRE_RUN = 0x1f34e0, POISON_GAS_DTOR = 0x3c7878,
+                         POISON_GAS_RUN = 0x1fd0f0;
 // DiseaseCloud_dtor 0x3cd480: research symbols/runtime.tsv names it (slot 1 of
 // 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
 inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =
     "DiseaseCloud_dtor 0x3cd480 (slot 1 of 0x5186f0): body not read";
 // AntQueen_dtor 0x3c3c10, Skeleton_dtor 0x3cc5b8, Soul_dtor 0x3cc72c: research
 // symbols/runtime.tsv names them (inline destructors); no body was read.
+inline bool potion_dtor(Raw fn) {
+  return fn == LOOSEFIRE_DTOR || fn == FIRE_DTOR || fn == POISON_GAS_DTOR;
+}
+// LooseFire_dtor 0x3c6778, Fire_dtor 0x3c5050, poisonGasSpell_dtor 0x3c7878:
+// symbols/runtime.tsv names them; no body was read (potion-ctors.md keeps them
+// recording stubs).
+inline std::string potion_dtor_refusal(Raw fn) {
+  const char *name = fn == LOOSEFIRE_DTOR ? "LooseFire_dtor 0x3c6778"
+                     : fn == FIRE_DTOR    ? "Fire_dtor 0x3c5050"
+                                          : "poisonGasSpell_dtor 0x3c7878";
+  return std::string(name) + ": body not read";
+}
 inline std::string ctor_class_dtor_refusal(Raw fn) {
   const char *name = fn == 0x3c3c10   ? "AntQueen_dtor 0x3c3c10"
                      : fn == 0x3cc5b8 ? "Skeleton_dtor 0x3cc5b8"
@@ -178,6 +198,17 @@ struct World::State {
   void note(std::string name, std::vector<std::uint64_t> args = {});
   void install_services();
   void install_ctor_services();
+  // Thrown potions 1 and 2 (combat_runtime_potions.cpp).
+  void potion_table(Address table, Raw getter, Address desc, const char *name,
+                    std::initializer_list<std::pair<unsigned, Raw>> slots);
+  void fx_spawn_fire(const Vec3 &);
+  void fire_ctor(Address, const Vec3 &);
+  void fire_run(Address);
+  void loosefire_ctor(Address, const Vec3 &, Address owner);
+  void loosefire_run(Address);
+  void loosefire_on_touch(Address, Address other);
+  void poison_gas_ctor(Address, const Vec3 &, Raw life, Raw radius, Raw word,
+                       Address owner, Raw damage);
   Value service(const std::string &, const std::vector<Value> &);
   Value vcall(Address, unsigned, std::vector<Value> = {});
   Value full_vcall(Address, unsigned, std::vector<Value>);

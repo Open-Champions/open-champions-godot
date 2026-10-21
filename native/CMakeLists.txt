@@ -1025,6 +1025,12 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_free_spot_vectors.py"
         "$<TARGET_FILE:champions-combat-free-spot-tests>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_free_spot.txt.gz")
+    add_executable(champions-potion-ctors-tests tests/potion_ctors_tests.cpp)
+    target_link_libraries(champions-potion-ctors-tests PRIVATE champions-combat-runtime)
+    add_test(NAME potion-ctors-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_potion_ctors_vectors.py"
+        "$<TARGET_FILE:champions-potion-ctors-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/potion_ctors.txt.gz")
     add_executable(champions-combat-ctors-tests tests/combat_ctors_tests.cpp)
     target_link_libraries(champions-combat-ctors-tests PRIVATE champions-combat-ctors)
     add_test(NAME combat-ctors-exact COMMAND "${Python3_EXECUTABLE}"

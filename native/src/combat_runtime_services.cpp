@@ -38,6 +38,7 @@ bool knows(Raw fn) {
   case 0x2a774c: case 0x2aa908: case 0x2a7e04: // refused recording stubs
   case 0x2a7688:
   case 0x3c3c78: case 0x3cc7a0:                // AntQueen, Soul type-info
+  case 0x1fcb70:                               // LooseFire_onTouch
   case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
   case 0x3c3b40:
   case 0x11a290: case 0x3c7ef8: case 0x3c3b10: case 0x3c3b08: // empty
@@ -157,6 +158,12 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   }
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  if (slot == 1 && potion_dtor(fn))
+    throw Unsupported(potion_dtor_refusal(fn));
+  if (slot == 6 && fn == LOOSEFIRE_TOUCH) {
+    loosefire_on_touch(self, ar(0));
+    return iv(0);
+  }
   switch (fn) {
   case 0x152a18:
     missile_on_touch(self, ar(0));
@@ -237,6 +244,8 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   if (slot == 1 && (fn == 0x3c3c10 || fn == 0x3cc5b8 || fn == 0x3cc72c))
     throw Unsupported(ctor_class_dtor_refusal(fn));
+  if (slot == 1 && potion_dtor(fn))
+    throw Unsupported(potion_dtor_refusal(fn));
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
                     fn == 0x3c6888)) {
     note("destroy", {self});
@@ -1035,6 +1044,16 @@ void World::State::run(Address a) {
     light_effect_run(a);
     return;
   }
+  if (fn == FIRE_RUN || fn == LOOSEFIRE_RUN) {
+    note("run", {a});
+    if (fn == FIRE_RUN)
+      fire_run(a);
+    else
+      loosefire_run(a);
+    return;
+  }
+  if (fn == POISON_GAS_RUN)
+    throw Unsupported("poisonGasSpell_run 0x1fd0f0 (combat round 6) is not ported");
   if (skill_body(fn)) {
     note("run", {a});
     object_body(a, fn, 4, {});

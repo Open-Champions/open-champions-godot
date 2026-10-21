@@ -240,8 +240,8 @@ void wave12_extensions() {
     if (t == 4) check(refuses([&] { scene.spawn_creature(0); }), "an unexecuted constructor is refused");
     if (t == 5) scene.spawn_creature(8); // Gnaw
     if (t == 6) check(refuses([&] { scene.spawn_creature(7); }), "one own-machine creature per session");
-    // Potions 1 and 2 end in LooseFire_ctor / poisonGasSpell_ctor, which the
-    // World refuses (audit CR4-1); they are checked apart below.
+    // Potions 1 and 2 stop the session later on (a Fire's destructor, the gas
+    // run); they are checked apart below.
     if (t == 60) scene.drop_potion(3);
     if (t >= 95 && t % 12 == 0) scene.press_attack(true);
   };
@@ -257,18 +257,23 @@ void wave12_extensions() {
     }
   };
   for (unsigned kind : {1u, 2u}) {
-    // The research constructors are stubbed call-outs (ref_combat_round4); the
-    // session stops with the World's refusal instead of dropping them.
+    // LooseFire_ctor and poisonGasSpell_ctor run (research-combat-ctors
+    // 98c081a). Kind 1's fires burn for 100 runs; the first one to end reaches
+    // Fire_dtor 0x3c5050, whose body was not read. Kind 2's cloud reaches
+    // poisonGasSpell_run 0x1fd0f0 (combat round 6, not ported) on the next
+    // frame.
     FullRun r = full_start();
     r.scene->drop_potion(kind);
     std::string error;
-    for (int t = 0; t < TICKS && error.empty(); ++t) {
+    int ticks = 0;
+    for (; ticks < TICKS && error.empty(); ++ticks) {
       const auto o = r.scene->advance(0);
       if (o.failed) error = o.error;
     }
-    const char *want = kind == 1 ? "LooseFire_ctor 0x202b70" : "poisonGasSpell_ctor 0x202de8";
+    const char *want = kind == 1 ? "Fire_dtor 0x3c5050" : "poisonGasSpell_run 0x1fd0f0";
     check(error.find(want) != std::string::npos,
-          "potion " + std::to_string(kind) + " stops at its refused constructor: '" + error + "'");
+          "potion " + std::to_string(kind) + " stops at " + want + ": '" + error + "'");
+    std::cout << "potion " << kind << " stops at ready tick " << ticks << ": " << error << "\n";
   }
   FullRun whole = full_start();
   run(whole, 0, TICKS);
