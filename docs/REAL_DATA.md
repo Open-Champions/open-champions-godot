@@ -391,7 +391,7 @@ water uses both documented sets (set 1 is chunk flag `0x1000`). Its one water
 mesh now has a surface per set, where the neutral mesh had one. The mesh count
 is unchanged. Every other deterministic count equals wave 15 with scripts on
 and wave 14 with scripts off, including every script count. Only `time.*`,
-`audio.frames_pushed` and peak static memory (+25 MB) differ.
+`audio.frames_pushed` and peak static memory (+26 MB summed over the four slices) differ.
 
 Water entries and ticks in water stay 4 and 252 of 3,024 observed. Drawing
 does not touch the creature `water_test` grid.
