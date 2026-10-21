@@ -156,8 +156,17 @@ void host() {
     h.w->write(C::FRAME, 4, 60);
     auto cloud = h.w->spawn_disease_cloud({0, 0, 0}, 1, owner);
     h.w->write(cloud + 0x54, 4, 60);
-    h.w->run_actor(cloud);
-    check(!h.w->contains(cloud), "the cloud destroys itself at its end frame");
+    // Slot 1 with 3 reaches DiseaseCloud_dtor 0x3cd480: only the symbol is
+    // in the research (runtime.tsv), so ending the cloud is refused.
+    std::string refusal;
+    try {
+      h.w->run_actor(cloud);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("DiseaseCloud_dtor 0x3cd480") != std::string::npos,
+          "the cloud's end-frame destructor is refused: '" + refusal + "'");
+    check(!has_event(*h.w, "destroy"), "the cloud is not destroyed by a guessed body");
   }
   {
     Host h;

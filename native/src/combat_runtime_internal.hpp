@@ -42,6 +42,10 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          DISEASE_CLOUD_DTOR = 0x3cd480, PHANTOM_RUN = 0x161a54,
                          GUTCHUNK_SIZE = 0x268, PHANTOM_SIZE = 0x3d8,
                          DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64;
+// DiseaseCloud_dtor 0x3cd480: research symbols/runtime.tsv names it (slot 1 of
+// 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
+inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =
+    "DiseaseCloud_dtor 0x3cd480 (slot 1 of 0x5186f0): body not read";
 struct World::State {
   enum class Kind { Creature, Player, Missile, Thrown, Effect, Spell };
   struct Actor : Object {
