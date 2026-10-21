@@ -51,6 +51,7 @@ var cosmetic_label: Label
 var frame_settings: Window
 var scene_scroll: ScrollContainer
 var hud_round3: Control
+var game_menus: Control
 
 
 func _ready() -> void:
@@ -63,6 +64,7 @@ func _ready() -> void:
 	_attach_components()
 	_attach_fx()
 	_attach_hud_round3()
+	_attach_game_menus()
 	_attach_level_textures()
 	_attach_audio()
 	refresh_capabilities()
@@ -407,6 +409,13 @@ func _full_key(event: InputEvent) -> bool:
 	return true
 
 func handle_input_event(event: InputEvent) -> bool:
+	if game_menus != null and game_menus.open and event is InputEventKey:
+		held_commands = 0
+		pending_damage = false
+		game_menus.handle_host_key(event)
+		return true
+	if game_menus != null and game_menus.handle_host_key(event):
+		return true
 	if _full_key(event): return true
 	if event is InputEventKey and event.pressed and not event.echo and (event.physical_keycode == KEY_ESCAPE or event.keycode == KEY_ESCAPE):
 		if _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible:
@@ -449,6 +458,8 @@ func load_session_file(path: String) -> bool:
 		if audio != null: audio.reset(play_mode,int(raw_observation.ready_ticks))
 		session_started = true
 		set_paused(true)
+		if game_menus != null:
+			game_menus.load_companion(path)
 	else:
 		status_label.text = "Load refused: %s. Current session retained; choose a valid native save." % status_label.text
 	return ok
@@ -473,6 +484,8 @@ func _observe(result: Dictionary) -> void:
 		_show_menu(Flow.PAUSED)
 	if hud_round3 != null:
 		hud_round3.observe(raw_observation, play_mode)
+	if game_menus != null and components.has("art"):
+		game_menus.sync_font(components.art)
 	if fx != null:
 		fx.observe(raw_observation)
 		fx_status.visible = fx.enabled
@@ -495,6 +508,14 @@ func _attach_hud_round3() -> void:
 	hud_round3.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hud_round3.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	viewport.add_child(hud_round3)
+
+func _attach_game_menus() -> void:
+	if viewport == null:
+		return
+	game_menus = load("res://ui/game_menus.gd").new()
+	game_menus.set_anchors_preset(Control.PRESET_FULL_RECT)
+	game_menus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	viewport.add_child(game_menus)
 
 func _attach_components() -> void:
 	for id in COMPONENTS:
@@ -728,6 +749,8 @@ func save_session_file(path: String) -> bool:
 	var result: Dictionary = controller.call(save_methods[save_format.selected], path)
 	status_label.text = "Saved native scene." if result.get("ok", false) else "Save refused: %s. Current session retained; check the selected path and native state." % str(result.get("error", "Save failed."))
 	if result.get("ok", false) and level_textures != null: level_textures.remember_save(path)
+	if result.get("ok", false) and game_menus != null:
+		game_menus.save_companion(path)
 	return result.get("ok", false)
 
 func _focus_menu() -> void:
