@@ -1,15 +1,18 @@
 #pragma once
-// Opt-in level-script host. Documented commands run the existing binder and,
-// where that binder's whole effect is a call into a subsystem that already
-// exists, the host routes that call. Every other command is a counted refusal.
-// Research: t3/research-script 9649e6b, tools/ref_script_compose.py.
+// Opt-in level-script host. Documented commands run the existing binder.
+// Commands whose callee research executed at t3/research-script 52984db also
+// run that binder, and the host answers the call. Every other command is a
+// counted refusal. The composition census stays the 9649e6b table.
 #include "champions/fx_simulation.hpp"
 #include "champions/level_flow.hpp"
+#include "champions/native_audio.hpp"
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
+#include "champions/script_effects.hpp"
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -17,7 +20,7 @@
 
 namespace champions::simulation::rta::script_commands {
 namespace builtins = champions::simulation::rta::builtins;
-inline constexpr const char *POLICY = "rta-script-commands-v1";
+inline constexpr const char *POLICY = "rta-script-commands-v2";
 inline constexpr std::size_t COMMANDS = 191;
 
 enum class Effect : std::uint8_t { Documented, Partial, Unknown };
@@ -121,6 +124,10 @@ public:
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }
   champions::rta::fx::sim::EffectWorld &effects() { return *effects_; }
+  script_effects::Effects &callees() { return *script_fx_; }
+  champions::audio::Playback &audio() { return *audio_; }
+  // The f12 music_playLevel passes to channel 2. Zero until a call passes the gate.
+  std::uint32_t music_channel() const { return music_channel_; }
   builtins::Variables &variables() { return *variables_; }
   amx::Machine *machine() { return machine_.get(); }
   amx::Cell last_value() const { return last_value_; }
@@ -173,10 +180,20 @@ private:
   bool touches_stub(std::size_t index, amx::Machine &machine) const;
   void refuse(std::size_t index, amx::Machine &machine);
   Stop stopped() const;
+  std::uint32_t scene(const std::string &name,
+                      const std::vector<builtins::Variables::ServiceValue> &args);
+  std::uint32_t intern_bytes(const std::string &text);
+  std::uint32_t intern_wide(const std::u16string &text);
+  void note_type(builtins::Obj &obj, const std::string &type);
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;
+  std::unique_ptr<champions::audio::Playback> audio_;
+  std::unique_ptr<script_effects::Effects> script_fx_;
+  std::uint32_t music_channel_ = 0;
+  std::uint32_t scratch_ = 0x700000;
+  std::map<std::string, std::uint32_t> type_at_;
   level_flow::State flow_;
   SharedRandom *external_seed_ = nullptr;
   // Addresses of adopted objects.ob records: unconstructed stubs.
