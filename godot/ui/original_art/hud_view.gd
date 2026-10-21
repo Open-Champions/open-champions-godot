@@ -18,6 +18,9 @@ var text_drawn: Array[String] = []
 # HUD text that is not drawn, keyed by element, with the missing evidence.
 var text_refusals: Dictionary = {}
 var glow_alpha := 0
+# Set by observe() while every glow gate holds: the tick and origin the next
+# displayed draw uses. Empty when a gate is false.
+var glow_context: Dictionary = {}
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -51,6 +54,7 @@ func set_art(art: Dictionary, catalogue: Dictionary) -> void:
 func observe(value: Dictionary) -> void:
 	records.clear()
 	missing.clear()
+	glow_context = {}
 	error = ""
 	if layout_service == null or dynamic_service == null:
 		error = "Native HUD layout service unavailable."
@@ -75,27 +79,28 @@ func observe(value: Dictionary) -> void:
 		layers.append(record.layer)
 		if not textures.has(record.resource): missing.append(record.resource)
 	# hud-dynamic.md section 3: local slot, present live object, HP > 0,
-	# pending level. The alpha advances once per displayed draw and persists
-	# until hud_run opens the level menu (section 2).
+	# pending level. Section 2: the alpha rises by 4 per *displayed draw* and
+	# persists until hud_run opens the level menu. observe() only decides the
+	# gates, reserves the glow's place in the painter order and resets the
+	# alpha on the menu-open event; advance_glow() steps it once per draw.
+	# HP comes from the simulation's own player values (the same ones the bars
+	# draw), not from the character record.
+	glow_context = {}
 	var level_menu_opened: bool = value.get("level_menu_opened", false) == true
 	if level_menu_opened:
 		glow_alpha = 0
 	var pending_level := typeof(value.get("level")) == TYPE_INT and typeof(value.get("acknowledged_level")) == TYPE_INT and int(value.level) > int(value.acknowledged_level)
-	var glow_ready: bool = not level_menu_opened and pending_level and value.get("player_object_present", false) == true and value.get("player_object_dead", true) == false and value.get("player_hp_known", false) == true and valid_bar(value, "hp", "max_hp") and float(value.hp) > 0.0
+	var glow_ready: bool = not level_menu_opened and pending_level and value.get("player_object_present", false) == true and value.get("player_object_dead", true) == false and valid_bar(value, "hp", "max_hp") and float(value.hp) > 0.0
 	if glow_ready:
 		var tick := int(value.get("ready_ticks", 0))
-		var adjunct: Dictionary = dynamic_service.status_adjuncts(0, tick, int(origins.origins[0]), glow_alpha, 0, false, 0, 0, false, false, 0)
-		if adjunct.get("ok", false): glow_alpha = int(adjunct.glow_alpha)
-		if adjunct.get("ok", false):
-			var glow: Dictionary = adjunct.glow_sprite
-			glow["layer"] = 6
-			glow["clipped"] = true
-			glow["clip"] = {"left": 0, "top": 0, "right": 1000, "bottom": 1000}
+		var preview: Dictionary = _glow_record(tick, int(origins.origins[0]), glow_alpha)
+		if not preview.is_empty():
+			glow_context = {"tick": tick, "origin": int(origins.origins[0])}
 			# Native status submission is glow, then frame (statusSequence).
 			var frame_at := records.size() - 1
-			records.insert(frame_at, glow)
+			records.insert(frame_at, preview)
 			layers.insert(frame_at, 6)
-			if not textures.has(glow.resource): missing.append(glow.resource)
+			if not textures.has(preview.resource): missing.append(preview.resource)
 	var order: Dictionary = dynamic_service.painter_indices(layers)
 	painter_order = order.get("indices", PackedInt32Array())
 	if not order.get("ok", false): error = str(order.get("error", "HUD order refused."))
@@ -140,6 +145,29 @@ func observe(value: Dictionary) -> void:
 						text_drawn.append("level_text")
 	queue_redraw()
 
+# The native glow sprite for an input alpha; the native service also returns
+# the stepped alpha (+4, capped at 128), which advance_glow() commits.
+func _glow_record(tick: int, origin: int, alpha: int, commit := false) -> Dictionary:
+	var adjunct: Dictionary = dynamic_service.status_adjuncts(0, tick, origin, alpha, 0, false, 0, 0, false, false, 0)
+	if not adjunct.get("ok", false): return {}
+	if commit: glow_alpha = int(adjunct.glow_alpha)
+	var glow: Dictionary = adjunct.glow_sprite
+	glow["layer"] = 6
+	glow["clipped"] = true
+	glow["clip"] = {"left": 0, "top": 0, "right": 1000, "bottom": 1000}
+	return glow
+
+# One displayed draw: step the alpha and use the stepped sprite. Called by
+# _draw(); tests call it to stand in for a displayed frame.
+func advance_glow() -> void:
+	if glow_context.is_empty() or dynamic_service == null: return
+	var stepped: Dictionary = _glow_record(int(glow_context.tick), int(glow_context.origin), glow_alpha, true)
+	if stepped.is_empty(): return
+	for index in records.size():
+		if records[index].get("resource", "") == "hud_statusbar00glow.tex":
+			records[index] = stepped
+			return
+
 func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
 	for key in [current, maximum]:
 		if typeof(value.get(key)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value[key])): return false
@@ -152,6 +180,7 @@ func _canvas_transform() -> void:
 
 func _draw() -> void:
 	if layout_service == null: return
+	advance_glow()
 	_canvas_transform()
 	for index in painter_order:
 		var record: Dictionary = records[index]

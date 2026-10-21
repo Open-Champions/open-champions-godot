@@ -58,27 +58,40 @@ func _run() -> void:
 	var pending_level: Dictionary = value.duplicate()
 	pending_level["level"] = 2
 	pending_level["acknowledged_level"] = 1
-	pending_level["player_hp_known"] = true
 	pending_level["player_object_present"] = true
 	pending_level["player_object_dead"] = false
 	hud.observe_play(pending_level, true)
 	check("level_up_glow" in hud.drawn and hud.records.any(func(r): return r.get("resource", "") == "hud_statusbar00glow.tex" and r.get("x", -1) == 8 and r.get("y", -1) == 36), "pending level glow at the documented origin")
+	check(hud.glow_alpha == 0, "observing alone does not advance the glow fade")
+	hud.observe_play(pending_level, true)
+	hud.observe_play(pending_level, true)
+	check(hud.glow_alpha == 0, "repeated observations between draws do not speed the fade")
+	hud.advance_glow()
+	check(hud.glow_alpha == 4, "glow advances by 4 for one displayed draw")
 	check(hud.records.any(func(r): return r.get("resource", "") == "hud_statusbar00glow.tex" and r.get("clipped", false) and r.get("clip", {}).get("left", -1) == 0 and r.get("clip", {}).get("right", -1) == 1000), "glow retains documented clip")
-	check(hud.glow_alpha == 4, "glow advances once per displayed frame")
 	var dead_level := pending_level.duplicate()
 	dead_level["hp"] = 0.0
 	hud.observe_play(dead_level, true)
+	hud.advance_glow()
 	check(not "level_up_glow" in hud.drawn and hud.glow_alpha == 4, "dead HP refuses glow without resetting fade")
 	var unknown_level := pending_level.duplicate()
-	unknown_level.erase("player_hp_known")
+	unknown_level.erase("hp")
 	hud.observe_play(unknown_level, true)
-	check(not "level_up_glow" in hud.drawn and hud.glow_alpha == 4, "unknown current HP refuses glow")
+	hud.advance_glow()
+	check(not "level_up_glow" in hud.drawn and hud.glow_alpha == 4, "an unobserved simulation HP refuses glow")
 	var missing_object := pending_level.duplicate()
 	missing_object.erase("player_object_present")
 	hud.observe_play(missing_object, true)
 	check(not "level_up_glow" in hud.drawn, "missing original player object refuses glow")
 	hud.observe_play(pending_level, true)
+	hud.advance_glow()
 	check(hud.glow_alpha == 8, "pending glow resumes its prior alpha")
+	# The record's own values never reach the bars: a record-only key is ignored.
+	var record_only := value.duplicate()
+	record_only.erase("hp")
+	record_only["record_hp"] = 99.0
+	hud.observe_play(record_only, true)
+	check(not "health_bar" in hud.drawn, "record_hp is not drawn as a health bar")
 	var opened_menu := pending_level.duplicate()
 	opened_menu["level_menu_opened"] = true
 	hud.observe_play(opened_menu, true)
