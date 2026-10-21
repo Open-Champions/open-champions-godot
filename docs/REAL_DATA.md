@@ -258,3 +258,91 @@ Still refused or not done:
   seed-0 empty-list search is one of the two seeds section 18 executed.
 - Light records only replace the sun, ambient and base; the special-chunk light
   modes stay gated (docs/NATIVE_FX.md).
+
+## Wave 15 (2026-10-20): level scripts on real levels, 111 / 111
+
+Integration of script-commands on `codex/playable-integration`. Counts only,
+same disc copy. The level-script host (docs/SCRIPT_COMMANDS.md) is opt-in: the
+real-data scene's "Level script (opt in)" checkbox or `--level-script`, and
+`godot/tests/real_data_scene.gd --scripts` for the sweep. Without it no host is
+created and no script runs.
+
+Sweep: `work/run-slices-r15.sh r15 --scripts`, four headless slices, 60 ready
+ticks per level, light and recipe JSON as in wave 14. Two slices were cut short
+by a harness time limit while the machine was heavily loaded by other
+worktrees. Those two were rerun whole. All four final slices exited 0 with 0
+failed checks.
+
+| Measure | Wave 14 | Wave 15 (scripts on) |
+|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **111 / 111** |
+| Refused (all reasons) | 0 | 0 |
+| Story ground / marker taken, water, meshes, lights, banks, HUD, pieces | as in wave 14 | equal |
+| Ready ticks / checks passed | 6,549 / 119 | 6,549 / 119 |
+
+Every count outside the host equals wave 14. Only `time.*`,
+`audio.frames_pushed` (pumped per process frame, and the machine was loaded)
+and peak static memory (+0.4 MB) differ.
+
+Script counts over the 111 levels:
+
+| | Count |
+|---|---|
+| Scripts attached | 111 |
+| Started (`preStart` or `start` defined) | 76 |
+| Reached a wait / reached completion | 41 / 37 |
+| Faults / missing entries | 0 / 0 |
+| Objects registered / refused | 17,398 / 0 |
+| Commands executed | 22,371 across 38 names |
+| Commands refused | 1,375 across 28 names |
+
+Started, wait, completion and object counts equal
+`champions-script-commands-measure --game rta`, which the integrated build
+reproduces exactly: 1,681 executed across 36 names, 529 refused across 27.
+The call counts differ because the play session resumes deferred names on every
+one of the 60 ready ticks, while the measure tool stops when the deferred name
+table repeats. Polling scripts therefore repeat the same commands. Three names
+appear only in play: `findDistance` and `closestPlayerDist` (executed) and
+`stopFollowingPath` (refused).
+
+Executed (levels / calls): `addParticleOnObject` 9 / 5,960, `gamePaused`
+23 / 3,222, `addDeferedCall` 41 / 2,597, `cos1000` 5 / 2,552, `sin1000`
+5 / 2,552, `getRand` 10 / 2,161, `getv` 53 / 1,222, `countPlayersAlive`
+10 / 561, `getScaledTime` 7 / 533, `callScript` 24 / 263, `setv` 50 / 175,
+`hideMonster` 41 / 138, `zeroPlayerMana` 2 / 118, `getHealthUsed` 1 / 60,
+`postAction` 27 / 39, `setSaveInhibit` 27 / 27, `getNumPlayers` 14 / 25,
+`showOnMap` 4 / 24, `setMissionAvailable` 23 / 23, `getEvil` 16 / 19,
+`findDistance` 4 / 15, `showMonster` 15 / 15, `closestPlayerDist` 1 / 14,
+`getMissionComplete` 10 / 13, `setPlayerFlag` 3 / 9, `addQuest` 8 / 8,
+`friendly` 1 / 6, `grantMission` 4 / 4, `getMadeDecision` 3 / 3,
+`increaseEnemyRank` 1 / 3, `clearAllSkills` 2 / 2, `getMissionAvailable` 1 / 2,
+and 1 / 1 each for `explodePotionsOnly`, `getPlayerFlag`, `moveMonster`,
+`removeQuest`, `setEntrance` and `startWithSwoopDone`.
+
+Refused (levels / calls): `showBust` 9 / 502, `countQuestItems` 12 / 306,
+`setMonsterVal` 13 / 94, `playerHasItem` 16 / 91, `onePlayerHasItem` 2 / 72,
+`removePlayerItem` 4 / 47, `setCreatureParams` 11 / 45, `rootMonster` 4 / 30,
+`setCFlag` 3 / 23, `cutScene` 17 / 18, `followPath` 5 / 16,
+`autoPropSetState` 6 / 15, `setParticle` 13 / 14, `deleteMonster` 2 / 12,
+`generateMonster` 5 / 12, `addHelpMessage` 9 / 10, `stopFollowingPath` 1 / 10,
+`savePlayer` 9 / 9, `setAlternateDeath` 9 / 9, `saveCheckPoint` 8 / 8,
+`setWeaponType` 5 / 8, `givePlayerItem` 1 / 7, `preloadResource` 7 / 7,
+`charmMonster` 3 / 4, `revealMap` 3 / 3, and 1 / 1 each for `removeAllItems`,
+`removeAllWeapons` and `startDialog`.
+
+The scene's own path was checked separately (untracked
+`work/playable-wave15/scene_path_check.gd`, three level indices). With
+`--level-script`, `load_real_level` attached the script on 3 / 3 levels, and
+2 of them started it, with 0 faults. Without the flag, 0 / 3 attached and no
+counts were available. Both runs had 0 failures.
+
+Still refused or not done:
+- Every partly documented or unknown command returns 0 (the refusals above:
+  combat, creature AI, audio, HUD text, items, cutscenes, paths).
+- Script effects stay inside the host. `hideMonster`, `showMonster` and
+  `moveMonster` move the host's own object world. `setEntrance` sets the host's
+  own level-flow state. `addParticleOnObject` spawns on the host's headless
+  effect world. None of these reaches the drawn level, the Godot effect
+  presenter or the play observation.
+- The post action runs once at level load, not again after a cutscene, dialog
+  or help screen.
