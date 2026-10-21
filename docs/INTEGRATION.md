@@ -2789,3 +2789,68 @@ Limits: everything listed as refused in the branch reports stays refused.
 The Full fixture's definitions, clips and services are still synthetic. No
 Intel/Windows/Linux hardware run (x86_64 is Rosetta only), no manual play and
 no heard audio are claimed.
+
+## Playable integration wave 13 — fx-trig (math_cos16) — 2026-10-20
+
+Start `eb583b8`. `codex/fx-trig` (tip `f9900c7`, branched from review-fixes
+`28e6cf0`, which wave 12 already merged) is merged in `917a26f` with no
+conflicts. Its tip is an ancestor of the branch.
+
+What it changes: the emitter cosine and sine (`fx::exact::angle_cos_sin`) now
+use `math_cos16` / `math_sin16` (`champions/fx_trig.hpp`). Those are the
+degree-7 half-angle polynomial with the ps2 adder, in integer arithmetic. Each
+float32 result is promoted to binary64. This replaces the correctly rounded
+double-double stopgap from review-fixes finding 13, and `tools/binary64_trig.py`
+is removed. Glows, trails, decals, recipes and the combat cosine already
+called `core::cos16` / `sin16`. No other caller in `native/` or `gdextension/`
+uses host `cos` / `sin`. New refusals: `draw_haze`,
+`trig::refuse_block_sparks_angle` and
+`trig::refuse_creature_process_damage_angles`. Comments mark the existing
+block-spark and `process_damage` bodies that these refusals cover; the bodies
+themselves are unchanged. See [NATIVE_FX.md](NATIVE_FX.md).
+
+Changed vectors: only `fx_exact.tsv`, with 900 `emitter` rows and all 16
+`trig` rows (every 16-bit angle). No combat, session or other vector file
+changed. Checked against the research:
+- Regenerating with `python3 -I tools/generate_fx_exact_vectors.py --out <tmp>`
+  from pin `19f80a6` gives a TSV byte-identical to the committed one, and the
+  same `vectors_sha256` `67290583…30bb`.
+- The pin's `ref_core.cos16` / `sin16` equal `t3/research-fx` `fe137cc`
+  `tools/ref_trig.py` on all 65,536 angles (0 mismatches). `sin16(0)` is
+  `0x34800000`, as the spec says.
+
+No trace hash changed. The Full `FULL_TRACE` is still `8dc349c1…aa0c`, and
+`FULL_HOLY_STRIKE` and `FULL_SAVE_LOAD` (including the bridge presentation)
+match wave 12 line for line. The Full fixture's emitter use does not reach
+seeds, health or the bridge counts.
+
+Verification (`work/playable-wave13/`):
+- Native Release builds for arm64 and x86_64 pass, as do the four universal
+  extension builds.
+- Full CTest arm64 `-j3`: **196/196**, 643 s (`player-exact` 115 s).
+- x86_64 Rosetta, `build/native-x64` `-j3`: **196/196**, 1,002 s
+  (`player-exact` 145 s). `fx-exact`: 14,690 rows, 0 mismatches on both
+  architectures.
+- Real data (counts only, `work/run-slices-r13.sh`): **108 / 111**, the same
+  3 refusals (no ground at the story start), 0 failed checks. Every
+  deterministic count equals wave 12. Only timing differs (`time.*`,
+  `audio.frames_pushed`, which is pumped once per process frame) plus a
+  5.8 KB difference in the peak static memory. The exported app ran
+  12 / 12 levels.
+- Godot dev matrix **43/43**: Full combat 2,616 checks, combined FX 1,876,
+  wave-12 extensions 40, FX bridge refusals 33, creature-anim 32 / 25 / 231.
+- Export matrix **16/16** on the first run. The 36,000-tick 1280×720 Full run
+  passed 108,822 checks with 0 failures, so the flaky stale-clip check did not
+  fire this time. 960×720 and 800×600 passed 2,742 checks each, and exported
+  headless 2,616. Every `FULL_TRACE` is `8dc349c1…aa0c`.
+
+App: `build/exports/wave13-final/Open Champions.app`.
+ZIP SHA-256: `9574f43d51234996669a5fbfa6b2c6a85a75553f1057ef00158839c03756710c`.
+Main universal extension: `12aceca2b2dafbe0a84f81eade312bb9388e43626b47774a3f296ec35f97f05e`.
+Texture universal extension: unchanged at `858bf674…7c51`.
+The packaged libraries are byte-identical to the local builds.
+
+Limits: the console's last bit of an add is still the research's open
+question, and the port uses the ps2 model. The three fx-trig refusals stay
+refused. No native Intel, Windows or Linux run (x86_64 is Rosetta only). No
+manual play is claimed.
