@@ -891,3 +891,34 @@ scripts, **12/12** with scripts, and **3/3** arena levels with scripts, with
 creature previews draw in each main run; the nine BLEND-7 mixed-pass material
 refusals of wave 21 are gone after `blend-fx`. No private level imagery is
 stored in the repository or export.
+
+## Wave 23 (2026-10-21): session music and initial HUD fade
+
+The four-slice, 60-ready-tick `w23on --scripts` and `w23off` runs each tried,
+loaded, and played **111/111** levels, with **230 passed checks**, zero failed
+checks, and an empty refusal list. They used the same read-only owner-selected
+disc and separate `user://` cache folders. Every deterministic scripted and
+unscripted count equals the wave-22 final sweep. In the scripted sweep,
+`startMusic` is **0 executed / 0 refused**, `setCFlag` is **0 / 1**, and
+`hudFadeScreen` is **0 / 0**, unchanged from wave 22. The one `setCFlag`
+call encounters a placeholder object and refuses before its music route.
+No level in this sweep calls `startMusic` or `hudFadeScreen`, so the sweep
+cannot measure their new successful paths. Synthetic host, native audio,
+and Godot session checks cover those paths.
+
+`scripts.refusal_stops` remains **14**, `scripts.stub_refusals` **266**,
+`scripts.callee_refusals` **0**, and `audio.bank_errors` **0**. The only
+changed numeric keys against wave 22 are runtime observations:
+
+| Four-process sum | Wave 22 on | Wave 23 on | Wave 22 off | Wave 23 off |
+|---|---:|---:|---:|---:|
+| `audio.frames_pushed` | 2,691,153 | 1,650,449 | 2,646,961 | 1,615,409 |
+| `memory.static_peak_bytes` | 1,531,496,240 | 1,531,512,448 | 1,529,047,064 | 1,529,063,272 |
+| `time.load_ms` | 39,958 | 19,105 | 39,898 | 18,592 |
+| `time.play_ms` | 79,226 | 35,718 | 78,462 | 34,283 |
+
+The scripted displayed-frame bust count is **34 → 27**; it follows render
+cadence, not fixed ready ticks. The timing and pushed-audio totals depend on
+machine load and scheduling. These runs do not isolate a speed change.
+The [wave-23 report](../work/loop-playable-integration-r23-report.md)
+records the remaining integration gates and export smoke.

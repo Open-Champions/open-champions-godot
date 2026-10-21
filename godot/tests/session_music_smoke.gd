@@ -37,6 +37,19 @@ func run() -> void:
 	options.encode_u32(8, 0x3fc00000)
 	save(path, options)
 	check(scene._sync_saved_music() and scene.audio.music_volume_bits == 0x3fc00000, "saved value is copied without clamping")
+	# A closed first-theme gate is an expected no-op in the real-data reset.
+	# Mark the global bank as already installed so this checks the menu route
+	# without requiring a private or synthetic bank payload.
+	var real_audio = load("res://real_data/real_audio.gd").new()
+	root.add_child(real_audio)
+	real_audio.configure(scene, null)
+	real_audio.global_bank = {"directory": PackedByteArray()}
+	real_audio.installed_global_bank = real_audio.global_bank.duplicate(true)
+	real_audio.bank_errors.clear()
+	check(real_audio.load_options_file_music(0), "zero options word reaches the real-data mixer")
+	real_audio.reset(false)
+	check(real_audio.bank_errors.is_empty(), "closed first-theme gate is not a bank refusal")
+	real_audio.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	scene.free()
 	print("session music smoke: %d checks, %d failures" % [checks, failures])

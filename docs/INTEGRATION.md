@@ -3600,3 +3600,35 @@ alone unchanged in 172.35 s, verifying all 226 tests with the initial timeout
 recorded separately. `strings-exact` is the new test over wave 21. Synthetic
 output was inspected, and private disc data was read only. All commits are
 local; no push or PR.
+
+## Playable integration wave 23 — session music and initial fade — 2026-10-21
+
+From wave 22 `af9e3b5`, merge commit `317be8c` brings in only
+`codex/session-music` tip `c703657`. The existing native
+`music_volume.cpp` is the sole music-volume implementation, compiled once
+into each distinct native and extension target. The play session supplies
+the raw options word, or the documented 0.5 default, to the script host
+before `preStart`. The first menu-theme request checks the researched music
+gate. `hudFadeScreen` starts from the observed zero and the controller carries
+its fade word when replacing the host. The Claude PASS audit's real-data
+closed-gate error report was corrected, and a synthetic Godot smoke now
+checks it. A separate controller starts its own fade word at zero; the
+research did not exhaust indirect presentation owners.
+
+Both four-slice, 60-ready-tick real-data sweeps still try, load and play
+**111/111** levels, with **230 passed checks**, zero failures and an empty
+refusal list, using separate `user://` caches. The scripted command counts
+stay `startMusic` **0/0**, `setCFlag` **0 executed / 1 refused** and
+`hudFadeScreen` **0/0**. The `setCFlag` placeholder refuses before music
+handling; no sweep level reaches the other two calls. Every deterministic
+count equals wave 22. The runtime and displayed-frame count changes are
+recorded in [REAL_DATA.md](REAL_DATA.md).
+
+The four universal extension builds pass, and the Godot dev matrix passes
+**54/54**, including the new session-music smoke. Its later focused
+closed-gate rerun passes **6 checks**. Dev headless Full retains
+**FULL_TRACE `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`**
+at **31,622 bytes**. A refused command still stops its script. The one
+process mixer, per-run user folders, and the Full fight's Skeleton exclusion
+remain intact. The [wave-23 report](../work/loop-playable-integration-r23-report.md)
+records the full native, export and real-data smoke results.
