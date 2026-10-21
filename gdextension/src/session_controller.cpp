@@ -142,8 +142,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
                        &ChampionsSessionController::load_terrain_file);
-  ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path"),
-                       &ChampionsSessionController::prepare_terrain_file);
+  ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path", "build_display"),
+                       &ChampionsSessionController::prepare_terrain_file, DEFVAL(true));
   ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name"),
                        &ChampionsSessionController::set_terrain_start_objects, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("load_arena_tables", "executable_path"),
@@ -1288,7 +1288,8 @@ void ChampionsSessionController::prepare_meshes(Dictionary &terrain) {
 constexpr std::size_t MAX_STATIC_SURFACES = 16384;
 constexpr std::size_t MAX_STATIC_TRIANGLES = 4000000;
 Dictionary ChampionsSessionController::present_geometry(
-    const champions::presentation::rta::world_geometry::Geometry &geometry) {
+    const champions::presentation::rta::world_geometry::Geometry &geometry,
+    bool build_display) {
   Array surfaces;
   std::size_t triangles = 0, batches = 0;
   for (const auto &chunk : geometry.chunks) {
@@ -1306,7 +1307,8 @@ Dictionary ChampionsSessionController::present_geometry(
           "This WORLD exceeds the scene's static mesh limit.");
     triangles += chunk_triangles;
     PackedVector3Array positions;
-    positions.resize(int64_t(chunk_triangles * 3));
+    if (build_display)
+      positions.resize(int64_t(chunk_triangles * 3));
     int64_t at = 0;
     int64_t first_batch = -1, chunk_batches = 0;
     for (std::size_t b = 0; b < packet.batches.size(); ++b) {
@@ -1325,12 +1327,17 @@ Dictionary ChampionsSessionController::present_geometry(
                 std::abs(coordinate) > std::numeric_limits<float>::max())
               throw std::runtime_error(
                   "This WORLD exceeds the display coordinate range.");
-          positions.set(at++, Vector3(p[0], p[1], p[2]));
+          if (build_display)
+            positions.set(at, Vector3(p[0], p[1], p[2]));
+          ++at;
         }
     }
     batches += std::size_t(chunk_batches);
     Dictionary surface;
-    surface["positions"] = positions;
+    // A streamed display needs the same validation and summary counts, but
+    // never publishes this neutral mesh. Keep the authority in the Scene.
+    if (build_display)
+      surface["positions"] = positions;
     surface["chunk"] = int64_t(chunk.index);
     surface["batch"] = first_batch;
     surface["batches"] = chunk_batches;
@@ -1353,7 +1360,8 @@ Dictionary ChampionsSessionController::present_geometry(
   return out;
 }
 Dictionary
-ChampionsSessionController::prepare_terrain_file(const String &path) {
+ChampionsSessionController::prepare_terrain_file(const String &path,
+                                                 bool build_display) {
   try {
     if (next_candidate_ == std::numeric_limits<int64_t>::max())
       throw std::runtime_error(
@@ -1445,9 +1453,10 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     }
     auto prepared = std::make_unique<PendingTerrain>();
     const Dictionary terrain =
-        illustration ? present_terrain(data) : present_geometry(geometry);
+        illustration ? present_terrain(data) : present_geometry(geometry, build_display);
     prepared->terrain = terrain;
-    prepare_meshes(prepared->terrain);
+    if (build_display || illustration)
+      prepare_meshes(prepared->terrain);
     const auto current_config = active_setup().config;
     // Preserve the historical scene policy when recovery is off. An active
     // opt-in descriptor must survive terrain replacement, including its cap.

@@ -174,8 +174,18 @@ Fixtures and other callers keep the full bind (`stream_cells` is opt-in).
 FX lighting: `ChampionsFxBridge.shade_world_many` returns `shade_world`'s
 colour for each vertex in one call. The renderer reuses its unshaded material
 copies instead of building (and compiling) new ones on every relight. The
-game-folder load holds world lighting while the neutral session display is
-briefly published, so that display is never lit.
+game-folder stream now prepares and commits the collision session once, with
+the same validated surface and triangle summary but no neutral mesh. Its
+textured root is the only terrain display published. The first nine-cell
+window is complete before play.
+
+While walking, one missing cell at a time is decoded on a worker thread.
+The main thread creates and lights its groups over multiple frames, then
+publishes the complete cell. The nearest-missing order, nine-slot limit and
+whole-cell visibility are unchanged. `end_session()` retains the global VAT;
+the game-folder audio bridge installs that read-only bank once per bridge
+lifetime, avoiding a second 108 MB copy during resets. Measurements and the
+water-mesh check are in `work/loop-perf-r2-report.md`.
 
 Constant-light groups (wave 18): `cell_view(cell, light_base)` colours them
 only for a non-negative base. The streamed display passes -1 and tags each

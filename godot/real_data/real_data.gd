@@ -231,22 +231,24 @@ func load_level(index: int) -> Dictionary:
 	scene.controller.set_terrain_start_objects(world_path, objects, str(level.stem))
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
-	# The library first publishes the neutral session display, then the textured
-	# one replaces it. In play mode FX lighting would light the neutral one
-	# per vertex only to free it; it is held until the textured display is up.
+	# The streamed path commits the session once with a summary-only neutral
+	# display; the textured root is the only mesh it publishes. Keep the library
+	# candidate and its history without making it load the WORLD a second time.
 	var hold: bool = scene.fx != null and "world_lighting_held" in scene.fx
 	if hold: scene.fx.world_lighting_held = true
 	library._add_candidate(session_path)
-	library._load_selected()
-	if scene.level_textures.world_path != session_path:
-		if hold: scene.fx.world_lighting_held = false
-		return {"ok": false, "stage": "library-load", "error": library._native_error()}
+	if not stream_textures:
+		library._load_selected()
+		if scene.level_textures.world_path != session_path:
+			if hold: scene.fx.world_lighting_held = false
+			return {"ok": false, "stage": "library-load", "error": library._native_error()}
 	scene.level_textures.session_worlds.clear()
 	scene.level_textures.stream_cells = stream_textures
 	var textured: bool = scene.load_textured_terrain(world_path, level.tex)
 	if hold: scene.fx.world_lighting_held = false
 	if not textured:
 		return {"ok": false, "stage": "textures", "error": scene.status_label.text}
+	if stream_textures: library.record_loaded(session_path)
 	current = index
 	# Per-level light record from the user's executable JSON (level-lights):
 	# game_loadLevel's lookup by this level's name. Applied when play starts;

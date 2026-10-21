@@ -5,6 +5,7 @@ extends "res://audio/playable_audio.gd"
 # Native policy selects the level music/ambient entries. Animation-event
 # samples have no documented bank association, so events are counted, not voiced.
 var global_bank: Dictionary = {}
+var installed_global_bank: Dictionary = {}
 var level_bank: Dictionary = {}
 var skipped_events := 0
 var bank_errors: Array[String] = []
@@ -25,8 +26,16 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	level_key = key
 	menu_accumulator = 0
 	events.clear()
-	if not global_bank.is_empty() and not bridge.set_global_vat(global_bank.directory, _vat(global_bank), 0):
-		bank_errors.append(bridge.get_last_error())
+	# end_session keeps the process-lifetime global VAT and mixer state. The
+	# disc bank is read-only, so reopening the same bank only makes a second
+	# 108 MB native copy overlap the first during a level reset.
+	if global_bank.is_empty():
+		installed_global_bank = {}
+	elif global_bank != installed_global_bank:
+		if bridge.set_global_vat(global_bank.directory, _vat(global_bank), 0):
+			installed_global_bank = global_bank.duplicate(true)
+		else:
+			bank_errors.append(bridge.get_last_error())
 	if play:
 		start_level(key)
 	elif not global_bank.is_empty() and not bridge.play_menu_music(false):

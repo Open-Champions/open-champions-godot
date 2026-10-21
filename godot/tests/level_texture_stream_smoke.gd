@@ -112,6 +112,34 @@ func run() -> void:
 	check(not display.resident.has(4949), "the cell farthest from the new focus was reused first")
 	check(display._load_next() and not display._load_next() and display.cell_loads == 13, "one missing cell is read per call")
 	check(display.resident.has(4949) and not display.resident.has(5252) and display.resident.size() == 9, "reading it reuses the farthest slot")
+	display.set_process(false)
+	display._retarget(Vector2(960.0 * 2.0 + 1.0, 960.0 * 2.0 + 1.0))
+	var first_missing := -1
+	for cell in display.wanted:
+		if not display.resident.has(int(cell)):
+			first_missing = int(cell)
+			break
+	var before_async: int = display.cell_loads
+	display._advance_stream()
+	check(first_missing >= 0 and display.pending_cell == first_missing and not display.resident.has(first_missing), "worker starts the nearest missing cell without publishing a partial cell")
+	var hidden_until_complete := true
+	for _i in range(120):
+		if display.pending_cell < 0: break
+		await process_frame
+		for instance in display.pending_built:
+			hidden_until_complete = hidden_until_complete and not instance.visible
+		display._advance_stream()
+	check(display.pending_cell < 0 and display.resident.has(first_missing) and display.cell_loads == before_async + 1, "worker publishes one complete cell before starting another")
+	check(hidden_until_complete, "staged groups stay invisible until the cell is complete")
+	display._drop(int(display.wanted[0])) # Exercise a focus change during a synthetic read.
+	display._advance_stream()
+	var stale: int = display.pending_cell
+	display._retarget(Vector2(-960.0 * 2.0 + 1.0, -960.0 * 2.0 + 1.0))
+	for _i in range(120):
+		if display.pending_cell < 0: break
+		await process_frame
+		display._advance_stream()
+	check(stale >= 0 and display.pending_cell < 0 and not display.resident.has(stale), "a cell outside the new focus window is discarded before publication")
 	holder.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(world_path)

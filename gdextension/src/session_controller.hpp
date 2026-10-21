@@ -109,7 +109,7 @@ class ChampionsSessionController : public godot::RefCounted {
   static godot::Dictionary
   present_terrain(const champions::simulation::rta::world_queries::LevelData &);
   static godot::Dictionary present_geometry(
-      const champions::presentation::rta::world_geometry::Geometry &);
+      const champions::presentation::rta::world_geometry::Geometry &, bool build_display = true);
   static void prepare_meshes(godot::Dictionary &);
   godot::Dictionary write_save_file(const godot::String &, bool direct);
   godot::Dictionary observation() const;
@@ -213,7 +213,7 @@ public:
   godot::Dictionary save_snapshot_file(const godot::String &path);
   godot::Dictionary prepare_save_file(const godot::String &path);
   godot::Dictionary load_terrain_file(const godot::String &path);
-  godot::Dictionary prepare_terrain_file(const godot::String &path);
+  godot::Dictionary prepare_terrain_file(const godot::String &path, bool build_display = true);
   // Level-spawn story start for the next terrain prepared from exactly `path`:
   // that level's objects.ob bytes (level_flow::story_start_ground). Empty
   // bytes or another path keep the historical origin start and check.
