@@ -11,7 +11,12 @@ constexpr std::uint32_t DIFFICULTY = 0x4f719c;
 constexpr std::uint32_t QUEST_VARS = 0x86da80;
 constexpr std::uint32_t QUEST_AT = 0x41d0;
 constexpr std::uint32_t QUEST_COUNT = 0x43d0;
-constexpr std::uint32_t MISSION_AT = 0x4bbf;
+// Mission rows 1..5: +0x4bbf + 1 * 13 = +0x4bcc through +0x4c0c. Row 0
+// (+0x4bbf..+0x4bcb) is not a mission row: clearAllSkills' pairs and the
+// countdowns live there (research-items 49bc578 docs/script-items.md 3).
+constexpr std::uint32_t MISSION_AT = 0x4bbf + FIRST_DIFFICULTY * MISSIONS;
+static_assert(MISSION_AT == 0x4bcc && MISSION_AT + DIFFICULTIES * MISSIONS == 0x4c0d,
+              "five mission rows end where the medal bytes start");
 constexpr std::uint32_t MEDAL_AT = 0x4c0d;
 constexpr std::uint32_t EVIL_AT = 0x4c1a;
 constexpr std::uint32_t DECISION_AT = 0x4c1b;

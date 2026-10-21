@@ -23,7 +23,13 @@ and drops the count by one. A string that would run past its 32-byte field,
 or a stored field with no terminator, is refused. On the console those would
 write or read into the neighbouring field.
 
-Mission bytes are five difficulties of thirteen missions. Bit 0 is available
+Mission bytes are five rows of thirteen missions, one row per difficulty
+1..5: `+0x4bbf + d × 13 + m`, that is +0x4bcc..+0x4c0c, ending where the
+medal bytes start (research-items `49bc578` `docs/script-items.md` section 3).
+`g_difficultyIdx` is 1 in the executable image, and a new campaign starts
+there. Row 0 would lie on the skill pairs and the countdown bytes, so a
+difficulty outside 1..5 is refused for every mission read and write, the hub
+name and the menu. Bit 0 is available
 and is written on the first `g_numPlayers` records. Bit 1 is complete and is
 written on all four records. Value −1 sets that bit. Any other value stores
 its bit 0. Mission 13 and above is not written. A negative mission index is
@@ -49,8 +55,8 @@ run that case.
 Quest variables are a lower-case name and a signed value byte. A name byte
 of 0x80 or more is refused (`ref_natives._lower`). `vars_get` appends an
 unknown name with 0. `vars_clearAll` zeros the values and keeps the names.
-A new character has mission 0 available and complete on all five
-difficulties.
+A new character has mission 0 available and complete on difficulties 1..5
+(`player_initNewCharacter`, research-items section 3).
 
 An item with flag bit 39 is removed on an act change unless its name
 contains `bloodstone` or `shardof`, or is exactly `spiritrunes`, `emptybag`,
@@ -122,7 +128,9 @@ These stay refused. Their bodies are not in the pinned quest contract:
 
 ## Saves
 
-`Campaign::save` writes a typed image, magic `OCQUEST1`, version 1. It is
+`Campaign::save` writes a typed image, magic `OCQUEST1`, version 2: its
+mission bytes are rows 1..5. A version-1 image held rows 0..4 and no row 5,
+so it is refused. No saved file carries this image yet (see below). It is
 not the PS2 card image. `save_build` was not re-run. `Host::save_campaign`
 copies the binder record and quest variables into the campaign first and
 returns that image. `Host::load_campaign` replaces the campaign and writes
@@ -138,8 +146,10 @@ capacities.
 
 `tools/generate_quests_vectors.py --research-dir R --tsv T --contract C`
 checks the research HEAD and imports the reference. Expected values come only
-from `ref_quests.py` and `ref_natives.py`. The first 241 lines are the round-1
-cases. Round 2 appends:
+from `ref_quests.py` and `ref_natives.py`. Every campaign case runs at difficulty 1,
+the image value, unless it names another of 1..5; record dumps are rows 1..5
+(+0x4bcc). The first 261 lines are the round-1 cases, including a row-5 case
+(mission 12 is +0x4c0c, the byte before the medals). Round 2 appends:
 
 - `difftest_quests.py`'s case structure on authored data: 37 helper cases of
   12 helpers, every menu path and launch chain (story, medal, bonus, evil,
@@ -154,7 +164,7 @@ cases. Round 2 appends:
   16 quest-variable runs; 200 random helper rows; 720 hub bit patterns;
   60 experience cases on two authored tables; 40 menu runs on random rows.
 
-11,304 lines. The test fails when the line count differs from the contract.
+11,324 lines. The test fails when the line count differs from the contract.
 
 ## Measure
 
@@ -208,6 +218,8 @@ mission command. The binder's `clearAllSkills` (exactly `ref_natives`) writes
 are +0x4bbf–+0x4bc7, the first 9 mission bytes of difficulty 0. Either the
 slot count or the mission offset in the research is wrong, or the original
 does this. That needs a research answer. This port follows the reference.
+(Answered by research-items `49bc578`: row 0 is not a mission row. See
+"Mission rows 1..5" below.)
 
 ## After the audit's script-host fixes (wave 17, 2026-10-21)
 
