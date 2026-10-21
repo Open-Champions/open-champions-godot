@@ -57,7 +57,14 @@ render-frame elapsed time, or Godot physics as substitutes.
   cold story query another job can call: one player, identity search (the file
   position, or the incoming slot when no marker takes), then that snap.
   `ground` is true when the snapped z is not the floor sentinel. It does not
-  call `findFreeSpot`. `entry_start_ground` is the same snap for an explicit
+  call `findFreeSpot`. When a `Player1` takes, the original runs
+  `Player1_ctor`'s `findFreeSpot` (spread 36, radius 24) and draws facing from
+  `g_randSeed`, whose value there is not a fixed constant (section 17.2). The
+  identity search is the research's ground measurement, not that start, so
+  the result sets `pre_search`: the xy is the marker before the search (the
+  original can be up to 36 away) and `facing` is left empty. With no marker
+  taken nothing is searched or drawn, `pre_search` is false and `facing` is
+  the incoming slot's. `entry_start_ground` is the same snap for an explicit
   previous level, entrance, recall flag, gate, or owner-supplied restore xy.
   A gate plan keeps the gate's own xy. `resolve_start` runs the caller's
   search; the caller owns the seed and the object list. `apply_act_entry`

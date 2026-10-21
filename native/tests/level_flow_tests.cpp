@@ -981,6 +981,18 @@ void round3_cases() {
       {}, {record("Player1", {}, v(400, 0, 0))}, far);
   CHECK(marked.marker_taken && marked.ground && marked.rank == 1 &&
         marked.position == v(400, 0, 8));
+  // LS-1: a taken Player1 runs findFreeSpot (spread 36) and a facing draw
+  // from g_randSeed (section 17.1-17.2). The seed is not a fixed constant, so
+  // the xy is the pre-search marker and the facing is left unset.
+  CHECK(marked.pre_search && !marked.facing.has_value());
+  // No marker takes: no search and no draw, so the incoming slot and its
+  // facing are the original's (section 5.1, the spawn is not cleared).
+  SpawnState incoming;
+  incoming.facing[0] = 0x1234;
+  auto untouched = story_start_ground(incoming, {}, high);
+  CHECK(!untouched.pre_search && untouched.facing.has_value() &&
+        *untouched.facing == 0x1234);
+  CHECK(!cold.pre_search && cold.facing.has_value() && *cold.facing == 0);
   auto reach = flat_field(2, 0, 4, 2, 30);
   CHECK(world_queries::terrain_height(reach, f(4), origin) ==
         world_queries::NO_FLOOR);

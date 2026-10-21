@@ -504,9 +504,18 @@ StoryGround ground_from(const StartResult &resolved, unsigned slot) {
   g.spawn_z = resolved.spawn.pos[slot][2];
   g.object_z = resolved.object_z[slot];
   g.position[2] = g.object_z;
-  g.facing = resolved.spawn.facing[slot];
   g.rank = resolved.spawn.rank;
   g.marker_taken = !resolved.took.empty();
+  // A taken marker runs Player1_ctor's findFreeSpot (spread 36, radius 24)
+  // and draws facing from g_randSeed, whose value at that point is not a
+  // fixed constant (research-levels 3ef714a docs/level-flow.md 17.1-17.2).
+  // The identity search and zero draw below are the research's ground
+  // measurement, not that start: the xy is the pre-search marker and the
+  // facing is left unset. With no marker taken, nothing is searched or drawn
+  // and the incoming slot keeps its facing (5.1).
+  g.pre_search = g.marker_taken;
+  if (!g.pre_search)
+    g.facing = resolved.spawn.facing[slot];
   g.ground = resolved.ground[slot];
   g.recall_cleared = resolved.recall_cleared;
   return g;

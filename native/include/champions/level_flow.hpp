@@ -200,9 +200,10 @@ StartResult resolve_start(const SpawnState &incoming,
 struct StoryGround {
   Vec3 position{};
   Raw spawn_z = 0, object_z = 0;
-  std::uint16_t facing = 0;
+  std::optional<std::uint16_t> facing;
   int rank = 0;
   bool marker_taken = false, ground = false, recall_cleared = false;
+  bool pre_search = false;
 };
 StoryGround story_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &,

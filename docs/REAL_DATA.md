@@ -144,7 +144,9 @@ What changed in the real-data scene:
   starts at `level_flow::story_start_ground` (cold story, one player, marker
   identity search, `player_ctor_z` at radius 12; docs/LEVEL_FLOW.md section
   17) instead of the origin, and refuses a level only when that snap has no
-  ground. `session_control::Config::start` carries the position; saves keep it
+  ground. When a marker took, that start is the marker before
+  `Player1_ctor`'s `findFreeSpot` (`start.pre_search` is true, up to 36 units
+  from the original) and no `start.facing` is published. `session_control::Config::start` carries the position; saves keep it
   (terrain marker byte 2). Terrain loaded without objects keeps the historical
   origin start and probes.
 - **Session mesh cap.** `present_geometry` merges each chunk's batches into
