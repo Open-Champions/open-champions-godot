@@ -51,6 +51,14 @@ moves only through `advance_draw_frame()`. The two counters are independent.
 The stream-driver timer still steps volumes at output sample 480, then every
 288 samples. That timer is not the frame cadence.
 
+A new `Playback` holds the process-start images. `end_session()` is a client
+session boundary, not an original routine: it stops the three streams as
+`audio_streamStop` does, ends effect voices and sequences, drops the level
+directory and discards unread output, and keeps the process-lifetime words
+(both frame counters, the duck words, the music volume, the stream volume words
+and the driver timer). The level-load advances of those counters were not
+executed and are not applied.
+
 ### Effects
 
 | Call | Behavior |
@@ -162,6 +170,7 @@ audio.pump_frames(4096)                                 # FIFO -> generator
 | `queue_level_entry(stream, name, flags)`, `queue_global_entry(stream, name, flags)`, `queue_stop(stream)` | bool |
 | `release_stream(stream)`, `set_stream_scale(stream, scale)`, `set_two_channel_output(bool)`, `set_frozen(bool)`, `set_sfx_volume(volume)` | — |
 | `set_music_volume(volume)` | bool; the player's 0..1 option as a float. Music is refused until it is called |
+| `end_session()` | — ; keeps the process-lifetime counters and duck words |
 | `play_menu_music(wait)`, `play_boss_music(type, object_name)`, `stop_boss_music()` | bool |
 | `get_stream_time(stream)` | seconds at 24 kHz |
 | `get_gated_flag_entries()` | count |

@@ -283,6 +283,14 @@ public:
   std::uint32_t stream_status(std::size_t stream) const;
 
   void tick();
+  // Client session boundary, not an original routine: the three streams are
+  // stopped as audio_streamStop does, effect voices and sequences end, the level
+  // directory is dropped and unread output is discarded. The process-lifetime
+  // words stay: g_soundFrame, g_drawFrame, the duck words, the music volume, the
+  // stream volume words and the driver timer (docs/audio-playback.md 260-265).
+  // The loading-screen g_drawFrame advance and game_loadLevel's two sound_update
+  // calls were not executed, so they are not applied.
+  void end_session();
   std::vector<std::array<float, 2>> drain(std::size_t max_frames);
   std::size_t buffered_frames() const { return fifo_.size(); }
 

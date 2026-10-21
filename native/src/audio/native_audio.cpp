@@ -1115,6 +1115,20 @@ void Playback::tick() {
   }
 }
 
+void Playback::end_session() {
+  for (std::size_t i = 0; i < stream_limit; ++i)
+    stream_stop(i);
+  for (auto &v : voices_)
+    v = Voice{};
+  for (auto &s : sequences_) {
+    s.active = false;
+    s.voice = -1;
+  }
+  level_ = Vat{};
+  level_active_ = false;
+  fifo_.clear();
+}
+
 std::vector<std::array<float, 2>> Playback::drain(std::size_t max_frames) {
   const auto count = std::min(max_frames, fifo_.size());
   std::vector<std::array<float, 2>> out(fifo_.begin(), fifo_.begin() + std::ptrdiff_t(count));

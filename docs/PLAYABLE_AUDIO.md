@@ -27,8 +27,16 @@ has started. Once play begins, audio only advances from ready ticks, including
 when returning to selection with a retained paused session. Pause lets already
 queued device PCM drain but freezes all further mixer/queue progress.
 
-New play, reset and successful continuation load restart cosmetic audio; the
-saved ready tick becomes its new origin. No PCM/voice/queue state is serialized,
+The client keeps one native mixer per process. `g_soundFrame`, `g_drawFrame`
+and the duck words are process-lifetime words (research
+`docs/audio-playback.md` "Executed frame counters"), so new play, reset and a
+successful continuation load call `end_session()` instead of restoring the
+process images: streams are stopped as `audio_streamStop` does (the stream
+volume words stay), voices and sequences end, and the level directory is
+dropped. This session boundary is client policy. The loading-screen
+`g_drawFrame` advance and `game_loadLevel`'s two `sound_update` calls were not
+executed, so the counter phase at level entry is not the original's and no
+advance is applied. The saved ready tick becomes the client's new origin. No PCM/voice/queue state is serialized,
 and native continuation bytes and deterministic state remain unchanged. Invalid
 loads do not replace audio. The read-only native `get_observation()` bridge
 reports clock, stream names/flags/queues, voices, FIFO/drop/error counts for checks.
@@ -68,8 +76,8 @@ supplies 1.0 as a fixture input, as the research difftest does.
 
 The real native selector queues `mx_maintheme_l.vag` on entry. Play installs an
 explicit synthetic level directory; its first `mx_theme` entry is selected on the
-first poll. `g_soundFrame`'s image is 0, so that entry starts on the first ready
-tick. `amb_` selection uses `g_drawFrame`'s low four bits. Level-generation changes
+first poll. Its fade bit waits until the kept stream-2 volume word reads 0, and
+it starts on the next 4-frame queue service after that. `amb_` selection uses `g_drawFrame`'s low four bits. Level-generation changes
 reinstall the synthetic level bank without guessing asset names from the WORLD path.
 
 The scene's explicit “Synthetic boss music (Broon)” control calls

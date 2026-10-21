@@ -846,8 +846,42 @@ void music_volume_input() {
             l.queued_count(2) == 1,
         "a supplied volume at the gate opens it");
 }
+// Audit AUD-4: g_soundFrame and g_drawFrame are process-lifetime words, and the
+// duck words are process statics (docs/audio-playback.md 210-212, 260-265). A
+// client session boundary keeps them instead of restoring the process images.
+void session_boundary() {
+  const auto ldir = directory({{"mx_theme_b.vag", 0}, {"amb_x_l.vag", 0x800}, {"", 0x1000}});
+  Playback p;
+  p.set_music_volume(float_one);
+  p.add_effect("fx", effect_pcm(3000, 48000, true));
+  p.add_stream("v", stream_pcm(100000));
+  p.set_level_vat(zero_vat(0x1000), parse_vat_directory(view(ldir), 0x1000), 0, 1);
+  p.queue_stream(1, "v", 0x20);
+  p.queue_stream(2, "v", 0x20);
+  ticks(p, 5);
+  p.advance_draw_frame();
+  p.step_duck();
+  const auto seq = p.start_sequence("fx", 1.0, {}, 0);
+  check(p.play_sample("fx", 1.0, 1.0, std::nullopt) >= 0 && seq >= 0 && p.queue_stream(2, "v", 1),
+        "session has voices, a sequence and queued music");
+  const auto duck = p.duck_current(), target = p.duck_target();
+  const auto volume = p.streams()[2].volume;
+  p.end_session();
+  bool silent = true;
+  for (const auto &v : p.voices())
+    silent = silent && !v.active;
+  for (std::size_t i = 0; i < Playback::stream_limit; ++i)
+    silent = silent && !p.streams()[i].active && p.queued_count(i) == 0;
+  check(silent && p.buffered_frames() == 0 && !p.poll_level(0) && !p.stop_sequence(seq),
+        "the boundary ends streams, voices, sequences, the level poll and unread output");
+  check(p.frame() == 5 && p.draw_frame() == draw_frame_image + 1 && p.duck_current() == duck &&
+            p.duck_target() == target && p.music_volume() == float_one &&
+            p.streams()[2].volume == volume && volume != 0,
+        "process-lifetime words survive the boundary");
+}
 int main() {
   try {
+    session_boundary();
     duck_channel_not_mixed();
     duck_not_in_tick();
     music_volume_input();

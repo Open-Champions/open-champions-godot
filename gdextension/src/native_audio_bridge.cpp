@@ -62,6 +62,7 @@ void ChampionsNativeAudio::_bind_methods() {
   ClassDB::bind_method(D_METHOD("set_frozen", "frozen"), &ChampionsNativeAudio::set_frozen);
   ClassDB::bind_method(D_METHOD("set_sfx_volume", "volume"), &ChampionsNativeAudio::set_sfx_volume);
   ClassDB::bind_method(D_METHOD("set_music_volume", "volume"), &ChampionsNativeAudio::set_music_volume);
+  ClassDB::bind_method(D_METHOD("end_session"), &ChampionsNativeAudio::end_session);
   ClassDB::bind_method(D_METHOD("play_menu_music", "wait_for_current"), &ChampionsNativeAudio::play_menu_music);
   ClassDB::bind_method(D_METHOD("play_boss_music", "creature_type", "object_name"),
                        &ChampionsNativeAudio::play_boss_music);
@@ -264,6 +265,9 @@ bool ChampionsNativeAudio::set_music_volume(double volume) {
   last_error_ = String();
   return true;
 }
+
+// Client session boundary; the process-lifetime counters and duck words stay.
+void ChampionsNativeAudio::end_session() { model_.end_session(); }
 
 bool ChampionsNativeAudio::play_menu_music(bool wait) {
   try {
