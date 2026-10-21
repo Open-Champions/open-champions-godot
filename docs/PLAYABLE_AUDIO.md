@@ -27,8 +27,16 @@ has started. Once play begins, audio only advances from ready ticks, including
 when returning to selection with a retained paused session. Pause lets already
 queued device PCM drain but freezes all further mixer/queue progress.
 
-New play, reset and successful continuation load restart cosmetic audio; the
-saved ready tick becomes its new origin. No PCM/voice/queue state is serialized,
+The client keeps one native mixer per process. `g_soundFrame`, `g_drawFrame`
+and the duck words are process-lifetime words (research
+`docs/audio-playback.md` "Executed frame counters"), so new play, reset and a
+successful continuation load call `end_session()` instead of restoring the
+process images: streams are stopped as `audio_streamStop` does (the stream
+volume words stay), voices and sequences end, and the level directory is
+dropped. This session boundary is client policy. The loading-screen
+`g_drawFrame` advance and `game_loadLevel`'s two `sound_update` calls were not
+executed, so the counter phase at level entry is not the original's and no
+advance is applied. The saved ready tick becomes the client's new origin. No PCM/voice/queue state is serialized,
 and native continuation bytes and deterministic state remain unchanged. Invalid
 loads do not replace audio. The read-only native `get_observation()` bridge
 reports clock, stream names/flags/queues, voices, FIFO/drop/error counts for checks.
@@ -58,10 +66,18 @@ PCM, sound banks, music or original animation sound-table associations are prese
 
 ## Music and retained gates
 
+`g_musicVolume` has no documented stored value, so the client has no default.
+`playable_audio.gd` keeps `music_volume` null until its owner calls
+`set_music_volume(volume)` with the player's option. While it is null the level
+poll's music call is refused (counted as `refused_music_polls` in the
+observation) and boss music is refused; menu music does not read the volume.
+The scene sets no value. `playable_wave_smoke_audio.gd` checks the refusal, then
+supplies 1.0 as a fixture input, as the research difftest does.
+
 The real native selector queues `mx_maintheme_l.vag` on entry. Play installs an
 explicit synthetic level directory; its first `mx_theme` entry is selected on the
-first poll. `g_soundFrame`'s image is 0, so that entry starts on the first ready
-tick. `amb_` selection uses `g_drawFrame`'s low four bits. Level-generation changes
+first poll. Its fade bit waits until the kept stream-2 volume word reads 0, and
+it starts on the next 4-frame queue service after that. `amb_` selection uses `g_drawFrame`'s low four bits. Level-generation changes
 reinstall the synthetic level bank without guessing asset names from the WORLD path.
 
 The scene's explicit “Synthetic boss music (Broon)” control calls
@@ -72,7 +88,9 @@ boss identities. Current combat carriers are not silently classified as bosses.
 
 Flags 0x40 and 0x100 are stored. Recall slices fade-stop stream 2 when status bit
 0x40 is set, and a cutscene gate leaves a stream-2 entry alone when bit 0x100 is
-set. Music ducking and VAT loop-restart spans follow the executed contract.
+set. VAT loop-restart spans follow the executed contract. Music ducking is
+not run by the client: the call site and order of `music_updateDucking` are not
+documented, and its channel word is not applied to the mix.
 Intro movie drift, the cutscene ±0.1 threshold, the 48 kHz labelling question,
 mute-for, delayed starts, original ANM sound tables, group-volume table values,
 SPU exhaustion, interpolation and final hardware mixing remain unimplemented.

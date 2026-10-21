@@ -907,5 +907,5 @@ func _attach_audio() -> void:
 	audio.configure(self,status)
 	controller.play_audio_tick.connect(audio.ready_tick)
 	_add_action("audio_boss", "Synthetic boss music (Broon)", func():
-		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / override gated)")
+		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / no music volume option / override gated)")
 	_add_action("audio_boss_stop", "Stop boss music", func(): audio.boss_leave())

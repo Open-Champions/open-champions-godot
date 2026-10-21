@@ -1,6 +1,9 @@
 extends Node
-# Presentation policy: fresh mixer on menu/play/load/reset; not serialized.
-# During play only native ready-tick signals advance sound. Device pulls never do.
+# One native mixer per process: g_soundFrame, g_drawFrame and the duck words are
+# process-lifetime words (research docs/audio-playback.md 260-265). Menu, play,
+# load and reset end the session (streams, voices, level poll) and keep them.
+# The loading-screen and game_loadLevel advances were not executed: none applied.
+# Not serialized. During play only native ready-tick signals advance sound.
 const Bank = preload("res://audio/synthetic_bank.gd")
 var bridge: RefCounted
 var player: AudioStreamPlayer
@@ -11,6 +14,9 @@ var last_tick := 0
 var menu_accumulator := 0.0
 var pushed_frames := 0
 var events: Array[Dictionary] = []
+# The player's music option, supplied by the owner. The executable's stored
+# g_musicVolume is not documented, so native music is refused while this is null.
+var music_volume = null
 var errors: Array[String] = []
 var label: Label
 
@@ -24,21 +30,26 @@ func configure(owner_scene: Control, status: Label) -> void:
 	player.stream = generator
 	player.volume_db = -18.0 # Authored preview volume, not a reconstructed mix gain.
 	add_child(player)
+	bridge = ClassDB.instantiate("ChampionsNativeAudio")
+	install_banks()
 	reset(false)
 
+func install_banks() -> void:
+	var bank := Bank.vat(["mx_maintheme_l.vag","mx_ba_broon_l.vag"])
+	if not bridge.set_global_vat(bank.directory,bank.bytes,0): errors.append(bridge.get_last_error())
+	if not bridge.register_vag("synthetic-step.vag",Bank.vag()): errors.append(bridge.get_last_error())
+	if not bridge.register_vag("synthetic-hit.vag",Bank.vag()): errors.append(bridge.get_last_error())
+
 func reset(play: bool, tick := 0, key := "") -> void:
-	if bridge != null: bridge.attach_playback(null)
+	if bridge == null: return
+	bridge.attach_playback(null)
 	player.stop()
-	bridge = ClassDB.instantiate("ChampionsNativeAudio")
+	bridge.end_session()
 	playing = play
 	last_tick = tick
 	level_key = key
 	menu_accumulator = 0
 	events.clear()
-	var bank := Bank.vat(["mx_maintheme_l.vag","mx_ba_broon_l.vag"])
-	if not bridge.set_global_vat(bank.directory,bank.bytes,0): errors.append(bridge.get_last_error())
-	if not bridge.register_vag("synthetic-step.vag",Bank.vag()): errors.append(bridge.get_last_error())
-	if not bridge.register_vag("synthetic-hit.vag",Bank.vag()): errors.append(bridge.get_last_error())
 	if play:
 		start_level(key)
 	else:
@@ -46,6 +57,11 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	player.play()
 	bridge.attach_playback(player.get_stream_playback())
 	update_label()
+
+func set_music_volume(volume: float) -> bool:
+	if bridge == null or not bridge.set_music_volume(volume): return false
+	music_volume = volume
+	return true
 
 func start_level(key: String) -> void:
 	level_key = key

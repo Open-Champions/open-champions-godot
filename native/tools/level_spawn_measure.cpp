@@ -7,6 +7,7 @@
 #include "champions/terrain_file.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -135,6 +136,150 @@ bool floor_at(world_queries::Level &level, Raw radius, const Vec3 &pos) {
   return world_queries::terrain_height(level, radius, pos) !=
          world_queries::NO_FLOOR;
 }
+unsigned water_chunks(const std::vector<std::uint8_t> &world) {
+  if (world.size() < 0x54)
+    return 0;
+  const auto chunks = u32(world, 0);
+  const auto table = u32(world, 0x24);
+  unsigned water = 0;
+  for (std::uint32_t i = 0; i < chunks; ++i) {
+    const auto at = std::uint64_t(table) + std::uint64_t(i) * 0x3c + 0x24;
+    if (at + 4 > world.size())
+      return water;
+    if (u32(world, static_cast<std::size_t>(at)) & 0x80)
+      ++water;
+  }
+  return water;
+}
+Raw raw_float(float value) {
+  Raw out;
+  std::memcpy(&out, &value, 4);
+  return out;
+}
+float float_raw(Raw value) {
+  float out;
+  std::memcpy(&out, &value, 4);
+  return out;
+}
+// Integer offsets around a centre, added in binary64 and rounded back to f32,
+// matching the section 18 lattice (radius 11.25, ix^2 + iy^2 <= 37^2).
+unsigned lattice_misses(world_queries::Level &level, const Vec3 &centre) {
+  const float fx = float_raw(centre[0]);
+  const float fy = float_raw(centre[1]);
+  const Raw query = raw_float(11.25f);
+  unsigned misses = 0;
+  constexpr int limit = 37;
+  for (int ix = -limit; ix <= limit; ++ix)
+    for (int iy = -limit; iy <= limit; ++iy) {
+      if (ix * ix + iy * iy > limit * limit)
+        continue;
+      const float qx =
+          static_cast<float>(static_cast<double>(fx) + static_cast<double>(ix));
+      const float qy =
+          static_cast<float>(static_cast<double>(fy) + static_cast<double>(iy));
+      const Vec3 pos{raw_float(qx), raw_float(qy), centre[2]};
+      if (!floor_at(level, query, pos))
+        ++misses;
+    }
+  return misses;
+}
+struct ColdTally {
+  unsigned n = 0, origin_floor = 0, start_floor = 0, ring_floor = 0;
+  unsigned search_ok = 0, search_n = 0, stand_ok = 0, stand_n = 0;
+  unsigned lattice = 0, decode_failures = 0, stand_failures = 0, story = 0;
+  std::vector<unsigned> water, alts, index;
+};
+// A geometry-skipped archive is cold when radius 12 at the origin is the
+// sentinel and an ArenaPlayerStart exists. Decode failures here are counted
+// and do not fail the tool: unrelated skipped archives are not the three.
+void consider_cold(ColdTally &tally, unsigned index,
+                   const std::vector<std::uint8_t> &world_bytes,
+                   const std::vector<std::uint8_t> *objects_bytes) {
+  world_queries::Level level;
+  try {
+    level = world_queries::Level(terrain_file::decode(world_bytes));
+  } catch (const std::exception &) {
+    ++tally.decode_failures;
+    return;
+  }
+  if (floor_at(level, PLACEMENT_RADIUS, kOrigin))
+    return;
+  std::vector<Record> records;
+  try {
+    if (objects_bytes)
+      records = parse_objects(
+          {objects_bytes->data(), objects_bytes->size()});
+  } catch (const std::exception &) {
+    ++tally.decode_failures;
+    return;
+  }
+  const Record *start = nullptr;
+  unsigned alts = 0;
+  for (const auto &record : records) {
+    if (record.cls == "ArenaPlayerStart")
+      start = &record;
+    else if (record.cls == "ArenaPlayerAlternate")
+      ++alts;
+  }
+  if (!start)
+    return;
+  ++tally.n;
+  tally.index.push_back(index);
+  tally.water.push_back(water_chunks(world_bytes));
+  tally.alts.push_back(alts);
+  if (floor_at(level, PLACEMENT_RADIUS, start->position))
+    ++tally.start_floor;
+  const auto centre = arena_ring_centre(start->position, 0, 1, true);
+  if (floor_at(level, PLACEMENT_RADIUS, centre))
+    ++tally.ring_floor;
+  const int specs[][2] = {{1, 0}, {2, 1}, {4, 1}, {4, 2}, {4, 3}};
+  for (const auto &spec : specs)
+    tally.lattice += lattice_misses(
+        level, arena_ring_centre(start->position, spec[1], spec[0], true));
+  auto blocked = [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_test_flag1(level, radius, pos);
+  };
+  auto height = [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_height(level, radius, pos);
+  };
+  for (std::uint32_t seed : {0u, 20973u}) {
+    ++tally.search_n;
+    objects::World world(objects::CallbackPolicy::ReferenceBase);
+    world.shared = SharedRandom(seed);
+    const auto placed = arena_initial_place(
+        start->position, 0, 1, true,
+        [&](const Vec3 &at, int spread, int radius, bool any) {
+          return world.find_free_spot(at, spread, radius, any, blocked, height);
+        },
+        false, 0);
+    if (player_ctor_z(placed.pos, PLACEMENT_RADIUS, height) !=
+        world_queries::NO_FLOOR)
+      ++tally.search_ok;
+  }
+  for (std::uint32_t seed : {0u, 20973u}) {
+    ++tally.stand_n;
+    try {
+      objects::World world(objects::CallbackPolicy::ReferenceBase);
+      world.shared = SharedRandom(seed);
+      for (std::size_t n = 0; n < records.size(); ++n)
+        world.construct(0x20000000u + static_cast<std::uint32_t>(n) * 0x80u,
+                        records[n].position);
+      const auto found = world.find_free_spot(
+          centre, ARENA_FIRST_SPREAD, ARENA_SEARCH_RADIUS, false, blocked,
+          height);
+      if (player_ctor_z(found.first, PLACEMENT_RADIUS, height) !=
+          world_queries::NO_FLOOR)
+        ++tally.stand_ok;
+    } catch (const std::exception &) {
+      ++tally.stand_failures;
+    }
+  }
+  try {
+    if (story_start_ground({}, records, level).ground)
+      ++tally.story;
+  } catch (const std::exception &) {
+  }
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -176,6 +321,7 @@ int main(int argc, char **argv) {
            story_ground = 0, origin_r4_floor = 0, origin_r12_floor = 0,
            marker_floor = 0, search_floor = 0, search_cases = 0, arena_n = 0,
            arena_floor = 0, scenario_miss = 0, measure_failures = 0;
+  ColdTally cold;
   objects::World world(objects::CallbackPolicy::ReferenceBase);
   for (const auto &path : gobs) {
     const auto stem = path.stem().string();
@@ -230,6 +376,8 @@ int main(int argc, char **argv) {
     }
     if (census == Census::Skip) {
       ++geometry_skipped;
+      consider_cold(cold, paired - 1, world_lump->bytes,
+                    objects_lump ? &objects_lump->bytes : nullptr);
       continue;
     }
     world_queries::Level level;
@@ -354,6 +502,31 @@ int main(int argc, char **argv) {
             << "geometry_bad " << geometry_bad << '\n'
             << "geometry_skipped " << geometry_skipped << '\n'
             << "measure_failures " << measure_failures << '\n';
+  auto water = cold.water;
+  auto alts = cold.alts;
+  std::sort(water.begin(), water.end());
+  std::sort(alts.begin(), alts.end());
+  std::cout << "cold " << cold.n << '\n'
+            << "cold_origin_floor " << cold.origin_floor << '\n'
+            << "cold_start_floor " << cold.start_floor << '\n'
+            << "cold_ring_floor " << cold.ring_floor << '\n'
+            << "cold_search_snap " << cold.search_ok << '/' << cold.search_n
+            << '\n'
+            << "cold_stand_in " << cold.stand_ok << '/' << cold.stand_n << '\n'
+            << "cold_lattice_misses " << cold.lattice << '\n'
+            << "cold_story " << cold.story << '\n'
+            << "cold_decode_failures " << cold.decode_failures << '\n'
+            << "cold_stand_failures " << cold.stand_failures << '\n'
+            << "cold_water";
+  for (auto value : water)
+    std::cout << ' ' << value;
+  std::cout << "\ncold_alternates";
+  for (auto value : alts)
+    std::cout << ' ' << value;
+  std::cout << "\ncold_index";
+  for (auto value : cold.index)
+    std::cout << ' ' << value;
+  std::cout << '\n';
   return measure_failures || read_failures || lump_failures || decode_failures ||
                  geometry_bad
              ? 1

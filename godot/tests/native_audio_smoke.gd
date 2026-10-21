@@ -66,6 +66,8 @@ func run() -> void:
 	vat.resize(0x1000)
 	check(audio.set_global_vat(vat_directory(["mx_maintheme_l.vag", "mx_ba_broon_l.vag"], true, 0x1000), vat, 0), "global VAT")
 	check(audio.play_menu_music(false), "menu music queued")
+	check(not audio.play_boss_music("FatCyclops", "Broon") and audio.get_last_error().contains("g_musicVolume"), "boss music refused without a music volume")
+	check(not audio.set_music_volume(1.5) and audio.set_music_volume(1.0), "music volume option 0..1 (fixture value)")
 	check(audio.play_boss_music("FatCyclops", "Broon"), "boss music queued")
 	check(audio.get_gated_flag_entries() == 0, "flags 0x40 and 0x100 are applied by their callers, not counted as gated")
 	check(audio.set_level_vat(vat_directory(["amb_x_l.vag"], false, 0x800), vat.slice(0, 0x800), 0, 100), "level VAT")
