@@ -125,10 +125,10 @@ Scene sweep, all 111 levels (headless, four slices, 60 ready ticks each):
   - User particle definitions and skill recipe JSON both loaded.
   - Peaks: 1.06 GB static, 0.76 GB video.
 
-Not documented, so not done:
-- Water drawing constants: colour, alpha FIX, waves and the waterenv UV
-  mapping. Tiles use one labelled neutral material at the documented placement.
-- The ripple simulation step and the grid lifetime.
+Not documented at this round, so not done then:
+- Water drawing constants were one labelled neutral material. Colour, FIX,
+  slope UVs, the wave and layer 3 are now [WATER_DRAW.md](WATER_DRAW.md).
+  The claim-frame seed and the drawer splash point stay refused.
 - Model header +0x18 values other than 1 and 9, and the context-2
   environment pass.
 
@@ -204,4 +204,21 @@ Still refused or not done:
 - Light records only replace the sun, ambient and base; the special-chunk
   light modes stay gated (docs/NATIVE_FX.md).
 - The HUD font row is a user choice; FNT header +2 is still not a line height.
+
+## Water draw (2026-10-20)
+
+The neutral tile is replaced by the documented layer-3 surface
+([WATER_DRAW.md](WATER_DRAW.md)). The wave steps on `ready_ticks`. A new
+block is a zero grid because the claim-frame weights stay refused, so a real
+tile stays flat and samples one texel of the water texture.
+
+Private disc, read-only, counts only. The scene loaded the first 3 levels
+that contain water (2 earlier levels had none and were not played). 223
+tiles were drawn. All 3 water textures decoded at 64×64. The run had 0
+failed checks. Nine captures are in gitignored
+`work/private/water-draw-captures/` (play, creature, and overview for each
+level). The pools are flat dark teal sheets blended over the ground. No
+ripples, which is the refused claim seed. On the third level the sheet
+draws over nearer rock: the documented test does not reject a pixel for
+being behind existing geometry.
 
