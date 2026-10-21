@@ -1,6 +1,7 @@
 extends SceneTree
 
 const Factory = preload("res://scenes/level_texture_material.gd")
+const Terrain = preload("res://scenes/level_texture_terrain.gd")
 const LevelDrawCamera = preload("res://scenes/level_draw_camera.gd")
 var checks := 0
 var failed := 0
@@ -85,6 +86,7 @@ func run() -> void:
 	check(pixel.g > 0.8 and pixel.r < 0.05, "environment chunk without its first pass draws its base pass opaque")
 	viewport.queue_free()
 	camera_rows()
+	await constant_light()
 	await environment_pass()
 	if failed:
 		print("level texture material: ", failed, " of ", checks, " checks failed")
@@ -144,6 +146,39 @@ func render_view(perspective: bool) -> SubViewport:
 	camera.current = true
 	viewport.add_child(camera)
 	return viewport
+
+# A flat constant-light chunk (flag 0x200, constant 0) at base level 0x80 is
+# texel x 128 / 128: the texture is unchanged (render-pipeline.md section 9
+# item 3). Without a documented base level the constant colour is refused and
+# the chunk keeps its base texture only.
+func constant_light() -> void:
+	var viewport := render_view(false)
+	var texel := PackedByteArray([0x60, 0xa0, 0x30, 0])
+	var source := {"width": 1, "height": 1, "rgba": texel}
+	var positions := PackedVector3Array()
+	for point in quad_arrays(0.1, 1.0)[Mesh.ARRAY_VERTEX]: positions.push_back(Vector3(point.x, -point.z, point.y))
+	var surface := {"image": 0, "positions": positions, "uv": quad_arrays(0.1, 1.0)[Mesh.ARRAY_TEX_UV], "alpha1": 1, "test1": 0x587f4, "blend_enabled": true, "sort_layer": 4, "dynamic_light": false, "light_constant": 0, "environment": false}
+	var terrain: Node3D = Terrain.build({"images": [source], "surfaces": [surface]}, true)
+	check(terrain != null, "constant-light terrain builds")
+	viewport.add_child(terrain)
+	var chunk: MeshInstance3D = terrain.get_child(0)
+	var unlit_colours = chunk.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	check(unlit_colours == null or unlit_colours.is_empty(), "no constant colour is stored before the level's base level is known")
+	var methods: Array = []
+	for method in (Terrain as Script).get_script_method_list(): methods.append(str(method.name))
+	var native = ClassDB.instantiate("ChampionsLevelTexturePreview")
+	var builder: Object = load("res://scenes/level_texture_terrain.gd")
+	if "set_constant_light" in methods:
+		check(not builder.call("set_constant_light", chunk, 0x30, native), "a base level other than 0x80, 0x40 or 0x20 is refused")
+		check(builder.call("set_constant_light", chunk, 0x40, native), "base level 0x40 is accepted")
+		var stored: PackedColorArray = chunk.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+		check(stored.size() == 6 and stored[0].r8 == 0x40, "flat constant 0 at base 0x40 stores channel 0x40")
+		check(builder.call("set_constant_light", chunk, 0x80, native), "base level 0x80 is accepted")
+	native.free()
+	for i in 4: await process_frame
+	var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
+	check(absf(pixel.r8 - 0x60) <= 2 and absf(pixel.g8 - 0xa0) <= 2 and absf(pixel.b8 - 0x30) <= 2, "constant 0 at base 0x80 leaves the texel unchanged (%d, %d, %d)" % [pixel.r8, pixel.g8, pixel.b8])
+	viewport.queue_free()
 
 # The environment first pass is modulated by the vertex colour, and its screen
 # term is (sx, sy) in pixels of the 1280 x 448 buffer from its centre with y

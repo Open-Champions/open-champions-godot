@@ -7,7 +7,10 @@ static var _shaders: Dictionary = {}
 # 9 is src + dst × As, 0x48 is dst + src × As, and 0x2a (context 2) is src.
 # Flag 0x400 discards a fragment whose alpha byte is at or above 0x2f.
 # World chunks keep the frame depth test and depth write. Automap tiles do not.
-const PLAY_LIGHT_BASE := 128
+# Level chunks are modulate: final = texel x colour / 128 (render-pipeline
+# section 9 item 3). Constant-light chunks store the channel byte / 255 and set
+# modulate_scale = 255 / 128; dynamic chunks keep native-fx's existing / 255
+# presentation (scale 1).
 
 static func create(source: Texture2D, surface: Dictionary, native_lighting := false) -> ShaderMaterial:
 	var alpha1 := int(surface.alpha1)
@@ -54,6 +57,7 @@ static func create(source: Texture2D, surface: Dictionary, native_lighting := fa
 	code += "uniform sampler2D env_texture : source_color, filter_linear, repeat_enable;\n"
 	code += "uniform vec4 env_row4 = vec4(0.0);\n"
 	code += "uniform vec4 env_row5 = vec4(192.0, 192.0, 192.0, 192.0);\n"
+	code += "uniform float modulate_scale = 1.0;\n"
 	if mode == "env":
 		# Program 0x48 computes the second coordinate per vertex (render-pipeline
 		# 4.6): n' = stored normal / 16 plus 0.07 x (sx, sy), where (sx, sy) are
@@ -74,13 +78,13 @@ static func create(source: Texture2D, surface: Dictionary, native_lighting := fa
 	code += "void fragment() {\n vec4 texel = texture(base_texture, UV);\n"
 	code += " float gs = clamp(texel.a * (255.0 / 128.0), 0.0, 1.0);\n"
 	code += " bool keep = !(cutout && texel.a * 255.0 >= 47.0);\n"
-	code += " vec3 lit = texel.rgb * COLOR.rgb;\n" if native_lighting else " vec3 lit = texel.rgb;\n"
+	code += " vec3 lit = min(texel.rgb * COLOR.rgb * modulate_scale, vec3(1.0));\n" if native_lighting else " vec3 lit = texel.rgb;\n"
 	code += " vec3 rgb = lit;\n"
 	if mode == "env":
 		# The environment pass is modulated by the same vertex colour
 		# (render-pipeline section 9 item 6).
 		code += " vec3 env_texel = texture(env_texture, env_uv / vec2(textureSize(env_texture, 0))).rgb;\n"
-		code += " vec3 env_lit = env_texel * COLOR.rgb;\n" if native_lighting else " vec3 env_lit = env_texel;\n"
+		code += " vec3 env_lit = min(env_texel * COLOR.rgb * modulate_scale, vec3(1.0));\n" if native_lighting else " vec3 env_lit = env_texel;\n"
 		code += " if (use_env) {\n"
 		code += "  vec3 src = lit;\n  vec3 dest = env_lit;\n"
 		code += "  if (alpha_mode == 2) rgb = src * (1.0 - gs);\n"

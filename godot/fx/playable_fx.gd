@@ -9,6 +9,7 @@ extends Node3D
 # through the exact fx_spawn 0 recipe and decal_add on the same bridge.
 const Renderer = preload("res://fx/native_fx_renderer.gd")
 const Fixture = preload("res://fx/playable_fx_fixture.gd")
+const LevelTerrain = preload("res://scenes/level_texture_terrain.gd")
 var renderer: Node3D
 var scene: Control
 var gore_detail := 2
@@ -274,9 +275,11 @@ func prepare_mesh(source: Mesh) -> ArrayMesh:
 
 func light(instance: MeshInstance3D, model: bool) -> void:
 	if instance == null or instance.mesh == null or not instance.visible: return
-	# Constant-light chunks already store world_constant_channel colours.
-	# shade_world stays on the dynamic chunks only.
-	if not model and not instance.get_meta("native_fx_world_dynamic", true): return
+	# Constant-light chunks take world_constant_channel on the loaded level's
+	# base level; shade_world stays on the dynamic chunks only.
+	if not model and not instance.get_meta("native_fx_world_dynamic", true):
+		light_constant(instance)
+		return
 	if instance.has_meta("play_fx_mesh") and instance.get_meta("play_fx_mesh") == instance.mesh and instance.get_meta("play_fx_transform", Transform3D()) == instance.global_transform: return
 	var source: Mesh = instance.mesh
 	var needs_normals: bool = not source is ArrayMesh
@@ -296,6 +299,16 @@ func light(instance: MeshInstance3D, model: bool) -> void:
 	instance.set_meta("play_fx_mesh", instance.mesh)
 	instance.set_meta("play_fx_transform", instance.global_transform)
 	lighting_calls["model" if model else "world"] += 1
+
+# The base level is the loaded level's record (its flag word); without one the
+# constant colour is refused and the chunk keeps its base texture only.
+func light_constant(instance: MeshInstance3D) -> void:
+	if not instance.has_meta("level_constant_light"): return
+	var base := int(level_light_record.get("base", -1)) if level_light_active else -1
+	if int(instance.get_meta("level_constant_base", -1)) == base: return
+	var loader: Object = ClassDB.instantiate("ChampionsLevelTexturePreview") if ClassDB.class_exists("ChampionsLevelTexturePreview") else null
+	LevelTerrain.set_constant_light(instance, base, loader)
+	if loader != null: loader.free()
 
 func light_world() -> void:
 	for instance in scene.terrain_root.get_children():

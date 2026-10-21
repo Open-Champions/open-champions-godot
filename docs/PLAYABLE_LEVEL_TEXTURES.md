@@ -52,13 +52,19 @@ level/sun/point inputs remain the labelled synthetic lighting fixture;
 original WORLD light entities are not loaded. Model and skinned-pose lighting
 remains independent.
 
-Chunks whose flags select flash (−230), full (+230) or flat (0) store
-`world_constant_channel` on the fixture base 128 and skip `shade_world`.
-Flag 0x100 wins over 0x2000, and 0x2000 wins over 0x200. Negative sums wrap
-as `(2 × sum) mod 256`; other sums clamp at 255. The channel is presented as
-`channel / 255`, matching the existing vertex-colour path. This is the
-documented CPU constant, not a second lighting model and not console
-final-colour parity.
+Chunks whose flags select flash (−230), full (+230) or flat (0) skip
+`shade_world` and store `world_constant_channel` on the **loaded level's base
+level**: 0x80, or 0x40 / 0x20 by the level's flag word (render-pipeline
+section 5.1; research-fx `8e66747` lighting.md section 10.2). That base comes
+from the level light record resolved for the loaded level; without one the
+constant colour is refused and the chunk draws its base texture only
+(labelled gated). Flag 0x100 wins over 0x2000, and 0x2000 wins over 0x200.
+Negative sums wrap as `(2 × sum) mod 256`; other sums clamp at 255. The chunk
+is presented as `texel × channel / 128`, clamped (render-pipeline section 9
+item 3): the vertex colour stores `channel / 255` and the shader multiplies by
+255 / 128. Dynamically lit chunks keep native-fx's existing `rgb / 255`
+presentation, which halves a base-level texel; that convention predates this
+adapter and is not changed here.
 
 Environment flag 0x10 rebuilds its material when the caller supplies an image.
 The camera adapter uploads the documented rows each frame. It reads
