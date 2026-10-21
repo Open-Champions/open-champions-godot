@@ -1,0 +1,33 @@
+{
+  "generator_sha256": "4e40f9f921266cc689aecd043ebead430b257ca52e01e713e51c4a3a76b3b111",
+  "lines": {
+    "charm/20973": 2452,
+    "charm/7": 2452,
+    "formats/20973": 2514,
+    "formats/7": 2514,
+    "formats_ascii/20973": 814,
+    "formats_ascii/7": 814,
+    "hash/20973": 4001,
+    "hash/7": 4001,
+    "helpers/20973": 2217,
+    "helpers/7": 2217,
+    "hud/20973": 6009,
+    "hud/7": 6009,
+    "sound/20973": 3427,
+    "sound/7": 3534,
+    "tables/20973": 4543,
+    "tables/7": 4788
+  },
+  "pins": {
+    "docs/strings.md": "ab48cb18861d444d26658623dbddbdbc0eb9e423ec093af50795cc984faf130c",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_strings.py": "7e40f746a4ab66feb21afb4a6e38f27d08a9048135776452102364374c268b77"
+  },
+  "reference_commit": "d4987fd",
+  "schema": "rta-strings-v1",
+  "seeds": [
+    20973,
+    7
+  ],
+  "vectors_sha256": "d7421d2661741b75d053872bda439e713794d988c7873433411afddf291757f2"
+}

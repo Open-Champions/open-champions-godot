@@ -13,13 +13,14 @@ else()
     target_compile_options(champions-level-factory PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/script_items_targets.cmake")
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/strings_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
     champions-script-builtins champions-level-flow champions-fx-sim champions-quests
-    champions-level-factory champions-monsters-1 champions-script-items)
+    champions-level-factory champions-monsters-1 champions-script-items champions-strings)
 # The extension links native-audio-binding-core after this static library.
 if(TARGET champions-native-audio)
     target_link_libraries(champions-script-commands PUBLIC champions-native-audio)
