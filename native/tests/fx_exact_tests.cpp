@@ -882,6 +882,23 @@ void check(bool ok, const char *what) {
 
 void unit_tests();
 
+// tools/generate_fx_trig_cases.py: emitter cases from the pinned ref_particles with
+// math_cos16 in place of the host cosine (audit TRIG-1). Keys are "case/field".
+std::string vector_dir;
+std::map<std::string, std::string> trig_cases() {
+    std::map<std::string, std::string> out;
+    std::ifstream in(vector_dir + "/fx_trig_cases.tsv");
+    std::string c, f, v;
+    while (in >> c >> f >> v)
+        out[c + "/" + f] = v;
+    check(!out.empty(), "fx_trig_cases.tsv present");
+    return out;
+}
+bool same_bits(double got, const std::map<std::string, std::string> &want, const std::string &key) {
+    const auto it = want.find(key);
+    return it != want.end() && R::double_bits(got) == std::stoull(it->second, nullptr, 16);
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -893,6 +910,7 @@ int main(int argc, char **argv) {
         const std::string p = argv[3], c = argv[4];
         return run_vectors(argv[1], &p, &c);
     }
+    vector_dir = argv[1];
     unit_tests();
     std::cout << assertions << " synthetic assertions, " << failures << " failed\n";
     const int v = run_vectors(argv[1], nullptr, nullptr);
@@ -1168,10 +1186,24 @@ void particle_tests() {
         X::EmitterRecord r;
         r.rate = 1; r.vel = {0, 0, 32}; r.off_z = 5;
         auto out = X::emitter_run(r, {100.0, 50.0, 10.0}, 1, rng);
-        check(out.size() == 1 && out[0].pos == X::Vec3d{100.0, 50.0, 15.0}, "straight up position");
+        const auto want = trig_cases();
+        check(out.size() == 1 && want.count("straight_up/count") &&
+                  want.at("straight_up/count") == "1" &&
+                  rng.seed == std::stoul(want.at("straight_up/seed")),
+              "straight up count and seed (generated)");
         // sin16(0) is +2^-22, so a zero tilt still moves the velocity off the axis.
-        almost(out[0].vel[0], 1.955310074665804e-06, 9, "sideways speed from sin16(0)");
-        almost(out[0].vel[2], 32.0, 9, "upward speed");
+        // Expected bits come from the pinned reference, not from this port.
+        if (out.size() == 1) {
+            check(same_bits(out[0].pos[0], want, "straight_up/pos0.x") &&
+                      same_bits(out[0].pos[1], want, "straight_up/pos0.y") &&
+                      same_bits(out[0].pos[2], want, "straight_up/pos0.z"),
+                  "straight up position (generated)");
+            check(same_bits(out[0].vel[0], want, "straight_up/vel0.x"),
+                  "sideways speed from sin16(0) (generated)");
+            check(same_bits(out[0].vel[1], want, "straight_up/vel0.y") &&
+                      same_bits(out[0].vel[2], want, "straight_up/vel0.z"),
+                  "upward speed (generated)");
+        }
     }
     {
         X::CosmeticRng rng(3);
