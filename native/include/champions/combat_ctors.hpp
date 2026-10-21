@@ -74,4 +74,67 @@ void install(A::Model &);
 // prefix, letters compared through the C library class table at G_CTYPE.
 int str_prefix_differs(A::Model &, Address text, Address prefix);
 bool on_airhub(A::Model &);
+
+// ---- Round 2: research t3/research-combat-ctors-2 at 5b92837 ------------------
+// docs/spec/combat-ctors-2.md (tools/ref_combat_ctors2.py, executed by
+// tools/difftest_combat_ctors2.py) and docs/spec/antqueen-run.md
+// (tools/ref_antqueen_run.py, executed by tools/difftest_antqueen_run.py), each
+// with 0 mismatches on seeds 20973 and 7. combat_ctors_2.cpp holds the bodies.
+inline constexpr Raw SKELETON_IS_ENEMY = 0x2a7e04, SKELETON_TAKE_DAMAGE = 0x2a774c,
+                     ANTQUEEN_TAKE_DAMAGE = 0x2378fc, SOUL_TAKE_DAMAGE = 0x2aa908,
+                     ANTQUEEN_DTOR = 0x3c3c10, SKELETON_DTOR = 0x3cc5b8,
+                     SOUL_DTOR = 0x3cc72c, FIRE_DTOR = 0x3c5050,
+                     LOOSEFIRE_DTOR = 0x3c6778, POISON_GAS_DTOR = 0x3c7878,
+                     ANTQUEEN_PICK_FLY_DEST = 0x238150;
+inline constexpr Address VT_CREATURE = 0x50cc58, VT_GAMEOBJECT = 0x5122a8,
+                         VT_FIRE = 0x50f208, VT_LOOSEFIRE = 0x50e2b8,
+                         VT_POISON_GAS = 0x50d500, VT_SI_TYPEINFO = 0x51df48,
+                         VT_USER_TYPEINFO = 0x51df78, S_NAME_KEY = 0x5321b0;
+// A type-info getter (combat-ctors-2.md section 3): its descriptor, the name
+// string it stores, and its base getter (0: GameObject's, which has none).
+struct TypeInfo {
+  Raw getter;
+  Address descriptor, name;
+  Raw base;
+  const char *text;
+};
+extern const TypeInfo TYPE_INFOS[8];
+inline constexpr Raw TI_GAMEOBJECT = 0x3c7e10, TI_CREATURE = 0x3c2608,
+                     TI_SKELETON = 0x3cc62c, TI_SOUL = 0x3cc7a0,
+                     TI_ANTQUEEN = 0x3c3c78, TI_SKELIGHT = 0x3cc6dc,
+                     TI_PLAYER = 0x3c3ab8, TI_DEMON = 0x3ca81c;
+const TypeInfo *find_type_info(Raw getter);
+// A getter of TYPE_INFOS: the descriptor, built on first use.
+Address type_info(A::Model &, Raw getter);
+// typeid(*obj): slot 0 of obj's table. A getter of TYPE_INFOS runs here; a
+// getter the model has as a class body runs that (not recorded); anything
+// else is the call-out "Creature.v0" with no argument, as the research's.
+Address type_id(A::Model &, Address obj);
+// rtti_typeInfoEquals 0x3b1250: the same descriptor, or equal name strings.
+bool type_info_equals(A::Model &, Address a, Address b);
+// Skeleton_isEnemy 0x2a7e04 (slot 20) -> 0, 1, 2 or 5.
+Raw skeleton_is_enemy(A::Model &, Address c, Raw other);
+// Soul_takeDamage 0x2aa908 (slot 2). A null attacker makes the call-out
+// cxx_throwBadTypeid and then throws Unsupported (what catches the throw is
+// Unknown, combat-ctors-2.md section 8).
+void soul_take_damage(A::Model &, Address c, Raw attacker, Raw flags, Raw amount);
+// The six inline destructors (slot 1, flags), with Creature_dtor 0x117128 and
+// GameObject_dtor 0x14cf90 (research ref_combat_monsters, borrowed unchanged)
+// beneath them. Their call-outs: iter_begin, iter_next, iter_end, Spell.v1,
+// handle_clear, sub_202500, AnimState_dtor, objNames_remove and pool_free.
+bool is_class_dtor(Raw fn);
+void class_dtor(A::Model &, Raw fn, Address object, Raw flags);
+void creature_dtor(A::Model &, Address c, Raw flags);
+void gameobject_dtor(A::Model &, Address o, Raw flags);
+// AntQueen_run 0x236f78, every state of the switch.
+void antqueen_run(A::Model &, Address c);
+// AntQueen_pickFlyDest 0x238150 (queen) -> the position it writes to out.
+Vec3 antqueen_pick_fly_dest(A::Model &, Address q);
+// AntQueen_fadeBankTracks 0x2385dc and AntQueen_updateBank 0x238448
+// (research combat round 5 2980af1; ref_combat_round5.QueenModel).
+void antqueen_fade_bank_tracks(A::Model &, Address c);
+void antqueen_update_bank(A::Model &, Address c);
+// The round-2 class bodies (isEnemy, the three takeDamage slots, the type-info
+// getters and the six destructors) as class bodies of the model.
+void install_round2(A::Model &);
 } // namespace champions::simulation::rta::combat_ctors

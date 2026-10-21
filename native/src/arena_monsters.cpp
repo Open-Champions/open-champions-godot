@@ -180,6 +180,9 @@ void Model::store(Address a, std::size_t size, std::uint64_t value) { write(a,si
 void Model::base_take_damage(Address c, Raw attacker, Raw flags, Raw amount) {
   Depth guard(depth_,limits_.depth); take_damage(c,attacker,flags,amount);
 }
+std::int64_t Model::base_is_enemy(Address c, Raw other) {
+  Depth guard(depth_,limits_.depth); return enemy(c,other);
+}
 Raw Model::u32(Address a) const { return Raw(mem.load(a,4)); }
 Vec3 Model::vec(Address a) const { return {u32(a),u32(a+4),u32(a+8)}; }
 Raw Model::clip(Address c, std::uint32_t off) const { raw_creature(c); return u32(Address(u32(c+0x24))+off); }

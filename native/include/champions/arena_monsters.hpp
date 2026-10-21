@@ -148,6 +148,8 @@ public:
   void store(Address, std::size_t, std::uint64_t);
   // Creature_takeDamage 0x116638, for a class slot 2 that only jumps to it.
   void base_take_damage(Address c, Raw attacker, Raw flags, Raw amount);
+  // Creature_isEnemy 0x119328 (0, 1 or 4), for a class slot 20 that calls it.
+  std::int64_t base_is_enemy(Address c, Raw other);
   explicit Model(Memory &, creature_hp::Limits = {});
   // Shared data/holder family. Strings retain bytes without text decoding.
   std::string cstr(Address address, std::size_t limit = 64) const;

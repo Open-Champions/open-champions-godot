@@ -336,7 +336,13 @@ void antqueen_set_state(A::Model &m, Address c, Raw requested) {
     b.w32(c + 0xb8, F_240);
     b.w32(c + 0x3d4, clock() + d % 120 + 180);
     m.clear_path(c);
-    auto dest = vector_of(b.call("AntQueen_pickFlyDest", {iv(c)}));
+    // AntQueen_pickFlyDest 0x238150, executed in research-combat-ctors-2
+    // (combat_ctors_2.cpp). A model that answers it as a call-out (the
+    // round-1 vectors pin e9777eb, where it was a recording stub) gets that
+    // answer instead.
+    auto dest = m.callbacks.count("AntQueen_pickFlyDest")
+                    ? vector_of(b.call("AntQueen_pickFlyDest", {iv(c)}))
+                    : antqueen_pick_fly_dest(m, c);
     b.wvec(c + 0x104, dest);
     if (((b.u16(c + 0x232) - 8) & 0xffff) >= 2) {
       b.fly_clips(c);
