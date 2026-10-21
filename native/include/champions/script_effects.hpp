@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -58,27 +59,27 @@ struct Rect {
   std::uint32_t colour = 0;
 };
 
-// One memory image and the calls a body makes. copy_text performs wstr_copy
-// and strcpy; the research difftest stubs those two, so a vector replay sets
-// copy_text false and compares the remaining stores. run_nested performs
-// sound_setPlaysWhileFrozen; the help difftest stubs that call.
+// One memory image and the calls a body makes. A call is recorded and
+// answered; its own body does not run here. That includes wstr_copy, strcpy
+// and sound_setPlaysWhileFrozen, which the research difftest stubs inside
+// these bodies, so no string is copied and no string-length bound is assumed.
+//
+// A call's answer is, in order: local_slot for net_isLocalSlot, a named stub,
+// a name in discarded (answered 0), then default_return. With none of these
+// the call throws HostFault: research did not enter that callee, and its
+// return would reach the caller. The vector replay sets default_return to 0,
+// the default of ref_script_effects.Trace.call. The script host sets only
+// discarded, for calls whose answer no script handler reads.
 class Effects {
 public:
   explicit Effects(builtins::Memory &memory);
   builtins::Memory &memory;
-  bool copy_text = true;
-  bool run_nested = true;
   std::vector<Call> calls;
   std::vector<Rect> rects;
-  // Stub returns. The host leaves the sound handle at -1 (no sample).
   std::function<std::uint32_t(std::uint32_t slot)> local_slot;
-  // A named stub wins over the fields below. The host leaves these empty and
-  // uses resource / sound_handle.
   std::map<std::string, std::uint32_t> stubs;
-  std::uint32_t resource = 0;
-  std::uint32_t sound_handle = 0xffffffffu;
-  std::uint32_t stream_play_result = 0;
-  std::uint32_t boss_music_result = 0;
+  std::set<std::string> discarded;
+  std::optional<std::uint32_t> default_return;
   // Set when music_play_level passes the volume gate. Absent when it does not.
   std::optional<std::uint32_t> channel_volume;
 
@@ -105,8 +106,6 @@ public:
   // Shut gate returns 0x500000 and makes no call. Otherwise the channel word
   // is scalar * volume * 0x3f480000 and stream 2 is queued with flags|0x22.
   std::uint32_t music_play_level(std::uint32_t name, std::uint32_t flags);
-  void wstr_copy(std::uint32_t dst, std::uint32_t src);
-  void byte_copy(std::uint32_t dst, std::uint32_t src);
 
 private:
   std::uint32_t call(const std::string &name, const std::vector<std::uint32_t> &args,

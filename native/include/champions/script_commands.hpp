@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -51,8 +52,16 @@ struct Counts {
   // unconstructed stub's creature flag, hit points or type name. Each is also
   // in refused[].
   std::uint64_t stub_refusals = 0;
+  // Routed commands refused because, for this state, they would reach a
+  // callee research did not execute: a live charm target, a music volume or
+  // a fade level nobody supplied. Each is also in refused[].
+  std::uint64_t callee_refusals = 0;
   std::array<std::uint64_t, COMMANDS> executed{};
   std::array<std::uint64_t, COMMANDS> refused{};
+  // Executions whose route runs an inferred body (setCFlag, selectSetCFlag:
+  // the boss-music stop and queue, research-audio 6b08886). Each is also in
+  // executed[].
+  std::array<std::uint64_t, COMMANDS> inferred{};
 };
 
 // One particle_spawn the binder asked for. Words are the binder's, unscaled
@@ -105,6 +114,10 @@ public:
   // is also refused once an objects.ob record is adopted: records are not
   // constructed, and construction draws from the shared seed.
   void bind_seed(SharedRandom *seed);
+  // The player's g_musicVolume option as a raw float pattern, from the
+  // caller. Until it is set, startMusic, and a setCFlag bit-0 call that would
+  // name a boss track, are refused (callee_refusals).
+  void set_music_volume(std::uint32_t bits);
 
   // Level entry in the loader's order (research docs/script.md 2.1):
   // run_prestart, then adopt_objects, then run_start. run_start runs start,
@@ -137,8 +150,10 @@ public:
   bool stopped_on_refusal() const { return refusal_stopped_; }
   bool is_stub(std::uint32_t address) const { return stubs_.count(address) != 0; }
   Queue queue() const;
-  // Deferred name table plus the two counters, without the flip. A repeated
-  // key is a polling loop, not a new chain of entry points.
+  // Deferred name table and its two counters (not the flip), the script's
+  // global variables, the quest variables and the post-action name. The
+  // measurement tool stops resuming when this key repeats: nothing a later
+  // tick reads has changed. It does not prove the wait never ends.
   std::string queue_key() const;
   std::uint32_t public_count() const;
   // The campaign the quest commands write. setCFlag stores creature bits 0 and
@@ -182,9 +197,10 @@ private:
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
                       const std::vector<builtins::Variables::ServiceValue> &args);
-  std::uint32_t intern_bytes(const std::string &text);
-  std::uint32_t intern_wide(const std::u16string &text);
-  void note_type(builtins::Obj &obj, const std::string &type);
+  std::optional<std::vector<const objects::GameObject *>> named(amx::Machine &machine,
+                                                               std::int64_t limit) const;
+  std::string boss_name(const objects::GameObject &obj) const;
+  bool callee_unknown(std::size_t index, amx::Machine &machine) const;
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
@@ -192,8 +208,9 @@ private:
   std::unique_ptr<champions::audio::Playback> audio_;
   std::unique_ptr<script_effects::Effects> script_fx_;
   std::uint32_t music_channel_ = 0;
-  std::uint32_t scratch_ = 0x700000;
-  std::map<std::string, std::uint32_t> type_at_;
+  // startMusic titles by host handle. Never written into binder memory.
+  std::map<std::string, std::uint32_t> music_titles_;
+  bool fade_known_ = false;
   level_flow::State flow_;
   SharedRandom *external_seed_ = nullptr;
   // Addresses of adopted objects.ob records: unconstructed stubs.

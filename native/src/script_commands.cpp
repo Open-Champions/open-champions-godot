@@ -16,8 +16,11 @@ const Row kRows[COMMANDS] = {
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
-constexpr std::uint32_t CAMERA_OBJECT = 0x4e1000;
-constexpr std::uint32_t STACK_WIDE = 0x6f0000;
+// g_scriptSelectedObj (research 9649e6b tools/ref_natives.py G_SELECTED_OBJ,
+// docs/script.md line 481): the object the select* commands act on.
+constexpr std::uint32_t SELECTED_WORD = 0x4039f8;
+// Stream 2's queue count: g_streams 0x876c10 + 2 * 0x1c4 + 448 (research
+// 52984db docs/script-effects.md endMusic; ref_script_effects.stream_count_addr).
 constexpr std::uint32_t STREAM2_COUNT = 0x877158;
 // missionMenu_run (research t3/research-quests docs/quests.md section 4):
 // g_paused, the pending level name and its orientation byte.
@@ -40,7 +43,17 @@ const StubRead kStubReads[] = {
     // setCFlag tests the creature flag 0x20 on each object it finds
     // (research-quests 7efd3ce tools/ref_natives.py n_setCFlag).
     {"setCFlag", 0x200},
+    // The 52984db callees act only on a creature: each tests flag 0x20 on
+    // every object its name finds (script_builtins.cpp creature_dispatch,
+    // find(name, 0x200); research 52984db docs/script-effects.md).
+    {"setMonsterVal", 0x200},     {"setMonsterRange", 0x200}, {"setCreatureParams", 0x200},
+    {"charmMonster", 0x200},      {"followPlayer", 0x200},
 };
+// The select* forms act on g_scriptSelectedObj and test the same flag.
+bool selected_form(const char *name) {
+  return std::strcmp(name, "selectSetMonsterVal") == 0 || std::strcmp(name, "initScriptSetParams") == 0 ||
+         std::strcmp(name, "selectSetCFlag") == 0;
+}
 const StubRead *stub_read(const char *name) {
   for (const auto &read : kStubReads)
     if (std::strcmp(read.name, name) == 0)
@@ -113,100 +126,31 @@ std::array<std::uint32_t, 3> vec_of(const builtins::Variables::ServiceValue &val
     return *vec;
   throw amx::HostFault("scene value is not a vector");
 }
-// Commands whose callee body research executed (52984db), plus setCFlag,
-// whose name selector and stop-then-queue are executed and whose queue is
-// Playback::play_boss_music. Everything else partial or unknown stays refused.
+// Commands whose callee body research executed (52984db
+// tools/ref_script_effects.py COMMANDS, status executed) and that need no
+// callee research did not enter. setInfo, addHelpMessage, addHelpMessageF,
+// showBust and showCompass are executed setters behind text_lookup, whose
+// string table the host does not have, so they stay refused. selectSetCFlag
+// is the one partial row routed: its bit-0 path reaches
+// creature_startBossMusic, whose name selector is executed and whose stop and
+// queue bodies are inferred from research-audio 6b08886 (counted in
+// Counts::inferred). setCFlag takes the same path through the quest route.
 bool routed_command(const char *name) {
   static const char *names[] = {
-      "setMonsterVal",     "selectSetMonsterVal", "setMonsterRange",
-      "setCreatureParams", "initScriptSetParams", "setInfo",
-      "addHelpMessage",    "addHelpMessageF",     "showBust",
-      "showCompass",       "hudResetFadeScreen",  "hudFadeScreen",
-      "charmMonster",      "followPlayer",        "startMusic",
-      "endMusic",          "setCFlag",            "selectSetCFlag",
+      "setMonsterVal",     "selectSetMonsterVal", "setMonsterRange",    "setCreatureParams",
+      "initScriptSetParams", "hudResetFadeScreen", "hudFadeScreen",     "charmMonster",
+      "followPlayer",      "startMusic",          "endMusic",           "selectSetCFlag",
   };
   for (const char *item : names)
     if (std::strcmp(item, name) == 0)
       return true;
   return false;
 }
-
-// wstr_format 0x19ea78 was not entered. This replaces the first %d, %i or %u
-// with the decimal of the first float truncated toward zero, and turns %% into
-// one percent. Any other percent sequence is left as text.
-std::u16string decimal_of(std::int32_t value) {
-  const bool neg = value < 0;
-  std::uint32_t mag = value == static_cast<std::int32_t>(0x80000000u)
-                          ? 0x80000000u
-                          : static_cast<std::uint32_t>(neg ? -value : value);
-  std::u16string digits;
-  do {
-    digits.push_back(static_cast<char16_t>(u'0' + (mag % 10u)));
-    mag /= 10u;
-  } while (mag);
-  std::u16string out;
-  if (neg)
-    out.push_back(u'-');
-  for (auto it = digits.rbegin(); it != digits.rend(); ++it)
-    out.push_back(*it);
-  return out;
-}
-std::u16string format_first_integer(const std::u16string &format, std::int32_t value) {
-  std::u16string out;
-  bool used = false;
-  for (std::size_t i = 0; i < format.size(); ++i) {
-    if (!used && format[i] == u'%' && i + 1 < format.size()) {
-      const auto spec = format[i + 1];
-      if (spec == u'd' || spec == u'i' || spec == u'u') {
-        const auto number = decimal_of(value);
-        out.insert(out.end(), number.begin(), number.end());
-        ++i;
-        used = true;
-        continue;
-      }
-      if (spec == u'%') {
-        out.push_back(u'%');
-        ++i;
-        continue;
-      }
-    }
-    out.push_back(format[i]);
-  }
-  return out;
-}
-std::u16string read_wide(builtins::Memory &memory, std::uint32_t address) {
-  std::u16string out;
-  for (std::uint32_t i = 0; i < 4096u; ++i) {
-    const auto unit = memory.u16(address + i * 2u);
-    if (unit == 0)
-      return out;
-    out.push_back(static_cast<char16_t>(unit));
-  }
-  throw amx::HostFault("wide string has no terminator");
-}
-void write_wide(builtins::Memory &memory, std::uint32_t address, const std::u16string &text) {
-  if (text.size() >= 4096u)
-    throw amx::HostFault("formatted wide string exceeds 4096 units");
-  for (std::size_t i = 0; i < text.size(); ++i)
-    memory.w16(address + static_cast<std::uint32_t>(i) * 2u, text[i]);
-  memory.w16(address + static_cast<std::uint32_t>(text.size()) * 2u, 0);
+// Rows whose route runs a body research inferred rather than executed.
+bool inferred_route(const char *name) {
+  return std::strcmp(name, "setCFlag") == 0 || std::strcmp(name, "selectSetCFlag") == 0;
 }
 
-// Boss rows compare the unprefixed class. Synthetic objects in this repo store
-// a Pawn length prefix ("10GameObject") whose integer is the remainder length.
-std::string bare_class(const std::string &cls) {
-  std::size_t i = 0;
-  unsigned value = 0;
-  while (i < cls.size() && cls[i] >= '0' && cls[i] <= '9') {
-    if (value > 99999u)
-      return cls;
-    value = value * 10u + static_cast<unsigned>(cls[i] - '0');
-    ++i;
-  }
-  if (i > 0 && value == cls.size() - i)
-    return cls.substr(i);
-  return cls;
-}
 bool campaign_command(const char *name) {
   static const char *names[] = {
       "addQuest", "removeQuest", "getv", "setv", "addv", "setMissionAvailable",
@@ -283,9 +227,11 @@ void Host::install() {
   variables_->run_reward_script = [this](const std::string &name) {
     variables_->run_script(name);
   };
-  // Follow camera, mode 1. A null camera faults showBust and showCompass.
-  variables_->memory.word(CAMERA_OBJECT + 0x34, 1);
-  variables_->memory.word(script_effects::G_CAMERA, CAMERA_OBJECT);
+  // These answers reach only handlers that discard them (research 52984db
+  // docs/script-effects.md: charmMonster, followPlayer, startMusic and
+  // hudFadeScreen return 0 or hud_stepFade's own value).
+  script_fx_->discarded = {"handle_clear", "ui_drawRect", "audio_setChannelVolume",
+                           "stream_playLevel"};
   variables_->scene_service = [this](const std::string &name,
                                      const std::vector<builtins::Variables::ServiceValue> &args) -> std::uint32_t {
     if (name == "obj_moveOffGrid" || name == "obj_updateGridCell") {
@@ -328,8 +274,12 @@ void Host::refuse(std::size_t index, amx::Machine &machine) {
 // address the machine refuses makes the binder use a remembered string slot,
 // which the host does not track; that counts as touching a stub.
 bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
+  if (stubs_.empty())
+    return false;
+  if (selected_form(kRows[index].name))
+    return stubs_.count(variables_->memory.word(SELECTED_WORD)) != 0;
   const auto *read = stub_read(kRows[index].name);
-  if (!read || stubs_.empty())
+  if (!read)
     return false;
   const auto address = machine.cell(machine.params + 4);
   if (machine.get_addr(address) != amx::ERR_NONE)
@@ -368,7 +318,14 @@ amx::NativeMap Host::command_map() {
         refuse(i, machine);
         return 0;
       }
+      if (callee_unknown(i, machine)) {
+        counts_.callee_refusals += 1;
+        refuse(i, machine);
+        return 0;
+      }
       counts_.executed[i] += 1;
+      if (inferred_route(kRows[i].name))
+        counts_.inferred[i] += 1;
       if (cflag) {
         try {
           campaign_->note_cflag(static_cast<int>(machine.cell(machine.params + 8)),
@@ -403,96 +360,93 @@ void Host::sync_seed_in() { variables_->memory.word(SEED_WORD, external_seed_->s
 void Host::sync_seed_out() { external_seed_->state = variables_->memory.word(SEED_WORD); }
 void Host::apply_entrance() { flow_.entrance = variables_->memory.cstr(ENTRANCE_WORD); }
 void Host::bind_seed(SharedRandom *next) { external_seed_ = next; }
-std::uint32_t Host::intern_bytes(const std::string &text) {
-  if (text.size() >= 160)
-    throw amx::HostFault("interned text exceeds 160 bytes");
-  const auto at = scratch_;
-  scratch_ += 512;
-  if (scratch_ > 0x00f00000u)
-    throw amx::HostFault("script string scratch exhausted");
-  variables_->memory.string(at, text);
-  return at;
+// The objects the binder's name argument finds. nullopt when the address is
+// one the machine refuses: the binder would then reuse a remembered string
+// slot the host does not track.
+std::optional<std::vector<const objects::GameObject *>> Host::named(amx::Machine &machine,
+                                                                   std::int64_t limit) const {
+  const auto address = machine.cell(machine.params + 4);
+  if (machine.get_addr(address) != amx::ERR_NONE)
+    return std::nullopt;
+  std::vector<const objects::GameObject *> out;
+  for (const auto *obj : variables_->find(machine.get_string(address), limit))
+    out.push_back(obj);
+  return out;
 }
-std::uint32_t Host::intern_wide(const std::u16string &text) {
-  if (text.size() >= 4096)
-    throw amx::HostFault("interned wide text exceeds 4096 units");
-  const auto at = scratch_;
-  scratch_ += 512 * ((static_cast<std::uint32_t>(text.size()) * 2u + 512u) / 512u);
-  if (scratch_ > 0x00f00000u)
-    throw amx::HostFault("script string scratch exhausted");
-  write_wide(variables_->memory, at, text);
-  return at;
+
+std::string Host::boss_name(const objects::GameObject &obj) const {
+  const auto type_at = variables_->memory.u32(obj.addr + 0x34);
+  if (type_at == 0)
+    return {};
+  std::string object_name;
+  if (auto found = objects::props_find(obj.props, "name"))
+    object_name = *found;
+  return champions::audio::Playback::boss_music_name(variables_->memory.cstr(type_at), object_name)
+      .value_or(std::string());
 }
-void Host::note_type(builtins::Obj &obj, const std::string &type) {
-  const auto found = type_at_.find(type);
-  const auto at = found == type_at_.end() ? type_at_.emplace(type, intern_bytes(type)).first->second
-                                          : found->second;
-  variables_->memory.word(obj.addr + 0x34, at);
+
+// A routed command whose callee research did not execute for this state.
+// Checked before the binder runs, so a refused command stores nothing.
+bool Host::callee_unknown(std::size_t index, amx::Machine &machine) const {
+  const std::string name = kRows[index].name;
+  auto &memory = variables_->memory;
+  const auto creature = [&](const objects::GameObject *obj) {
+    return obj && (memory.u32(obj->addr + 0xc) & 0x20u) != 0;
+  };
+  if (name == "charmMonster" || name == "followPlayer") {
+    // Creature_setCharm reaches handle_clear of +0x234 past these gates;
+    // a live handle is research's Unknown (docs/script-effects.md charmMonster).
+    const auto found = named(machine, 0x200);
+    if (!found)
+      return true;
+    for (const auto *obj : *found) {
+      if (!creature(obj) || memory.s16(obj->addr + 0x312) == -1 || (memory.u32(obj->addr + 0xc) & 0x40u))
+        continue;
+      if (memory.u32(obj->addr + 0x234) != 0)
+        return true;
+    }
+    return false;
+  }
+  if (name == "startMusic")
+    // music_playLevel reads g_musicVolume, which has no default (AUD-1).
+    return !audio_->music_volume();
+  if (name == "hudFadeScreen")
+    // hud_stepFade adds to g_hudFade, which is kept between fades; this host
+    // knows it only after hudResetFadeScreen has set it.
+    return !fade_known_;
+  if (name == "setCFlag" || name == "selectSetCFlag") {
+    const bool select = name == "selectSetCFlag";
+    if (machine.cell(machine.params + (select ? 4 : 8)) != 0)
+      return false;
+    // Bit 0 reaches creature_startBossMusic. A named boss needs
+    // g_musicVolume (Playback throws Unsupported without it).
+    if (audio_->music_volume())
+      return false;
+    std::vector<const objects::GameObject *> found;
+    if (select)
+      found.push_back(variables_->obj_at(memory.word(SELECTED_WORD)));
+    else if (auto list = named(machine, 0x200))
+      found = *list;
+    else
+      return true;
+    for (const auto *obj : found)
+      if (creature(obj) && !boss_name(*obj).empty())
+        return true;
+  }
+  return false;
 }
+
+void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
 
 std::uint32_t Host::scene(const std::string &name,
                           const std::vector<builtins::Variables::ServiceValue> &args) {
   auto &fx = *script_fx_;
   auto &memory = variables_->memory;
-  if (name == "text_lookup") {
-    if (args.empty())
-      throw amx::HostFault("text_lookup needs a key");
-    // The string table was not entered. The widened key is the text the
-    // setter copies. It is not retail copy.
-    const auto &key = string_of(args[0]);
-    std::u16string wide;
-    wide.reserve(key.size());
-    for (unsigned char byte : key)
-      wide.push_back(static_cast<char16_t>(byte));
-    return intern_wide(wide);
-  }
-  if (name == "wstr_format") {
-    if (args.size() < 3 || string_of(args[0]) != "stack")
-      throw amx::HostFault("wstr_format destination is not the stack buffer");
-    const auto formatted = format_first_integer(read_wide(memory, word_of(args[1])),
-                                                 Fpu::to_int(word_of(args[2])));
-    write_wide(memory, STACK_WIDE, formatted);
-    return 0;
-  }
-  if (name == "wstr_copy") {
-    if (args.size() < 2)
-      throw amx::HostFault("wstr_copy argument count");
-    const auto source = std::holds_alternative<std::string>(args[1]) && string_of(args[1]) == "stack"
-                            ? STACK_WIDE
-                            : word_of(args[1]);
-    fx.wstr_copy(word_of(args[0]), source);
-    return 0;
-  }
-  if (name == "hud_showMessage") {
-    if (args.size() < 4)
-      throw amx::HostFault("hud_showMessage argument count");
-    fx.show_message(word_of(args[0]), word_of(args[1]), word_of(args[2]), word_of(args[3]));
-    return 0;
-  }
-  if (name == "hud_showHelpMessage") {
-    if (args.size() < 3)
-      throw amx::HostFault("hud_showHelpMessage argument count");
-    fx.show_help(word_of(args[0]), word_of(args[1]), word_of(args[2]));
-    return 0;
-  }
-  if (name == "hud_setCompassTarget") {
-    if (args.size() < 2)
-      throw amx::HostFault("hud_setCompassTarget argument count");
-    const auto pos = vec_of(args[0]);
-    fx.set_compass(pos.data(), word_of(args[1]));
-    return 0;
-  }
-  if (name == "hud_setBust") {
-    if (args.size() < 4)
-      throw amx::HostFault("hud_setBust argument count");
-    const auto texture = intern_bytes(string_of(args[0]));
-    fx.set_bust(texture, word_of(args[1]), word_of(args[2]), word_of(args[3]));
-    return 0;
-  }
   if (name == "hud_setFade") {
     if (args.empty())
       throw amx::HostFault("hud_setFade argument count");
     fx.set_fade(word_of(args[0]));
+    fade_known_ = true;
     return 0;
   }
   if (name == "hud_stepFade") {
@@ -511,6 +465,8 @@ std::uint32_t Host::scene(const std::string &name,
   if (name == "Creature_setCharm") {
     if (args.size() < 3)
       throw amx::HostFault("Creature_setCharm argument count");
+    if (memory.u32(word_of(args[0]) + 0x234) != 0 && memory.s16(word_of(args[0]) + 0x312) != -1)
+      throw amx::HostFault("Creature_setCharm reached a live target handle");
     fx.set_charm(word_of(args[0]), word_of(args[1]), word_of(args[2]));
     return 0;
   }
@@ -525,12 +481,24 @@ std::uint32_t Host::scene(const std::string &name,
   if (name == "music_playLevel") {
     if (args.size() < 2)
       throw amx::HostFault("music_playLevel argument count");
+    if (!audio_->music_volume())
+      throw amx::HostFault("music_playLevel without a supplied music volume");
     const auto &title = string_of(args[0]);
     const auto flags = word_of(args[1]);
-    const auto result = fx.music_play_level(intern_bytes(title), flags);
+    // The gate and the channel word read g_musicVolume and the duck scalar;
+    // both are the host Playback's.
+    memory.w32(script_effects::G_MUSIC_VOLUME, *audio_->music_volume());
+    memory.w32(script_effects::G_MUSIC_SCALAR, audio_->duck_current());
+    // The name pointer only travels to stream_playLevel, which the host runs
+    // as Playback::music_play_level by name. The word is a host handle, not
+    // a binder address.
+    const auto found = music_titles_.find(title);
+    const auto handle = found != music_titles_.end()
+                            ? found->second
+                            : music_titles_.emplace(title, static_cast<std::uint32_t>(music_titles_.size())).first->second;
+    const auto result = fx.music_play_level(handle, flags);
     if (fx.channel_volume) {
       music_channel_ = *fx.channel_volume;
-      audio_->set_music_volume(memory.u32(script_effects::G_MUSIC_VOLUME));
       audio_->music_play_level(title, flags);
     }
     return result;
@@ -539,25 +507,32 @@ std::uint32_t Host::scene(const std::string &name,
     if (args.empty())
       throw amx::HostFault("stream_queueStop argument count");
     const auto stream = word_of(args[0]);
-    const auto before = stream == 2 ? memory.u32(STREAM2_COUNT) : 0u;
+    if (stream != 2)
+      throw amx::HostFault("stream_queueStop on a stream other than 2");
+    // Stream 2's queue is the host Playback's; its count is the word the
+    // executed body reads.
+    memory.w32(STREAM2_COUNT, static_cast<std::uint32_t>(audio_->queued_count(2)));
+    const auto before = memory.u32(STREAM2_COUNT);
     const auto result = fx.queue_stop(stream);
-    if (stream == 2 && before < 8)
+    if (before < 8)
       audio_->queue_stop(2);
     return result;
   }
   if (name == "creature_startBossMusic") {
     if (args.empty())
       throw amx::HostFault("creature_startBossMusic argument count");
-    const auto addr = word_of(args[0]);
-    const auto type_at = memory.u32(addr + 0x34);
+    auto *obj = variables_->obj_at(word_of(args[0]));
+    if (!obj)
+      throw amx::HostFault("creature_startBossMusic has no object");
+    // creature_bossMusicName: a null type name at +0x34 or no row is no
+    // name, and then nothing else is called (docs/script-effects.md setCFlag).
+    const auto type_at = memory.u32(obj->addr + 0x34);
     if (type_at == 0)
       return 0;
     std::string object_name;
-    if (auto *obj = variables_->obj_at(addr))
-      if (auto found = objects::props_find(obj->props, "name"))
-        object_name = *found;
-    audio_->set_music_volume(memory.u32(script_effects::G_MUSIC_VOLUME));
-    audio_->play_boss_music(bare_class(memory.cstr(type_at)), object_name);
+    if (auto found = objects::props_find(obj->props, "name"))
+      object_name = *found;
+    audio_->play_boss_music(memory.cstr(type_at), object_name);
     return 0;
   }
   throw amx::HostFault("undocumented scene service");
@@ -637,7 +612,6 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
         continue;
       }
       const auto obj = variables_->new_object({}, 0, record.position, record.angle, record.cls, props);
-      note_type(*obj, record.cls);
       stubs_.insert(obj->addr);
       counts_.objects_registered += 1;
     }
@@ -652,8 +626,7 @@ void Host::add_object(const std::string &name, std::uint32_t flags,
                       const std::array<std::uint32_t, 3> &pos, std::uint32_t angle) {
   auto props = std::make_shared<std::vector<std::string>>();
   props->push_back("name=" + name);
-  auto obj = variables_->new_object({}, flags, pos, angle, "10GameObject", props);
-  note_type(*obj, "10GameObject");
+  variables_->new_object({}, flags, pos, angle, "10GameObject", props);
   counts_.objects_registered += 1;
 }
 
@@ -801,15 +774,34 @@ Queue Host::queue() const {
   state.flip = variables_->memory.word(DEFER_FLIP);
   return state;
 }
+// The state a deferred wait can count in: the deferred name table and its two
+// counters (without the flip), the script's global variables (the data
+// segment below the heap), the quest variables and the post-action name
+// (g_postAction, research 9649e6b tools/ref_natives.py G_POST_ACTION).
+// docs/script.md 2.4: a waiting entry "counts in a global variable and
+// defers itself again".
 std::string Host::queue_key() const {
   constexpr std::uint32_t names = 0x86b278;
   constexpr std::size_t bytes = 2u * 64u * 0x50u;
+  constexpr std::uint32_t post_action = 0x86fa80;
   auto raw = variables_->memory.read(names, bytes);
-  const auto state = queue();
-  for (const auto word : {state.count, state.queued}) {
+  auto put = [&raw](std::uint32_t word) {
     for (int shift = 0; shift < 32; shift += 8)
       raw.push_back(static_cast<std::uint8_t>(word >> shift));
+  };
+  const auto state = queue();
+  put(state.count);
+  put(state.queued);
+  if (machine_ && machine_->hea0 > machine_->dat)
+    for (amx::Address at = 0; at < machine_->hea0 - machine_->dat; at += 4)
+      put(static_cast<std::uint32_t>(machine_->cell(at)));
+  for (const auto &var : variables_->quest_vars()) {
+    raw.insert(raw.end(), var.first.begin(), var.first.end());
+    raw.push_back(0);
+    put(static_cast<std::uint32_t>(var.second));
   }
+  const auto action = variables_->memory.cstr(post_action);
+  raw.insert(raw.end(), action.begin(), action.end());
   return std::string(raw.begin(), raw.end());
 }
 std::uint32_t Host::public_count() const {

@@ -101,19 +101,17 @@ std::uint32_t peek(const builtins::Memory &memory, const Store &store) {
   throw std::runtime_error("unsupported peek width");
 }
 
-void run_case(const std::string &name, bool copy, bool nest,
+void run_case(const std::string &name,
               const std::vector<std::pair<std::string, std::uint32_t>> &stubs,
-              std::uint32_t resource, std::uint32_t sound, const std::string &local,
+              const std::string &local,
               const std::vector<Store> &pres, const std::vector<Store> &posts,
               const std::vector<Store> &keeps, const std::vector<std::string> &op,
               const std::optional<std::uint32_t> &expect,
               const std::vector<ExpectCall> &calls) {
   builtins::Memory memory;
   fx::Effects body(memory);
-  body.copy_text = copy;
-  body.run_nested = nest;
-  body.resource = resource;
-  body.sound_handle = sound;
+  // ref_script_effects.Trace.call answers a call without a stub with 0.
+  body.default_return = 0;
   for (const auto &stub : stubs)
     body.stubs[stub.first] = stub.second;
   if (local == "eq0")
@@ -163,9 +161,9 @@ int main(int argc, char **argv) {
   }
   std::string line;
   std::string name;
-  bool copy = false, nest = false, open = false;
+  bool open = false;
+  int cases = 0;
   std::vector<std::pair<std::string, std::uint32_t>> stubs;
-  std::uint32_t resource = 0, sound = 0xffffffffu;
   std::string local;
   std::vector<Store> pres, posts, keeps;
   std::vector<std::string> op;
@@ -173,10 +171,7 @@ int main(int argc, char **argv) {
   bool saw_ret = false;
   std::vector<ExpectCall> calls;
   auto reset = [&]() {
-    copy = nest = false;
     stubs.clear();
-    resource = 0;
-    sound = 0xffffffffu;
     local.clear();
     pres.clear();
     posts.clear();
@@ -210,16 +205,8 @@ int main(int argc, char **argv) {
     check(open, "directive outside a case");
     if (!open)
       continue;
-    if (words[0] == "copy")
-      copy = hex_of(words[1]) != 0;
-    else if (words[0] == "nest")
-      nest = hex_of(words[1]) != 0;
-    else if (words[0] == "stub")
+    if (words[0] == "stub")
       stubs.emplace_back(words[1], hex_of(words[2]));
-    else if (words[0] == "resource")
-      resource = hex_of(words[1]);
-    else if (words[0] == "sound")
-      sound = hex_of(words[1]);
     else if (words[0] == "local")
       local = words[1];
     else if (words[0] == "pre" || words[0] == "post" || words[0] == "keep") {
@@ -251,16 +238,18 @@ int main(int argc, char **argv) {
       check(!op.empty(), name + " has an op");
       if (!saw_ret)
         expect.reset();
-      run_case(name, copy, nest, stubs, resource, sound, local, pres, posts, keeps, op, expect, calls);
+      run_case(name, stubs, local, pres, posts, keeps, op, expect, calls);
       open = false;
+      ++cases;
     } else
       check(false, name + " unknown directive " + words[0]);
   }
   check(!open, "file ended inside a case");
+  check(cases > 0, "the vector file has cases");
   if (failed) {
     std::cerr << failed << " failure(s)\n";
     return 1;
   }
-  std::cout << "script-effects ok\n";
+  std::cout << "script-effects ok, " << cases << " cases\n";
   return 0;
 }

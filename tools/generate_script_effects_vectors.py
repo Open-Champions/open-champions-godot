@@ -4,20 +4,59 @@
 The research difftest compares those cases with the retail executable. This
 generator does not open that executable. It runs the same Python bodies on a
 fresh memory image and writes the stores, the return and the calls. Addresses
-are fixed so the C++ test can replay them. No retail strings.
+are fixed synthetic fixtures so the C++ test can replay them. No retail
+strings.
+
+Each pinned research file is read with `git show 52984db:<path>` into a
+temporary directory and must hash to its pin; nothing is imported from the
+research working tree. A manifest with the pins is written beside the TSV.
+
+    python3 tools/generate_script_effects_vectors.py \
+        --research-dir ~/Projects/champions-re-wt/research-script \
+        --out native/tests/vectors/script_effects.tsv \
+        --manifest native/tests/vectors/script_effects.json
 """
-import os
+import argparse
+import hashlib
+import importlib
+import json
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
-RESEARCH = os.environ.get(
-    "SCRIPT_EFFECTS_RESEARCH",
-    os.path.expanduser("~/Projects/champions-re-wt/research-script/tools"))
-if RESEARCH not in sys.path:
-    sys.path.insert(0, RESEARCH)
+sys.dont_write_bytecode = True
+COMMIT = "52984db"
+PINS = {
+    "tools/ref_script_effects.py": "d7e6cc778279a917629650672370f0a4efa9ce1e2678cc67c01e8433f19510b6",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2",
+    "tools/ref_amx.py": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f",
+}
+DOC_PINS = {
+    "docs/script-effects.md": "f633f3df2e3e7c6336b091d86c199d68d1b1cdec49c10e85d9e2d545f694f3f5",
+}
+C = N = E = None
 
-import ref_core as C            # noqa: E402
-import ref_natives as N         # noqa: E402
-import ref_script_effects as E  # noqa: E402
+
+def git_show(research, path):
+    return subprocess.check_output(["git", "-C", str(research), "show", "%s:%s" % (COMMIT, path)])
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def stage(research, into):
+    for path, want in list(PINS.items()) + list(DOC_PINS.items()):
+        blob = git_show(research, path)
+        got = sha(blob)
+        if got != want:
+            raise SystemExit("%s at %s hashed %s, pin is %s" % (path, COMMIT, got, want))
+        if path in PINS:
+            (into / Path(path).name).write_bytes(blob)
+
 
 CREATURE = 0x200000
 TEXT = 0x210000
@@ -26,8 +65,6 @@ BODY = 0x210200
 TEXTURE = 0x210300
 NAME = 0x210400
 CAMERA = 0x220000
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                   "..", "native", "tests", "vectors", "script_effects.tsv")
 
 
 def f32(value):
@@ -39,7 +76,7 @@ class Case:
         self.label = label
         self.mem = N.Mem()
         self.trace = E.Trace()
-        self.lines = ["case " + label, "copy 0", "nest 0"]
+        self.lines = ["case " + label]
         self.mem.writes.clear()
 
     def pre(self, addr, size, value):
@@ -69,7 +106,7 @@ class Case:
         return self
 
 
-def main():
+def build():
     rows = []
 
     def add(case):
@@ -150,8 +187,8 @@ def main():
             case.pre(N.G_ALIVE_LIST + 4 * index, 4, live)
         case.trace.returns["res_find"] = 0x55
         case.trace.returns["sound_playOnObject"] = 0x8001
-        case.lines.append("resource 55")
-        case.lines.append("sound 8001")
+        case.lines.append("stub res_find 55")
+        case.lines.append("stub sound_playOnObject 8001")
         if kind == "const":
             case.trace.returns["net_isLocalSlot"] = local
             case.lines.append("stub net_isLocalSlot %x" % local)
@@ -281,14 +318,43 @@ def main():
         case.finish("op music %x 3" % NAME, result)
         add(case)
 
-    path = os.path.normpath(OUT)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="ascii") as out:
-        out.write("# script-effects research 52984db ref_script_effects.py\n")
-        out.write("\n".join(rows))
-        out.write("\n")
-    print("wrote %s (%d cases)" % (path, sum(1 for line in rows if line.startswith("case "))))
+    return rows
+
+
+def main():
+    global C, N, E
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--research-dir", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, required=True)
+    args = parser.parse_args()
+    with tempfile.TemporaryDirectory() as temp:
+        stage(args.research_dir, Path(temp))
+        sys.path.insert(0, temp)
+        C = importlib.import_module("ref_core")
+        N = importlib.import_module("ref_natives")
+        E = importlib.import_module("ref_script_effects")
+        rows = build()
+    cases = sum(1 for line in rows if line.startswith("case "))
+    lines = ["# Generated by tools/generate_script_effects_vectors.py. Do not edit by hand.",
+             "# Research %s ref_script_effects.py; synthetic fixtures only." % COMMIT]
+    for path, digest in sorted(list(PINS.items()) + list(DOC_PINS.items())):
+        lines.append("# %s sha256 %s" % (path, digest))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text("\n".join(lines + rows) + "\n", encoding="ascii")
+    manifest = {
+        "schema": "rta-script-effects-v1",
+        "reference_commit": COMMIT,
+        "pins": dict(sorted(list(PINS.items()) + list(DOC_PINS.items()))),
+        "generator_sha256": sha(Path(__file__).resolve().read_bytes()),
+        "vectors_sha256": sha(args.out.read_bytes()),
+        "cases": cases,
+    }
+    args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print("cases %d" % cases)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

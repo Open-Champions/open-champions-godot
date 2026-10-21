@@ -18,7 +18,6 @@ namespace se = champions::simulation::rta::script_effects;
 namespace builtins = champions::simulation::rta::builtins;
 namespace a = champions::simulation::rta::amx;
 namespace audio = champions::audio;
-using champions::simulation::rta::Lcg;
 using champions::simulation::rta::SharedRandom;
 
 namespace {
@@ -288,97 +287,186 @@ void test_entrance_grid_and_particle() {
   check(host.counts().faults == 0, "routed commands do not fault");
 }
 
-std::string wide_at(const builtins::Memory &memory, std::uint32_t address) {
-  std::string out;
-  for (std::uint32_t i = 0; i < 64; ++i) {
-    const auto unit = memory.u16(address + i * 2u);
-    if (unit == 0)
-      return out;
-    out.push_back(static_cast<char>(unit));
-  }
-  return out;
-}
+// Synthetic binder address of a test creature's type-name string (+0x34
+// holds a pointer to it). Fixture only, like the generated effects vectors.
+constexpr std::uint32_t FIXTURE_TYPE_NAME = 0x210400;
+// g_scriptSelectedObj, research tools/ref_natives.py G_SELECTED_OBJ.
+constexpr std::uint32_t SELECTED_WORD = 0x4039f8;
+std::size_t at(const char *name) { return static_cast<std::size_t>(index_of(name)); }
 
+// Expected values are research's: docs/script-effects.md (the 0x1abcd slot-34
+// pattern, the fade steps, the channel formula, the stop marker) or the
+// pinned reference (scale: ref_core and ref_script_effects.scale_stats at
+// 52984db give 50/100 = 0x3effffff, so 100.0 becomes 49.0 = 0x42440000 and
+// armour 10 becomes 4).
 void test_routed_commands() {
   auto built = build_calls(
       {{"start",
         {{"setMonsterVal", {2000, 1, 0x1abcd}},
          {"setMonsterVal", {2000, 4, 0x1abcd}},
          {"setMonsterVal", {2200, 1, 99}},
-         {"setInfo", {2400}},
-         {"showBust", {2600, 2800, 3, 4}},
-         {"addHelpMessage", {3000, 3200}},
-         {"hudFadeScreen", {40}},
-         {"endMusic", {}},
-         {"setCFlag", {3400, 0, 1}},
-         {"getRand", {}}}}},
-      {{2000, "ogre"},
-       {2200, "prop"},
-       {2400, "hello"},
-       {2600, "face"},
-       {2800, "hi"},
-       {3000, "title"},
-       {3200, "body"},
-       {3400, "broon"}});
+         {"setCreatureParams", {2000, 50, 50, 50, 50, 50}},
+         {"charmMonster", {2400}},
+         {"hudResetFadeScreen", {1}},
+         {"hudFadeScreen", {-16}},
+         {"endMusic", {}}}}},
+      {{2000, "ogre"}, {2200, "prop"}, {2400, "imp"}});
   sc::Host host;
   host.add_object("ogre", 0x20, {}, 0);
   host.add_object("prop", 0, {}, 0);
-  host.add_object("broon", 0x20, {}, 0);
+  host.add_object("imp", 0x20, {}, 0);
+  auto &memory = host.variables().memory;
   auto *ogre = host.variables().find_first("ogre");
   auto *prop = host.variables().find_first("prop");
-  auto *broon = host.variables().find_first("broon");
-  check(ogre && prop && broon, "routed objects exist");
-  if (!ogre || !prop || !broon)
+  auto *imp = host.variables().find_first("imp");
+  check(ogre && prop && imp, "routed objects exist");
+  if (!ogre || !prop || !imp)
     return;
-  host.variables().memory.string(0x720000, "FatCyclops");
-  host.variables().memory.word(broon->addr + 0x34, 0x720000);
-  host.variables().memory.word(se::G_MUSIC_VOLUME, 0x3f800000u);
+  memory.w32(ogre->addr + 0x228, 0x42c80000u);
+  memory.w16(ogre->addr + 0xe4, 10);
+  plant(host, built);
+  host.run_prestart();
+  check(host.run_start() == sc::Stop::Complete, "routed script completes");
+  check(host.counts().faults == 0 && host.counts().callee_refusals == 0, "routed script does not fault");
+  check(memory.u16(ogre->addr + 0x3ac) == 0xabcd, "which 1 stores the low half");
+  check(memory.u32(ogre->addr + 0x3c0) == 0x472bcd00u, "which 4 stores from_int of the low half");
+  check(memory.u16(prop->addr + 0x3ac) == 0, "a non-creature stores nothing");
+  check(host.counts().executed[at("setMonsterVal")] == 3 && host.counts().refused[at("setMonsterVal")] == 0,
+        "setMonsterVal executed");
+  check(memory.u32(ogre->addr + 0x228) == 0x42440000u, "setCreatureParams scales hit points");
+  check(memory.u16(ogre->addr + 0xe4) == 4, "setCreatureParams scales armour");
+  check(memory.u8(imp->addr + 0x310) == 0 && memory.u16(imp->addr + 0x312) == 0xffff,
+        "charmMonster stores team 0 and frames -1");
+  const auto &calls = host.callees().calls;
+  check(std::any_of(calls.begin(), calls.end(),
+                    [&](const se::Call &c) {
+                      return c.name == "handle_clear" && c.args == std::vector<std::uint32_t>{imp->addr + 0x234, 0xffffffffu};
+                    }),
+        "charmMonster clears the null target");
+  check(memory.u32(se::G_FADE) == 112, "128 - 16 is 112");
+  check(host.callees().rects.size() == 1 && host.callees().rects[0].colour == (112u << 24),
+        "a nonzero fade records the 640 by 448 rect");
+  check(memory.u32(0x877158) == 1 && host.audio().queued_count(2) == 1, "endMusic appends one stop marker");
+  check(host.counts().inferred[at("setMonsterVal")] == 0, "an executed route is not inferred");
+}
+
+// Each routed command whose callee research did not execute for this state
+// is refused before the binder runs.
+void test_callee_refusals() {
+  auto built = build_calls(
+      {{"start",
+        {{"charmMonster", {2000}},
+         {"followPlayer", {2000}},
+         {"hudFadeScreen", {40}},
+         {"startMusic", {2200}},
+         {"setCFlag", {2400, 0, 1}}}}},
+      {{2000, "imp"}, {2200, "theme"}, {2400, "broon"}});
+  sc::Host host;
+  host.add_object("imp", 0x20, {}, 0);
+  host.add_object("broon", 0x20, {}, 0);
+  auto &memory = host.variables().memory;
+  auto *imp = host.variables().find_first("imp");
+  auto *broon = host.variables().find_first("broon");
+  check(imp && broon, "refusal objects exist");
+  if (!imp || !broon)
+    return;
+  memory.w32(imp->addr + 0x234, 0x44);
+  memory.string(FIXTURE_TYPE_NAME, "FatCyclops");
+  memory.w32(broon->addr + 0x34, FIXTURE_TYPE_NAME);
+  plant(host, built);
+  host.run_prestart();
+  check(host.run_start() == sc::Stop::Complete, "discarded refusals do not stop the entry");
+  for (const char *name : {"charmMonster", "followPlayer", "hudFadeScreen", "startMusic", "setCFlag"})
+    check(host.counts().refused[at(name)] == 1 && host.counts().executed[at(name)] == 0,
+          std::string("callee refusal: ") + name);
+  check(host.counts().callee_refusals == 5 && host.counts().stub_refusals == 0, "callee refusals counted");
+  check(memory.u16(imp->addr + 0x312) == 0 && memory.u32(imp->addr + 0x234) == 0x44,
+        "a live charm target is left alone");
+  check((memory.u32(imp->addr + 0xa8) & (1u << 23)) == 0, "followPlayer stores nothing when refused");
+  check(memory.u32(se::G_FADE) == 0 && host.callees().calls.empty(), "nothing reached a callee");
+  check((memory.u8(broon->addr + 0xa8) & 1u) == 0 && host.audio().queued_count(2) == 0,
+        "setCFlag on a boss without a music volume stores nothing");
+  check(host.campaign().events().boss_music == 0, "no boss-music request is noted");
+}
+
+// With the caller's music volume, startMusic and the boss bit of setCFlag run.
+void test_music_with_volume() {
+  auto built = build_calls({{"start", {{"startMusic", {2200}}, {"setCFlag", {2400, 0, 1}}}}},
+                           {{2200, "theme"}, {2400, "broon"}});
+  sc::Host host;
+  host.add_object("broon", 0x20, {}, 0);
+  auto &memory = host.variables().memory;
+  auto *broon = host.variables().find_first("broon");
+  check(broon != nullptr, "boss object exists");
+  if (!broon)
+    return;
+  memory.string(FIXTURE_TYPE_NAME, "FatCyclops");
+  memory.w32(broon->addr + 0x34, FIXTURE_TYPE_NAME);
   audio::VatEntry row;
   row.name = "mx_ba_broon_l.vag";
   row.length = 16;
   row.declared_rate = 48000;
   host.audio().set_global_vat(std::vector<std::uint8_t>(16, 0), {row}, 0);
-  SharedRandom live(20973);
-  Lcg expected(20973);
-  expected.draw();
-  host.bind_seed(&live);
-  const auto seed_before = live.state;
+  host.set_music_volume(0x3f800000u);
   plant(host, built);
   host.run_prestart();
-  check(host.run_start() == sc::Stop::Complete, "routed script completes");
-  check(host.counts().faults == 0, "routed script does not fault");
-  check(host.variables().memory.u16(ogre->addr + 0x3ac) == 0xabcd, "which 1 stores the low half");
-  check(host.variables().memory.u32(ogre->addr + 0x3c0) == 0x472bcd00u, "which 4 stores from_int of the low half");
-  check(host.variables().memory.u16(prop->addr + 0x3ac) == 0, "a non-creature stores nothing");
-  check(host.counts().executed[static_cast<std::size_t>(index_of("setMonsterVal"))] == 3, "setMonsterVal executed");
-  check(host.counts().refused[static_cast<std::size_t>(index_of("setMonsterVal"))] == 0, "setMonsterVal is not refused");
-  check(host.variables().memory.u16(se::G_MESSAGE_FRAMES) == 180, "setInfo stores 180 frames");
-  check(wide_at(host.variables().memory, se::G_MESSAGE_TEXT) == "hello", "setInfo copies the widened key");
-  check(host.variables().memory.cstr(se::G_BUST_TEXTURE) == "face", "showBust copies the texture name");
-  check(wide_at(host.variables().memory, se::G_BUST_TEXT) == "hi", "showBust copies the widened key");
-  check(host.variables().memory.u8(se::G_BUST_COUNTER) == 5, "showBust stores counter 5");
-  check(host.variables().memory.u32(se::G_BUST_A) == 3 && host.variables().memory.u32(se::G_BUST_B) == 4,
-        "showBust stores both integers");
-  check(host.variables().memory.u8(se::G_HELP_OPEN) == 1, "addHelpMessage opens the help box");
-  check(host.variables().memory.u32(se::G_HELP_DELAY) == 90, "addHelpMessage stores the 90-frame delay");
-  check(wide_at(host.variables().memory, host.variables().memory.u32(se::G_HELP_TITLE)) == "title",
-        "help title is the widened key");
-  check(host.variables().memory.u32(se::G_FADE) == 40, "hudFadeScreen adds the delta");
-  check(host.callees().rects.size() == 1 && host.callees().rects[0].colour == (40u << 24),
-        "a nonzero fade draws the 640 by 448 rect");
-  check(host.variables().memory.u32(0x877158) == 1, "endMusic appends one stop marker");
+  check(host.run_start() == sc::Stop::Complete, "music script completes");
+  check(host.counts().callee_refusals == 0 && host.counts().faults == 0, "music runs with a volume");
+  const auto &calls = host.callees().calls;
+  check(calls.size() == 2 && calls[0].name == "audio_setChannelVolume" &&
+            calls[0].fargs == std::vector<std::uint32_t>{0x3f480000u},
+        "the channel word is scalar * volume * 0x3f480000");
+  check(calls.size() == 2 && calls[1].name == "stream_playLevel" && calls[1].args.size() == 3 &&
+            calls[1].args[0] == 2 && calls[1].args[2] == 0x23,
+        "stream 2 is queued with flags 3 | 0x22");
+  check(host.music_channel() == 0x3f480000u, "the channel word is kept");
+  check(host.counts().executed[at("setCFlag")] == 1 && host.counts().inferred[at("setCFlag")] == 1,
+        "setCFlag's boss route is counted as inferred");
+  check(memory.u8(broon->addr + 0xa8) & 1u, "setCFlag sets bit 0");
   check(host.audio().queued_count(2) == 1, "setCFlag queues the boss track");
-  check(host.variables().memory.u8(broon->addr + 0xa8) & 1u, "setCFlag sets bit 0");
-  check(live.state == expected.state && live.state != seed_before, "only getRand draws the shared seed");
-  check(host.variables().memory.u32(0x404464) == live.state, "the seed word matches the one draw");
+}
 
-  sc::Host blind;
-  blind.variables().memory.word(se::G_CAMERA, 0);
-  auto faulted = build_calls({{"start", {{"showBust", {2000, 2200, 1, 2}}}}}, {{2000, "face"}, {2200, "hi"}});
-  plant(blind, faulted);
-  blind.run_prestart();
-  check(blind.run_start() == sc::Stop::Fault, "a null camera faults showBust");
-  check(blind.counts().faults == 1, "the null camera is a fault");
+// The five text setters sit behind text_lookup, whose string table the host
+// does not have: refused, nothing written to the HUD words.
+void test_text_setters_refused() {
+  auto built = build_calls({{"start",
+                             {{"setInfo", {2000}},
+                              {"addHelpMessage", {2000, 2000}},
+                              {"addHelpMessageF", {2000, 1, 2000, 2}},
+                              {"showBust", {2000, 2000, 1, 2}},
+                              {"showCompass", {2000, 2000}}}}},
+                           {{2000, "key"}});
+  sc::Host host;
+  plant(host, built);
+  host.run_prestart();
+  check(host.run_start() == sc::Stop::Complete, "text setters refuse without stopping");
+  for (const char *name : {"setInfo", "addHelpMessage", "addHelpMessageF", "showBust", "showCompass"})
+    check(host.counts().refused[at(name)] == 1, std::string("text setter refused: ") + name);
+  auto &memory = host.variables().memory;
+  check(memory.u16(se::G_MESSAGE_FRAMES) == 0 && memory.u8(se::G_HELP_OPEN) == 0 &&
+            memory.u8(se::G_BUST_COUNTER) == 0 && memory.u8(se::G_COMPASS_COUNTER) == 0,
+        "no HUD word is written");
+  check(memory.u32(se::G_CAMERA) == 0, "no camera is installed");
+}
+
+// A select* form on an adopted stub is a stub refusal.
+void test_selected_stub() {
+  auto built = build_calls({{"start", {{"selectSetMonsterVal", {1, 5}}, {"initScriptSetParams", {50, 50, 50, 50, 50}}}}}, {});
+  sc::Host host;
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = gate_objects();
+  host.adopt_objects(blob.data(), blob.size());
+  auto *gate = host.variables().find_first("gate");
+  check(gate != nullptr, "stub adopted");
+  if (!gate)
+    return;
+  host.variables().memory.w32(SELECTED_WORD, gate->addr);
+  host.run_start();
+  check(host.counts().refused[at("selectSetMonsterVal")] == 1 && host.counts().refused[at("initScriptSetParams")] == 1,
+        "select forms refuse on a stub");
+  check(host.counts().stub_refusals == 2, "select-form stub refusals counted");
+  check(host.variables().memory.u16(gate->addr + 0x3ac) == 0, "the stub is not written");
 }
 
 void test_refusals() {
@@ -457,6 +545,11 @@ void test_stub_objects() {
   // setCFlag (a quest command, QUESTS.md) tests creature flag 0x20 on each
   // object it finds, so a stub refuses it too.
   calls.push_back({"setCFlag", {2000, 26, 1}});
+  // The 52984db creature routes test the same flag.
+  for (const char *name : {"setMonsterVal", "setMonsterRange", "setCreatureParams"})
+    calls.push_back({name, {2000, 1, 1, 1, 1, 1}});
+  calls.push_back({"charmMonster", {2000}});
+  calls.push_back({"followPlayer", {2000}});
   calls.push_back({"addParticleOnObject", {0, 2000, 0, 0, 0, 0, 0, 0}});
   auto built = build_calls({{"start", calls}}, {{2000, "gate"}});
   sc::Host host;
@@ -477,7 +570,10 @@ void test_stub_objects() {
   check(host.counts().executed[cflag] == 0 && host.counts().refused[cflag] == 1 &&
             host.campaign().events().cflag_bit26 == 0,
         "refused on a stub: setCFlag");
-  check(host.counts().stub_refusals == 5, "stub refusals counted");
+  for (const char *name : {"setMonsterVal", "setMonsterRange", "setCreatureParams", "charmMonster", "followPlayer"})
+    check(host.counts().executed[at(name)] == 0 && host.counts().refused[at(name)] == 1,
+          std::string("refused on a stub: ") + name);
+  check(host.counts().stub_refusals == 10, "stub refusals counted");
   check(gate && grid_cell(gate) && !off_grid(host, gate),
         "a refused hideMonster leaves the stub on the grid");
   check(host.counts().executed[static_cast<std::size_t>(index_of("addParticleOnObject"))] == 1,
@@ -687,6 +783,10 @@ int main(int argc, char **argv) {
   test_seed_refused_without_session_seed();
   test_entrance_grid_and_particle();
   test_routed_commands();
+  test_callee_refusals();
+  test_music_with_volume();
+  test_text_setters_refused();
+  test_selected_stub();
   test_refusals();
   test_wait_then_complete();
   test_prestart_before_objects();

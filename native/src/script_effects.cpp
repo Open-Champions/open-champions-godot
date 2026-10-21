@@ -29,27 +29,17 @@ std::uint32_t Effects::reply(const std::string &name, const std::vector<std::uin
   const auto stub = stubs.find(name);
   if (stub != stubs.end())
     return stub->second;
-  if (name == "res_find")
-    return resource;
-  if (name == "sound_playOnObject")
-    return sound_handle;
-  if (name == "stream_playLevel")
-    return stream_play_result;
-  if (name == "music_playGlobal")
-    return boss_music_result;
-  return 0;
+  if (discarded.count(name))
+    return 0;
+  if (default_return)
+    return *default_return;
+  throw amx::HostFault(name + " was not entered; its return is not in the contract");
 }
 
 std::uint32_t Effects::call(const std::string &name, const std::vector<std::uint32_t> &args,
                             const std::vector<std::uint32_t> &fargs) {
   calls.push_back(Call{name, args, fargs});
-  if (name == "wstr_copy" && copy_text && args.size() >= 2)
-    wstr_copy(args[0], args[1]);
-  else if (name == "strcpy" && copy_text && args.size() >= 2)
-    byte_copy(args[0], args[1]);
-  else if (name == "sound_setPlaysWhileFrozen" && run_nested && !args.empty())
-    return set_plays_while_frozen(args[0]);
-  else if (name == "ui_drawRect" && args.size() >= 6)
+  if (name == "ui_drawRect" && args.size() >= 6)
     rects.push_back(Rect{static_cast<int>(args[0]), static_cast<int>(args[1]),
                          static_cast<int>(args[2]), static_cast<int>(args[3]),
                          static_cast<int>(args[4]), args[5]});
@@ -78,8 +68,8 @@ std::uint32_t Effects::set_charm(std::uint32_t creature, std::uint32_t frames, s
     return flags & 0x20u;
   memory.w8(creature + 0x310, team & 0xffu);
   memory.w16(creature + 0x312, frames & 0xffffu);
-  // handle_clear of a null target stores nothing. A live handle's unlink is
-  // not in this contract; the following store of 0 is.
+  // handle_clear of a null target stores nothing (executed). A live handle is
+  // research's Unknown; the script host refuses before it gets here.
   const auto ret = call("handle_clear", {creature + 0x234, 0xffffffffu});
   memory.w32(creature + 0x234, 0);
   return ret;
@@ -244,23 +234,4 @@ std::uint32_t Effects::music_play_level(std::uint32_t name, std::uint32_t flags)
   return call("stream_playLevel", {2u, name, (flags | 0x22u) & 0xffffffffu});
 }
 
-void Effects::wstr_copy(std::uint32_t dst, std::uint32_t src) {
-  for (std::uint32_t i = 0; i < 4096u; ++i) {
-    const auto unit = memory.u16(src + i * 2u);
-    memory.w16(dst + i * 2u, unit);
-    if (unit == 0)
-      return;
-  }
-  throw amx::HostFault("wide string copy exceeded 4096 units");
-}
-
-void Effects::byte_copy(std::uint32_t dst, std::uint32_t src) {
-  for (std::uint32_t i = 0; i < 160u; ++i) {
-    const auto byte = memory.u8(src + i);
-    memory.w8(dst + i, byte);
-    if (byte == 0)
-      return;
-  }
-  throw amx::HostFault("byte copy exceeded 160 bytes");
-}
 } // namespace champions::simulation::rta::script_effects

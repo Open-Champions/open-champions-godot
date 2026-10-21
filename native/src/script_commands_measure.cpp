@@ -91,6 +91,8 @@ void drain(sc::Host &host) {
   if (!host.waiting() || host.faulted())
     return;
   std::set<std::string> seen;
+  // A measurement cap, not original behaviour: the original keeps ticking.
+  // It bounds a counting wait whose key never repeats.
   const auto limit = static_cast<std::uint64_t>(host.public_count()) + 2u;
   for (std::uint64_t step = 0; step < limit && host.waiting() && !host.faulted(); ++step) {
     if (!seen.insert(host.queue_key()).second)
