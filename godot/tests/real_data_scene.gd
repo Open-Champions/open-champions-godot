@@ -9,6 +9,7 @@ extends SceneTree
 #                 than the session's static-mesh cap (refused before round 2)
 #   [--from=I] [--to=J]  only level indices I..J-1 (for parallel slices)
 #   [--scripts]   opt into the level script after load and before play
+#   [--water]     capture only levels that have water tiles
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
@@ -143,6 +144,10 @@ func run() -> void:
 			refuse("level." + str(result.stage), str(result.get("error", "")))
 			write_summary()
 			continue
+		if args.has("water") and int(result.get("water_tiles", 0)) <= 0:
+			add("levels.skipped_without_water")
+			write_summary()
+			continue
 		add("levels.loaded")
 		var scripted := false
 		if args.has("scripts"):
@@ -156,6 +161,10 @@ func run() -> void:
 		for kind in kinds: add("levels.loaded_with_" + kind)
 		if kinds.is_empty(): add("levels.loaded_static")
 		add("water.tiles_shown", int(result.get("water_tiles", 0)))
+		if int(result.get("water_tiles", 0)) > 0:
+			add("water.texture_ok" if result.get("water_texture_ok", false) else "water.texture_refused")
+			peak("water.texture_width", int(result.get("water_texture_width", 0)))
+			peak("water.texture_height", int(result.get("water_texture_height", 0)))
 		add("pieces.total", int(result.get("pieces", 0)))
 		add("pieces.claimed", int(result.get("claimed", 0)))
 		add("pieces.drawn_claimed", int(result.get("drawn_claimed", 0)))

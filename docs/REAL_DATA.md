@@ -125,10 +125,10 @@ Scene sweep, all 111 levels (headless, four slices, 60 ready ticks each):
   - User particle definitions and skill recipe JSON both loaded.
   - Peaks: 1.06 GB static, 0.76 GB video.
 
-Not documented, so not done:
-- Water drawing constants: colour, alpha FIX, waves and the waterenv UV
-  mapping. Tiles use one labelled neutral material at the documented placement.
-- The ripple simulation step and the grid lifetime.
+Not documented at this round, so not done then:
+- Water drawing constants were one labelled neutral material. Colour, FIX,
+  slope UVs, the wave and layer 3 are now [WATER_DRAW.md](WATER_DRAW.md).
+  The claim-frame seed and the drawer splash point stay refused.
 - Model header +0x18 values other than 1 and 9, and the context-2
   environment pass.
 
@@ -346,3 +346,86 @@ Still refused or not done:
   presenter or the play observation.
 - The post action runs once at level load, not again after a cutscene, dialog
   or help screen.
+
+## Water draw (2026-10-20)
+
+The neutral tile is replaced by the documented layer-3 surface
+([WATER_DRAW.md](WATER_DRAW.md)). The wave steps on `ready_ticks`. A new
+block is a zero grid because the claim-frame weights stay refused, so a real
+tile stays flat and samples one texel of the water texture.
+
+Private disc, read-only, counts only. The scene loaded the first 3 levels
+that contain water (2 earlier levels had none and were not played). 223
+tiles were drawn. All 3 water textures decoded at 64×64. The run had 0
+failed checks. Nine captures are in gitignored
+`work/private/water-draw-captures/` (play, creature, and overview for each
+level). The pools are flat dark teal sheets blended over the ground. No
+ripples, which is the refused claim seed. On the third level the sheet
+draws over nearer rock: the documented test does not reject a pixel for
+being behind existing geometry.
+
+
+## Wave 16 (2026-10-21): drawn water on real levels, 111 / 111
+
+Integration of water-draw on `codex/playable-integration`. Counts only, same
+disc copy. Water tiles now use the documented layer-3 surface
+([WATER_DRAW.md](WATER_DRAW.md)) in place of the neutral tile.
+
+Sweep: `work/run-slices-r16.sh`, four headless slices, 60 ready ticks per
+level, light and recipe JSON as in wave 14. It ran twice: `r16 --scripts`
+(3 min 39 s) and `r16n` with no level script (3 min 44 s). All eight slices
+exited 0 with 0 failed checks.
+
+| Measure | Wave 15 | Wave 16, scripts on | Wave 16, scripts off |
+|---|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **111 / 111** | **111 / 111** |
+| Refused (all reasons) | 0 | 0 | 0 |
+| Levels with water / water tiles shown | 48 / 9,451 | 48 / 9,451 | 48 / 9,451 |
+| Water textures decoded / refused | not drawn | 48 / 0 | 48 / 0 |
+| Meshes / textured | 174,456 / 174,408 | 174,456 / 174,408 | 174,456 / 174,408 |
+| Mesh surfaces | 174,456 | 174,457 | 174,457 |
+| Ready ticks / checks passed | 6,549 / 119 | 6,549 / 119 | 6,549 / 119 |
+
+Each decoded water texture is 64×64. The one extra surface is a level whose
+water uses both documented sets (set 1 is chunk flag `0x1000`). Its one water
+mesh now has a surface per set, where the neutral mesh had one. The mesh count
+is unchanged. Every other deterministic count equals wave 15 with scripts on
+and wave 14 with scripts off, including every script count. Only `time.*`,
+`audio.frames_pushed` and peak static memory (+26 MB summed over the four slices) differ.
+
+Water entries and ticks in water stay 4 and 252 of 3,024 observed. Drawing
+does not touch the creature `water_test` grid.
+
+The level whose water uses both sets is index 20. It was found with one
+headless run per level over indices 0–27, comparing each level's mesh count
+with its surface count.
+
+Captures (gitignored `work/private/captures-r16/`, 1280×720, windowed,
+inspected): index 20, plus the first 3 water levels from index 28 on
+(indices 28, 29 and 30). water-draw's own captures covered the first 3 water
+levels from index 0. Play, creature and overview for each: 12 PNGs, 0 failed
+checks. The windowed run from index 28 went on to play all 35 water levels in
+28–110, with 0 failures and 35 textures decoded.
+
+| Index | Tiles | What the captures show |
+|---|---|---|
+| 20 | 48 (both sets) | Bright orange sheets over a round pit and one side patch. Texture detail is visible up close. Where two tiles overlap, the overlap is brighter, because each tile blends on its own. |
+| 28 | 37 | Small pale grey-green patches in the overview. None is in the play camera's view. |
+| 29 | 11 | One small grey-green patch in the overview. Not in the play view. |
+| 30 | 772 | Many orange square sheets across the level. Up close they are flat with faint texture and hard square edges. One sheet draws over nearer rock. |
+
+None shows a ripple. Every tile is flat, as expected while the claim seed is
+refused.
+
+Exported app (`build/exports/wave16-final`, headless): the 12-level set, with
+and without `--scripts`, and the three arena indices with `--scripts`. Each
+equals wave 15 apart from timing, plus the new water-texture counts (5, 5 and
+3 decoded at 64×64, 0 refused).
+
+Still refused or not done:
+- No ripples. The claim-frame seed is refused, so every block starts as a zero
+  grid and stays flat. A real tile samples one texel of the water texture.
+- The drawer's splash point and the simulation splash stay refused, so nothing
+  disturbs the drawn grid.
+- Water draws without a depth test, as documented, so a pool can draw over
+  nearer rock.
