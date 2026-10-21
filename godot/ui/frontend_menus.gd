@@ -42,7 +42,7 @@ var start_mode := "" # how the last start_play request was served
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
-	set_anchors_preset(PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	visible = false
 	if ClassDB.class_exists("ChampionsFrontendService"):
 		service = ClassDB.instantiate("ChampionsFrontendService")
@@ -409,7 +409,7 @@ func _draw() -> void:
 		return
 	var name := screen()
 	var pause_family: bool = name in ["pause", "exit-confirm"] or (name in ["options", "options-load", "load-game"] and scene != null and scene.session_started and not view.get("in_frontend", true))
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.02, 0.03, 0.72 if pause_family else 1.0), true)
+	draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.02, 0.03, 0.8 if pause_family else 1.0), true)
 	var scale := minf(size.x / 640.0, size.y / 480.0)
 	if scale <= 0.0:
 		return
@@ -431,31 +431,49 @@ func _draw() -> void:
 			pass
 	var entries: Array = view.get("entries", [])
 	var cursor := int(view.get("cursor", 0))
+	# Host placement: one centred column; two columns for long lists; the exit
+	# prompt side by side because its documented moves are left and right.
+	var per_column := entries.size() if entries.size() <= 8 else int(ceil(entries.size() / 2.0))
+	var bottom := 120
 	var y := 120
 	for index in range(entries.size()):
 		var entry: Dictionary = entries[index]
 		var selected := index == cursor
 		var enabled := bool(entry.enabled)
+		var cx := 320
+		var half := 170
+		if name == "exit-confirm":
+			cx = 240 + index * 160
+			y = 200
+			half = 70
+		elif entries.size() > 8:
+			cx = 190 + (index / per_column) * 260
+			y = 120 + (index % per_column) * 28
+			half = 120
 		if selected:
-			draw_rect(Rect2(150, y - 15, 340, 22), Color(0.95, 0.78, 0.35, 0.18), true)
-			_host_text(Vector2(134, y), ">", 15, Color(0.95, 0.78, 0.35))
+			draw_rect(Rect2(cx - half, y - 13, half * 2, 24), Color(0.95, 0.78, 0.35, 0.18), true)
+			_host_text(Vector2(cx - half - 16, y + 4), ">", 15, Color(0.95, 0.78, 0.35))
 		var label := str(entry.label)
 		var colour := PAUSE_TEXT if pause_family else HOST_TEXT
 		if not enabled:
 			colour = 0x80303030
-		if not _game_text(320, y - 12, label, colour):
+		if not _game_text(cx, y - 12, label, colour):
 			var tint := Color(0.92, 0.92, 0.92) if enabled else Color(0.45, 0.45, 0.45)
 			if pause_family and enabled:
 				tint = _word(PAUSE_TEXT)
-			_host_text(Vector2(150, y), label, 15, tint, 340, true)
+			_host_text(Vector2(cx - half, y), label, 15, tint, half * 2, true)
+		var step := 28
 		if int(entry.type) == 4:
 			var value := float(_bits_to_float(int(entry.value)))
-			draw_rect(Rect2(500, y - 10, 100, 8), Color(0.2, 0.2, 0.24), true)
-			draw_rect(Rect2(500, y - 10, 100.0 * clampf(value, 0.0, 1.0), 8), Color(0.95, 0.78, 0.35), true)
-			_host_text(Vector2(500, y + 12), "%.4f (0x%08x)" % [value, int(entry.value)], 10, muted)
+			draw_rect(Rect2(270, y + 14, 100, 6), Color(0.2, 0.2, 0.24), true)
+			draw_rect(Rect2(270, y + 14, 100.0 * clampf(value, 0.0, 1.0), 6), Color(0.95, 0.78, 0.35), true)
+			_host_text(Vector2(378, y + 21), "%.4f (0x%08x)" % [value, int(entry.value)], 10, muted)
+			step = 40
 		if not enabled and not str(entry.refusal).is_empty():
 			_host_text(Vector2(500, y), "refused: " + str(entry.refusal), 10, Color(0.85, 0.45, 0.4), 136)
-		y += 26 if entries.size() <= 8 else 22
+		bottom = maxi(bottom, y + step - 12)
+		if name != "exit-confirm" and entries.size() <= 8:
+			y += step
 	var character: Dictionary = view.get("character", {})
 	if name.begins_with("char-"):
 		var stats: Array = character.get("stats", [0, 0, 0, 0])
@@ -464,17 +482,18 @@ func _draw() -> void:
 			_host_text(Vector2(16, 80), "Type the name on the host keyboard; Backspace deletes. Then Done.", 12, muted, 608)
 	if name == "options" or name == "options-load":
 		_host_text(Vector2(16, 60), "music live 0x%08x · image 0x%08x · options file %s" % [int(view.get("music_live", 0)), int(view.get("music_image", 0)), "present" if view.get("options_file", false) else "absent"], 12, muted, 608)
-	var notes_y := 300
+	var notes_y := maxi(300, bottom + 20)
 	var error := host_error if not host_error.is_empty() else str(view.get("error", ""))
 	if not error.is_empty():
 		_host_text(Vector2(16, notes_y), "Refused: " + error, 12, Color(0.95, 0.5, 0.45), 608)
 		notes_y += 18
 	for note in view.get("notes", []):
-		if notes_y > 430:
+		var line := "· " + str(note)
+		var height := int(ThemeDB.fallback_font.get_multiline_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, 608, 10).y)
+		if notes_y + height > 434:
 			break
-		var line := str(note)
-		_host_text(Vector2(16, notes_y), "· " + line, 10, muted, 608)
-		notes_y += 12 * (1 + line.length() / 110)
+		_host_text(Vector2(16, notes_y), line, 10, muted, 608)
+		notes_y += height + 2
 	_host_text(Vector2(16, 444), KEY_HELP, 10, Color(0.5, 0.55, 0.6))
 
 func _bits_to_float(bits: int) -> float:
