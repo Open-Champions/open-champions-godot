@@ -200,13 +200,25 @@ inline std::uint32_t haze_index(std::uint32_t clock, std::uint32_t birth, std::u
     return static_cast<std::uint32_t>(to_int(add(start_alpha, mul(alpha_rate, age)))) & 63u;
 }
 
-// The trig contract does not establish these. Callers refuse instead of guessing.
-[[noreturn]] inline void refuse_block_sparks_angle() {
-    throw std::domain_error("Player_blockSparks angle is not established");
+// Creature_processDamage 0x110d30. The register is what math_cos16 and math_sin16
+// receive; each consumes the low 16 bits. Combat round 5 (research 2980af1).
+// Hit sparks add 0x7fff to the sign-extended hit halfword +0x2e0.
+inline std::uint32_t process_damage_hit_angle(std::uint32_t hit_half) {
+    return static_cast<std::uint32_t>(s16(hit_half) + 0x7fff);
 }
-[[noreturn]] inline void refuse_creature_process_damage_angles() {
-    throw std::domain_error("Creature_processDamage angle formulas are not established");
+// Metal sparks and Player_blockSparks silent 0 pass the sign-extended facing +0x38.
+inline std::uint32_t process_damage_facing_angle(std::uint32_t facing_half) {
+    return static_cast<std::uint32_t>(s16(facing_half));
 }
+// One gib heading. `draw` is the high 16 bits of one own-generator step. The
+// bias-plus-remainder sum is sign-extended from 16 bits and added to the hit.
+inline std::uint32_t process_damage_gib_angle(std::uint32_t hit_half, std::uint32_t draw,
+                                             std::uint32_t span, std::uint32_t bias) {
+    const auto rem = span == 0 ? 0u : draw % span;
+    return static_cast<std::uint32_t>(s16(hit_half) + s16(bias + rem));
+}
+
+// Kind 3 and the screen axis are still open. Callers refuse instead of guessing.
 [[noreturn]] inline void refuse_haze_kind3() {
     throw std::domain_error("whether particle_drawHaze runs only for kind 3 is not established");
 }

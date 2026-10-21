@@ -1635,9 +1635,16 @@ void trig_tests() {
         }
         return false;
     };
-    check(throws([] { T::refuse_block_sparks_angle(); }), "block sparks angle refused");
-    check(throws([] { T::refuse_creature_process_damage_angles(); }),
-          "processDamage angles refused");
+    check(T::process_damage_hit_angle(0) == 0x7fffu, "hit 0 adds 0x7fff");
+    check(T::process_damage_hit_angle(1) == 0x8000u, "hit 1 wraps to 0x8000");
+    check(T::process_damage_hit_angle(0x8000) == 0xffffffffu, "hit 0x8000 is all bits");
+    check(T::process_damage_facing_angle(0x1234) == 0x1234u, "facing 0x1234 is itself");
+    check(T::process_damage_facing_angle(0xc000) == 0xffffc000u, "facing 0xc000 sign-extends");
+    check(T::process_damage_facing_angle(0x8000) == 0xffff8000u, "facing 0x8000 sign-extends");
+    check(T::cos16(T::process_damage_facing_angle(0x1234)) == T::cos16(0x1234),
+          "block-spark cosine consumes the low 16 bits");
+    check(T::process_damage_gib_angle(0, 0, 16000, 0xe0c0) == 0xffffe0c0u,
+          "two-chunk gib bias sign-extends");
     check(throws([] { T::refuse_haze_kind3(); }), "haze kind-3 question refused");
     check(throws([] { T::refuse_haze_screen_axis(); }), "haze screen axis refused");
 }

@@ -3,7 +3,9 @@
 #include "champions/arena_monsters.hpp"
 #include <utility>
 #include "champions/core_math.hpp"
+#include "champions/fx_trig.hpp"
 namespace champions::simulation::rta::arena_monsters {
+namespace trig = champions::rta::fx::trig;
 namespace {
 struct Depth {
   std::size_t &n;
@@ -1927,13 +1929,14 @@ Raw Model::gib(Address c,const Vec3 &pos,int variant,Raw kind) {auto block=Raw(i
 void Model::hit_effect(Address c,Raw model) {
   Bounds bounds;if(model){auto v=call("model_getBounds",{i(model),i(UINT32_MAX)});auto p=std::get_if<Bounds>(&v);if(!p)throw Error("bounds requires six integers");bounds=*p;}
   auto z0=u32(c+0x18);Raw x,y;
-  if(le(0x41c80000,u32(c+0x1c))){auto angle=s16(mem.load(c+0x2e0,2))+0x7fff;x=add(u32(c+0x10),mul(cos16(angle),mul(u32(c+0x1c),0x3f400000)));y=add(u32(c+0x14),mul(sin16(angle),mul(u32(c+0x1c),0x3f400000)));}else{x=u32(c+0x10);y=u32(c+0x14);}
+  if(le(0x41c80000,u32(c+0x1c))){auto angle=trig::process_damage_hit_angle(static_cast<std::uint32_t>(mem.load(c+0x2e0,2)));x=add(u32(c+0x10),mul(trig::cos16(angle),mul(u32(c+0x1c),0x3f400000)));y=add(u32(c+0x14),mul(trig::sin16(angle),mul(u32(c+0x1c),0x3f400000)));}else{x=u32(c+0x10);y=u32(c+0x14);}
   auto z=add(z0,0x42100000);auto top=s32(bounds.values[5]),bottom=s32(bounds.values[2]);auto height=s32(Raw(top)-Raw(bottom));if(top<36&&height>0)z=add(add(z0,from_int(height/2)),0x41400000);Vec3 pos{x,y,z};auto cf=mem.load(c+0xa8,8);
   if(lt(0,u32(c+0x344))||(cf&0x4000))call("fx_spawn",{i(10),pos});
   else if(cf&0x8000)call("fx_spawn",{i(11),pos});else if(cf&0x10000)call("fx_spawn",{i(2),pos});
   else if(cf&0x20000){auto text=call("libc_sprintf",{i(0x52ffe0),std::monostate{}});auto entry=call("res_find",{i(0x52fc18),text});call("sound_playOnObject",{entry,i(c),i(ONE)});
     auto get=[&](Raw index){auto v=call("model_getAttachPoint",{i(model),vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(c+0x114),i(index),i(0),i(ONE)});auto p=std::get_if<Vec3>(&v);if(!p)throw Error("attach point requires vector");return *p;};auto a=get(0),b=get(1);Vec3 mid;for(unsigned k=0;k<3;++k)mid[k]=mul(add(a[k],b[k]),HALF);
-    Vec3 velocity{mul(cos16(s16(mem.load(c+0x38,2))),0x41200000),mul(sin16(s16(mem.load(c+0x38,2))),0x41200000),0x41200000};
+    auto facing=trig::process_damage_facing_angle(static_cast<std::uint32_t>(mem.load(c+0x38,2)));
+    Vec3 velocity{mul(trig::cos16(facing),0x41200000),mul(trig::sin16(facing),0x41200000),0x41200000};
     for(unsigned n=0;n<50;++n){Vec3 r;do {for(auto &v:r)v=unit(own_draw(c));}while(lt(ONE,add(add(mul(r[0],r[0]),mul(r[1],r[1])),mul(r[2],r[2]))));for(unsigned k=0;k<3;++k)velocity[k]=add(velocity[k],mul(r[k],0x40a00000));call("particle_spawn",{i(0x5bf608),mid,velocity,i(0)});}
   }else if(cf&0x3000){auto kind=cf&0x2000?5u:3u;call("fx_spawn",{i(cf&0x2000?3:9),pos});gib(c,pos,2,kind);if(own_draw(c)%3==0)gib(c,pos,2,kind);if(le(u32(c+0x228),0)&&own_draw(c)%3==0)gib(c,pos,2,kind);}
   else if((s32(u32(0x44fdc0))>0||mem.load(0x402791,1))&&(cf&0x40000)){call("fx_spawn",{i(0),pos});if(own_draw(c)%3==0)gib(c,pos,2,1);}
@@ -1946,7 +1949,7 @@ Raw Model::shatter_or_gib(Address c,Raw model,Raw flags) {
   if(s32(u32(0x44fdc0))>0){auto seed=Raw(std::uint64_t(u32(0x404468))*0x19660d+0x3c6ef35f);auto angle=s16(seed>>16);seed=Raw(std::uint64_t(seed)*0x19660d+0x3c6ef35f);write(0x404468,4,seed);auto kind=((seed>>16)&1)+(cf&0x2000?4:cf&0x1000?7:1);call("decal_add",{pos,i(angle),i(kind),i(0),i(0x42300000)});
     for(unsigned n=0;n<3;++n){seed=u32(0x404468);Vec3 r;std::size_t attempts=0;do {if(++attempts>limits_.history_entries)throw creature_hp::ResourceLimit("cosmetic rejection limit");for(auto &v:r){seed=Raw(std::uint64_t(seed)*0x19660d+0x3c6ef35f);v=unit(seed>>16);}}while(lt(ONE,add(add(mul(r[0],r[0]),mul(r[1],r[1])),mul(r[2],r[2]))));cf=mem.load(c+0xa8,8);write(0x404468,4,seed);Vec3 base{add(pos[0],0),pos[1],add(pos[2],0x42100000)},spot;for(unsigned k=0;k<3;++k)spot[k]=add(mul(r[k],0x41200000),base[k]);call("fx_spawn",{i(cf&0x1000?9:cf&0x2000?3:1),spot});}}
   for(unsigned group=0;group<2;++group)for(unsigned n=0;n<(group?4u:2u);++n){cf=mem.load(c+0xa8,8);auto chunk=gib(c,pos,-1,cf&0x1000?2:cf&0x2000?5:group);if(!chunk)continue;
-    auto push=add(mul(mul(from_int(own_draw(c)),TWO_M16),group?0x42480000:0x42a00000),group?0x41200000:0x41a00000);auto angle=s16((group?0xb1e0:0xe0c0)+own_draw(c)%(group?40000:16000));auto heading=s16(mem.load(c+0x2e0,2))+angle;write(Address(chunk)+0xfc,4,add(mul(u32(Address(chunk)+0xfc),0x3e999999),mul(cos16(heading),push)));heading=s16(mem.load(c+0x2e0,2))+angle;write(Address(chunk)+0x100,4,add(mul(u32(Address(chunk)+0x100),0x3e999999),mul(sin16(heading),push)));call("PhProp_initPhysics",{i(chunk),i(18)});}
+    auto push=add(mul(mul(from_int(own_draw(c)),TWO_M16),group?0x42480000:0x42a00000),group?0x41200000:0x41a00000);auto heading=trig::process_damage_gib_angle(static_cast<std::uint32_t>(mem.load(c+0x2e0,2)),own_draw(c),group?40000u:16000u,group?0xb1e0u:0xe0c0u);write(Address(chunk)+0xfc,4,add(mul(u32(Address(chunk)+0xfc),0x3e999999),mul(trig::cos16(heading),push)));write(Address(chunk)+0x100,4,add(mul(u32(Address(chunk)+0x100),0x3e999999),mul(trig::sin16(heading),push)));call("PhProp_initPhysics",{i(chunk),i(18)});}
   return remove_body(c);
 }
 void Model::award_kill(Address c) {
