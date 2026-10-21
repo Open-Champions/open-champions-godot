@@ -2854,3 +2854,55 @@ Limits: the console's last bit of an add is still the research's open
 question, and the port uses the ps2 model. The three fx-trig refusals stay
 refused. No native Intel, Windows or Linux run (x86_64 is Rosetta only). No
 manual play is claimed.
+
+## Playable integration wave 14 — level-spawn-2 (mode-A arena start) — 2026-10-20
+
+Start `037e26d`. `codex/level-spawn-2` (`53c4883..e7ac3d5`, branched from
+`037e26d`) is merged in `b7374ca` with no conflicts.
+
+What it changes: when a cold story start's radius-12 snap has no floor, no
+Player1 took and the level has an `ArenaPlayerStart`, `story_start_ground` uses
+the mode-A wave start (ring radius 180, slot 0, count 1, `findFreeSpot` spread
+36 then 240 on an empty object list with seed 0, then `player_ctor_z` at
+radius 12). Research pin `t3/research-levels` `13fafa46`, `docs/level-flow.md`
+section 18. `champions-level-flow` now links `champions-objects`. See
+[LEVEL_FLOW.md](LEVEL_FLOW.md).
+
+Integration fix (`ed499e2`): the level-texture extension lists its native
+sources by hand and compiles `level_flow.cpp`, so after the merge it failed to
+link (`objects::World` undefined). It now also compiles
+`objects_lifetime.cpp`, `objects_scheduler.cpp` and `objects_queries.cpp`.
+level-spawn-2 had not rebuilt that extension.
+
+Verification (`work/playable-wave14/`):
+- Native Release arm64 and x86_64 builds pass, as do the four universal
+  extension builds (after `ed499e2`).
+- Full CTest arm64 `-j3`: **196/196**, 659 s (`player-exact` 118 s).
+- x86_64 Rosetta, `build/native-x64` `-j3`: 194/196 in the aggregate run
+  (2,567 s, overlapping the sweep and the Godot runs). `monsters-1-exact`
+  (its 180 s trace subprocess limit) and `skills-a-exact` (120 s) only timed
+  out; rerun alone both pass (210 s, 116 s), so **196/196**.
+  `level-flow-exact` and `fx-exact` pass on both architectures.
+- Real data (counts only, `work/run-slices-r14.sh`): **111 / 111** loaded and
+  played, 0 refused for any reason, 0 failed checks. Every deterministic count
+  equals level-spawn-2's sweep. See [REAL_DATA.md](REAL_DATA.md).
+- Godot dev matrix **43/43**: Full combat 2,616 checks, combined FX 1,876,
+  wave-12 extensions 40, FX bridge refusals 33, creature-anim 32 / 25 / 231,
+  `native_fx_visual` 4 runs, no refusals.
+- Export matrix **16/16** on the first run. The 36,000-tick 1280×720 Full run
+  passed 108,822 checks with 0 failures (140 s). 960×720 and 800×600 passed
+  2,742 each, exported headless 2,616. Every `FULL_TRACE` is still
+  `8dc349c1…aa0c`. The exported app also ran the 12-level real-data set
+  (12 / 12, counts equal wave 13 apart from timing) and the three arena
+  levels (3 / 3).
+
+App: `build/exports/wave14-final/Open Champions.app`.
+ZIP SHA-256: `8bd72823081a9cafa75103baa0a6cd2691ceb13b9d128cfcfc1e4a544739721b`.
+Main universal extension: `bfaf12dd7da6168677a4f7c3f35ea96faebfcbf82be46b58bbc97b46abe4c0bf`.
+Texture universal extension: `0b93213ee395cfd16701fea24f0c375aeb77e7fd7f7aa7d87c24aa1b64349941`.
+The packaged libraries are byte-identical to the local builds (x86_64 + arm64).
+
+Limits: the live `Player1_ctor` seed, the `findFreeSpot` class radii, the
+mode-A name table, `arena_pickSpawnPoint` with a0 = 0 and the unchecked
+net-peer index stay refused. No native Intel, Windows or Linux run (x86_64 is
+Rosetta only). No manual play is claimed.
