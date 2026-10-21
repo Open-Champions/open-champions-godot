@@ -23,6 +23,7 @@ string(JSON GODOT_CPP_PIN GET "${DEPENDENCY_LOCK}" godot_cpp_commit)
 if(NOT PIN_RESULT EQUAL 0 OR NOT GODOT_CPP_REV STREQUAL GODOT_CPP_PIN)
     message(FATAL_ERROR "godot-cpp must be checked out at ${GODOT_CPP_PIN}")
 endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/source_path_map.cmake")
 # The archive API uses C++ exceptions; retain them across the adapter's catch boundary.
 set(GODOTCPP_DISABLE_EXCEPTIONS OFF CACHE BOOL "Preserve archive error handling" FORCE)
 set(GODOTCPP_BUILD_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/build_profile.json" CACHE PATH "Trim bindings" FORCE)

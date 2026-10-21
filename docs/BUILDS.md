@@ -86,6 +86,12 @@ would emit an archive instead of a shared library. Zig links libc++ into the
 binary itself. The Linux target is `x86_64-linux-gnu.2.28`. The Windows target
 is `x86_64-windows-gnu` (MinGW, Universal CRT).
 
+`gdextension/source_path_map.cmake` remaps the checkout, build directory, and
+pinned godot-cpp directory in Clang/GCC diagnostic file names. This keeps local
+absolute paths out of the exported release libraries, including names expanded
+from `__FILE__`; it does not change game data or simulation behavior. Inspect
+all four release libraries for build-machine paths before packaging.
+
 ## Build the libraries
 
 Set `GODOT_CPP_DIR` to the pinned checkout. Run these from the repository root.
@@ -152,7 +158,10 @@ ctest --test-dir build/native --output-on-failure -j 3
 ## Export
 
 Import the project once so Godot sees both extensions, then export. `GODOT` is
-the 4.5.2 editor binary.
+the 4.5.2 editor binary. On a macOS build host, build both macOS
+`template_debug` extensions above before importing a fresh checkout. The editor
+loads those libraries even when the requested release export targets Windows or
+Linux.
 
 ```sh
 "$GODOT" --headless --path godot --editor --quit-after 120 --frame-delay 50
@@ -177,10 +186,10 @@ glibc family. The player binary's ELF note asks for Linux 5.15.0, and its
 glibc symbols go up to 2.28, so launch it on a distribution at least that new.
 The extension `.so` files themselves do not ask for a glibc newer than 2.16.
 
-These Windows and Linux files were checked on the Mac (format, imports,
-exported entry points, and that the package does not contain a game folder).
-They were not executed here: this machine has no Wine and no x86_64 Linux
-loader. On a Windows machine, run `OpenChampions.exe --headless --quit-after 40`
+Cross-build and export checks on macOS establish binary format, imported
+libraries, exported entry points, and package contents. They do not establish
+that Windows or Linux can load or run the client. On a Windows machine, run
+`OpenChampions.exe --headless --quit-after 40`
 from the export directory and confirm both DLLs load. On a Linux machine, run
 `ldd` on the player and both `.so` files, then
 `./OpenChampions.x86_64 --headless --quit-after 40`.
