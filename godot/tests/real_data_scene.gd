@@ -8,6 +8,7 @@ extends SceneTree
 #   [--new-only]  play/capture only levels with water, moving pieces or more
 #                 than the session's static-mesh cap (refused before round 2)
 #   [--from=I] [--to=J]  only level indices I..J-1 (for parallel slices)
+#   [--scripts]   opt into the level script after load and before play
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
@@ -143,6 +144,11 @@ func run() -> void:
 			write_summary()
 			continue
 		add("levels.loaded")
+		var scripted := false
+		if args.has("scripts"):
+			scene.level_script.set_pressed_no_signal(true)
+			scripted = scene.attach_level_script()
+			add("scripts.attached" if scripted else "scripts.attach_refused")
 		var kinds: Array[String] = []
 		if int(result.get("water_tiles", 0)) > 0: kinds.append("water")
 		if int(result.get("pieces", 0)) > 0: kinds.append("pieces")
@@ -181,6 +187,7 @@ func run() -> void:
 		started = Time.get_ticks_msec()
 		scene.actions.play.pressed.emit()
 		if not check(scene.play_mode and scene.fx.enabled, "play starts on a real level"):
+			if scripted: take_script_counts()
 			refuse("play.start", scene.status_label.text)
 			continue
 		add("levels.played")
@@ -202,6 +209,9 @@ func run() -> void:
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
 		for t in range(ticks): scene.advance_step()
+		var started_before := int(counts.get("scripts.started", 0))
+		if scripted: take_script_counts()
+		if int(counts.get("scripts.started", 0)) > started_before: print("script_started_index ", index)
 		add("time.play_ms", Time.get_ticks_msec() - started)
 		add("play.ready_ticks", int(scene.raw_observation.get("ready_ticks", 0)))
 		if scene.real.world != null:
@@ -238,6 +248,21 @@ func run() -> void:
 	counts["complete"] = 1
 	print(JSON.stringify(write_summary(), "  ", true))
 	quit(0 if failures == 0 else 1)
+
+func take_script_counts() -> void:
+	var counts: Dictionary = scene.controller.script_command_counts()
+	if not counts.get("ok", false):
+		add("scripts.counts_unavailable")
+		return
+	add("scripts.started", int(counts.get("started", 0)))
+	add("scripts.reached_wait", int(counts.get("reached_wait", 0)))
+	add("scripts.reached_complete", int(counts.get("reached_complete", 0)))
+	add("scripts.faults", int(counts.get("faults", 0)))
+	add("scripts.missing_entries", int(counts.get("missing_entries", 0)))
+	add("scripts.objects_registered", int(counts.get("objects_registered", 0)))
+	add("scripts.objects_refused", int(counts.get("objects_refused", 0)))
+	for name in counts.get("executed", {}): add("executed." + str(name), int(counts.executed[name]))
+	for name in counts.get("refused", {}): add("refused." + str(name), int(counts.refused[name]))
 
 func write_summary() -> Dictionary:
 	var summary := {"counts": counts, "refusals": reasons, "failures": failures}
