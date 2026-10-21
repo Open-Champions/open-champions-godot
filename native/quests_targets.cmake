@@ -1,5 +1,6 @@
-# Quest and mission campaign. Included after script_commands_targets.cmake:
-# the host links champions-quests by name, which CMake resolves at generate time.
+# Quest and mission campaign. Included from the end of
+# script_commands_targets.cmake, so the native tree and the GDExtension both
+# define it; the host links champions-quests by name.
 set(CHAMPIONS_QUESTS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 if(NOT TARGET champions-quests)
   add_library(champions-quests

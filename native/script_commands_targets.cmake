@@ -39,3 +39,7 @@ if(BUILD_TESTING AND TARGET champions-archive)
     set_tests_properties(script-commands-measure-usage PROPERTIES WILL_FAIL TRUE)
     set_tests_properties(script-commands-measure-empty PROPERTIES PASS_REGULAR_EXPRESSION "scripts_started 0")
 endif()
+
+# The host links champions-quests; define it here so every build that includes
+# this file (native and the GDExtension) has the target.
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/quests_targets.cmake")
