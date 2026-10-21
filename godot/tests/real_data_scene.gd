@@ -415,7 +415,8 @@ func take_script_counts() -> void:
 	add("scripts.callee_refusals", int(counts.get("callee_refusals", 0)))
 
 	for key in ["objects_built", "objects_unbuilt", "objects_not_created", "objects_pool_refused",
-			"objects_unclassified", "load_draws_unmodelled"]:
+			"objects_unclassified", "load_draws_unmodelled",
+			"item_load_gate_refusals", "item_load_draws_inferred"]:
 		add("scripts." + key, int(counts.get(key, 0)))
 	var refusals: Dictionary = counts.get("build_refusals", {})
 	for reason in refusals: add("scripts.build_refused." + str(reason), int(refusals[reason]))
