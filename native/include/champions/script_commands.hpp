@@ -58,8 +58,9 @@ struct Counts {
   std::uint64_t callee_refusals = 0;
   std::array<std::uint64_t, COMMANDS> executed{};
   std::array<std::uint64_t, COMMANDS> refused{};
-  // Executions whose route runs an inferred body (setCFlag, selectSetCFlag:
-  // the boss-music stop and queue, research-audio 6b08886). Each is also in
+  // Executions whose route runs an inferred body: setCFlag and
+  // selectSetCFlag with bit 0, which reach creature_startBossMusic (the
+  // boss-music stop and queue, research-audio 6b08886). Each is also in
   // executed[].
   std::array<std::uint64_t, COMMANDS> inferred{};
 };

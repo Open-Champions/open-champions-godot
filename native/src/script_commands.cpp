@@ -1,5 +1,4 @@
 #include "champions/script_commands.hpp"
-#include "champions/core_arithmetic.hpp"
 #include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
@@ -146,7 +145,7 @@ bool routed_command(const char *name) {
       return true;
   return false;
 }
-// Rows whose route runs a body research inferred rather than executed.
+// Rows whose bit-0 route runs a body research inferred rather than executed.
 bool inferred_route(const char *name) {
   return std::strcmp(name, "setCFlag") == 0 || std::strcmp(name, "selectSetCFlag") == 0;
 }
@@ -324,7 +323,10 @@ amx::NativeMap Host::command_map() {
         return 0;
       }
       counts_.executed[i] += 1;
-      if (inferred_route(kRows[i].name))
+      // Only bit 0 reaches creature_startBossMusic (the selector's which
+      // argument: params + 8 for setCFlag, + 4 for selectSetCFlag).
+      if (inferred_route(kRows[i].name) &&
+          machine.cell(machine.params + (std::strcmp(kRows[i].name, "setCFlag") == 0 ? 8 : 4)) == 0)
         counts_.inferred[i] += 1;
       if (cflag) {
         try {

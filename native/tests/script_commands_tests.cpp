@@ -391,7 +391,7 @@ void test_callee_refusals() {
 
 // With the caller's music volume, startMusic and the boss bit of setCFlag run.
 void test_music_with_volume() {
-  auto built = build_calls({{"start", {{"startMusic", {2200}}, {"setCFlag", {2400, 0, 1}}}}},
+  auto built = build_calls({{"start", {{"startMusic", {2200}}, {"setCFlag", {2400, 0, 1}}, {"setCFlag", {2400, 26, 1}}}}},
                            {{2200, "theme"}, {2400, "broon"}});
   sc::Host host;
   host.add_object("broon", 0x20, {}, 0);
@@ -420,8 +420,8 @@ void test_music_with_volume() {
             calls[1].args[0] == 2 && calls[1].args[2] == 0x23,
         "stream 2 is queued with flags 3 | 0x22");
   check(host.music_channel() == 0x3f480000u, "the channel word is kept");
-  check(host.counts().executed[at("setCFlag")] == 1 && host.counts().inferred[at("setCFlag")] == 1,
-        "setCFlag's boss route is counted as inferred");
+  check(host.counts().executed[at("setCFlag")] == 2 && host.counts().inferred[at("setCFlag")] == 1,
+        "only setCFlag's bit-0 boss route is counted as inferred");
   check(memory.u8(broon->addr + 0xa8) & 1u, "setCFlag sets bit 0");
   check(host.audio().queued_count(2) == 1, "setCFlag queues the boss track");
 }
