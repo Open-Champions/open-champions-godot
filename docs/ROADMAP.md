@@ -17,6 +17,7 @@ The standalone [Return to Arms UI layout service](HUD_LAYOUT.md) computes
 documented static frame, base HUD and font metrics for later scene integration.
 Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,
 medal and net-camera arithmetic, plus the present-brightness formula, beside that service.
+The play scene's inventory, shop, skills, stats and level-up screens call the existing item handlers; undocumented frame positions stay refusals.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
 platform verification. Godot and godot-cpp are fetched locally, not vendored.

@@ -1,0 +1,280 @@
+#include "champions/menus.hpp"
+
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+using namespace champions::menus;
+
+namespace {
+int checks = 0;
+
+void expect(bool ok, const char *name) {
+  ++checks;
+  if (!ok)
+    throw std::runtime_error(name);
+}
+
+template <class Fn> void reject(Fn fn, const char *name) {
+  bool threw = false;
+  try {
+    fn();
+  } catch (const Refusal &) {
+    threw = true;
+  }
+  expect(threw, name);
+}
+
+void rank_vectors() {
+  expect(rank_cost(0, 10) == 0, "rank 0*11");
+  expect(rank_cost(1, 0) == 1, "rank 1*1");
+  expect(rank_cost(1, 10) == 11, "rank 1*11");
+  expect(rank_cost(4, 10) == 44, "rank 4*11");
+  expect(rank_cost(-1, 10) == -11, "rank negative");
+  expect(rank_cost(4, 0) == 4, "rank 4*1");
+  expect(rank_cost(5, 0) == 5, "rank power 5,0");
+  expect(rank_cost(5, 1) == 6, "rank power 5,1");
+  expect(rank_cost(5, 2) == 8, "rank power 5,2");
+  expect(rank_cost(5, 3) == 10, "rank power 5,3");
+  expect(rank_cost(5, 10) == 44, "rank power 5,10");
+  expect(rank_cost(8, 2) == 11, "rank power 8,2");
+  expect(rank_cost(20, 10) == 59, "rank power 20,10");
+}
+
+void save_index_vectors() {
+  constexpr std::uint32_t record = 0x100000;
+  const Counts counts{{2, 1, 0}};
+  for (auto pair : {std::pair<int, int>{0, 0}, {0, 1}, {1, 0}}) {
+    const auto cell = record + BAG_ITEMS + static_cast<std::uint32_t>(pair.first) * BAG_STRIDE +
+                      static_cast<std::uint32_t>(pair.second) * ITEM_SIZE;
+    const auto got = item_ptr_to_index(cell, record, counts);
+    expect(got == pair.first * 1000 + pair.second, "save index");
+    expect(item_index_to_ptr(got, record, counts) == cell, "save pointer");
+  }
+  expect(item_ptr_to_index(0, record, counts) == -1, "null pointer");
+  expect(item_ptr_to_index(record + BAG_ITEMS + 2 * ITEM_SIZE, record, counts) == -1, "past count");
+  expect(item_index_to_ptr(-1, record, counts) == 0, "index -1");
+  expect(item_index_to_ptr(2, record, counts) == 0, "unmatched 2");
+  expect(item_index_to_ptr(1000, record, counts) == record + BAG_ITEMS + BAG_STRIDE, "bag 1");
+  expect(item_index_to_ptr(1001, record, counts) == 0, "past bag 1");
+  expect(item_index_to_ptr(2000, record, counts) == 0, "empty bag");
+  expect(item_ptr_to_index(record + BAG_ITEMS + 2 * BAG_STRIDE, record, counts) == -1, "bag 2 cell");
+}
+
+void cursor_vectors() {
+  expect(cursor_cell(0, 17, 100) == std::make_pair(0, 0), "origin cell");
+  expect(cursor_cell(0, 49, 100) == std::make_pair(1, 0), "column 1");
+  expect(grid_address(0x2000, 1, 0) == 0x2000 + GRID_COL, "grid column");
+  expect(grid_address(0x2000, -1, 0) == 0, "grid negative");
+  expect(grid_address(0x2000, 9, 0) == 0, "grid past column");
+  expect(grid_address(0x2000, 0, 75) == 0, "grid past row");
+  expect(grid_address(0x2000, 8, 74) == 0x2000 + 8 * GRID_COL + 74 * GRID_ROW, "grid corner");
+  expect(cursor_cell(80, 80 + 17 + 4 * 32, 100) == std::make_pair(4, 0), "column 4");
+  const auto hit = hit_cell(0, 0, 1);
+  expect(cursor_cell(0, hit.x0, hit.y0) == std::make_pair(0, 1), "hit cell row");
+}
+
+void action_vectors() {
+  struct Row {
+    int mode;
+    std::uint32_t edge;
+    bool equipped, holdable;
+    Masks masks;
+    Action want;
+  };
+  const Row rows[] = {
+      {0, 0x80, false, false, CROSS_CONFIRM, Action::Buy},
+      {0, 0x40, false, false, CROSS_CONFIRM, Action::None},
+      {1, 0x80, false, false, CROSS_CONFIRM, Action::Sell},
+      {1, 0x80, true, false, CROSS_CONFIRM, Action::ConfirmBox},
+      {1, 0x40, false, false, CROSS_CONFIRM, Action::Equip},
+      {1, 0x40, true, false, CROSS_CONFIRM, Action::Unequip},
+      {1, 0x10, false, false, CROSS_CONFIRM, Action::None},
+      {2, 0x40, false, false, CROSS_CONFIRM, Action::Equip},
+      {2, 0x40, true, false, CROSS_CONFIRM, Action::Unequip},
+      {2, 0x40, false, true, CROSS_CONFIRM, Action::Drag},
+      {2, 0x10, false, false, CROSS_CONFIRM, Action::Drop},
+      {2, 0x50, false, false, CROSS_CONFIRM, Action::Equip},
+      {2, 0x80, false, false, CROSS_CONFIRM, Action::None},
+      {2, 0x00, false, false, CROSS_CONFIRM, Action::None},
+      {3, 0x00, false, false, CROSS_CONFIRM, Action::Workshop},
+      {2, 0x20, false, false, CIRCLE_CONFIRM, Action::Equip},
+      {2, 0x80, false, false, CIRCLE_CONFIRM, Action::Drop},
+      {2, 0x40, false, false, CIRCLE_CONFIRM, Action::None},
+      {0, 0x80, false, false, CIRCLE_CONFIRM, Action::None},
+  };
+  for (const auto &row : rows)
+    expect(item_action(row.mode, row.edge, row.equipped, row.holdable, row.masks) == row.want,
+           "item action");
+}
+
+void layout_vectors() {
+  const auto strip = inventory_strip(80);
+  expect(strip.x0 == 95 && strip.y0 == 413 && strip.x1 == 385 && strip.y1 == 414 && strip.layer == 4,
+         "strip");
+  const auto above = inventory_strip_above(80);
+  expect(above.y0 == 412 && above.y1 == 413 && above.x0 == 95, "strip step");
+  expect(shop_choice_rows() == std::make_pair(203, 243), "shop rows");
+  const auto header = stats_header();
+  expect(header.x == 160 && header.y == 107 && header.font == 0x4f7104u && header.layer == 5 &&
+             header.colour == 0x80323c3cu,
+         "stats header");
+  const auto lines = stats_lines();
+  expect(lines.size() == 8 && lines[0].x == 160 && lines[0].y == 107 && lines[0].centred, "stats lines");
+  const auto skill = skill_layout(40);
+  expect(skill.clip_x == 40 && skill.clip_y == 98 && skill.header_centre_x == 93 && skill.header_x == 110,
+         "skill clip");
+  expect(skill.line_calls == 17 && skill.node_x[0] == 126 && skill.line_x[0] == 17, "skill nodes");
+  const auto pause = pause_style();
+  expect(pause.font == 0x4f7100u && pause.layer == 7 && pause.colour == 0x80464646u, "pause style");
+  const auto shop = shop_mark();
+  expect(shop.sprite_x == 66 && shop.sprite_y == 210 && shop.text_colour == 0x80323c3cu, "shop mark");
+  expect(stored_mask(1, 0x41b970) == 0x80 && stored_mask(1, 0x41b960) == 0x40, "cross masks");
+  expect(stored_mask(0, 0x41b960) == 0x20 && stored_mask(0, 0x41bfb8) == 0x140, "circle masks");
+  expect(stored_mask(1, 0x41b964) == 0x7e, "wide stored word");
+  reject([] { stored_mask(0, 0x41b970); }, "byte 0 leaves the shop word");
+  reject([] { read_wide_mask_as_button(0x7e); }, "wide mask");
+  reject([] { refuse("item-info-coordinates"); }, "item info");
+  bool saw = false;
+  for (const auto &gap : gaps())
+    if (std::string(gap.id) == "stat-spend-input")
+      saw = true;
+  expect(saw, "stat spend gap");
+  expect(skill_points_for_level(0) == 1 && skill_points_for_level(5) == 1, "skill band 1");
+  expect(skill_points_for_level(6) == 2 && skill_points_for_level(15) == 2, "skill band 2");
+  expect(skill_points_for_level(16) == 3 && skill_points_for_level(25) == 3, "skill band 3");
+  expect(skill_points_for_level(26) == 4 && skill_points_for_level(35) == 4, "skill band 4");
+  expect(skill_points_for_level(36) == 5 && skill_points_for_level(80) == 5, "skill band 5");
+}
+
+void ledger_vectors() {
+  {
+    Ledger book;
+    expect(book.gold() == 500 && book.bag_count(0) == 2 && book.skill_points() == 4, "seed");
+    expect(book.stat_points() == 3 && book.level() == 5 && book.acknowledged() == 4, "seed points");
+    expect(book.press(2, 0x40) == Action::Equip && book.equipment_index(0) == 0, "equip");
+    expect(book.press(2, 0x40) == Action::Unequip && book.equipment_index(0) == -1, "unequip");
+  }
+  {
+    Ledger book;
+    const auto row = hit_cell(0, 0, 1);
+    book.set_cursor(row.x0, row.y0);
+    expect(book.press(2, 0x40) == Action::Drag && book.dragging() && book.bag_count(0) == 2, "drag");
+    expect(book.frame("inventory").texts.size() == 2, "drag does not copy");
+  }
+  {
+    Ledger book;
+    expect(book.press(2, 0x10) == Action::Drop && book.bag_count(0) == 1 && book.gold() == 500, "drop");
+    expect(book.frame("inventory").texts.at(0).text == "charm", "drop slides");
+  }
+  {
+    Ledger book;
+    expect(book.press(0, 0x80) == Action::Buy && book.gold() == 441 && book.bag_count(0) == 3, "buy");
+    expect(book.frame("shop").texts.at(0).text == "stock", "stock cell");
+  }
+  {
+    Ledger book;
+    expect(book.press(1, 0x80) == Action::Sell && book.gold() == 501 && book.bag_count(0) == 1, "sell");
+  }
+  {
+    Ledger book;
+    expect(book.press(2, 0x40) == Action::Equip, "equip before sell");
+    expect(book.press(1, 0x80) == Action::ConfirmBox && book.gold() == 500 && book.equipment_index(0) == 0,
+           "equipped sell");
+  }
+  {
+    Ledger book;
+    expect(book.press(3, 0) == Action::Workshop && book.gold() == 500 && book.bag_count(0) == 2, "workshop");
+    book.set_cursor(49, 100);
+    expect(book.press(2, 0x40) == Action::None && book.bag_count(0) == 2, "empty cell");
+  }
+  {
+    Ledger book;
+    book.set_scheme(CIRCLE_CONFIRM);
+    expect(book.press(2, 0x20) == Action::Equip && book.equipment_index(0) == 0, "circle equip");
+  }
+  {
+    Ledger book;
+    book.set_scheme(CIRCLE_CONFIRM);
+    expect(book.press(2, 0x40) == Action::None && book.equipment_index(0) == -1, "circle cross");
+    expect(book.press(0, 0x80) == Action::None && book.gold() == 500, "circle shop");
+  }
+  {
+    Ledger book;
+    book.set_page(3);
+    expect(book.press(2, 0x40) == Action::None && book.stat_points() == 3, "stats page");
+    book.spend_stat(0);
+    expect(book.base_stat(0) == 11 && book.stat_points() == 2, "stat handler");
+    expect(book.passive_level_at(1) == 2, "passive");
+    book.spend_skill(0, 1);
+    expect(book.skill_points() == 3 && book.passive_level_at(1) == 3, "skill handler");
+    expect(book.frame("skills").texts.at(0).text == "3 cost 10", "displayed cost");
+  }
+  {
+    Ledger book;
+    const auto before = book.hit_points();
+    book.grant_level();
+    expect(book.level() == 6 && book.skill_points() == 5 && book.stat_points() == 6, "level award");
+    expect(book.acknowledged() == 4 && book.hit_points() == book.max_hit_points() && before != book.hit_points(),
+           "hit points refilled");
+    book.open_level_up();
+    expect(book.acknowledged() == 6 && book.page() == 5 && book.level() == 6, "level-up page");
+    expect(book.press(2, 0x40) == Action::None, "level-up press");
+  }
+  {
+    Ledger book;
+    for (int i = 0; i < 42; ++i)
+      book.grant_level();
+    expect(book.stat_points() == -127 && book.level() == 47 && book.skill_points() == 150, "stat wrap");
+  }
+  {
+    Ledger book;
+    auto bytes = book.save();
+    expect(bytes.size() > 56, "save size");
+    bytes[52] = bytes[53] = bytes[54] = bytes[55] = 0;
+    book.load(bytes);
+    expect(book.hit_points() == 0, "loaded zero hit points");
+    book.grant_level();
+    expect(book.hit_points() == 0 && book.level() == 6, "zero hit points stay");
+  }
+  {
+    Ledger book;
+    expect(book.press(2, 0x40) == Action::Equip, "equip for save");
+    book.set_page(2);
+    book.set_cursor(49, 123);
+    const auto bytes = book.save();
+    Ledger restored;
+    restored.load(bytes);
+    expect(restored.save() == bytes, "save round trip");
+    expect(restored.equipment_index(0) == 0 && restored.gold() == 500 && restored.page() == 2, "restored");
+    auto bad = bytes;
+    bad[72] = 99;
+    bad[73] = bad[74] = bad[75] = 0;
+    reject([&] { restored.load(bad); }, "unknown definition");
+    reject([&] { restored.load({1, 2, 3, 4}); }, "truncated save");
+  }
+  {
+    Ledger book;
+    const auto drawn = book.frame("inventory");
+    expect(!drawn.texts.empty() && drawn.texts[0].x == 17 && drawn.texts[0].y == 89, "name on hit cell");
+    expect(!drawn.rects.empty() && drawn.rects[0].y0 == 413, "scrollbar");
+    const auto stats = book.frame("stats");
+    expect(stats.texts.at(0).text == "5" && stats.texts.at(0).x == 160 && stats.texts.at(0).centred, "level line");
+    expect(book.frame("pause").texts.empty(), "pause has no frame");
+  }
+}
+} // namespace
+
+int main() {
+  rank_vectors();
+  save_index_vectors();
+  cursor_vectors();
+  action_vectors();
+  layout_vectors();
+  ledger_vectors();
+  std::cout << "PASS menus " << checks << " checks\n";
+  return 0;
+}
