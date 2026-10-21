@@ -516,6 +516,30 @@ void replay(const Exact &c) {
     expect_particles(*h.w, c);
     return;
   }
+  if (c.name == "disease-attach") {
+    Host h;
+    auto victim = h.creature({0, 0, 0});
+    h.w->write(victim + 0x1c, 4, 0x41c00000);  // 24.0
+    h.w->write(victim + 0x68, 4, 0x3e800000);  // disease resistance 0.25
+    h.w->write(C::FRAME, 4, 77);
+    h.w->write(C::SHARED_SEED, 4, 0x2468ace1);
+    h.w->write(0x41b1e4, 4, 0x41b000);
+    h.w->clear_history();
+    auto block = h.w->attach_disease(victim, 0);
+    check(block != 0, "disease-attach block");
+    check(c.seed && h.w->read(C::SHARED_SEED) == *c.seed, "disease-attach shared seed");
+    const unsigned offs[] = {0x10, 0x14, 0x1a0, 0x1a4, 0x1a8, 0x1ac};
+    check(c.spell.size() == 6, "disease-attach spell words");
+    for (unsigned k = 0; k < 6; ++k)
+      check(h.w->read(block + offs[k]) == c.spell[k],
+            "disease-attach word +" + std::to_string(offs[k]));
+    check(c.swarm.size() == 96, "disease-attach swarm width");
+    for (unsigned k = 0; k < 96; ++k)
+      check(h.w->read(block + 0x1c + 4 * k) == c.swarm[k],
+            "disease-attach swarm word " + std::to_string(k));
+    check(h.w->attached_spells(victim).size() == 1, "disease-attach is linked");
+    return;
+  }
   if (c.name == "cloud-tick") {
     // The victim sits one cell column below the cloud, so the grid walk meets
     // it first, as the research box callback lists it first. The cloud is in

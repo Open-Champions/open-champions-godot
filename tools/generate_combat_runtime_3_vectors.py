@@ -241,6 +241,8 @@ def main():
     # Audit fixes CR3-2/CR3-6: kind 1 in flight. Its 24 particle pairs are not
     # behind the hit, which now refuses at fx_spawn 5 (arrow1 keeps its FX row).
     lines += arrow_case('arrow1-flight', 1, 0)
+    # Audit fix CR3-7: the disease branch (stored words, the 16-point swarm).
+    lines += disease_attach_case()
     text = ('\n'.join(lines) + '\n').encode()
     out = Path(__file__).resolve().parents[1] / 'native/tests/vectors'
     out.mkdir(parents=True, exist_ok=True)
