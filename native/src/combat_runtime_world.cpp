@@ -828,6 +828,8 @@ Services flat_fixture_services() {
   s.attach_point = [](Address, Raw, const Vec3 &pos, Raw, Raw) { return pos; };
   s.sample_point_count = [](Raw) { return Raw(0); };
   s.resource = [](const ResourceQuery &) { return Raw(0); };
+  s.height_at_point = [](const Vec3 &) { return Raw(0); };
+  s.particle_group = [] { return Raw(0); };
   return s;
 }
 } // namespace champions::simulation::rta::combat_runtime

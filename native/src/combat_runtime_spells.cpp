@@ -462,6 +462,20 @@ Value World::State::skill_virtual(Address skill, unsigned slot,
     return iv(a.stat(self, ar(0), ar(1)));
   case 0x3c8690:
     return iv(a.tier2(self, ar(0), ar(1), ar(2)));
+  // Skill_getStatFor 0x3c87f0 and Skill_getStatForHandle 0x3c8864
+  // (ref_skills_a). Slot 10 for a player, slot 11 otherwise. The handle form
+  // reads the object through the node and does not test that object for null.
+  case 0x3c87f0:
+    if (ar(2) && (u(ar(2) + 0xc) & 0x40))
+      return skill_virtual(skill, 10, {iv(ar(0)), iv(ar(1)), iv(ar(3))});
+    return skill_virtual(skill, 11, {iv(ar(0)), iv(ar(1)), iv(ar(3))});
+  case 0x3c8864: {
+    auto node = u(ar(2));
+    Address caster = node ? u(node + 0xc) : 0;
+    if (node && (u(caster + 0xc) & 0x40))
+      return skill_virtual(skill, 10, {iv(ar(0)), iv(ar(1)), iv(ar(3))});
+    return skill_virtual(skill, 11, {iv(ar(0)), iv(ar(1)), iv(ar(3))});
+  }
   case 0x3c88dc:
     return iv(ar(0));
   case 0x3c8218:
@@ -518,6 +532,20 @@ Value World::State::spell_virtual(Address spell, unsigned slot,
   }
   if (fn == HOLY_SHIELD_RUN) {
     holy_shield_run(self);
+    return iv(0);
+  }
+  // Round 6 runs, reached by function when a table holds them. Creature slot
+  // 17 calls spell slot 2 with the position. Nothing here plants these tables.
+  if (fn == 0x305bbc || fn == 0x2fc684 || fn == 0x2fb9b4) {
+    if (args.empty() || !std::holds_alternative<Vec3>(args[0]))
+      throw Unsupported("a round-6 spell run without its position");
+    auto pos = std::get<Vec3>(args[0]);
+    if (fn == 0x305bbc)
+      arena_run(self, pos);
+    else if (fn == 0x2fc684)
+      hornomen_run(self, pos);
+    else
+      planarsteel_run(self, pos);
     return iv(0);
   }
   throw Unsupported("Spell slot " + std::to_string(slot) + " reaches " +
