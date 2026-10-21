@@ -2983,3 +2983,77 @@ Limits:
 - The post action runs once at load.
 - No native Intel, Windows or Linux run (x86_64 is Rosetta only). No manual
   play is claimed.
+
+## Playable integration wave 16 — water-draw (documented water surface) — 2026-10-21
+
+Start `685c6e6`. `codex/water-draw` (`037e26d..be0f580`, three commits) is
+merged in `679b7d7`. See [WATER_DRAW.md](WATER_DRAW.md).
+
+Conflicts: `docs/REAL_DATA.md` (both sides kept: the wave-14/15 sections, then
+the water-draw section) and `godot/tests/real_data_scene.gd` (both
+`--scripts` and `--water` kept). No code change was needed beyond that.
+
+What it adds: `champions-water-draw`, the documented water colour, FIX blend,
+slope UVs, vertices and layer 3, with the wave stepped once per simulation
+tick. The level-texture extension compiles it into `ChampionsRealWorld`
+(`water_sync`, `water_texture`). `real_world.gd` replaces the neutral tile with
+one mesh that has a surface per water set. It uses `render_priority` 3,
+`depth_draw_never` and `depth_test_disabled`, and it textures the tiles from
+the level's first water `.tex`. The claim-frame seed is refused, so every
+block is a zero grid and real tiles stay flat. The main extension is unchanged.
+
+Verification (`work/playable-wave16/`):
+- Native Release arm64 and x86_64 builds pass, with 0 warnings on arm64. The
+  four universal extension builds pass.
+- Full CTest arm64 `-j3`: **200/200** on the first run, 772 s
+  (`player-exact` 130 s, `skills-a-exact` 31 s). The new test is
+  `water-draw`.
+- x86_64 Rosetta, `build/native-x64` `-j3`: **200/200** on the first run,
+  1,246 s, no timeouts (`player-exact` 187 s, `monsters-1-exact` 82 s,
+  `skills-a-exact` 50 s).
+- Real data (counts only, `work/run-slices-r16.sh`): **111 / 111** loaded and
+  played with scripts on (`r16 --scripts`) and with scripts off (`r16n`).
+  0 refused and 0 failed checks in both. 48 / 48 water textures decoded, all
+  64×64. Every other count equals wave 15 (scripts on) and wave 14 (scripts
+  off), apart from mesh surfaces, which rose by one: 174,457. One level uses
+  both water sets, so its water mesh has two surfaces. See
+  [REAL_DATA.md](REAL_DATA.md).
+- Windowed captures of four water levels (indices 20, 28, 29 and 30), checked
+  by eye. The sheets are flat, with no ripples, and are textured and tinted.
+  Overlapping tiles blend twice. A sheet draws over nearer rock because water
+  has no depth test.
+- Godot dev matrix **45/45**, the same set as wave 15. Full combat 2,616
+  checks, combined FX 1,876, wave-12 extensions 40, FX bridge refusals 33,
+  creature-anim 32 / 25 / 231, `native_fx_visual` 4 runs with no refusals.
+  `FULL_TRACE` is `8dc349c1…aa0c`.
+- Export matrix: 17 of 18 passed in the matrix run, then **18/18** after one rerun.
+  - The 36,000-tick 1280×720 Full run failed one check in the matrix: 108,822
+    checks, 1 failure, "stale clip clears cosmetic owner and restores static
+    mesh". This is the animation-picker refusal step. It rewrites the LMP and
+    restarts the clip. water-draw does not touch that path.
+  - Rerun alone, it passed 108,822 checks with 0 failures (152 s) and 63
+    captures.
+  - The cause of the single failure is not proven. No timestamp cache was
+    found in the scripts.
+  - Exported headless passed 2,616, 960×720 passed 2,742 and 800×600 passed
+    2,742, each with 63 captures.
+  - Every `FULL_TRACE` is `8dc349c1…aa0c`.
+- Exported app on real data: the 12-level set with and without `--scripts`,
+  and the three arena indices with `--scripts`. Each equals wave 15 apart
+  from timing and the new water-texture counts.
+
+App: `build/exports/wave16-final/Open Champions.app`.
+ZIP SHA-256: `317bdd38be2a83d088f3acaefdc7da4c5a7189d32e4a6ad2243c40fa9e6a71b6`.
+Main universal extension (unchanged from wave 15): `283420664a26c469ec66842379ca859c3d0c6c8160191b56dd36a7e6046ee95a`.
+Texture universal extension: `7ef534a2d01ee57ea6084db252639b6b10c8e5ebdfeed9f36536b1d9a950927c`.
+The packaged libraries are byte-identical to the local builds (x86_64 + arm64).
+
+Limits:
+- No ripples. The claim-frame weights, the drawer's splash point and the
+  simulation splash stay refused, so nothing seeds or disturbs the drawn grid.
+  A research job is working on them.
+- Level-option bit 8 (`filled_mask()`) is implemented and not turned on.
+- The play mesh uses world positions and the Godot camera frustum. The
+  documented ±1000 screen clip is tested only in `project_strips`.
+- No native Intel, Windows or Linux run (x86_64 is Rosetta only). No manual
+  play is claimed.
