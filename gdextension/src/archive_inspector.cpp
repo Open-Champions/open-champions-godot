@@ -33,6 +33,7 @@
 
 void register_ui_layout_service();
 void register_level_lights_service();
+void register_ps2_save_import();
 namespace {
 using namespace godot;
 constexpr std::uint64_t max_file_bytes = 64ULL * 1024 * 1024;
@@ -884,6 +885,7 @@ void initialize(ModuleInitializationLevel level) {
         GDREGISTER_CLASS(ChampionsSessionController);
         register_ui_layout_service();
         register_level_lights_service();
+        register_ps2_save_import();
         GDREGISTER_CLASS(ChampionsFxBridge);
         GDREGISTER_CLASS(ChampionsNativeAudio);
     }
