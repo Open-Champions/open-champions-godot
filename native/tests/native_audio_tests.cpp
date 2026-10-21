@@ -808,43 +808,43 @@ void duck_not_in_tick() {
             !p.duck_sent(),
         "tick() leaves the duck words at their images");
 }
-// Audit AUD-1: g_musicVolume 0x4f8944 has no documented stored value
-// (docs/audio-playback.md 225, docs/audio-save.md 278), so music that reads it
-// is refused until the caller supplies the option.
-template <class F> bool refused(F &&f) {
-  try {
-    f();
-  } catch (const std::exception &) {
-    return true;
-  }
-  return false;
-}
+// Audit AUD-1, lifted: g_musicVolume 0x4f8944 starts at save_init's 0.5 and a
+// session takes the options file's +0x08 unclamped (research 22408a1
+// docs/spec/music-volume.md). Music reads the stored word; nothing refuses.
 void music_volume_input() {
   const auto gdir = directory({{"mx_ba_broon_l.vag", 0, 1}, {"", 0x800}});
   Playback p;
+  check(p.music_volume() == music_volume_default, "the default is save_init's 0.5, not the ELF 1.0");
   p.set_global_vat(zero_vat(0x800), parse_vat_directory(view(gdir), 0x800), 0);
-  check(refused([&] { p.music_play_global("mx_ba_broon_l.vag", 0); }) && p.queued_count(2) == 0,
-        "music_playGlobal refuses without a caller-supplied music volume");
-  check(!p.music_volume(), "there is no default music volume");
+  check(p.play_boss_music("fatcyclops", "broon") && p.queued_count(2) == 1,
+        "boss music plays from the default volume");
   p.add_stream("theme", stream_pcm(100));
   p.queue_stream(2, "theme", 0x21);
-  check(!p.play_boss_music("orc") && p.queued_count(2) == 1, "a creature with no boss name never reads it");
-  check(refused([&] { p.play_boss_music("fatcyclops", "broon"); }) && p.queued_count(2) == 1,
-        "a boss start refuses before its stream-2 stop");
   p.tick();
-  check(p.stream_status(2) == 0x21 && refused([&] { p.step_duck(); }) &&
-            p.duck_current() == duck_current_image && p.duck_target() == duck_target_image,
-        "a duck send needs the volume; the refused step changes nothing");
+  const auto step = p.step_duck();
+  check(step.sent && step.channel == ducked_channel(step.current, music_volume_default),
+        "a duck send reads the default volume");
   const auto ldir = directory({{"mx_theme_b.vag", 0}, {"amb_x_l.vag", 0x800}, {"", 0x1000}});
   Playback l;
   l.set_level_vat(zero_vat(0x1000), parse_vat_directory(view(ldir), 0x1000), 0, 1);
-  check(l.poll_level(0) && l.refused_music_polls() == 1 && l.queued_count(2) == 0 &&
-            l.queued_count(0) == 1 && l.level_countdown() == 14400,
-        "the level poll refuses only its music_playLevel call");
+  check(l.poll_level(0) && l.queued_count(2) == 1 && l.queued_count(0) == 1 &&
+            l.level_countdown() == 14400,
+        "the level poll queues its music_playLevel call at the default");
+  Playback file;
+  file.set_level_vat(zero_vat(0x1000), parse_vat_directory(view(ldir), 0x1000), 0, 1);
+  file.set_music_volume(boot_music_volume(0u));
+  check(file.music_volume() == 0 && file.poll_level(0) && file.queued_count(2) == 0 &&
+            file.queued_count(0) == 1,
+        "an options-file 0 closes the gate: no level music");
+  Playback loud;
+  loud.set_music_volume(boot_music_volume(0x3fc00000u));
+  loud.set_level_vat(zero_vat(0x1000), parse_vat_directory(view(ldir), 0x1000), 0, 1);
+  check(loud.music_volume() == 0x3fc00000u && loud.music_play_level("mx_theme_b.vag", 0x102),
+        "an options-file 1.5 is stored unclamped and plays");
   l.set_music_volume(music_volume_gate);
   check(l.music_volume() == music_volume_gate && l.music_play_level("mx_theme_b.vag", 0x102) &&
-            l.queued_count(2) == 1,
-        "a supplied volume at the gate opens it");
+            l.queued_count(2) == 2,
+        "the gate pattern itself opens the gate");
 }
 // Audit AUD-4: g_soundFrame and g_drawFrame are process-lifetime words, and the
 // duck words are process statics (docs/audio-playback.md 210-212, 260-265). A
