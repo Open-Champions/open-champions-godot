@@ -229,3 +229,13 @@ v2.00 folder, 2026-10-21:
 | talks refused: an item condition / a quoted missing text key | 6 / 4 |
 
 All parse counts equal research section 10.
+
+Through the real-data play scene (`godot/tests/real_data_dialog.gd`, windowed,
+111 levels): 24 talkers on 19 levels; the talk-to diagnostic opened 21 and
+closed all 21 through message 3, 3 were refused as above; the use button at
+the story start found a talker on 1 level and opened it, and nothing in its
+box on 18; 0 stalls; the box and text were drawn on 821 frames; 39 voiced
+lines were queued and the mouth started 32 times (28 with a lip-sync `.anm`).
+The real-data sweep (60 ticks per level, 111 / 111) equals the tree without
+the dialog in every count, with scripts on and off, apart from the new
+`dialog.*` counts.
