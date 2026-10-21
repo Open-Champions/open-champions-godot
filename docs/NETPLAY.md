@@ -29,18 +29,41 @@ reaches `cam_yaw` bit 0, `net_getCamFlag` returns 1, and `choose_pad` then
 hands the player `ZERO_PAD`, so no input would reach the simulation. The
 stick is pushed to full deflection (bytes 255 and 0). A smaller push such as
 ±24 stays inside `pad_apply`'s radial dead zone (`STICK_DEAD` 0.32) and moves
-nobody. The attack bit is pressed for one frame every 12 frames, the research
-`WalkAndCombo` cadence, because `pad_apply` reports edges and a held bit
-swings once.
+nobody. `pad_apply` reports edges, so a held bit swings once, and the
+attack bit is pressed for one frame at a time. The test has four scripts:
+walk only; mash (a press every 12 frames from frame 24 for the whole run,
+the research `WalkAndCombo` cadence); swing (one press at frame 24, then
+walk); combo (presses at frames 24, 36, 48 and 60, then walk).
 
 The creature uses the combat-play hit points `0x42f00000` and facing
 `0x8000`, and the spawn's default minimum, maximum and attack words. In the
 attack run the players kill it by tick 66 and a player's hit points move
-until tick 1,334. After its first swing a Full combat player does not walk
-again in this fixture. That is the combat runtime's player phase and is not
-changed here. The walking runs carry no creature: a walking player next to
-an armed Skelight reaches the unported `world_findFreeSpot` within about
-1,000 ticks and refuses.
+until tick 1,334.
+
+Round 2 reported that a Full combat player never walks again after its
+first swing. That came from the mash script, not from `Player_run`. With the
+stick past 0.8, action state 1 ends 40 ticks after the current swing started.
+A press after the swing window chains the next swing, which restarts that
+clock. So a press every 12 frames keeps the player swinging, and standing,
+to the end of the run. The original does the same: research
+`t3/research-combat-walk` `difftest_combat_walk.py` (`walk.once`,
+`walk.mash.stop`, `walk.mash.12`, seeds 20973 and 7, model equal to the
+original on every tick) and `docs/spec/combat-walk.md`. After one swing, or a
+combo, the players walk on. The test checks both cases (`attack_then_walk`).
+
+Round 2 also reported that a walking player next to an armed Skelight
+reached `world_findFreeSpot` and refused. A Skelight pinned by a walker makes
+no progress, so its `Creature_moveTo` stuck recovery searches
+`world_findFreeSpot(position, 72, 12, 0)`. The Full composition answers that
+search with `World::find_free_spot` (docs/COMBAT_RUNTIME.md). The refusal was
+`world_findFreeSpot terrain service missing`: the session never supplied the
+search's two terrain tests. Each peer now answers them from its own level
+copy: `terrain_testFlag1` (`world_queries::terrain_test_flag1`) and
+`terrain_height` (`world_queries::terrain_height`). Research
+`difftest_combat_walk.py` (`free_spot`) executed the search with these
+arguments on both seeds. `Session::free_spot_searches(peer)` counts the
+searches. The test requires every walking run with a creature to search,
+and to search the same on every peer and in the replay.
 
 The session writes `g_killPlaneZ` (`0x4f7188`) as −100000, the value of
 every level-table row and of the default row (research `level-flow.md`
@@ -58,10 +81,12 @@ positions (72 bytes per tick).
 Full combat retains every list walk and every spell-list `iter_begin` until
 65,536 iterators, then refuses. A tick walks four lists and begins one
 iterator per player and per live creature. Two peers stay under that cap for
-10,000 ticks (the creature in the attack run is dead by tick 66). Three
+10,000 ticks (the creature in the mash run is dead by tick 66). Three
 peers refuse on the tick after 9,362 and four peers on the tick after 8,192,
-so those runs stop at 9,000 and 8,000. This session does not change that
-runtime.
+so those runs stop at 9,000 and 8,000. With a live creature the caps are
+9,362, 8,192 and 7,281 for 2, 3 and 4 peers. The runs with a creature (2-peer
+swing, 3- and 4-peer walk) stop at 9,000, 8,000 and 7,000. This session does
+not change that runtime.
 
 The public test uses an authored flat heightfield (1,048,576 zero samples,
 inside the 4,194,304 sample cap). `tools/netplay_level_measure.cpp` is not a

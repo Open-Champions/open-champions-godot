@@ -110,10 +110,24 @@ N::Placement fight(int peers, bool creature = true) {
 // dead zone (STICK_DEAD 0.32 in 1/128 steps) and never move anyone. Slots 0
 // and 1 use stick X in opposite directions, slots 2 and 3 stick Y. The camera
 // flag stays clear (follow camera); a set flag makes choose_pad hand the
-// player ZERO_PAD. With `attack`, the bound 0x10 bit is pressed for one frame
-// every 12 frames from frame 24, the research WalkAndCombo cadence: pad_apply
-// reports edges, so a held bit swings once. Pressure stays 0.
-N::Sample script(int slot, std::uint32_t frame, bool attack) {
+// player ZERO_PAD. Pressure stays 0. The bound 0x10 bit is pressed for one
+// frame (pad_apply reports edges, so a held bit swings once):
+// - Walk: never.
+// - Mash: every 12 frames from frame 24 for the whole run, the research
+//   WalkAndCombo cadence. Each press past the swing window chains the next
+//   swing, so Player_run's state 1 never ends and the player never walks
+//   again (research t3/research-combat-walk difftest_combat_walk walk.mash.12).
+// - Swing: one press (frame 24), then the stick alone. State 1 ends 40 ticks
+//   after the swing starts with the stick past 0.8 (walk.once), and the
+//   player walks on. The Skelight survives the two swings.
+// - Combo: four presses (frames 24, 36, 48, 60; 36 and 60 fall inside the
+//   swing window, 48 chains a second swing), then the stick alone. State 1
+//   ends 40 ticks after the last swing start (walk.mash.stop).
+enum class Input { Walk, Mash, Swing, Combo };
+std::uint32_t last_press(Input input) {
+  return input == Input::Mash ? 0xffffffffu : input == Input::Combo ? 60 : 24;
+}
+N::Sample script(int slot, std::uint32_t frame, Input input) {
   N::Sample sample;
   sample.camera_flag = false;
   const bool early = frame < 16;
@@ -124,19 +138,21 @@ N::Sample script(int slot, std::uint32_t frame, bool attack) {
     sample.sticks[0] = slot == 0 ? go : back;
   else
     sample.sticks[1] = slot == 2 ? go : back;
-  if (attack && frame >= 24 && frame % 12 == 0)
+  const bool press = input != Input::Walk && frame >= 24 &&
+                     frame % 12 == 0 && frame <= last_press(input);
+  if (press)
     sample.buttons = N::ATTACK_BIT;
   return sample;
 }
 
-void drive(N::Session &session, std::size_t ticks, bool attack) {
+void drive(N::Session &session, std::size_t ticks, Input input) {
   unsigned stall = 0;
   while (session.sim_ticks() < ticks || !session.aligned()) {
     const auto before = session.sim_ticks();
     std::vector<N::Sample> samples;
     const auto frame = static_cast<std::uint32_t>(session.render_steps());
     for (int slot = 0; slot < session.peers(); ++slot)
-      samples.push_back(script(slot, frame, attack));
+      samples.push_back(script(slot, frame, input));
     session.step(samples);
     if (session.sim_ticks() == before) {
       if (++stall >= 240)
@@ -214,7 +230,7 @@ void research_planes() {
     placement.players[std::size_t(slot)] = {raw_int(xs[slot]), 0, 0};
   }
   N::Session session(2, ground, placement);
-  drive(session, 150, false);
+  drive(session, 150, Input::Walk);
   traces_match(session, "far peers differ");
   const auto trace = session.trace_bytes(0);
   bool beyond = false;
@@ -277,34 +293,91 @@ void loopback() {
   check(transport.take(1).empty(), "loopback take clears the inbox");
 }
 
+// Words 6..17: whether some player position word changes from tick - 1.
+bool moved_at(const std::vector<std::uint8_t> &trace, std::size_t tick) {
+  for (std::size_t word = 6; word <= 17; ++word)
+    if (trace_word(trace, tick, word) != trace_word(trace, tick - 1, word))
+      return true;
+  return false;
+}
+
 void long_session(const W::Snapshot &ground, int peers, std::size_t ticks,
-                  bool creature) {
+                  bool creature, Input input) {
   N::Session session(peers, ground, fight(peers, creature));
   const auto midway = ticks / 2;
-  drive(session, midway, creature);
+  drive(session, midway, input);
   const auto saved = session.save();
   auto loaded = N::Session::load(saved, ground);
   check(loaded.trace_bytes(0) == session.trace_bytes(0), "long save/load");
-  drive(session, ticks, creature);
-  drive(loaded, ticks, creature);
+  drive(session, ticks, input);
+  drive(loaded, ticks, input);
   traces_match(session, "long peers differ");
-  input_reaches_simulation(session, creature, !creature);
+  const bool walking = input != Input::Mash;
+  input_reaches_simulation(session, creature, walking);
   check(session.trace_bytes(0) == loaded.trace_bytes(0), "long continuation");
   check(session.sim_ticks() >= ticks, "long tick count");
   check(session.input_packets() > 0, "long input packets");
+  for (int slot = 1; slot < peers; ++slot)
+    check(session.free_spot_searches(slot) == session.free_spot_searches(0),
+          "peers made different free-spot searches");
+  check(loaded.free_spot_searches(0) == session.free_spot_searches(0),
+        "the replay made different free-spot searches");
+  if (creature && walking)
+    check(session.free_spot_searches(0) > 0,
+          "a walking player beside the Skelight never reached world_findFreeSpot");
+  if (input == Input::Swing || input == Input::Combo) {
+    // The players walk again once the last swing has ended (its press plus
+    // 40 ticks, well inside 200), on all but a few later ticks.
+    const auto trace = session.trace_bytes(0);
+    std::size_t still = 0;
+    for (std::size_t tick = 200; tick < session.sim_ticks(); ++tick)
+      still += moved_at(trace, tick) ? 0 : 1;
+    check(still * 20 < session.sim_ticks() - 200,
+          "players stopped walking after their attacks");
+  }
   std::cout << "peers=" << peers << " sim_ticks=" << session.sim_ticks()
             << " trace_bytes=" << session.trace_bytes(0).size()
-            << " creature=" << (creature ? 1 : 0)
+            << " creature=" << (creature ? 1 : 0) << " input="
+            << (input == Input::Walk   ? "walk"
+                : input == Input::Mash ? "mash"
+                : input == Input::Swing ? "swing-then-walk"
+                                        : "combo-then-walk")
             << " input_packets=" << session.input_packets()
+            << " free_spot_searches=" << session.free_spot_searches(0)
             << " synced=" << (session.synced() ? 1 : 0) << " fnv=" << std::hex
             << fnv(session.trace_bytes(0)) << std::dec << "\n";
+}
+
+// Attack, then walk: the cause of "never walks again" was the input, not
+// Player_run. With presses every 12 frames the players stand still from
+// their first swing to the end of the run (the swings chain); after one
+// swing, or a two-swing combo, they walk on once the last swing ends.
+void attack_then_walk(const W::Snapshot &ground) {
+  auto run = [&](Input input) {
+    N::Session session(2, ground, fight(2, false));
+    drive(session, 400, input);
+    traces_match(session, "attack-then-walk peers differ");
+    return session.trace_bytes(0);
+  };
+  auto moved_after = [](const std::vector<std::uint8_t> &trace) {
+    for (std::size_t tick = 140; tick < 400; ++tick)
+      if (moved_at(trace, tick))
+        return true;
+    return false;
+  };
+  check(!moved_after(run(Input::Mash)), "a press every 12 frames let a player walk");
+  for (Input input : {Input::Swing, Input::Combo}) {
+    const auto trace = run(input);
+    check(moved_after(trace) && moved_at(trace, 399),
+          "a player who attacked did not walk again");
+  }
 }
 
 void short_session(const W::Snapshot &ground, int peers, std::size_t ticks) {
   N::Session a(peers, ground, fight(peers));
   N::Session b(peers, ground, fight(peers));
-  drive(a, ticks, true);
-  drive(b, ticks, true);
+  drive(a, ticks, Input::Mash);
+  drive(b, ticks, Input::Mash);
   traces_match(a, "peers in one session differ");
   input_reaches_simulation(a, false);
   check(a.trace_bytes(0) == b.trace_bytes(0), "two sessions differ");
@@ -315,8 +388,8 @@ void short_session(const W::Snapshot &ground, int peers, std::size_t ticks) {
   check(loaded.trace_bytes(0) == a.trace_bytes(0), "save/load trace");
   check(loaded.save() == saved, "save is stable");
   const auto further = ticks + 40;
-  drive(a, further, true);
-  drive(loaded, further, true);
+  drive(a, further, Input::Mash);
+  drive(loaded, further, Input::Mash);
   traces_match(a, "peers diverged after save");
   input_reaches_simulation(a, true);
   check(a.trace_bytes(0) == loaded.trace_bytes(0), "continuation diverged");
@@ -331,7 +404,7 @@ void refusals(const W::Snapshot &ground) {
   rejects([&] { N::Session(2, ground, placement); }, "spawn with no floor");
   N::Session session(2, ground, fight(2));
   rejects([&] { session.step({}); }, "sample count");
-  drive(session, 4, false);
+  drive(session, 4, Input::Walk);
   auto bytes = session.save();
   bytes[0] ^= 1;
   rejects([&] { N::Session::load(bytes, ground); }, "save magic");
@@ -371,20 +444,26 @@ int main(int argc, char **argv) {
     short_session(ground, 3, 48);
     short_session(ground, 4, 48);
     std::cout << "short peers=2,3,4 sim_ticks=48 checks=" << checks << "\n";
+    attack_then_walk(ground);
     // Iterator retention in Full combat: 4 list walks per tick, plus one
     // spell-list iterator per player and per live creature, refused at
-    // 65536. 2 peers stay under that cap at 10000 (the creature dies early
-    // in the attack run). 3 peers refuse after 9362 and 4 peers after 8192,
-    // so those runs stop short of the cap. Walking runs carry no creature: a
-    // walking player beside an armed Skelight reaches the unported
-    // world_findFreeSpot.
+    // 65536. So 2 peers walking stay under that cap at 10000, and the
+    // mashing creature run too because its creature dies early. 3 peers
+    // refuse after 9362 and 4 peers after 8192 with no creature. With a
+    // live creature: 2 peers after 9362, 3 after 8192, 4 after 7281. Every
+    // run stops short of its cap. The walking runs with a creature pass
+    // through world_findFreeSpot (Creature_moveTo's stuck recovery).
     if (long_ticks >= 10000) {
-      long_session(ground, 2, 10000, false);
-      long_session(ground, 2, 10000, true);
-      long_session(ground, 3, 9000, false);
-      long_session(ground, 4, 8000, false);
+      long_session(ground, 2, 10000, false, Input::Walk);
+      long_session(ground, 2, 10000, true, Input::Mash);
+      long_session(ground, 3, 9000, false, Input::Walk);
+      long_session(ground, 4, 8000, false, Input::Walk);
+      long_session(ground, 2, 9000, true, Input::Swing);
+      long_session(ground, 3, 8000, true, Input::Walk);
+      long_session(ground, 4, 7000, true, Input::Walk);
     } else {
-      long_session(ground, 2, long_ticks, false);
+      long_session(ground, 2, long_ticks, false, Input::Walk);
+      long_session(ground, 2, long_ticks, true, Input::Swing);
     }
     std::cout << "checks=" << checks << "\n";
   } catch (const std::exception &error) {

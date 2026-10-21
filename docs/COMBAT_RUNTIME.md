@@ -406,6 +406,10 @@ When all 50 tries fail, ok is 0 and the point is the last one that passed the te
 
 `native/tests/vectors/combat_free_spot.txt.gz` holds 11 cases from the reference. They cover open ground, the stuck fight's geometry, a ring of objects, blocked terrain, a floor at exactly 6 (with and without anyHeight), a floor far below, a non-solid and a solid covering object, mixed terrain, and a wide search. Each case compares the point, ok and the shared seed after. `combat-free-spot-host` runs the idle Full fight for 400 ready ticks. The Skelight searches in the 311th from (80, 0) with spread 72 and radius 12, and moves to the spot it finds. Left idle, the fight reaches the second search at 621. At 786 the player has died, and the fight stops on the existing `party wipe: deathTask` refusal.
 
+A walking player beside that Skelight reaches the same search (`combat-free-spot-host`, `walk_beside_skelight`: 1,500 ready ticks walking ±x past it, 8 searches with spread 72, radius 12 and anyHeight 0, no refusal). Research `t3/research-combat-walk` `difftest_combat_walk.py` (`free_spot`, seeds 20973 and 7) executed `0x14acf8` with these arguments on the original object world, including retried and failed searches. The netplay session supplies the two terrain services from each peer's level copy (docs/NETPLAY.md).
+
+The same host test pins walking after an attack (`attack_then_walk`). A held press while walking starts state 1. The swing ends 40 ticks after it starts (`+0x448`), because the stick is past 0.8 (`0x3f4ccccc`) and 39.3 (`0x421d3332`) ticks have passed. The player does not move during the swing and walks on every tick after it. A press every 12 ticks chains the swings and keeps state 1 (research `walk.once`, `walk.mash.12`). The neutral state starts a swing from the held word (pad `+8`, `ref_player.Tick.state_neutral`), so a pressed edge without the held bit (`press_attack(false)`) starts none. `pad_apply` never makes such a pad.
+
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_combat_free_spot_vectors.py
 ctest --test-dir build/native -R 'combat-free-spot' --output-on-failure
