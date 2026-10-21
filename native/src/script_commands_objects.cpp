@@ -228,6 +228,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       counts_.build_refusals["Player1 needs session seed and WORLD"] += 1;
       return Build::NotBuilt;
     }
+    try {
     auto list = std::make_shared<std::vector<std::string>>(props);
     auto obj = variables_->new_object({}, 3, record.position, record.angle,
                                       "7Player1", list, c, outcome.size);
@@ -275,6 +276,17 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     built_.insert(c);
     counts_.objects_registered += 1;
     return Build::Built;
+    } catch (const std::exception &) {
+      // WORLD queries can refuse a geometry shape outside their executed
+      // domain. A failed Player1 placement must not abort every later record.
+      counts_.build_refusals["Player1 placement outside executed WORLD domain"] += 1;
+      if (variables_->world->objects.count(c)) {
+        stubs_.insert(c);
+        counts_.objects_registered += 1;
+        return Build::Stubbed;
+      }
+      return Build::NotBuilt;
+    }
   }
   const Ported *ported = nullptr;
   for (const auto &p : kPorted)
