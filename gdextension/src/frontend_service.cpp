@@ -58,6 +58,69 @@ class ChampionsFrontendService : public RefCounted {
     }
   }
 
+  static String kind_name(F::Draw::Kind k) {
+    switch (k) {
+    case F::Draw::Kind::Sprite: return "sprite";
+    case F::Draw::Kind::Frame: return "frame";
+    case F::Draw::Kind::Rect: return "rect";
+    case F::Draw::Kind::Text: return "text";
+    }
+    return "text";
+  }
+  static String align_name(F::Align a) {
+    switch (a) {
+    case F::Align::Left: return "left";
+    case F::Align::Centred: return "centred";
+    case F::Align::Wrapped: return "wrapped";
+    case F::Align::WrappedCentred: return "wrapped_centred";
+    }
+    return "left";
+  }
+
+  Dictionary scene_of(const PackedInt32Array &widths) {
+    std::vector<int> measured;
+    for (int i = 0; i < widths.size(); ++i)
+      measured.push_back(widths[i]);
+    const auto scene = flow_->layout(measured);
+    Dictionary out;
+    out["ok"] = true;
+    out["screen"] = String::utf8(scene.screen.c_str());
+    out["host_layout"] = scene.host_layout;
+    out["host_label"] = String::utf8(scene.host_label.c_str());
+    Array unknown;
+    for (const auto &u : scene.unknown)
+      unknown.push_back(String::utf8(u.c_str()));
+    out["unknown"] = unknown;
+    Array draws;
+    int order = 0;
+    for (const auto &d : scene.draws) {
+      Dictionary item;
+      item["order"] = order++;
+      item["kind"] = kind_name(d.kind);
+      item["evidence"] = String::utf8(F::evidence_name(d.evidence));
+      item["layer"] = d.layer;
+      item["x"] = d.x;
+      item["y"] = d.y;
+      item["w"] = d.w;
+      item["h"] = d.h;
+      item["colour"] = int64_t(d.colour);
+      item["style"] = d.style;
+      item["min_w"] = d.min_w;
+      item["lump"] = String::utf8(d.lump.c_str());
+      item["resource"] = String::utf8(d.resource.c_str());
+      item["font"] = d.font == F::Font::Medium ? "medium" : "small";
+      item["align"] = align_name(d.align);
+      item["wrap_width"] = d.wrap_width;
+      item["line"] = d.line;
+      item["text"] = String::utf8(d.text.c_str());
+      item["role"] = String::utf8(d.role.c_str());
+      item["site"] = String::utf8(d.site);
+      draws.push_back(item);
+    }
+    out["draws"] = draws;
+    return out;
+  }
+
   Dictionary view_of() {
     Dictionary out;
     out["ok"] = true;
@@ -94,6 +157,7 @@ class ChampionsFrontendService : public RefCounted {
     out["difficulty"] = flow_->difficulty_index();
     out["save_latch"] = flow_->save_latch();
     out["exit_code"] = flow_->last_exit_code();
+    out["gated_music"] = flow_->gated_music();
     out["ability_remaining"] = flow_->ability_remaining();
     out["error"] = String::utf8(flow_->last_error().c_str());
     const auto &c = flow_->character();
@@ -140,6 +204,7 @@ protected:
   static void _bind_methods() {
     ClassDB::bind_method(D_METHOD("boot", "options_file"), &ChampionsFrontendService::boot);
     ClassDB::bind_method(D_METHOD("view"), &ChampionsFrontendService::view);
+    ClassDB::bind_method(D_METHOD("layout", "widths"), &ChampionsFrontendService::layout, DEFVAL(PackedInt32Array()));
     ClassDB::bind_method(D_METHOD("frame", "buttons", "stick_x", "stick_y"), &ChampionsFrontendService::frame, DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("set_name", "name"), &ChampionsFrontendService::set_name);
     ClassDB::bind_method(D_METHOD("load_class_start_stats", "executable_path"), &ChampionsFrontendService::load_class_start_stats);
@@ -176,6 +241,21 @@ public:
     }
   }
   Dictionary view() { return guarded([] {}); }
+  // The documented draw calls of the current screen. widths: the host-measured
+  // pixel widths of the entry labels in the medium font (empty = unmeasured).
+  Dictionary layout(const PackedInt32Array &widths) {
+    if (!flow_) {
+      Dictionary out;
+      out["ok"] = false;
+      out["error"] = "call boot() first";
+      return out;
+    }
+    try {
+      return scene_of(widths);
+    } catch (const std::exception &e) {
+      return failure(e);
+    }
+  }
   Dictionary frame(int64_t buttons, int64_t stick_x, int64_t stick_y) {
     return guarded([&] {
       if (buttons < 0 || buttons > 0xffff || stick_x < 0 || stick_x > 255 || stick_y < 0 || stick_y > 255)

@@ -21,6 +21,7 @@ var checks := 0
 var failures := 0
 var dir := ""
 var visited := {}
+var layouts := {} # screen -> the last native scene seen on it
 
 func _initialize() -> void:
 	call_deferred("run")
@@ -39,15 +40,21 @@ func key(code: int, pressed := true, unicode := 0) -> InputEventKey:
 	event.unicode = unicode
 	return event
 
+func note_layout(name: String) -> void:
+	if not fe.scene_view.is_empty() and str(fe.scene_view.get("screen", "")) == name:
+		layouts[name] = fe.scene_view
+
 func tap(bits: int) -> Dictionary:
 	var v: Dictionary = fe.tap(bits)
 	visited[str(v.get("screen", ""))] = true
+	note_layout(str(v.get("screen", "")))
 	return v
 
 func frames(bits: int, count: int) -> Dictionary:
 	var v: Dictionary = {}
 	for i in range(count):
 		v = fe.step(bits)
+		note_layout(str(v.get("screen", "")))
 	visited[str(v.get("screen", ""))] = true
 	return v
 
@@ -108,6 +115,14 @@ func run() -> void:
 	var notes: Array = fe.view.notes
 	check(notes.any(func(n): return str(n).find("not in the research") >= 0), "layout gap named on screen")
 
+	check(fe.scene_view.get("screen", "") == "main" and not fe.scene_view.host_layout, "main draws the documented layout")
+	check(fe.scene_view.draws.any(func(d): return d.kind == "sprite" and d.resource == "title.tex" and d.lump == "FRONTEND.LMP" and d.x == 141 and d.y == 15 and d.layer == 5 and d.colour == 0x80808080), "title sprite (141,15) layer 5")
+	var main_frames: Array = fe.scene_view.draws.filter(func(d): return d.kind == "frame")
+	check(main_frames.size() == 3 and main_frames[1].x == 292 and main_frames[1].y == 248 and main_frames[1].w == 56 and main_frames[1].h == 122 and main_frames[1].style == 2, "backing frame (292,248,56,122) style 2")
+	check(main_frames[0].x == 300 and main_frames[0].y == 259 and main_frames[0].h == 33 and main_frames[2].layer == 6, "cursor and overlay frames")
+	check(fe.view_painter.build(fe.scene_view) > 0, "the scene builds paintable items")
+	check(int(fe.view.gated_music) == 0, "the default volume passes the gate")
+
 	# Second boot with the file: logo press skips the film.
 	v = fe.boot()
 	check(v.entries[0].id == "continue" and v.options_file, "file read at boot")
@@ -116,10 +131,17 @@ func run() -> void:
 	check(fe.screen() == "main" and fe.view.skip_splash, "logo press skips the film")
 
 	# Options: slider, commit, load.
+	fe.sounds.clear()
 	tap(DOWN)
 	tap(DOWN)
+	check(int(fe.sounds.get("menu_main_toggle.anm", 0)) == 2, "each move requests the toggle clip")
 	tap(CROSS)
+	check(int(fe.sounds.get("menu_main_accept.anm", 0)) == 1 and fe.sounds_voiced == 0, "accept requests its clip; the clips are not voiced")
 	check(fe.screen() == "options" and int(fe.view.cursor) == 1, "options on music")
+	check(fe.scene_view.draws.filter(func(d): return d.kind == "text" and d.role == "list row").size() == 13, "options draws thirteen rows")
+	check(not fe.scene_view.draws.any(func(d): return d.resource == "title.tex"), "options has no title sprite")
+	var value_x: Array = fe.scene_view.draws.filter(func(d): return d.kind == "text" and d.role == "list row" and d.x == 297)
+	check(value_x.size() == 3, "three value rows at x=297")
 	var before := int(fe.view.music_live)
 	fe.log_lines.clear()
 	frames(RIGHT, 12)
@@ -285,6 +307,46 @@ func run() -> void:
 	fe.step(fe.held_bits())
 	check(fe.screen() == "pause", "P pauses a host-started session")
 
+	# Per-screen layout: documented where the research has it, host-labelled where Unknown.
+	for name in ["soe-logo", "main", "game-type", "players", "mode", "difficulty", "options", "pause", "char-ability", "char-name"]:
+		check(layouts.has(name), "layout seen for " + name)
+	for name in ["intro-movie", "char-class", "char-appearance", "credits", "load-game", "options-load"]:
+		if layouts.has(name):
+			check(bool(layouts[name].host_layout) and not str(layouts[name].host_label).is_empty(), name + " is a labelled host layout")
+	if layouts.has("soe-logo"):
+		var logo: Array = layouts["soe-logo"].draws
+		check(logo.size() == 2 and logo[0].resource == "soe_splash_url.tex" and logo[0].x == 192 and logo[0].y == 330 and logo[1].resource == "soe_splash.tex" and logo[1].x == 64 and logo[1].y == 50 and logo[1].layer == 3, "logo sprites")
+	if layouts.has("pause"):
+		var pause: Dictionary = layouts["pause"]
+		check(not pause.host_layout, "pause draws only documented calls")
+		var rows: Array = pause.draws.filter(func(d): return d.role == "list row")
+		check(rows.size() == 5 and rows[0].y == 179 and rows[4].y == 267 and rows[0].font == "medium" and rows[0].layer == 7 and rows[0].colour == 0x80464646, "pause rows y=179..267, medium, layer 7")
+		var pf: Array = pause.draws.filter(func(d): return d.kind == "frame")
+		check(pf[1].x == 292 and pf[1].y == 168 and pf[1].w == 56 and pf[1].h == 144, "pause backing frame")
+	if layouts.has("char-ability"):
+		var ys := []
+		for d in layouts["char-ability"].draws:
+			if d.role == "stat label (text Host)":
+				check(d.x == 41, "ability label x=41")
+				ys.append(d.y)
+		check(ys == [106, 123, 140, 157], "ability rows from y=106, 17 apart")
+	if layouts.has("char-name"):
+		check(layouts["char-name"].draws.any(func(d): return d.kind == "text" and d.x == 41 and d.y == 72), "name line at (41,72)")
+	# F1 shows the native notes; the first theme obeys the volume gate.
+	var f1: bool = fe.handle_key(key(KEY_F1))
+	check(f1 and fe.show_notes, "F1 shows the notes")
+	fe.handle_key(key(KEY_F1))
+	var low: PackedByteArray = FileAccess.get_file_as_bytes(fe.options_path)
+	low.encode_u32(8, 0)
+	var low_file := FileAccess.open(fe.options_path, FileAccess.WRITE)
+	low_file.store_buffer(low)
+	low_file.close()
+	fe.booted = false
+	fe.log_lines.clear()
+	fe.boot()
+	tap(CROSS)
+	tap(CROSS)
+	check(fe.screen() == "main" and not ("front_end_music" in kinds()) and int(fe.view.gated_music) == 1, "volume 0 queues no first theme")
 	for name in ["boot-card", "soe-logo", "intro-movie", "main", "game-type", "players", "mode", "difficulty", "options", "options-load", "credits", "load-game", "save-game", "saved", "char-class", "char-appearance", "char-ability", "char-name", "playing", "pause", "exit-confirm"]:
 		check(visited.has(name) or name in ["boot-card", "soe-logo", "intro-movie"], "visited " + name)
 	_cleanup()
