@@ -6,6 +6,7 @@
 #include "champions/script_commands.hpp"
 #include "champions/terrain_file.hpp"
 #include <cstring>
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -135,6 +136,14 @@ void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
   }
   if (rows.empty() || !rows.back().name.empty())
     throw std::invalid_argument("unterminated level table");
+  // The executable's own table supplies the longest name this image uses.
+  // Refuse external names longer than that known-safe domain; the capacity of
+  // the global at 0x44fe18 is not documented.
+  std::size_t max_level_name = 0;
+  for (const auto &entry : rows)
+    max_level_name = std::max(max_level_name, entry.name.size());
+  if (name.size() > max_level_name)
+    throw std::invalid_argument("level name exceeds executable table names");
   const auto request = level_flow::split_request(name);
   const auto row = level_flow::find_level_row(rows, request.first, request.second);
   const auto level = level_flow::monster_level(row, 1, request.first);
@@ -164,10 +173,19 @@ void Host::set_level_world(const std::uint8_t *data, std::size_t size) {
       terrain_file::decode(std::vector<std::uint8_t>(data, data + size)));
 }
 
-void Host::advance_first_level_items() {
+void Host::advance_first_level_items(const std::string &level_name,
+                                     std::optional<bool> hud_lmp_resident) {
+  // Executed gate: game_loadLevel 0x1e5690 compares against intro;
+  // 0x1e56a4 queries hud.lmp residency. Research 7a66b58.
+  if (level_name == "intro") return;
+  if (!hud_lmp_resident) {
+    counts_.item_load_gate_refusals += 1;
+    counts_.item_load_draws_inferred += 223;
+    return;
+  }
+  if (*hud_lmp_resident) return;
   if (!external_seed_) throw std::invalid_argument("item loader needs session seed");
-  // item_loadResources parses every base definition with variant -1. The
-  // executed seed-side contract is exactly 223 shared draws for this build.
+  // item_loadResources parses every base definition with variant -1.
   for (unsigned i = 0; i < 223; ++i) external_seed_->draw();
 }
 
@@ -228,6 +246,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       counts_.build_refusals["Player1 needs session seed and WORLD"] += 1;
       return Build::NotBuilt;
     }
+    bool world_seed_active = false;
     try {
     auto list = std::make_shared<std::vector<std::string>>(props);
     auto obj = variables_->new_object({}, 3, record.position, record.angle,
@@ -241,6 +260,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     variables_->memory.byte(c + 0x39, static_cast<std::uint8_t>(record.angle >> 8));
     auto &world = *variables_->world;
     world.shared.state = external_seed_->state;
+    world_seed_active = true;
     int rank = world.start_rank;
     if (flow_.loaded_from_save) rank = 3;
     bool take = false;
@@ -277,6 +297,8 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     counts_.objects_registered += 1;
     return Build::Built;
     } catch (const std::exception &error) {
+      if (world_seed_active)
+        external_seed_->state = variables_->world->shared.state;
       // WORLD queries can refuse a geometry shape outside their executed
       // domain. A failed Player1 placement must not abort every later record.
       const char *reason = "Player1 placement other refusal";
@@ -305,6 +327,12 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     return Build::NotBuilt;
   if (!external_seed_) {
     counts_.build_refusals["no session seed"] += 1;
+    return Build::NotBuilt;
+  }
+  if (stats_ready_ &&
+      (variables_->memory.u32(0x4d8ae0) != 1 ||
+       variables_->memory.u32(script_items::G_DIFFICULTY) != 1)) {
+    counts_.build_refusals["stats require one player at difficulty 1"] += 1;
     return Build::NotBuilt;
   }
   // Mounted Horsemen reach Nightmare_ctor, whose body is not yet in the
@@ -547,6 +575,8 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       break;
     }
     case Class::Skelight:
+      // Factory call 0x15b608, delay slot 0x15b60c: fifth argument = 1.
+      // Executed call-site difftest: research 7a66b58.
       model.skelight_ctor(c, record.position, facing, 0, 1);
       break;
     case Class::Zek:

@@ -130,7 +130,7 @@ at their addresses; nothing read is kept. Then:
 |---|---|
 | the factory builds no object (`clearColor`, `customVars`, the arena start points, `Line`, no test and no fall-back) | nothing is registered (`objects_not_created`); a script finds nothing by that name |
 | the pool has no block of the size class | nothing is registered (`objects_pool_refused`); the original calls no constructor |
-| the constructor is one of SmallSpider 0x2ab450, Gnaw 0x26741c, Mosquito 0x297788, Scorpion 0x2a4d68, Badger 0x244018 | built (`objects_built`), below |
+| the constructor is one of SmallSpider 0x2ab450, Gnaw 0x26741c, Mosquito 0x297788, Scorpion 0x2a4d68, Badger 0x244018, Skelight 0x2a8770, Zek 0x2c1f94, or an on-foot Horsemen 0x271c70 | built (`objects_built`), below |
 | any other constructor | a stub at its pool address (`objects_unbuilt`, by constructor in `unbuilt_constructors`) |
 
 Every record the factory constructs takes its block from the host world's
@@ -144,18 +144,25 @@ session seed into its own generator +0x44, the name), then the ported
 `monsters_1` constructor, which runs `Creature_ctor`, the class body and its
 set-state 0. Their call-outs are answered as research
 `docs/script-session.md` section 5 says: the property getters lower the key
-and compare it case-sensitively; `Creature_setStats` makes its one draw of
-the object's own generator; `Creature_init` (research
+and compare it case-sensitively; `Creature_setStats` draws from the object's
+own generator and, with the selected level's `monsters.bal` and executable
+level table, computes hit points, armor, damage, attack and experience.
+It refuses this statistics path outside one player at difficulty 1. The
+factory's Skelight level argument is 1 at call `0x15b608` (delay slot
+`0x15b60c`; executed research `7a66b58`). `Creature_init` (research
 `tools/ref_creature_init.py`, executed) stores the change mask; `handle_clear`
 finds the empty target list `Creature_ctor` left; the animation, run-list
 and grid calls are made on the host's world or have no effect on what is
 kept. The constructor runs on the executable's image, so it reads the
 original's constants. The object's bytes are then copied into the binder,
-except the fields no ported code computes: hit points, maximum hit points
-and the four statistics and experience value (`Creature_setStats`), the
-height and draw byte (`Creature_init` from the model's bounds), the hide mask,
+except fields no ported code computes: the height and draw byte
+(`Creature_init` from the model's bounds), the hide mask,
 the creature serial (an unbuilt creature before it would have taken one), and
-the pointers into the record's strings. A record whose `Creature_init` would
+the pointers into the record's strings. Statistics are copied only when the
+selected balance and level data are present; otherwise hit-point reads still
+refuse. A level name longer than every name in the executable's level table
+is refused before it can be written into the emulated level-name global.
+A record whose `Creature_init` would
 call the class or run a script (a `dead` or `initScript` property, the
 MiniBoss bit, a weapon element on a weapon) stays a stub and is counted in
 `build_refusals`.
@@ -166,8 +173,8 @@ constructors produce for them (`tools/generate_level_objects_vectors.py`).
 
 A documented command whose binder path reads, on an object its name finds,
 the creature flag 0x20, hit points at +0x228 or the type name is refused when
-any object it finds is a stub, and `getHitPoints` also when it finds a built
-creature (its hit points are not known): `hideMonster`, `showMonster`,
+any object it finds is a stub; `getHitPoints` also refuses a built creature
+whose statistics were not supplied: `hideMonster`, `showMonster`,
 `increaseEnemyRank`, `unRootMonster`, `stopFollowingPlayer`, `friendly`,
 `unFriendly`, `getHitPoints`, `setHitPoints`, `countLiveObjects`,
 `showOnMap`, and the `52984db` creature routes `setMonsterVal`,
@@ -298,6 +305,13 @@ refused from then on. A script attached while a combat or level fixture is
 active binds no seed, because the fixture's seed belongs to its journaled scene.
 `script_command_counts` reports the object outcomes, `load_draws_unmodelled`,
 `build_refusals` and `seed_bound` / `seed_paired` / `seed_unpaired`.
+The executed item-resource gate compares the world against `intro` and then
+queries whether `hud.lmp` is resident (research `7a66b58`). Godot's level
+script attach does not expose that residency, so it refuses the 223 seed
+draws and reports `item_load_gate_refusals` and
+`item_load_draws_inferred`. The latter is a conditional potential draw count,
+not an observed seed advance. A caller with an observed residency result can
+execute the exact gate through `advance_first_level_items`.
 
 The counts-only disc tool is `champions-script-commands-measure --game rta DIR`.
 It reads GOB files that have a sibling TEX, then `script.scr` and `objects.ob`

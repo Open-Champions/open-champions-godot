@@ -247,6 +247,8 @@ Variables::Variables(std::shared_ptr<Memory> mem,
   if(!host->game) host->game = &host_owner;
 }
 Variables::~Variables() {
+  for (const auto &object : setup_objects)
+    world->unregister_external(*object);
   if(host && host->game==&host_owner) host->game=nullptr;
 }
 Host::Value Variables::ext(const std::string &name, const Host::Arguments &args) {

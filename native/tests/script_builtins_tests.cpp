@@ -898,6 +898,22 @@ void setup_api_tests() {
   host->handlers["reenter"]=[&](const b::Host::Arguments &) {game.quest_set("inside",7);return game.ext("dialog_isOpen");};
   require(std::get<std::int64_t>(game.ext("reenter"))==0 && game.quest_vars()[0].second==7,"setup forwarding reentry");
 }
+void external_world_lifetime_test() {
+  auto world = std::make_shared<champions::simulation::rta::objects::World>();
+  std::uint32_t address = 0;
+  {
+    b::Variables binder({}, world);
+    auto object = binder.new_object({"Temporary"}, 0, {0, 0, 0}, 0);
+    address = object->addr;
+    require(world->names.find_first("Temporary") == object.get() &&
+            world->objects.at(address) == object.get(), "external registration is live");
+  }
+  require(!world->names.find_first("Temporary") && !world->objects.count(address),
+          "binder teardown removes external names and addresses");
+  require(world->collect_in_box({0xc1200000u,0xc1200000u,0xc1200000u},
+                                {0x41200000u,0x41200000u,0x41200000u},8).empty(),
+          "surviving World does not walk destroyed binder objects");
+}
 void api_tests() {
   for(int dividend=-128; dividend<=128; ++dividend) {
     for(int divisor=-17; divisor<=17; ++divisor) {
@@ -928,6 +944,7 @@ void api_tests() {
   try {b::truncating_divide(power,{{},true});} catch(const std::domain_error &) {zero_threw=true;}
   require(zero_threw,"division empty signed zero divisor");
   setup_api_tests();
+  external_world_lifetime_test();
   host_api_tests();
   argument_api_tests();
   object_api_tests();

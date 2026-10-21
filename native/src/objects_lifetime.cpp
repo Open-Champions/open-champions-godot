@@ -148,6 +148,21 @@ GameObject &World::checked_object(rta::Object *object) const {
 void World::register_external(GameObject &object) {
   owned_objects_[&object] = &object;
 }
+void World::unregister_external(GameObject &object) {
+  if (!owned_objects_.count(&object)) return;
+  // Remove every paired world-list node before the binder releases the
+  // object's embedded list heads. A shared World may outlive that binder.
+  for (auto &head : object.heads)
+    handles.clear(head);
+  for (std::size_t slot = 0; slot < names.objs.size(); ++slot)
+    if (names.objs[slot] == &object) {
+      names.objs[slot] = nullptr;
+      --names.count;
+    }
+  if (auto it = objects.find(object.addr); it != objects.end() && it->second == &object)
+    objects.erase(it);
+  owned_objects_.erase(&object);
+}
 World::World(CallbackPolicy policy) : callback_policy(policy) {}
 World::~World() {
   *lifetime_ = false;

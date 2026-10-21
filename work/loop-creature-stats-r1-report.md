@@ -106,7 +106,7 @@ cmake --build build/mac-template_release --parallel 4
 python3 work/creature-stats/run-godot.py
 work/run-slices-creature-stats.sh csfinal --scripts
 work/run-slices-creature-stats.sh csfinaln
-./build/native/champions-script-commands-measure --game rta /Users/syndicatemike/Projects/open-champions/private-validation/rta-disc
+./build/native/champions-script-commands-measure --game rta <owner-selected-rta-disc>
 ```
 
 The research commands were the selected `tools/difftest_combat.py`,

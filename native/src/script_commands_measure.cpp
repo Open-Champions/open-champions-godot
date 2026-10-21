@@ -90,6 +90,8 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.objects_pool_refused += one.objects_pool_refused;
   total.objects_unclassified += one.objects_unclassified;
   total.load_draws_unmodelled += one.load_draws_unmodelled;
+  total.item_load_gate_refusals += one.item_load_gate_refusals;
+  total.item_load_draws_inferred += one.item_load_draws_inferred;
   for (const auto &kv : one.unbuilt_constructors)
     total.unbuilt_constructors[kv.first] += kv.second;
   for (const auto &kv : one.build_refusals)
@@ -253,8 +255,7 @@ int main(int argc, char **argv) {
           } catch (const std::exception &) {}
           break;
         }
-      if (!no_seed && stem != "intro")
-        host.advance_first_level_items();
+      host.advance_first_level_items(stem);
     }
     champions::simulation::rta::amx::ByteVector image(script_bytes.data, script_bytes.data + script_bytes.size);
     if (!host.load(image)) {
@@ -309,6 +310,8 @@ int main(int argc, char **argv) {
   std::cout << "objects_pool_refused " << total.objects_pool_refused << '\n';
   std::cout << "objects_unclassified " << total.objects_unclassified << '\n';
   std::cout << "load_draws_unmodelled " << total.load_draws_unmodelled << '\n';
+  std::cout << "item_load_gate_refusals " << total.item_load_gate_refusals << '\n';
+  std::cout << "item_load_draws_inferred " << total.item_load_draws_inferred << '\n';
   std::cout << "unbuilt_constructors " << total.unbuilt_constructors.size() << '\n';
   for (const auto &kv : total.build_refusals)
     std::cout << "build_refused " << kv.first << ' ' << kv.second << '\n';

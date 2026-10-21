@@ -79,6 +79,11 @@ struct Counts {
   // Records the original constructs whose shared-seed draws the host did not
   // make (each draws at least once, in GameObject_ctor).
   std::uint64_t load_draws_unmodelled = 0;
+  // An eligible non-front-end load without an observed hud.lmp residency
+  // result cannot apply the 223 item draws. Count the gate and potential
+  // draws separately from constructor draws actually missed.
+  std::uint64_t item_load_gate_refusals = 0;
+  std::uint64_t item_load_draws_inferred = 0;
   // Unbuilt records by constructor address, and build refusals by reason.
   std::map<std::uint32_t, std::uint64_t> unbuilt_constructors;
   std::map<std::string, std::uint64_t> build_refusals;
@@ -177,9 +182,10 @@ public:
   // The selected level's WORLD payload supplies the terrain queries used by
   // Player1_ctor's four exact free-spot searches.
   void set_level_world(const std::uint8_t *world, std::size_t size);
-  // item_loadResources' seed side, once before the first non-front-end level
-  // of a play session (research-items docs/spec/items.md 7.6).
-  void advance_first_level_items();
+  // Execute the observed intro/hud.lmp gate. A missing residency result
+  // refuses seed advancement and counts the potentially omitted 223 draws.
+  void advance_first_level_items(const std::string &level_name,
+                                 std::optional<bool> hud_lmp_resident = std::nullopt);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Caller-supplied music volume gates level and boss music.
   void set_music_volume(std::uint32_t bits);

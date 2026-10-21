@@ -187,6 +187,20 @@ int main(int argc, char **argv) {
         }
     }
     check(built > 200 && stubs > 0, "case coverage");
+    rta::SharedRandom gate_seed(20973), expected_gate_seed(20973);
+    sc::Host gate_host;
+    gate_host.bind_seed(&gate_seed);
+    gate_host.advance_first_level_items("intro", false);
+    gate_host.advance_first_level_items("testlevel", true);
+    gate_host.advance_first_level_items("testlevel");
+    check(gate_seed.state == expected_gate_seed.state &&
+          gate_host.counts().item_load_gate_refusals == 1 &&
+          gate_host.counts().item_load_draws_inferred == 223,
+          "unknown HUD residency refuses inferred item draws");
+    gate_host.advance_first_level_items("testlevel", false);
+    for (unsigned i = 0; i < 223; ++i) expected_gate_seed.draw();
+    check(gate_seed.state == expected_gate_seed.state,
+          "observed absent HUD applies 223 item draws");
     // Authored level table and balance row. Expected patterns come from the
     // executed ref_combat.monster_stats contract on seed 20973, level 2 and
     // five stored percentages of 100 (which look up as 0x3f7fffff each).
@@ -219,6 +233,15 @@ int main(int argc, char **argv) {
     }
     const std::vector<std::uint8_t> balance{1, 0, 0x1c, 0xd6,
                                             100, 0, 100, 0, 100, 0, 100, 0, 100, 0};
+    {
+      sc::Host long_name_host;
+      long_name_host.set_executable(stats_image.view());
+      bool refused = false;
+      try {
+        long_name_host.set_level_stats(level_name + "-outside-table", balance.data(), balance.size());
+      } catch (const std::invalid_argument &) { refused = true; }
+      check(refused, "external level name cannot overrun known table-name domain");
+    }
     rta::SharedRandom stat_seed(20973);
     sc::Host stat_host;
     stat_host.bind_seed(&stat_seed);
@@ -237,6 +260,20 @@ int main(int argc, char **argv) {
           stat_mem.u16(stat_at + 0xd0) == 3 && stat_mem.u16(stat_at + 0xd2) == 6 &&
           stat_mem.u16(stat_at + 0xd4) == 27 &&
           stat_mem.u32(stat_at + 0xd8) == 0x41a00000u, "exact combat statistics");
+    {
+      rta::SharedRandom unsupported_seed(20973);
+      sc::Host unsupported_host;
+      unsupported_host.bind_seed(&unsupported_seed);
+      unsupported_host.start_single_player();
+      unsupported_host.set_executable(stats_image.view());
+      unsupported_host.set_level_stats(level_name, balance.data(), balance.size());
+      unsupported_host.variables().memory.word(0x4d8ae0, 2);
+      check(unsupported_host.adopt_objects(gnaw.data(), gnaw.size()) &&
+            unsupported_host.counts().objects_built == 0 &&
+            unsupported_host.counts().build_refusals.count(
+                "stats require one player at difficulty 1") == 1,
+            "multiplayer creature statistics are explicitly refused");
+    }
     rta::SharedRandom skel_seed(20973);
     sc::Host skel_host;
     skel_host.bind_seed(&skel_seed);

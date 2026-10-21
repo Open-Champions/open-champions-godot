@@ -559,11 +559,10 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                             static_cast<std::size_t>(balance.size()));
     if (!world.is_empty())
       next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
-    // This opt-in real-data attachment starts a fresh offline play session.
-    // The first non-front-end level loads item resources before preStart.
-    if (!carried && !combat_ && !level_ &&
-        !level_name.is_empty() && level_name != "intro")
-      next->advance_first_level_items();
+    // The original checks hud.lmp residency. This attach path does not know
+    // it, so the host records the inferred draw count without moving the seed.
+    if (!level_name.is_empty())
+      next->advance_first_level_items(std::string(level_name.utf8().get_data()));
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {
@@ -618,6 +617,8 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_pool_refused"] = static_cast<int64_t>(counts.objects_pool_refused);
   result["objects_unclassified"] = static_cast<int64_t>(counts.objects_unclassified);
   result["load_draws_unmodelled"] = static_cast<int64_t>(counts.load_draws_unmodelled);
+  result["item_load_gate_refusals"] = static_cast<int64_t>(counts.item_load_gate_refusals);
+  result["item_load_draws_inferred"] = static_cast<int64_t>(counts.item_load_draws_inferred);
   result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
   Dictionary build_refusals;
   for (const auto &kv : counts.build_refusals)
