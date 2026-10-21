@@ -62,6 +62,8 @@ void ChampionsNativeAudio::_bind_methods() {
   ClassDB::bind_method(D_METHOD("set_frozen", "frozen"), &ChampionsNativeAudio::set_frozen);
   ClassDB::bind_method(D_METHOD("set_sfx_volume", "volume"), &ChampionsNativeAudio::set_sfx_volume);
   ClassDB::bind_method(D_METHOD("set_music_volume", "volume"), &ChampionsNativeAudio::set_music_volume);
+  ClassDB::bind_method(D_METHOD("set_options_file_music", "bits"),
+                       &ChampionsNativeAudio::set_options_file_music);
   ClassDB::bind_method(D_METHOD("end_session"), &ChampionsNativeAudio::end_session);
   ClassDB::bind_method(D_METHOD("play_menu_music", "wait_for_current"), &ChampionsNativeAudio::play_menu_music);
   ClassDB::bind_method(D_METHOD("play_boss_music", "creature_type", "object_name"),
@@ -251,17 +253,32 @@ void ChampionsNativeAudio::set_sfx_volume(double volume) {
   }
 }
 
-// The player's g_musicVolume option (symbols/audio-save.tsv: float 0-1). The
-// executable's stored value is not documented, so music is refused until set.
+// g_musicVolume starts at save_init's 0.5 (research 22408a1
+// docs/spec/music-volume.md). This sets a slider-range value: the front-end
+// slider clamps to 0..1, so a value outside that range is refused here. An
+// options-file word, which is copied with no clamp, goes through
+// set_options_file_music instead.
 bool ChampionsNativeAudio::set_music_volume(double volume) {
   if (!std::isfinite(volume) || volume < 0.0 || volume > 1.0) {
-    fail("music volume outside 0..1");
+    fail("music slider volume outside 0..1");
     return false;
   }
   const float value = float(volume);
   std::uint32_t bits = 0;
   std::memcpy(&bits, &value, sizeof bits);
   model_.set_music_volume(bits);
+  last_error_ = String();
+  return true;
+}
+
+// The options file's +0x08 word as a raw pattern: the boot card copy puts it in
+// the options image unclamped and game_addCoreTasks copies it to g_musicVolume.
+bool ChampionsNativeAudio::set_options_file_music(int64_t bits) {
+  if (bits < 0 || bits > int64_t(UINT32_MAX)) {
+    fail("options-file music word is not a 32-bit pattern");
+    return false;
+  }
+  model_.set_music_volume(audio::boot_music_volume(std::uint32_t(bits)));
   last_error_ = String();
   return true;
 }
@@ -338,8 +355,7 @@ Dictionary ChampionsNativeAudio::get_observation() const {
   out["dropped_frames"]=int64_t(model_.dropped_frames());
   out["failed_stream_entries"]=int64_t(model_.failed_stream_entries());
   out["level_countdown"]=int64_t(model_.level_countdown());
-  out["refused_music_polls"]=int64_t(model_.refused_music_polls());
-  out["music_volume_set"]=model_.music_volume().has_value();
+  out["music_volume"]=int64_t(model_.music_volume()); // raw g_musicVolume pattern
   for(std::size_t i=0;i<model_.streams().size();++i) {
     const auto &s=model_.streams()[i]; Dictionary item;
     item["name"]=String::utf8(s.name.c_str()); item["active"]=s.active;

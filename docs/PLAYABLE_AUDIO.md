@@ -66,13 +66,13 @@ PCM, sound banks, music or original animation sound-table associations are prese
 
 ## Music and retained gates
 
-`g_musicVolume` has no documented stored value, so the client has no default.
-`playable_audio.gd` keeps `music_volume` null until its owner calls
-`set_music_volume(volume)` with the player's option. While it is null the level
-poll's music call is refused (counted as `refused_music_polls` in the
-observation) and boss music is refused; menu music does not read the volume.
-The scene sets no value. `playable_wave_smoke_audio.gd` checks the refusal, then
-supplies 1.0 as a fixture input, as the research difftest does.
+`g_musicVolume` starts at save_init's 0.5 (`0x3f000000`, research
+`docs/spec/music-volume.md`), the value of a boot with no options file, and
+`playable_audio.gd` mirrors it in `music_volume_bits`. Its owner may call
+`load_options_file_music(bits)` with the options file's +0x08 word (copied with
+no clamp) or `set_music_volume(volume)` with a slider-range value. The scene
+sets no value, so level and boss music play at 0.5; a value below `0x3d4ccccc`
+closes the gate for both. Menu music does not read the volume.
 
 The real native selector queues `mx_maintheme_l.vag` on entry. Play installs an
 explicit synthetic level directory; its first `mx_theme` entry is selected on the
