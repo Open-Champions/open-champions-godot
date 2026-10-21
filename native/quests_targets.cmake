@@ -1,5 +1,5 @@
-# Quest and mission campaign. Included twice: once to create the library
-# before the level-script host, then again so the tests can link that host.
+# Quest and mission campaign. Included after script_commands_targets.cmake:
+# the host links champions-quests by name, which CMake resolves at generate time.
 set(CHAMPIONS_QUESTS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 if(NOT TARGET champions-quests)
   add_library(champions-quests

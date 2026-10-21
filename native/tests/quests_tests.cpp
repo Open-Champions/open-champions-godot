@@ -405,41 +405,56 @@ q::Field raw_title() {
   return field;
 }
 
+// Binder words from ref_natives / difftest_quests: g_players, the record
+// stride, g_numPlayers, the quest list and its count, g_questVars.
+constexpr std::uint32_t PLAYERS_AT = 0x4d8af0u, RECORD = 0x4c30u, NUM_PLAYERS = 0x4d8ae0u;
+constexpr std::uint32_t QUEST_AT = 0x41d0u, QUEST_COUNT = 0x43d0u, QUEST_VARS = 0x86da80u;
+
+void plant_quest(sc::Host &host, int slot, int index, const q::Field &title, const std::string &text) {
+  auto &memory = host.variables().memory;
+  const auto base = PLAYERS_AT + static_cast<std::uint32_t>(slot) * RECORD + QUEST_AT +
+                    static_cast<std::uint32_t>(index) * 0x40u;
+  memory.write(base, std::vector<std::uint8_t>(title.begin(), title.end()));
+  memory.string(base + 0x20u, text);
+  memory.word(PLAYERS_AT + static_cast<std::uint32_t>(slot) * RECORD + QUEST_COUNT,
+              static_cast<std::uint32_t>(index + 1));
+}
+void plant_var(sc::Host &host, const std::string &name, int value) {
+  host.variables().memory.string(QUEST_VARS, name);
+  host.variables().memory.byte(QUEST_VARS + static_cast<std::uint32_t>(name.size()) + 1u,
+                               static_cast<std::uint8_t>(value));
+}
+void plant_bag(sc::Host &host, std::vector<q::Item> items) {
+  auto record = host.campaign().record(0);
+  record.bags[0] = std::move(items);
+  host.campaign().set_record(0, std::move(record));
+}
+
 void test_level_change() {
   line_no = 0;
+  // Level flow makes the one act decision. Its prefix rule matches an empty
+  // prefix (the quest rule does not); the retail table has none
+  // (difftest_quests checks), and the campaign follows level flow here.
   sc::Host host;
-  host.campaign().set_num_players(1);
+  host.variables().memory.word(NUM_PLAYERS, 1u);
+  plant_quest(host, 0, 0, q::field_from("Alpha"), "Body");
   host.campaign().set_act(0);
-  host.campaign().set_acts({{"hub"}, {""}});
-  auto record = host.campaign().record(0);
-  record.quest_count = 1;
-  record.quests[0].title = q::field_from("Alpha");
-  record.quests[0].text = q::field_from("Body");
-  host.campaign().set_record(0, record);
   host.level().act = 0;
   host.level().acts = {{{"hub", 0}}, {{"", 0}}};
   host.level().players[0].quests.push_back("Alpha");
   host.level().quest_values["step"] = 4;
   host.level().pending.request("zz");
-  const auto disagreed = host.change_level({});
-  check(disagreed.reset_act, "level flow clears on an empty prefix");
-  check(host.campaign().record(0).quest_count == 1, "the campaign keeps its list");
-  check(host.campaign().act() == 0, "the campaign act stays");
-  check(host.level().players[0].quests.empty() && host.level().quest_values["step"] == 0,
-        "level flow cleared its own quest copy");
+  const auto empty_prefix = host.change_level({});
+  check(empty_prefix.reset_act, "level flow clears on an empty prefix");
+  check(host.campaign().act() == 1 && host.campaign().record(0).quest_count == 0,
+        "the campaign follows level flow's decision");
+  check(host.variables().memory.s32(PLAYERS_AT + QUEST_COUNT) == 0, "the cleared count reaches the binder");
 
   sc::Host matched;
-  matched.campaign().set_num_players(1);
-  matched.campaign().set_act(0);
-  matched.campaign().set_acts({{"hub", "blood1"}, {"hub", "fire1"}});
-  record = matched.campaign().record(0);
-  record.quest_count = 1;
-  record.quests[0].title = raw_title();
-  record.quests[0].text = q::field_from("Body");
-  record.bags[0].push_back({"zzzz", 1ull << 39});
-  record.bags[0].push_back({"pickaxe", 1ull << 39});
-  matched.campaign().set_record(0, record);
-  matched.campaign().var_set("step", 4);
+  matched.variables().memory.word(NUM_PLAYERS, 1u);
+  plant_quest(matched, 0, 0, raw_title(), "Body");
+  plant_var(matched, "step", 4);
+  plant_bag(matched, {{"zzzz", 1ull << 39}, {"pickaxe", 1ull << 39}});
   matched.level().act = 0;
   matched.level().acts = {{{"hub", 0}, {"blood1", 0}}, {{"hub", 0}, {"fire1", 0}}};
   matched.level().players[0].quests.push_back("Alpha");
@@ -455,18 +470,33 @@ void test_level_change() {
   for (std::size_t i = 0; i < sizeof(expect); ++i)
     prefix = prefix && title[i] == static_cast<std::uint8_t>(expect[i]);
   check(prefix, "the placeholder leaves the tail");
+  const auto bytes = matched.variables().memory.read(PLAYERS_AT + QUEST_AT, 14);
+  bool binder = true;
+  for (std::size_t i = 0; i < sizeof(expect); ++i)
+    binder = binder && bytes[i] == static_cast<std::uint8_t>(expect[i]);
+  check(binder, "the binder record holds the cleared title");
   check(cleared.bags[0].size() == 1 && cleared.bags[0][0].name == "pickaxe", "flag 39 items are filtered");
-  check(matched.campaign().vars().size() == 1 && matched.campaign().vars()[0].value == 0,
-        "quest variable values are cleared");
+  check(matched.campaign().vars().size() == 1 && matched.campaign().vars()[0].value == 0 &&
+            matched.variables().memory.s8(QUEST_VARS + 5u) == 0,
+        "quest variable values are cleared in the campaign and the binder");
   check(matched.campaign().events().act_resets == 1 && matched.campaign().events().flag39_removed == 1,
         "the clear is counted");
   check(matched.level().players[0].quests.empty(), "level flow cleared its quest strings");
 
+  sc::Host same;
+  same.variables().memory.word(NUM_PLAYERS, 1u);
+  plant_quest(same, 0, 0, q::field_from("Alpha"), "Body");
+  same.level().act = 1;
+  same.campaign().set_act(1);
+  same.level().acts = {{{"hub", 0}, {"blood1", 0}}, {{"hub", 0}, {"fire1", 0}}};
+  same.level().pending.request("hub2");
+  const auto stay = same.change_level({});
+  check(!stay.act_changed && same.campaign().act() == 1 && same.campaign().record(0).quest_count == 1,
+        "hub2 in an act with a hub row is not a change");
+
   sc::Host latched;
-  latched.campaign().set_num_players(1);
-  latched.campaign().set_act(0);
-  latched.campaign().set_acts({{"hub", "blood1"}, {"hub", "fire1"}});
-  latched.campaign().quest_add("Alpha", "Body");
+  latched.variables().memory.word(NUM_PLAYERS, 1u);
+  plant_quest(latched, 0, 0, q::field_from("Alpha"), "Body");
   latched.level().act = 0;
   latched.level().acts = {{{"hub", 0}, {"blood1", 0}}, {{"hub", 0}, {"fire1", 0}}};
   latched.level().pending.request("fire1");
@@ -474,27 +504,88 @@ void test_level_change() {
   options.card_latch = true;
   const auto held = latched.change_level(options);
   check(held.act_changed && !held.reset_act, "a card latch stores the act and keeps the list");
-  check(latched.campaign().record(0).quest_count == 1, "the latched campaign is not cleared");
+  check(latched.campaign().act() == 1 && latched.campaign().record(0).quest_count == 1,
+        "the latched campaign takes the act and is not cleared");
+
+  sc::Host dying;
+  dying.variables().memory.word(NUM_PLAYERS, 1u);
+  plant_quest(dying, 0, 0, q::field_from("Alpha"), "Body");
+  dying.level().act = 0;
+  dying.level().acts = {{{"hub", 0}, {"blood1", 0}}, {{"hub", 0}, {"fire1", 0}}};
+  dying.level().pending.request("fire1");
+  flow::ChangeOptions death;
+  death.death_task = true;
+  const auto wipe = dying.change_level(death);
+  check(wipe.act_changed && !wipe.reset_act && dying.campaign().record(0).quest_count == 1,
+        "a death task keeps the list");
 
   sc::Host empty;
-  empty.campaign().quest_add("Alpha", "Body");
+  empty.variables().memory.word(NUM_PLAYERS, 1u);
+  plant_quest(empty, 0, 0, q::field_from("Alpha"), "Body");
   bool threw = false;
   try {
     empty.change_level({});
   } catch (const flow::Error &) {
     threw = true;
   }
-  check(threw && empty.campaign().record(0).quest_count == 0, "no pending level does not clear");
-  // quest_add wrote nothing because the player count is still 0. Plant one and retry.
-  empty.campaign().set_num_players(1);
-  empty.campaign().quest_add("Alpha", "Body");
-  threw = false;
+  check(threw && empty.campaign().record(0).quest_count == 1, "a missing pending level leaves the list");
+}
+
+void test_menu_and_save() {
+  line_no = 0;
+  sc::Host host;
+  host.variables().memory.word(NUM_PLAYERS, 1u);
+  host.variables().memory.word(0x4f719cu, 1u);
+  std::vector<q::MissionRow> rows;
+  for (int i = 0; i < 13; ++i)
+    rows.push_back({"s" + std::to_string(i), "", "m" + std::to_string(i), "b" + std::to_string(i), 1, 1, 1});
+  host.campaign().set_rows(rows);
+  // Mission 2 available on difficulty 1: byte (1 * 13 + 2) of the mission rows.
+  host.variables().memory.byte(PLAYERS_AT + 0x4bbfu + 13u + 2u, 1);
+  bool threw = false;
   try {
-    empty.change_level({});
-  } catch (const flow::Error &) {
+    host.tick_mission_menu(0);
+  } catch (const q::Error &) {
     threw = true;
   }
-  check(threw && empty.campaign().record(0).quest_count == 1, "a missing pending level leaves the list");
+  check(threw, "a closed menu does not tick");
+  host.campaign().open_menu(0);
+  for (int i = 0; i < 17; ++i)
+    check(!host.tick_mission_menu(0), "intro tick");
+  check(host.campaign().menu().state == 2 && host.campaign().menu().row == 1, "intro lands on mission 2");
+  check(host.variables().memory.word(0x41b4f4u) == 1u, "state 0 pauses the game");
+  check(!host.tick_mission_menu(q::BTN_CROSS), "cross accepts");
+  check(host.campaign().menu().state == 5, "state 5");
+  host.tick_mission_menu(0);
+  q::MenuInputs fade;
+  check(!host.tick_mission_menu(0, fade) && host.campaign().menu().state == 6, "fade below 128 stays");
+  fade.fade = 128;
+  check(!host.tick_mission_menu(0, fade) && host.campaign().menu().state == 7, "fade done");
+  check(!host.tick_mission_menu(0, fade) && host.campaign().menu().state == 8, "state 8 entered");
+  check(host.tick_mission_menu(0, fade), "state 8 copies the level");
+  check(host.campaign().menu().pending == "s1" && host.variables().memory.cstr(0x41b6d0u) == "s1" &&
+            host.variables().memory.read(0x41b720u) == 0xffu,
+        "the binder's pending name and orientation");
+  check(host.level().pending.name == "s1" && host.level().pending.orientation == flow::ORIENT_NONE,
+        "level flow's pending request");
+  check(host.campaign().events().menu_launches == 1, "one launch counted");
+
+  plant_quest(host, 0, 0, q::field_from("Alpha"), "Body");
+  plant_var(host, "step", -3);
+  plant_bag(host, {{"pickaxe", 1ull << 39}});
+  const auto image = host.save_campaign();
+  sc::Host other;
+  other.load_campaign(image);
+  check(other.save_campaign() == image, "the campaign image survives a host round trip");
+  check(other.variables().memory.cstr(QUEST_VARS) == "step" && other.variables().memory.s8(QUEST_VARS + 5u) == -3 &&
+            other.variables().memory.read(QUEST_VARS + 6u) == 0,
+        "the loaded quest-variable table");
+  check(other.variables().memory.s32(PLAYERS_AT + QUEST_COUNT) == 1 &&
+            other.variables().memory.cstr(PLAYERS_AT + QUEST_AT) == "Alpha" &&
+            other.variables().memory.s32(NUM_PLAYERS) == 1,
+        "the loaded binder record");
+  check(other.campaign().record(0).bags[0].size() == 1 && other.campaign().menu().pending == "s1",
+        "bags and the menu travel in the image");
 }
 
 void test_host() {
@@ -566,7 +657,24 @@ void test_host() {
   const auto exp_script = build_calls({{"givePlayerExp", {10}}}, {});
   check(experience.load(exp_script.image), "experience script loads");
   experience.variables().memory.word(0x4d8ae0u, 1u);
+  // Live hp 4 of 9 and mana 1 of 3 in the binder record (+0xac, +0xb0, +0xc0,
+  // +0xc4). A level gained with hp above 0 refills both from these maxima.
+  const auto put_float = [&](std::uint32_t at, float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, 4);
+    experience.variables().memory.word(0x4d8af0u + at, bits);
+  };
+  put_float(0xacu, 4.f);
+  put_float(0xb0u, 9.f);
+  put_float(0xc0u, 1.f);
+  put_float(0xc4u, 3.f);
   check(experience.begin_level() == sc::Stop::Complete, "givePlayerExp returns");
+  check(experience.campaign().record(0).hp == 9.f && experience.campaign().record(0).mana == 3.f,
+        "the level gained refills from the binder's maxima");
+  float hp_after = 0;
+  const auto hp_bits = experience.variables().memory.word(0x4d8af0u + 0xacu);
+  std::memcpy(&hp_after, &hp_bits, 4);
+  check(hp_after == 9.f, "the refilled hp reaches the binder");
   check(experience.campaign().events().exp_grants == 1, "one experience grant");
   check(experience.campaign().record(0).level == 1 && experience.campaign().record(0).exp == 10 &&
             experience.campaign().record(0).skill == 1,
@@ -583,6 +691,7 @@ int main(int argc, char **argv) {
   test_contract(argv[2]);
   test_refusals_and_save();
   test_level_change();
+  test_menu_and_save();
   test_host();
   if (failed) {
     std::cerr << failed << " failed\n";

@@ -20,8 +20,12 @@ constexpr std::uint32_t LEVEL_AT = 0x59;
 constexpr std::uint32_t EXP_AT = 0x5c;
 constexpr std::uint32_t SKILL_AT = 0xe8;
 constexpr std::uint32_t STAT_AT = 0xec;
+// HP, max HP, mana and max mana are the float words difftest_quests plants
+// for player_giveExp: +0xac, +0xb0, +0xc0, +0xc4.
 constexpr std::uint32_t HP_AT = 0xac;
+constexpr std::uint32_t MAX_HP_AT = 0xb0;
 constexpr std::uint32_t MANA_AT = 0xc0;
+constexpr std::uint32_t MAX_MANA_AT = 0xc4;
 constexpr std::uint32_t GOLD_AT = 0xe4;
 
 std::uint32_t rec(int slot) { return PLAYERS_AT + static_cast<std::uint32_t>(slot) * RECORD; }
@@ -80,7 +84,9 @@ void mirror_from_variables(Campaign &campaign, const builtins::Variables &variab
     record.skill = memory.s32(base + SKILL_AT);
     record.stat = memory.read(base + STAT_AT);
     record.hp = float_of(memory.word(base + HP_AT));
+    record.max_hp = float_of(memory.word(base + MAX_HP_AT));
     record.mana = float_of(memory.word(base + MANA_AT));
+    record.max_mana = float_of(memory.word(base + MAX_MANA_AT));
     record.gold = memory.s32(base + GOLD_AT);
     campaign.set_record(slot, std::move(record));
   }
@@ -125,7 +131,9 @@ void mirror_to_variables(const Campaign &campaign, builtins::Variables &variable
     memory.word(base + SKILL_AT, static_cast<std::uint32_t>(record.skill));
     memory.byte(base + STAT_AT, record.stat);
     memory.word(base + HP_AT, bits_of(record.hp));
+    memory.word(base + MAX_HP_AT, bits_of(record.max_hp));
     memory.word(base + MANA_AT, bits_of(record.mana));
+    memory.word(base + MAX_MANA_AT, bits_of(record.max_mana));
     memory.word(base + GOLD_AT, static_cast<std::uint32_t>(record.gold));
   }
   // Values only. Names stay where the binder wrote them.
@@ -138,6 +146,22 @@ void mirror_to_variables(const Campaign &campaign, builtins::Variables &variable
       memory.byte(address + static_cast<std::uint32_t>(name.size()) + 1, static_cast<std::uint8_t>(var.value));
     address += static_cast<std::uint32_t>(name.size() + 2);
   }
+}
+
+void restore_variables(const Campaign &campaign, builtins::Variables &variables) {
+  mirror_to_variables(campaign, variables);
+  // The packed g_questVars table, rewritten whole: name, 0, value byte, and
+  // an empty name after the last entry (ref_natives vars_*).
+  auto &memory = variables.memory;
+  auto address = QUEST_VARS;
+  for (const auto &var : campaign.vars()) {
+    if (var.name.empty() || var.name.find('\0') != std::string::npos)
+      throw Error("saved quest variable name is empty or holds a zero byte");
+    memory.string(address, var.name);
+    memory.byte(address + static_cast<std::uint32_t>(var.name.size()) + 1, static_cast<std::uint8_t>(var.value));
+    address += static_cast<std::uint32_t>(var.name.size() + 2);
+  }
+  memory.byte(address, 0);
 }
 
 void write_exp(const Campaign &campaign, builtins::Variables &variables, int slot) {

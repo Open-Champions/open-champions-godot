@@ -15,6 +15,9 @@ const Row kRows[COMMANDS] = {
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
+// missionMenu_run (research t3/research-quests docs/quests.md section 4):
+// g_paused, the pending level name and its orientation byte.
+constexpr std::uint32_t PAUSED_WORD = 0x41b4f4, PENDING_WORD = 0x41b6d0, ORIENT_WORD = 0x41b720;
 
 std::uint32_t word_of(const builtins::Variables::ServiceValue &value) {
   if (const auto *word = std::get_if<std::uint32_t>(&value))
@@ -79,6 +82,8 @@ void Host::bind_campaign() {
   variables_->player_service = [this](const std::string &name,
                                       const std::vector<std::uint32_t> &args) -> std::uint32_t {
     if (name == "player_giveExp" && campaign_->has_xp_table() && args.size() >= 2) {
+      // The record may have changed since the last quest command.
+      mirror();
       campaign_->give_exp_to(static_cast<int>(args[0]), static_cast<std::int32_t>(args[1]));
       quests::write_exp(*campaign_, *variables_, static_cast<int>(args[0]));
       return 0;
@@ -179,9 +184,32 @@ void Host::sync_seed_out() { seed().state = variables_->memory.word(SEED_WORD); 
 void Host::apply_entrance() { flow_.entrance = variables_->memory.cstr(ENTRANCE_WORD); }
 void Host::bind_seed(SharedRandom *next) { external_seed_ = next; }
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
+  mirror();
   auto result = quests::change_level(*campaign_, flow_, options, {});
   quests::mirror_to_variables(*campaign_, *variables_);
   return result;
+}
+bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
+  mirror();
+  const bool launch = campaign_->tick_menu(button, inputs);
+  const auto &menu = campaign_->menu();
+  if (menu.paused)
+    variables_->memory.word(PAUSED_WORD, 1u);
+  if (launch) {
+    variables_->memory.string(PENDING_WORD, menu.pending);
+    variables_->memory.byte(ORIENT_WORD, static_cast<std::uint8_t>(menu.orient));
+    flow_.pending.request(menu.pending, level_flow::ORIENT_NONE);
+  }
+  return launch;
+}
+std::vector<std::uint8_t> Host::save_campaign() {
+  mirror();
+  return campaign_->save();
+}
+void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
+  auto next = quests::Campaign::load(bytes);
+  *campaign_ = std::move(next);
+  quests::restore_variables(*campaign_, *variables_);
 }
 
 bool Host::load(const amx::ByteVector &image) {

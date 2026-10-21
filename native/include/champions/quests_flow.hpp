@@ -1,8 +1,10 @@
 #pragma once
-// Act change shared by the campaign and level flow. The campaign uses its own
-// prefix match (an empty prefix does not match). Level flow keeps its match.
-// The clear runs when the campaign's save_actChanged is non-zero, the card
-// latch is clear and no death task is running.
+// One level change for the campaign and level flow together. Level flow's
+// begin_change makes the act decision (save_actChanged, then the card latch
+// and death-task tests of mainloop_loadRequestedWorld). The campaign takes
+// that act and, when level flow resets the act, runs its own clear: the
+// quest lists, the flag-39 items and the quest-variable values. One decision
+// serves both, so they cannot disagree about a change.
 #include "champions/level_flow.hpp"
 #include "champions/quests.hpp"
 #include <functional>

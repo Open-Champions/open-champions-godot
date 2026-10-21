@@ -15,11 +15,33 @@ void need_mission(int mission) {
   if (mission < 0)
     throw Error("mission index is before the mission row");
 }
+// ref_natives._lower: ASCII upper case + 0x20. A byte of 0x80 or more indexes
+// the original's character table with a negative number, so it is refused.
 std::string lower_name(std::string name) {
-  for (auto &c : name)
+  for (auto &c : name) {
+    if (static_cast<unsigned char>(c) >= 0x80)
+      throw Error("non-ASCII quest variable name");
     if (c >= 'A' && c <= 'Z')
       c = static_cast<char>(c - 'A' + 'a');
+  }
   return name;
+}
+// strcpy into a 32-byte field: the string and its terminator, and the bytes
+// after the terminator stay. A string that would run past the field is
+// refused rather than written into the neighbouring field.
+void copy_into(Field &field, const std::string &text) {
+  if (text.size() >= QUEST_FIELD || text.find('\0') != std::string::npos)
+    throw Error("quest string does not fit the 32-byte field");
+  for (std::size_t i = 0; i < text.size(); ++i)
+    field[i] = static_cast<std::uint8_t>(text[i]);
+  field[text.size()] = 0;
+}
+// cstr of a stored field. A field with no terminator would read on into the
+// next field on the console; that read is refused.
+std::string stored_text(const Field &field) {
+  if (std::find(field.begin(), field.end(), std::uint8_t(0)) == field.end())
+    throw Error("quest field has no terminator");
+  return field_text(field);
 }
 int clamp_byte(int value) {
   if (value < -128)
@@ -391,11 +413,11 @@ void Campaign::quest_add(const std::string &title, const std::string &text) {
     if (rec.quest_count < 0)
       throw Error("quest count is negative");
     for (int index = 0; index < rec.quest_count; ++index) {
-      if (field_text(rec.quests[static_cast<std::size_t>(index)].title) == title)
+      if (stored_text(rec.quests[static_cast<std::size_t>(index)].title) == title)
         return;
     }
-    rec.quests[static_cast<std::size_t>(rec.quest_count)].title = field_from(title);
-    rec.quests[static_cast<std::size_t>(rec.quest_count)].text = field_from(text);
+    copy_into(rec.quests[static_cast<std::size_t>(rec.quest_count)].title, title);
+    copy_into(rec.quests[static_cast<std::size_t>(rec.quest_count)].text, text);
     ++rec.quest_count;
   }
 }
@@ -407,7 +429,7 @@ void Campaign::quest_remove(const std::string &title) {
     int last = -1;
     for (int index = 0; index < rec.quest_count; ++index) {
       auto &line = rec.quests[static_cast<std::size_t>(index)];
-      if (field_text(line.title) == title) {
+      if (stored_text(line.title) == title) {
         overlay_placeholder(line.title);
         overlay_placeholder(line.text);
         last = index;
@@ -418,15 +440,8 @@ void Campaign::quest_remove(const std::string &title) {
     while (last < rec.quest_count - 1) {
       const auto &next = rec.quests[static_cast<std::size_t>(last + 1)];
       auto &line = rec.quests[static_cast<std::size_t>(last)];
-      const auto title_text = field_text(next.title);
-      const auto body = field_text(next.text);
-      // strcpy leaves the bytes after the new terminator.
-      for (std::size_t i = 0; i < title_text.size(); ++i)
-        line.title[i] = static_cast<std::uint8_t>(title_text[i]);
-      line.title[title_text.size()] = 0;
-      for (std::size_t i = 0; i < body.size(); ++i)
-        line.text[i] = static_cast<std::uint8_t>(body[i]);
-      line.text[body.size()] = 0;
+      copy_into(line.title, stored_text(next.title));
+      copy_into(line.text, stored_text(next.text));
       ++last;
     }
     --rec.quest_count;
@@ -578,14 +593,12 @@ void Campaign::give_gold(int amount) {
   // so the division is not performed. The script binder still faults that case.
   if (num_players_ <= 0)
     return;
+  // C division toward zero; INT_MIN / -1 cannot occur because the count is 1..4.
   const int share = amount / num_players_;
   for (int slot = 0; slot < num_players_; ++slot) {
     auto &gold = players_[static_cast<std::size_t>(slot)].gold;
-    const std::int64_t next = std::int64_t(gold) + share;
-    if (next > std::numeric_limits<std::int32_t>::max() ||
-        next < std::numeric_limits<std::int32_t>::min())
-      throw Error("gold does not fit a signed 32-bit word");
-    gold = static_cast<std::int32_t>(next);
+    // ref_natives n_givePlayerGold: s32(gold + share), then the cap.
+    gold = static_cast<std::int32_t>(static_cast<std::uint32_t>(gold) + static_cast<std::uint32_t>(share));
     if (gold > MAX_GOLD)
       gold = MAX_GOLD;
   }
@@ -630,13 +643,20 @@ void Campaign::vars_clear() {
 }
 void Campaign::open_menu(int slot) {
   chooser_ = slot;
-  menu_ = new_menu();
+  menu_.state = 0;
+  menu_open_ = true;
   events_.menu_opens += 1;
 }
-void Campaign::tick_menu(int button) {
+bool Campaign::tick_menu(int button, const MenuInputs &inputs) {
+  if (!menu_open_)
+    throw Error("the mission menu is not open");
   MenuWorld world;
   world.rows = rows_;
   world.evil = evil() != 0;
+  world.local = inputs.local;
+  world.pause = inputs.pause;
+  world.slot_active = inputs.slot_active;
+  world.fade = inputs.fade;
   if (difficulty_ >= 0 && difficulty_ < DIFFICULTIES) {
     for (int mission = 0; mission < MISSIONS; ++mission) {
       const auto byte =
@@ -653,7 +673,11 @@ void Campaign::tick_menu(int button) {
     if (have)
       world.medals[mission] = have;
   }
+  const bool launch = menu_.state == 8;
   menu_tick(menu_, button, world);
+  if (launch)
+    events_.menu_launches += 1;
+  return launch;
 }
 std::pair<int, int> Campaign::act_changed(const std::string &name) {
   const int found = find_act(name, act_, acts_);
@@ -702,6 +726,7 @@ std::vector<std::uint8_t> Campaign::save() const {
   out.push_back(xp_ready_ ? 1 : 0);
   out.push_back(static_cast<std::uint8_t>(reward_player_));
   out.push_back(static_cast<std::uint8_t>(chooser_));
+  out.push_back(menu_open_ ? 1 : 0);
   for (auto value : xp_)
     put_i32(out, value);
   for (const auto &rec : players_) {
@@ -784,6 +809,7 @@ Campaign Campaign::load(const std::vector<std::uint8_t> &bytes) {
   out.xp_ready_ = in.u8() != 0;
   out.reward_player_ = in.u8();
   out.chooser_ = in.u8();
+  out.menu_open_ = in.u8() != 0;
   for (auto &value : out.xp_)
     value = in.i32();
   for (auto &rec : out.players_) {

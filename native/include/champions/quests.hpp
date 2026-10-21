@@ -108,6 +108,15 @@ struct MenuWorld {
   bool mission_complete(int mission) const;
   int mission_medal(int mission) const;
 };
+// The calls missionMenu_run makes that this module does not own: whether the
+// chooser is local with the pause menu open, net_isSlotActive(chooser), and
+// hud_stepFade(4). The executed menu cases ran offline with these defaults.
+struct MenuInputs {
+  bool local = false;
+  bool pause = false;
+  bool slot_active = true;
+  int fade = 0;
+};
 struct Var {
   std::string name;
   std::int8_t value = 0;
@@ -130,6 +139,7 @@ struct Events {
   std::uint64_t act_resets = 0;
   std::uint64_t flag39_removed = 0;
   std::uint64_t exp_grants = 0;
+  std::uint64_t menu_launches = 0;
 };
 
 std::string field_text(const Field &);
@@ -206,14 +216,25 @@ public:
   const std::vector<Var> &vars() const { return vars_; }
   void set_vars(std::vector<Var> vars) { vars_ = std::move(vars); }
 
-  // missionMenu_open leaves the run state at 0. The draw is not this function.
+  // missionMenu_open stores the chooser and leaves the run state at 0. Only
+  // those two are written: the research does not say the open resets the
+  // other menu words, and state 0 rewrites row, column, pause and counter.
+  // The draw is not this function.
   void open_menu(int slot);
+  bool menu_open() const { return menu_open_; }
   int chooser() const { return chooser_; }
   Menu &menu() { return menu_; }
   const Menu &menu() const { return menu_; }
-  void tick_menu(int button);
+  // One missionMenu_run call. Returns true on the tick that runs state 8,
+  // which copies the chosen level name into menu().pending with orientation
+  // 0xff. The medal the helpers read is record 0's: every executed menu case
+  // had the local slot at 0.
+  bool tick_menu(int button, const MenuInputs &inputs = {});
 
   // save_actChanged: stores the new act when a different one matches.
+  // Standalone model of ref_quests.act_changed. The level change in
+  // quests_flow.hpp takes the decision from level flow instead, so the
+  // campaign and level flow can never disagree about one change.
   std::pair<int, int> act_changed(const std::string &name);
   std::string hub() const;
 
@@ -235,6 +256,7 @@ private:
   int act_ = -1;
   bool network_ = false;
   bool xp_ready_ = false;
+  bool menu_open_ = false;
   int chooser_ = 0;
   int reward_player_ = 0;
   std::array<std::int32_t, XP_LEVELS> xp_{};

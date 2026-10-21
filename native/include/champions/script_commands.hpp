@@ -110,9 +110,21 @@ public:
   // when the recall byte is 0. givePlayerExp runs only after a table is set.
   quests::Campaign &campaign() { return *campaign_; }
   const quests::Campaign &campaign() const { return *campaign_; }
-  // Level-flow act change, then the campaign clear when the quest prefix
-  // match says the act changed. Copies the cleared record back into the binder.
+  // Level-flow act change; the campaign takes level flow's act and clears
+  // when level flow resets the act. Copies the cleared record back into the
+  // binder.
   level_flow::ChangeResult change_level(const level_flow::ChangeOptions &);
+  // One missionMenu_run tick. State 0 stores 1 in the binder's g_paused word
+  // 0x41b4f4. The state-8 tick copies the chosen level into the binder's
+  // pending name 0x41b6d0 with 0xff at 0x41b720, and into level flow's
+  // pending request with ORIENT_NONE. Returns true on that tick.
+  bool tick_mission_menu(int button, const quests::MenuInputs &inputs = {});
+  // The campaign image (quests::Campaign::save) after copying the binder's
+  // record and quest variables into it. load_campaign replaces the campaign
+  // and writes its records and the whole quest-variable table into the
+  // binder. Neither is the PS2 card image.
+  std::vector<std::uint8_t> save_campaign();
+  void load_campaign(const std::vector<std::uint8_t> &);
 
 private:
   void install();
