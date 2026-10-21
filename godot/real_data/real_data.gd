@@ -182,6 +182,8 @@ func dialog_data(index: int) -> Dictionary:
 		"vat_size": vat_size,
 		"text": _dialog_text,
 		"font": font,
+		# dialog_loadBox's res_find("dlgbox.lmp", "box.tex"): the loose lump is on the disc.
+		"box_available": files.has("dlgbox.lmp"),
 	}
 
 # gamefontmed.fnt, the dialog's font word 0x4f7100 (docs/dialog.md 7).

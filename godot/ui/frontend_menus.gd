@@ -60,6 +60,14 @@ func configure(owner: Control) -> void:
 func available() -> bool:
 	return service != null
 
+# dialog_isOpen: offline the start button cannot open the pause menu and its recall and exit
+# entries are not selectable while a conversation is open (docs/spec/dialog-gaps.md 3).
+var _dialog_open := false
+func set_dialog_open(open: bool) -> void:
+	if service == null or not booted or open == _dialog_open: return
+	_dialog_open = open
+	service.set_dialog_open(open)
+
 # Overlay drawn and taking keys: every flow screen except play itself.
 func active() -> bool:
 	return booted and str(view.get("screen", "")) != "playing"

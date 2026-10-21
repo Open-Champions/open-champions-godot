@@ -471,7 +471,7 @@ func take_script_counts() -> void:
 	# The NPC dialog attached to the level script (docs/DIALOG.md).
 	var talk: Dictionary = counts.get("dialog", {})
 	for key in talk:
-		if key == "interact" or key == "mouth":
+		if key == "interact" or key == "mouth" or key == "refused_reasons":
 			for result in talk[key]: add("dialog.%s.%s" % [key, str(result)], int(talk[key][result]))
 		else:
 			add("dialog." + str(key), int(talk[key]))
