@@ -996,6 +996,13 @@ if(BUILD_TESTING)
     add_executable(champions-combat-play-tests tests/combat_play_tests.cpp)
     target_link_libraries(champions-combat-play-tests PRIVATE champions-combat-play)
     add_test(NAME combat-play COMMAND champions-combat-play-tests)
+    add_executable(champions-combat-free-spot-tests tests/combat_free_spot_tests.cpp)
+    target_link_libraries(champions-combat-free-spot-tests PRIVATE champions-combat-play)
+    add_test(NAME combat-free-spot-host COMMAND champions-combat-free-spot-tests)
+    add_test(NAME combat-free-spot-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_free_spot_vectors.py"
+        "$<TARGET_FILE:champions-combat-free-spot-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_free_spot.txt.gz")
     add_executable(champions-playable-combat-fx-tests tests/playable_combat_fx_tests.cpp)
     target_include_directories(champions-playable-combat-fx-tests PRIVATE src)
     target_link_libraries(champions-playable-combat-fx-tests PRIVATE champions-combat-play-effects)

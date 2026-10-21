@@ -321,6 +321,7 @@ void World::State::install_services() {
                          "world_collectObjectsInArc",
                          "world_collectInSphere",
                          "world_damageInRadius",
+                         "world_findFreeSpot",
                          "damage_apply",
                          "pool_new",
                          "pool_free",
@@ -764,6 +765,10 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     if (n == "world_damageInRadius")
       return A::Objects{damage_in_radius(ar(0), v(1), ar(2), ar(3), ar(4),
                                          ar(5), ar(6), ar(7))};
+    if (n == "world_findFreeSpot") {
+      auto spot = find_free_spot(v(0), ar(1), ar(2), ar(3));
+      return A::FreeSpot{spot.first, Raw(spot.second)};
+    }
     if (n == "pool_new")
       return iv(pool_new(ar(0)));
     if (n == "pool_free") {

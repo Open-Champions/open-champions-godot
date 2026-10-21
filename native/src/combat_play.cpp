@@ -81,6 +81,13 @@ struct Session::State {
     out.height_below = [this](const Vec3 &p, Raw r) {
       return world_queries::terrain_height_below(terrain, r, p);
     };
+    // world_findFreeSpot's two terrain tests on the same ground.
+    out.terrain_blocked = [this](const Vec3 &p, Raw r) {
+      return world_queries::terrain_test_flag1(terrain, r, p);
+    };
+    out.terrain_height = [this](const Vec3 &p, Raw r) {
+      return world_queries::terrain_height(terrain, r, p);
+    };
     out.animation_start = [this](Raw a, Raw clip, Raw flags, Raw, Raw) { full_start(a, clip, flags); };
     out.animation_advance = [this](Raw a, Raw) { return full_advance(a); };
     out.is_class = [](C::Address, const std::string &) { return false; };

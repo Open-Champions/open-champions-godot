@@ -73,6 +73,10 @@ struct Services {
   std::function<Slide(const Vec3 &, const Vec3 &, Raw, Raw)> slide;
   std::function<Raw(const Vec3 &, Raw)> height_below;
   std::function<Raw(const Vec3 &, Raw)> water_test;
+  // world_findFreeSpot 0x14acf8's terrain tests (point, radius):
+  // terrain_testFlag1 0x183b48 and terrain_height 0x183820. Full only.
+  std::function<Raw(const Vec3 &, Raw)> terrain_blocked;
+  std::function<Raw(const Vec3 &, Raw)> terrain_height;
   std::function<Raw(Address, Raw)>
       animation_advance; // actor, speed -> mask (hit=1)
   std::function<void(Address, Raw, Raw, Raw, Raw)> animation_start;
@@ -253,6 +257,9 @@ public:
   std::vector<Address> damage_in_radius(Address attacker, const Vec3 &,
                                         Raw most, Raw flags, Raw least,
                                         Raw skip, Raw inner, Raw outer);
+  // world_findFreeSpot 0x14acf8: up to 50 shared-seed tries; (point, ok).
+  std::pair<Vec3, int> find_free_spot(const Vec3 &centre, Raw spread,
+                                      Raw radius, Raw any_height);
   std::vector<Address> attached_spells(Address creature) const;
   void drop_loot(Address, const Vec3 &, Raw angle, Raw filter, Raw z,
                  Raw throw_speed, Raw gold_scale, Raw gold_chance,

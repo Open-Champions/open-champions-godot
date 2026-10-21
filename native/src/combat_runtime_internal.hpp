@@ -144,6 +144,7 @@ struct World::State {
   void erase_later(Address);
   void walk(Address, const std::function<void(Address)> &);
   std::vector<Address> box(const Vec3 &, const Vec3 &, int);
+  std::pair<Vec3, int> find_free_spot(const Vec3 &, Raw, Raw, Raw);
   void run_objects();
   void tick();
   void run(Address);

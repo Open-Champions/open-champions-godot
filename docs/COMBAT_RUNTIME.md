@@ -379,6 +379,24 @@ PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_combat_runtime_5_vectors.py
 ctest --test-dir build/native -R 'combat-runtime-5' --output-on-failure
 ```
 
+### world_findFreeSpot (audit-fixes)
+
+An idle Full fight used to stop with 310 ready ticks done, with `missing arena handler: world_findFreeSpot`. The Skelight at x = 80 never moves in that fixture (no root motion). Its `Creature_moveTo` stuck recovery (`0x114510`, research-combat `docs/creatures.md`) then searches for a free spot once the stand reaches 300 clock ticks, and no handler answered. The round-5 actors play no part in it.
+
+The Full composition now answers with `World::find_free_spot`: `world_findFreeSpot` `0x14acf8` as executed in research-levels `13fafa4` (`ref_objects.World.find_free_spot`; `docs/level-flow.md` 17.2 and 18.3; `docs/objects.md`). It makes up to 50 tries. Each try draws a shared-seed point in the unit ball (three draws per sample) and offsets the centre by that point's x and y times the spread. A try fails when:
+- `terrain_testFlag1` is nonzero;
+- the floor from `terrain_height` is not below centre z + 6, unless anyHeight is set;
+- the box query (result ± radius, floor ± 100000, limit `0x80`) holds an object without flag `0x1` where dx² + dy² ≤ radius² + r².
+
+When all 50 tries fail, ok is 0 and the point is the last one that passed the terrain tests, or the centre. Two new services carry the terrain tests: `terrain_blocked` and `terrain_height`. The Full fixture supplies both from its own ground. A world without them refuses. Round 1 is unchanged.
+
+`native/tests/vectors/combat_free_spot.txt.gz` holds 11 cases from the reference. They cover open ground, the stuck fight's geometry, a ring of objects, blocked terrain, a floor at exactly 6 (with and without anyHeight), a floor far below, a non-solid and a solid covering object, mixed terrain, and a wide search. Each case compares the point, ok and the shared seed after. `combat-free-spot-host` runs the idle Full fight for 400 ready ticks. The Skelight searches in the 311th from (80, 0) with spread 72 and radius 12, and moves to the spot it finds. Left idle, the fight reaches the second search at 621. At 786 the player has died, and the fight stops on the existing `party wipe: deathTask` refusal.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_combat_free_spot_vectors.py
+ctest --test-dir build/native -R 'combat-free-spot' --output-on-failure
+```
+
 ### Findings
 
 - **Shock of Fire presentation names.** The composed reference builds its presentation table before `ref_combat_spells` adds `voice_setPosition` and `fx_ringBurst`, so it refuses Shock of Fire's first run, while the spells runtime treats both as presentation. The native Full composition treats them as presentation. The generator applies the same one-line adjustment, recorded in the manifest.

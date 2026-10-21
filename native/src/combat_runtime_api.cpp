@@ -260,6 +260,11 @@ std::vector<Address> World::damage_in_radius(Address a, const Vec3 &c,
   require_full(*s_);
   return s_->damage_in_radius(a, c, most, flags, least, skip, inner, outer);
 }
+std::pair<Vec3, int> World::find_free_spot(const Vec3 &c, Raw spread,
+                                           Raw radius, Raw any_height) {
+  require_full(*s_);
+  return s_->find_free_spot(c, spread, radius, any_height);
+}
 std::vector<Address> World::attached_spells(Address c) const {
   return s_->attached(c);
 }
