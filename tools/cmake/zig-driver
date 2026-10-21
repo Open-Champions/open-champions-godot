@@ -1,0 +1,17 @@
+#!/bin/bash
+# Forward a CMake compiler invocation to zig cc / zig c++.
+# godot-cpp passes -static and -static-libstdc++ for portable runtimes.
+# Zig already links libc++ into the binary and treats a bare -static as
+# "emit an archive", which would replace the GDExtension shared library.
+set -euo pipefail
+lang="$1"
+target="$2"
+shift 2
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    -static|-static-libgcc|-static-libstdc++|-lstdc++) ;;
+    *) args+=("$arg") ;;
+  esac
+done
+exec zig "$lang" -target "$target" "${args[@]}"

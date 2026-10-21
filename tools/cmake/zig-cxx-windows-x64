@@ -1,0 +1,3 @@
+#!/bin/bash
+# Zig C++ driver for the MinGW / UCRT x86_64 Windows target.
+exec "$(dirname "$0")/zig-driver" c++ x86_64-windows-gnu "$@"

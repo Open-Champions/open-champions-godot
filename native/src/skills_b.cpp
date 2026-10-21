@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#ifdef alloca
+#undef alloca
+#endif
 
 namespace champions::simulation::rta::skills_b {
 namespace kernel = detail::skill_kernel;
