@@ -455,26 +455,98 @@ void hosts() {
     C::Spawn s;
     auto kept = w.spawn_class("Skelight");
     check(w.read(kept + 0x48) == C::VT_SKELIGHT, "Skelight keeps its run table");
-    auto natasla = w.spawn_class("Natasla");
-    w.run_objects();
-    check(w.read(natasla + 0x232, 2) == 0, "Natasla decides nothing");
-    auto npc = w.spawn_class("NPC");
-    w.run_objects();
-    check(w.read(npc + 0x232, 2) == 0, "NPC without the path flag stays idle");
-    auto queen = w.spawn_class("AntQueen");
-    w.write(queen + 0x232, 2, 2);
-    w.run_objects();
-    check(w.read(queen + 0x232, 2) == 2, "AntQueen hole stays put");
-    auto gnome = w.spawn_class("GnomeNavigator");
-    w.write(gnome + 0x232, 2, 6);
-    w.run_objects();
-    check(w.read(gnome + 0x232, 2) == 6, "GnomeNavigator hole stays put");
-    auto gnaw = w.spawn_class("Gnaw");
-    w.write(gnaw + 0x232, 2, 7);
-    w.run_objects();
-    check(w.read(gnaw + 0x232, 2) == 0 && f.anim[gnaw].first == 3,
-          "Gnaw hole requests idle");
+    // CAI-4: only Gnaw_ctor is executed (ref_monsters_1.gnaw_ctor); the other
+    // eight constructors are not, so their spawn refuses.
+    for (const char *cls : {"Critter", "Soul", "NPC", "Natasla", "Mermaid",
+                            "GnomeNavigator", "Skeleton", "AntQueen"})
+      refused([&] { w.spawn_class(cls); }, "unexecuted own-class constructor");
     refused([&] { w.spawn_class("AntWave"); }, "no-dispatch class spawned");
+      {
+        // Gnaw in the Full composition (run_actor).
+        Fixture g;
+        C::World full(g.services(), 1, C::Composition::Full);
+        g.ptr = &full;
+        auto &w = full;
+        auto &f = g;
+        C::Spawn other;
+        other.team = 1; // an enemy, so the slot-23 target pick keeps it
+        auto kept = w.spawn_skelight(other);
+        w.write(C::FRAME, 4, 40);
+        auto gnaw = w.spawn_class("Gnaw");
+      // monsters-1.md 4.2: table 0x515038 (run 0x267654, draw 0x267604, setState
+      // 0x267a0c, everything else base), kind 1, turn rate 1.2, radius 6, speed
+      // 0, +0xec = frame, +0xf4 = frame + 300, creature flags |= 0x200001000.
+      check(w.read(gnaw + 0x48) == 0x515038 && w.read(0x515038 + 36) == 0x267654 &&
+                w.read(0x515038 + 8 * 27 + 4) == 0x267a0c &&
+                w.read(0x515038 + 8 * 2 + 4) == 0x116638,
+            "Gnaw table is base plus run, draw and setState");
+      check(w.read(gnaw + 0xb4, 1) == 1 && w.read(gnaw + 0xb0) == 0x3f999999 &&
+                w.read(gnaw + 0x1c) == 0x40c00000 && w.read(gnaw + 0xb8) == 0 &&
+                w.read(gnaw + 0xec) == 40 && w.read(gnaw + 0xf4) == 340 &&
+                (w.read(gnaw + 0xa8, 8) & 0x200001000ull) == 0x200001000ull,
+            "Gnaw_ctor class words");
+      // The scale draw: own draw 20396 (the object's generator after the
+      // draw). Expected from research-anim 5694ae3 tools/ref_core.py: d2f(
+      // dadd(dmul(f2d(mul(from_int(d), 2^-16)), 0.3), 0.45f widened)).
+      check(w.read(gnaw + 0x44) >> 16 == 20396 && w.read(gnaw + 0xdc) == 0x3f0b19ff,
+            "Gnaw_ctor scale from one own draw");
+      // CAI-5: setState(0) starts the class-definition word at +0x1c (the
+      // authored token 0xc1100018), not an entry index.
+      check(w.read(gnaw + 0x232, 2) == 0 && f.anim[gnaw].first == 0xc1100018,
+            "Gnaw_ctor setState(0) starts the first bite clip");
+      // CAI-1: the prologue processes pending damage.
+      auto hp = w.read(gnaw + 0x228);
+      // Flags 2: no hit effect (a Gnaw bleeds: flags & 0xd reach GutChunk_ctor).
+      w.take_damage(gnaw, kept, 2, from_int(10));
+      w.write(gnaw + 0x232, 2, 7);
+      w.run_actor(gnaw);
+      check(w.read(gnaw + 0x228) != hp, "Gnaw_run processes pending damage");
+      check(w.read(gnaw + 0x232, 2) == 0 && f.anim[gnaw].first == 0xc1100018,
+            "Gnaw hole requests idle");
+      // CAI-2: setState runs Creature_filterState first. A running cooldown
+      // with a target turns the request for 0 into 0x10, which stores the
+      // cooldown 60 and starts the second move clip (+0x34).
+      w.relink(gnaw + C::TARGET, kept);
+      w.write(gnaw + 0x318, 2, 5);
+      w.write(gnaw + 0x232, 2, 7);
+      w.run_actor(gnaw);
+      check(w.read(gnaw + 0x232, 2) == 0x10 && w.read(gnaw + 0x318, 2) == 60 &&
+                f.anim[gnaw].first == 0xc1100030,
+            "Gnaw setState filters to the cooldown state");
+      w.write(gnaw + 0x318, 2, 0);
+      w.write(gnaw + 0x31c, 2, 5);
+      w.write(gnaw + 0x232, 2, 7);
+      w.run_actor(gnaw);
+      check(w.read(gnaw + 0x232, 2) == 0x13 && f.anim[gnaw].first == 0xc1100018,
+            "Gnaw setState filters a stunned request to 0x13");
+      w.write(gnaw + 0x31c, 2, 0);
+      // CAI-1: the step's event word reaches state 6, whose bit 0 is the bite.
+      w.write(kept + 0x10, 4, from_int(4));
+      w.write(kept + 0x14, 4, 0);
+      w.write(gnaw + 0x232, 2, 6);
+      w.write(gnaw + 0x11a, 2, 8);
+      w.animation_events(gnaw, 1);
+      w.clear_history();
+      w.run_actor(gnaw);
+      bool bite = false;
+      for (const auto &e : w.events())
+        bite = bite || e.name == "damage_apply";
+      check(bite, "Gnaw state 6 bites on event bit 0");
+    }
+    {
+      // CAI-6: walking home refuses outside the Full composition, as Skelight.
+      auto gnaw = w.spawn_class("Gnaw");
+      w.write(gnaw + 0x3b4, 4, from_int(500));
+      w.clear_history();
+      std::string why;
+      try {
+        w.run_objects();
+      } catch (const std::exception &e) {
+        why = e.what();
+      }
+      check(why.find("walking home") != std::string::npos,
+            "Gnaw walks home in round 1");
+    }
   }
   std::cout << checks << " native combat runtime checks passed\n";
 }

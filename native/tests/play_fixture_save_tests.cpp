@@ -206,16 +206,16 @@ void full_combat() {
       if (cut != std::string::npos) last = line.substr(cut);
     }
   }
-  bool queen = false, skeleton = false, soul = false;
-  for (const auto &a : whole.scene->actors()) {
-    queen = queen || a.slot == 4;
-    skeleton = skeleton || a.slot == 5;
-    soul = soul || a.slot == 6;
-  }
-  check(queen && skeleton && soul, "AntQueen, Skeleton and Soul stay in the Full fight");
+  // Slots 4-6 stay empty: AntQueen, Skeleton and Soul refuse to spawn
+  // (their constructors are not executed; audit CAI-4), so the fight has no
+  // demon test.
+  bool round5 = false;
+  for (const auto &a : whole.scene->actors())
+    round5 = round5 || (a.slot >= 4 && a.present);
+  check(!round5, "the Full fight places no AntQueen, Skeleton or Soul");
   std::cout << "full combat round 5: " << whole.demon_tests << " demon tests, " << whole.shield_samples
             << " Holy Shield sample points\n";
-  check(whole.demon_tests > 0, "the Soul tests for a demon in the live fight");
+  check(whole.demon_tests == 0, "no Soul tests for a demon in the live fight");
   check(whole.shield_samples > 0 && whole.shield_samples % 241 == 0,
         "Holy Shield absorbs in the live fight, 241 sample points each time");
   auto player = whole.scene->session().world().target(whole.scene->actors().at(0).handle);
@@ -231,8 +231,11 @@ void full_combat() {
 void wave12_extensions() {
   constexpr int TICKS = 200, SAVE_AT = 90;
   auto ops = [](FS::CombatScene &scene, int t) {
-    if (t == 5) scene.spawn_creature(0); // Critter
-    if (t == 6) check(refuses([&] { scene.spawn_creature(8); }), "one own-machine creature per session");
+    // Critter's constructor is not executed (audit CAI-4): refused before
+    // the World is touched. Gnaw (index 8) is the executed constructor.
+    if (t == 4) check(refuses([&] { scene.spawn_creature(0); }), "an unexecuted constructor is refused");
+    if (t == 5) scene.spawn_creature(8); // Gnaw
+    if (t == 6) check(refuses([&] { scene.spawn_creature(7); }), "one own-machine creature per session");
     if (t == 20) scene.drop_potion(1);
     if (t == 60) scene.drop_potion(3);
     if (t == 120) scene.drop_potion(2);
@@ -251,7 +254,7 @@ void wave12_extensions() {
   };
   FullRun whole = full_start();
   run(whole, 0, TICKS);
-  check(whole.scene->actors().size() == 7 && whole.scene->own_creature_class() == "Critter",
+  check(whole.scene->actors().size() == 4 && whole.scene->own_creature_class() == "Gnaw",
         "the own-machine creature is observed in slot 3");
   FullRun first = full_start();
   run(first, 0, SAVE_AT);
@@ -265,7 +268,7 @@ void wave12_extensions() {
   second.world = std::make_unique<FX::sim::EffectWorld>();
   FX::sim::load_world(*second.world, *loaded.presentation);
   second.scene->attach(second.world.get());
-  check(second.scene->own_creature_class() == "Critter", "the loaded scene keeps its creature");
+  check(second.scene->own_creature_class() == "Gnaw", "the loaded scene keeps its creature");
   run(second, SAVE_AT, TICKS);
   check(prefix + second.trace == whole.trace, "wave-12 operations: byte-identical continuation");
   check(FX::sim::save_world(*second.world) == FX::sim::save_world(*whole.world),

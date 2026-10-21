@@ -1,5 +1,6 @@
 #include "champions/combat_runtime.hpp"
 #include "champions/fx_trig.hpp"
+#include "champions/own_machines.hpp"
 #include <array>
 #include <fstream>
 #include <functional>
@@ -48,11 +49,17 @@ struct Host {
     services.resource = [](const C::ResourceQuery &) { return Raw(0); };
     w = std::make_unique<C::World>(services, 1, C::Composition::Full);
   }
-  C::Address creature(const char *cls, Raw y = 0) {
+  // A creature object to carry the round-5 bodies that are called directly
+  // (bank fade and spring, isDemonNear, the volley run). The AntQueen,
+  // Skeleton, Soul and Critter constructors are not executed, so
+  // World::spawn_class refuses them (audit CAI-4); the authored Skelight
+  // placement is the same pool block and layout those spawns used.
+  void creature_refused(const char *cls) { w->spawn_class(cls, C::Spawn{}); }
+  C::Address carrier(Raw y = 0) {
     C::Spawn s;
     s.position[1] = y;
     s.hp = 0x42f00000;
-    return w->spawn_class(cls, s);
+    return w->spawn_skelight(s);
   }
 };
 int count_event(const C::World &w, const std::string &name) {
@@ -71,64 +78,14 @@ bool threw_message(const std::function<void()> &fn, const std::string &part) {
   return false;
 }
 void live_fight() {
+  // CAI-1, CAI-2, CAI-4: these three classes can no longer be built, so their
+  // runs (round-5 slot-25 arguments, the queen's ground fade and the Soul's
+  // phase gate) do not run in the World. The phase gate is replayed against
+  // the decision module below; the bodies are called directly.
   Host h;
-  auto queen = h.creature("AntQueen");
-  auto skeleton = h.creature("Skeleton", from_int(40));
-  auto soul = h.creature("Soul", from_int(-40));
-  for (int t = 0; t < 20; ++t) {
-    h.w->write(C::FRAME, 4, static_cast<Raw>(t));
-    h.w->run_actor(queen);
-    h.w->run_actor(skeleton);
-    h.w->run_actor(soul);
-  }
-  check(h.w->read(queen + 0x232, 2) == 0, "AntQueen stays in state 0 beside the fight");
-  check(h.w->read(skeleton + 0x232, 2) == 0, "Skeleton stays in state 0 beside the fight");
-  check(h.w->read(soul + 0x232, 2) == 0, "Soul stays in state 0 beside the fight");
-
-  Host phase;
-  auto s = phase.creature("Soul");
-  phase.w->write(C::FRAME, 4, 9);
-  phase.w->write(s + 0x230, 1, 0);
-  phase.w->write(s + 0x44, 4, 9);
-  phase.w->clear_history();
-  phase.w->run_actor(s);
-  check(count_event(*phase.w, "Soul_isDemonNear") == 0,
-        "frame 9 with phase byte 0 does not call the demon test");
-  phase.w->write(s + 0x230, 1, 9);
-  phase.w->clear_history();
-  phase.w->run_actor(s);
-  check(count_event(*phase.w, "Soul_isDemonNear") == 1,
-        "frame 9 with phase byte 9 calls the demon test");
-  check(count_event(*phase.w, "world_collectObjectsInBox") == 1, "the demon box is collected");
-
-  Host gate;
-  auto far_q = gate.creature("AntQueen", from_int(10000));
-  auto defin = gate.w->read(far_q + 0x24);
-  gate.w->write(defin + 0xb4, 4, 0x11);
-  gate.w->write(far_q + 0x118, 1, 1);
-  gate.w->write(far_q + 0x11c, 4, 0x11);
-  gate.w->write(far_q + 0xf4, 4, 1000);
-  gate.w->run_actor(far_q);
-  check(gate.w->read(far_q + 0x128) == 0xbd088888u, "an inactive AntQueen still fades");
-  check(gate.w->read(far_q + 0x232, 2) == 0, "the fade does not leave state 0");
-  auto far_s = gate.creature("Skeleton", from_int(10000));
-  gate.w->write(far_s + 0x300, 4, 5);
-  gate.w->write(far_s + 0xf4, 4, 0);
-  gate.w->write(far_s + 0x3d0, 4, 4);
-  gate.w->run_actor(far_s);
-  check(gate.w->read(far_s + 0x232, 2) == 0, "an inactive Skeleton does not take the expired transition");
-  auto far_soul = gate.creature("Soul", from_int(10000));
-  gate.w->write(C::FRAME, 4, 9);
-  gate.w->write(far_soul + 0x230, 1, 9);
-  gate.w->clear_history();
-  gate.w->run_actor(far_soul);
-  check(count_event(*gate.w, "Soul_isDemonNear") == 0, "an inactive Soul does not test for a demon");
-
-  Host bow;
-  auto sk = bow.creature("Skeleton");
-  bow.w->write(sk + 0x3d0, 4, 4);
-  bow.w->run_actor(sk);
-  check(bow.w->read(sk + 0x232, 2) == 0, "a bow skeleton with nothing to see stays in state 0");
+  for (const char *cls : {"AntQueen", "Skeleton", "Soul"})
+    check(threw_message([&] { h.creature_refused(cls); }, "constructor is not executed"),
+          std::string(cls) + " spawn refuses");
 }
 // The armed shield's run (0x2e8428) steps its clock on every player tick and
 // ends through the base Spell destructor once the duration passes.
@@ -293,7 +250,7 @@ void replay(const Exact &c) {
   }
   if (!c.bank.empty() || !c.fade.empty()) {
     Host h;
-    auto a = h.creature("AntQueen");
+    auto a = h.carrier();
     if (!c.bank.empty()) {
       h.w->write(a + 0x110, 2, c.bank.at(0));
       h.w->write(a + 0x3e0, 4, c.bank.at(8));
@@ -384,11 +341,13 @@ void replay(const Exact &c) {
       C::Spawn s;
       s.position = {add(v.at(0), dx), v.at(1), v.at(2)};
       s.hp = 0x42f00000;
-      return h.w->spawn_class(cls, s);
+      // A demon needs its own class table (its slot-0 getter is planted
+      // below): Gnaw objects share VT_GNAW, the others the Skelight table.
+      return std::string(cls) == "Gnaw" ? h.w->spawn_class(cls, s) : h.w->spawn_skelight(s);
     };
     {
       Host h;
-      auto soul = place(h, "Soul", 0);
+      auto soul = place(h, "Skelight", 0);
       h.w->clear_history();
       check(h.w->is_demon_near(soul) == 0, "no demon in an empty box");
       bool seen = false;
@@ -399,14 +358,14 @@ void replay(const Exact &c) {
         }
       check(seen, "the demon box is collected");
     }
-    // A list entry is (demon << 1) | flag 8. Demons are Critters whose class
+    // A list entry is (demon << 1) | flag 8. Demons are Gnaws whose class
     // table's slot-0 getter is Demon_typeinfo; the others are Skelights.
     for (const auto &row : c.demonlists) {
       Host h;
-      auto soul = place(h, "Soul", 0);
+      auto soul = place(h, "Skelight", 0);
       for (std::size_t k = 1; k < row.size(); ++k) {
         bool demon = row[k] & 2;
-        auto obj = place(h, demon ? "Critter" : "Skelight", from_int(Raw(k * 10)));
+        auto obj = place(h, demon ? "Gnaw" : "Skelight", from_int(Raw(k * 10)));
         if (demon)
           h.w->write(h.w->read(obj + 0x48) + 4, 4, 0x3ca81c);
         if (row[k] & 1)
@@ -417,17 +376,18 @@ void replay(const Exact &c) {
     return;
   }
   if (!c.soulphase.empty()) {
+    // Soul_run's phase gate, replayed on the decision module (the World no
+    // longer builds a Soul): (state, g_simFrame, byte +0x230, demon calls).
     for (const auto &row : c.soulphase) {
-      Host h;
-      auto soul = h.creature("Soul");
-      h.w->write(soul + 0x232, 2, row.at(0));
-      h.w->write(C::FRAME, 4, row.at(1));
-      h.w->write(soul + 0x230, 1, row.at(2));
-      h.w->clear_history();
-      h.w->run_actor(soul);
-      check(Raw(count_event(*h.w, "Soul_isDemonNear")) == row.at(3),
-            "soul phase state " + std::to_string(row[0]) + " frame " + std::to_string(row[1]) +
-                " byte " + std::to_string(row[2]));
+      own_machines::View v;
+      v.frame = row.at(1);
+      v.serial = row.at(2);
+      auto tick = own_machines::step("Soul", row.at(0), v);
+      Raw demon = 0;
+      for (const auto &call : tick.calls)
+        demon += call == "demon";
+      check(demon == row.at(3), "soul phase state " + std::to_string(row[0]) + " frame " +
+                                    std::to_string(row[1]) + " byte " + std::to_string(row[2]));
     }
     return;
   }
@@ -464,7 +424,7 @@ void replay(const Exact &c) {
   if (!c.volley.empty()) {
     Host h;
     h.ground = c.volley.at(3);
-    auto obj = h.creature("Critter");
+    auto obj = h.carrier();
     h.w->write(obj + 0x60, 4, c.volley.at(0));
     h.w->write(obj + 0x6c, 4, c.volley.at(1));
     h.w->write(obj + 0x44, 4, c.volley.at(2));
