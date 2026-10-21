@@ -149,6 +149,68 @@ int main() {
       refused = true;
     }
     check(refused, "a malformed texture refuses");
+    auto mode = MT::alpha_mode(1);
+    check(mode.equation == 1 && mode.fix == 0, "ALPHA 1 is the reverse mix");
+    check(MT::alpha_mode(2).equation == 2, "ALPHA 2 drops the destination");
+    check(MT::alpha_mode(9).equation == 9, "ALPHA 9 adds destination times As");
+    check(MT::alpha_mode(0x2a).equation == 0x2a, "ALPHA 0x2a replaces");
+    check(MT::alpha_mode(0x44).equation == 0x44, "ALPHA 0x44 is the usual mix");
+    check(MT::alpha_mode(0x48).equation == 0x48, "ALPHA 0x48 adds source times As");
+    mode = MT::alpha_mode((0x80ULL << 32) | 0x64);
+    check(mode.equation == 0x64 && mode.fix == 0x80,
+          "0x64 plus FIX keeps the FIX byte");
+    mode = MT::alpha_mode((40ULL << 32) | 0x68);
+    check(mode.equation == 0x68 && mode.fix == 40, "0x68 plus FIX is the add form");
+    check(MT::alpha_mode(0x8000000029ULL).equation == 0 &&
+              MT::alpha_mode(0xac00000029ULL).equation == 0 &&
+              MT::alpha_mode((0x100ULL << 32) | 0x64).equation == 0,
+          "registers outside the documented rows stay undocumented");
+    const std::array<double, 3> src{{10, 20, 30}}, dst{{1, 2, 3}};
+    auto blended = MT::blend_rgb(1, 0, src, dst, 0.25, true);
+    check(blended && (*blended)[0] == 10 * 0.75 + 1 * 0.25 &&
+              (*blended)[2] == 30 * 0.75 + 3 * 0.25,
+          "equation 1 is src (1-As) + dst As");
+    blended = MT::blend_rgb(9, 0, src, dst, 0.5, true);
+    check(blended && (*blended)[1] == 20 + 2 * 0.5, "equation 9 is src + dst As");
+    blended = MT::blend_rgb(0x48, 0, src, dst, 0.5, true);
+    check(blended && (*blended)[0] == 1 + 10 * 0.5, "equation 0x48 is dst + src As");
+    blended = MT::blend_rgb(2, 0, src, dst, 0.25, true);
+    check(blended && (*blended)[0] == 7.5 && (*blended)[1] == 15,
+          "equation 2 does not add the destination");
+    blended = MT::blend_rgb(0x44, 0, src, dst, 0.25, true);
+    check(blended && (*blended)[0] == 10 * 0.25 + 1 * 0.75,
+          "equation 0x44 is src As + dst (1-As)");
+    blended = MT::blend_rgb(0x2a, 0, src, dst, 0.9, true);
+    check(blended && *blended == src, "equation 0x2a is the source");
+    blended = MT::blend_rgb(0x64, 0.25, src, dst, 0.9, true);
+    check(blended && (*blended)[0] == 10 * 0.25 + 1 * 0.75,
+          "equation 0x64 weights by FIX");
+    blended = MT::blend_rgb(0x68, 40.0 / 128.0, src, dst, 0.9, true);
+    check(blended && (*blended)[0] == 1 + 10 * (40.0 / 128.0),
+          "equation 0x68 adds source times FIX");
+    blended = MT::blend_rgb(9, 0, src, dst, 1, false);
+    check(blended && *blended == src, "a clear PRIM blend bit replaces");
+    check(!MT::blend_rgb(0x29, 1, src, dst, 0, true),
+          "an undocumented equation is not evaluated");
+    const auto centre = MT::environment_uv(0, 0, 128, 128);
+    const auto right = MT::environment_uv(1, 0, 128, 128);
+    const auto down = MT::environment_uv(0, 1, 128, 128);
+    check(centre[0] == 1.5 && centre[1] == 1.5 && right[0] == 2 &&
+              right[1] == 1.5 && down[0] == 1.5 && down[1] == 2,
+          "environment UV is (192 + 64 n) / image size");
+    auto header = model.bytes;
+    put(header, 0x10, 0x10, 2);
+    put(header, 0x18, 9, 8);
+    put(header, 0x20, 0x80, 1);
+    const auto flagged = MT::bind({header.data(), header.size()}, {tex.data(), tex.size()});
+    check(flagged.two_pass && flagged.fix2 == 0x80 && flagged.mode.equation == 9 &&
+              !flagged.meshes[0].environment,
+          "flag 0x10 is the environment pass even when this packet has one tag");
+    put(header, 0x10, 0, 2);
+    put(header, 0x18, 0x48, 8);
+    const auto additive = MT::bind({header.data(), header.size()}, {tex.data(), tex.size()});
+    check(!additive.two_pass && additive.mode.equation == 0x48,
+          "header 0x48 is the documented add equation");
     std::cout << "model texture bind checks: " << checks << "; failures: 0\n";
     return 0;
   } catch (const std::exception &e) {
