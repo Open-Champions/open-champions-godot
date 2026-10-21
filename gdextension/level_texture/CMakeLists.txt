@@ -29,6 +29,7 @@ add_library(champions-level-texture-preview SHARED
     ../../native/src/level_texture/level_draw.cpp
     ../../native/src/world_geometry.cpp
     ../../native/src/real_world.cpp
+    ../../native/src/water_draw.cpp
     ../../native/src/terrain_file.cpp
     ../../native/src/world_terrain.cpp
     ../../native/src/world_movement.cpp
