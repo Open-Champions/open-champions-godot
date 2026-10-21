@@ -147,6 +147,14 @@ void drive(N::Session &session, std::size_t ticks, bool attack) {
   }
 }
 
+// FNV-1a 64 of a trace, printed so arm64 and x86_64 logs can be compared.
+std::uint64_t fnv(const std::vector<std::uint8_t> &bytes) {
+  std::uint64_t h = 0xcbf29ce484222325ull;
+  for (auto b : bytes)
+    h = (h ^ b) * 0x100000001b3ull;
+  return h;
+}
+
 void traces_match(const N::Session &session, const char *why) {
   const auto first = session.trace_bytes(0);
   check(first.size() == session.sim_ticks() * N::TRACE_RECORD, "trace size");
@@ -288,7 +296,8 @@ void long_session(const W::Snapshot &ground, int peers, std::size_t ticks,
             << " trace_bytes=" << session.trace_bytes(0).size()
             << " creature=" << (creature ? 1 : 0)
             << " input_packets=" << session.input_packets()
-            << " synced=" << (session.synced() ? 1 : 0) << "\n";
+            << " synced=" << (session.synced() ? 1 : 0) << " fnv=" << std::hex
+            << fnv(session.trace_bytes(0)) << std::dec << "\n";
 }
 
 void short_session(const W::Snapshot &ground, int peers, std::size_t ticks) {
