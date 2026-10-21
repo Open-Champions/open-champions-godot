@@ -238,7 +238,10 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 # AntQueen, Skeleton and Soul constructors, set-states and run prologues
 # (research-combat-ctors e9777eb) on the arena model.
 add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors.cpp"
-    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors_2.cpp")
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors_2.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors_3.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors_soul.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_weapon_holder.cpp")
 target_include_directories(champions-combat-ctors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 target_link_libraries(champions-combat-ctors PUBLIC champions-arena-monsters)
 if(MSVC)

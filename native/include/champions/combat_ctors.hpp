@@ -61,11 +61,11 @@ void skeleton_ctor(A::Model &, Address c, const Vec3 &pos, Raw facing,
                    const Options & = {});
 void skeleton_set_state(A::Model &, Address c, Raw state);
 // false: the creature is inactive and the run returned before the switch.
-bool skeleton_run_prologue(A::Model &, Address c);
+bool skeleton_run_prologue(A::Model &, Address c, Raw *events = nullptr);
 void soul_ctor(A::Model &, Address c, Raw type_name, const Vec3 &pos,
                Raw facing, Raw props, Raw owner, const Options & = {});
 void soul_set_state(A::Model &, Address c, Raw state);
-bool soul_run_prologue(A::Model &, Address c);
+bool soul_run_prologue(A::Model &, Address c, Raw *events = nullptr);
 Raw soul_get_model(A::Model &, Address c);
 // The three set-states (slot 27) and Soul_getModel (slot 16) as class bodies
 // of the model's virtual calls.
@@ -137,4 +137,26 @@ void antqueen_update_bank(A::Model &, Address c);
 // The round-2 class bodies (isEnemy, the three takeDamage slots, the type-info
 // getters and the six destructors) as class bodies of the model.
 void install_round2(A::Model &);
+
+// Executed round-3 run bodies and helpers: research-combat-ctors-3 9ff6ae0.
+void skeleton_run(A::Model &, Address c);
+void soul_run(A::Model &, Address c);
+void creature_set_charm(A::Model &, Address c, Raw frames, Raw team);
+Raw skeleton_has_shield(A::Model &, Address c);
+void skeleton_on_nearby_event(A::Model &, Address c, Raw code,
+                              const Vec3 &position, Address other);
+Raw ally_in_line_of_fire(A::Model &, Address c, Address target, Raw previous,
+                         Raw reach, Raw distance);
+Raw count_living_nonplayer_in_box(A::Model &, const Vec3 &centre, Raw half_size);
+Raw creature_obj_in_arc_range(A::Model &, Address c, Address object, Raw arc,
+                              Raw range);
+Raw lead_target_point(A::Model &, Address c, Vec3 *out, Raw speed);
+void install_round3(A::Model &);
+// Weapon1 and WeaponShield slots 1–17, research-combat-ctors-3 weapon-holder.md.
+Raw holder_slot(A::Model &, Address holder, unsigned slot,
+                const std::vector<A::Value> &args);
+void build_element_damage(A::Model &, Address descriptor, Raw kind);
+Raw damage_desc_get_element(A::Model &, Address descriptor);
+void drop_held_part(A::Model &, Raw part, Address creature, Address definition,
+                    Raw flags);
 } // namespace champions::simulation::rta::combat_ctors

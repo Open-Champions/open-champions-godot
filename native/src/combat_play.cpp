@@ -275,6 +275,7 @@ struct Session::State {
       handles[slot] = world->retain(world->spawn_class(cls, s));
     };
     place(4, "AntQueen", -110, 110);
+    place(5, "Skeleton", 70, 100);
     place(6, "Soul", -60, 100);
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);

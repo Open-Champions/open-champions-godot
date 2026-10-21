@@ -1045,6 +1045,9 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_ctors.txt.gz")
     add_executable(champions-combat-ctors-2-tests tests/combat_ctors_2_tests.cpp)
     target_link_libraries(champions-combat-ctors-2-tests PRIVATE champions-combat-ctors)
+    add_executable(champions-combat-ctors-3-tests tests/combat_ctors_3_tests.cpp)
+    target_link_libraries(champions-combat-ctors-3-tests PRIVATE champions-combat-ctors)
+    add_test(NAME combat-ctors-3-reference COMMAND champions-combat-ctors-3-tests)
     add_test(NAME combat-ctors-2-exact COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_ctors_2_vectors.py"
         "$<TARGET_FILE:champions-combat-ctors-2-tests>"

@@ -496,7 +496,7 @@ void skeleton_ctor(A::Model &m, Address c, const Vec3 &pos, Raw facing,
   b.call("Creature_init", {iv(c)});
 }
 // Skeleton_run 0x2a6864 up to its switch: an inactive skeleton returns.
-bool skeleton_run_prologue(A::Model &m, Address c) {
+bool skeleton_run_prologue(A::Model &m, Address c, Raw *events) {
   Body b{m};
   m.process_damage(c, m.class_model(c));
   if (m.creature_run(c, m.class_model(c)))
@@ -505,7 +505,9 @@ bool skeleton_run_prologue(A::Model &m, Address c) {
     return false;
   if (b.u32(c + 0x50))
     m.holder_call(b.u32(c + 0x50), 21, {iv(SKEL_COMMON), iv(c), iv(HALF)});
-  m.step_anim(c, ONE);
+  auto ev = m.step_anim(c, ONE);
+  if (events)
+    *events = ev;
   b.call("Creature_applyKnockback", {iv(c), iv(F_0_7)});
   m.vcall(c, 23, {iv(0)});
   return true;
@@ -685,14 +687,16 @@ Raw soul_get_model(A::Model &m, Address c) {
   return b.u32(Address(b.u32(c + 0x24) + (b.u32(c + 0x3c8) ? 0x1c : 0xc)));
 }
 // Soul_run 0x2a9870 up to its switch: an inactive soul returns.
-bool soul_run_prologue(A::Model &m, Address c) {
+bool soul_run_prologue(A::Model &m, Address c, Raw *events) {
   Body b{m};
   m.process_damage(c, Raw(integer(m.vcall(c, 16))));
   if (m.creature_run(c, Raw(integer(m.vcall(c, 16)))))
     return false;
   if (!m.update_active(c))
     return false;
-  m.step_anim(c, ONE);
+  auto ev = m.step_anim(c, ONE);
+  if (events)
+    *events = ev;
   b.call("Creature_applyKnockback", {iv(c), iv(ZERO)});
   m.vcall(c, 23, {iv(0)});
   if (!b.u32(c + 0x3c8) && b.s16m(c + 0x232) != 0x1b)

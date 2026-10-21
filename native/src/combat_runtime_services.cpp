@@ -313,10 +313,17 @@ void World::State::install_ctor_services() {
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
         "Holder.v21", "Skeleton_shatter", "model_getSamplePoint", "AntWave_ctor",
-        "cxx_throwBadTypeid"}) {
+        "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
+        "CT_type_info_equals"}) {
     std::string n = name;
     model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &a) {
       return service(n, a);
+    };
+  }
+  for (unsigned slot=1;slot<=17;++slot) {
+    auto n="Holder.v"+std::to_string(slot);
+    model.callbacks[n]=[this,n](A::Model &,const std::vector<Value> &a) {
+      return service(n,a);
     };
   }
 }
@@ -570,27 +577,23 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return std::int64_t(services.hide_mask(ar(0), ar(1)));
   }
   if (n == "Creature_setCharm") {
-    // Creature_setCharm 0x1189f0 (Observed, skills-35-68.md "Creature_setCharm";
-    // script.md charmMonster): nothing when +0x312 is -1 (a permanent charm),
-    // without object flag 0x20, or for a player (0x40). Otherwise the team
-    // byte +0x310, the charm timer +0x312, and the target handle cleared.
+    // Executed body: research-combat-ctors-3 soul-run.md section 4.
     auto c = ar(0);
     actor(c);
     note(n, {c, ar(1), ar(2)});
-    if (s16m(c + 0x312) == -1 || !(u(c + 0xc) & 0x20) || (u(c + 0xc) & 0x40))
-      return iv(0);
-    w(c + 0x310, 1, ar(2));
-    w(c + 0x312, 2, ar(1));
     if (full())
       list_head(c + 0x234);
-    clear(c + 0x234);
+    combat_ctors::creature_set_charm(model,c,ar(1),ar(2));
     return iv(0);
   }
-  if (n == "Holder.v1" || n == "Holder.v21") {
-    // Skeleton's weapon holder: slot 1 puts a model entry in a hand, slot 21
-    // is the per-frame update that only feeds fx_modelStatusEffects
-    // (docs/monsters-2.md 2.2; FINDINGS D37). The research records both as
-    // call-outs; their bodies are not executed. Recorded here.
+  if (n == "Soul_isDemonNear")
+    return iv(is_demon_near(ar(0)));
+  if (n == "CT_type_id")
+    return iv(type_of(ar(0)));
+  if (n == "CT_type_info_equals")
+    return iv(same_type(ar(0),ar(1)) ? 1 : 0);
+  if (n == "Holder.v21") {
+    // The presentation slot remains a recorded call-out in round 3.
     std::vector<std::uint64_t> args;
     for (const auto &x : a)
       if (auto p = std::get_if<std::int64_t>(&x))
@@ -598,11 +601,13 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     note(n, std::move(args));
     return iv(0);
   }
-  if (n == "Holder.v2" || n == "Holder.v3" || n == "Holder.v4")
-    throw Unsupported(n + ": a Skeleton weapon element (creature_buildElementDamage "
-                          "draws the shared seed; docs/monsters-2.md) is not executed");
-  if (n == "Holder.v11")
-    throw Unsupported("Holder.v11: dropping a held part as a physics prop is not executed");
+  if (n.rfind("Holder.v",0)==0) {
+    auto slot=unsigned(std::stoul(n.substr(8)));
+    if (slot>=1&&slot<=17) {
+      std::vector<Value> rest(a.begin()+1,a.end());
+      return iv(combat_ctors::holder_slot(model,ar(0),slot,rest));
+    }
+  }
   if (n == "Skeleton_shatter")
     throw Unsupported("Skeleton_shatter 0x2a7ef0 is a recording stub of the research");
   if (n == "model_getSamplePoint")
