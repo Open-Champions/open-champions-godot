@@ -4,20 +4,23 @@ extends Control
 # from ChampionsUiHudRound3Service. The minimap projector, compass mesh and
 # arena hermite point stay refused, so this draws no projected blips, no
 # compass model and no arena step string.
+# Flying numbers are refused (audit HUD-1/HUD-2): damage_apply creates FlyingText
+# only for non-player victims, with the damage number, crit, kind and a
+# shared-seed constructor draw (research-ui 1ed740a docs/gameplay.md step 30,
+# docs/hud-dynamic.md section 7). The combat runtime refuses that 0x98
+# allocation, and play supplies no g_viewProj 0x44f140 or world anchor.
+const FLYING_NUMBERS_REFUSAL := "FlyingText comes only from damage_apply; the combat runtime refuses that allocation and play supplies no g_viewProj 0x44f140 or world anchor"
 var service: Object
 var play_mode := false
 var compass_text := ""
 var compass: Dictionary = {}
 var blips: Array = []
-var numbers: Array = []
+var refusals: Dictionary = {}
 var help: Dictionary = {}
 var notice: Dictionary = {}
 var medal: Dictionary = {}
 var net_cam: Dictionary = {}
 var bust: Dictionary = {}
-var last_ticks := -1
-var last_hp := 0
-var have_hp := false
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
@@ -34,52 +37,11 @@ func observe(observation: Dictionary, playing: bool) -> void:
 	medal = {}
 	net_cam = {}
 	bust = {}
+	refusals = {}
 	if service == null or not playing:
-		numbers.clear()
-		have_hp = false
-		last_ticks = -1
 		queue_redraw()
 		return
-	var ticks := int(observation.get("ready_ticks", 0))
-	if last_ticks < 0 or ticks < last_ticks:
-		numbers.clear()
-		last_ticks = ticks
-	else:
-		var steps := ticks - last_ticks
-		last_ticks = ticks
-		var kept: Array = []
-		for number in numbers:
-			var life := int(number.life)
-			var alpha := int(number.alpha)
-			var erase := false
-			for _i in steps:
-				var stepped: Dictionary = service.flying_step(life, alpha)
-				if not stepped.get("ok", false):
-					erase = true
-					break
-				life = int(stepped.life)
-				alpha = int(stepped.alpha)
-				erase = bool(stepped.erase)
-				if erase:
-					break
-			if not erase:
-				number.life = life
-				number.alpha = alpha
-				kept.append(number)
-		numbers = kept
-	var hp := int(observation.get("hp_raw", 0))
-	if have_hp:
-		var drop: Dictionary = service.hp_drop_text(last_hp, hp)
-		if drop.get("ok", false) and drop.get("spawn", false):
-			var drift: Dictionary = service.flying_drift(ticks & 0xffffffff)
-			var offset := int(drift.get("drift", 0)) & 0xffffffff
-			numbers.append({
-				"kind": 0, "crit": false, "life": 30, "alpha": 128,
-				"x_off": offset, "y_off": offset, "world_z": 0,
-				"text": str(drop.get("text", "")),
-			})
-	last_hp = hp
-	have_hp = observation.has("hp_raw")
+	refusals["flying_numbers"] = FLYING_NUMBERS_REFUSAL
 	if observation.get("terrain_name", "") is String and not str(observation.terrain_name).is_empty():
 		compass = service.compass_label()
 		if compass.get("ok", false):
@@ -154,11 +116,6 @@ func _draw() -> void:
 		chip += 1
 	if not compass_text.is_empty() and compass.get("ok", false):
 		_text(font, font_size, compass.x, compass.y, compass_text, _word(int(compass.colour)))
-	for number in numbers:
-		# Identity clip: no view-projection is available, so the number is not a world projection.
-		var drawn: Dictionary = service.flying_draw(int(number.kind), bool(number.crit), int(number.alpha), int(number.x_off), int(number.y_off), int(number.world_z), 0, 0, 0x3f800000)
-		if drawn.get("ok", false):
-			_text(font, font_size, int(drawn.x), int(drawn.y), str(number.text), _word(int(drawn.colour)))
 
 func _presented(r: int, g: int, b: int, alpha: int) -> Color:
 	var packed: Dictionary = service.present_colour(r, g, b, 0x3f000000)

@@ -94,8 +94,6 @@ protected:
                          &ChampionsUiHudRound3Service::flying_draw);
     ClassDB::bind_method(D_METHOD("flying_drift", "rand_word"),
                          &ChampionsUiHudRound3Service::flying_drift);
-    ClassDB::bind_method(D_METHOD("hp_drop_text", "previous_raw", "current_raw"),
-                         &ChampionsUiHudRound3Service::hp_drop_text);
     ClassDB::bind_method(D_METHOD("compass_label"), &ChampionsUiHudRound3Service::compass_label);
     ClassDB::bind_method(D_METHOD("help_box", "wrap_height", "label_width"),
                          &ChampionsUiHudRound3Service::help_box);
@@ -242,19 +240,9 @@ public:
       return failure(e);
     }
   }
-  Dictionary hp_drop_text(int64_t previous_raw, int64_t current_raw) const {
-    try {
-      auto previous = F::to_int(raw_of(previous_raw));
-      auto current = F::to_int(raw_of(current_raw));
-      auto d = success();
-      d["spawn"] = previous > current;
-      if (previous > current)
-        d["text"] = String::num_int64(int64_t(previous) - current);
-      return d;
-    } catch (const std::exception &e) {
-      return failure(e);
-    }
-  }
+  // No hp_drop_text: damage numbers are created by damage_apply for
+  // non-player victims (research-ui 1ed740a docs/gameplay.md step 30), never
+  // from the player's own HP drop (audit HUD-1).
   Dictionary compass_label() const {
     auto l = H::compassLabel();
     auto d = success();
