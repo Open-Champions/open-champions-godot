@@ -310,8 +310,9 @@ queries whether `hud.lmp` is resident (research `7a66b58`). Godot's level
 script attach does not expose that residency, so it refuses the 223 seed
 draws and reports `item_load_gate_refusals` and
 `item_load_draws_inferred`. The latter is a conditional potential draw count,
-not an observed seed advance. A caller with an observed residency result can
-execute the exact gate through `advance_first_level_items`.
+not an observed seed advance. An omitted level name also counts a refusal.
+A caller with a known level name and an observed residency result can execute
+the exact gate through `advance_first_level_items`.
 
 The counts-only disc tool is `champions-script-commands-measure --game rta DIR`.
 It reads GOB files that have a sibling TEX, then `script.scr` and `objects.ob`
