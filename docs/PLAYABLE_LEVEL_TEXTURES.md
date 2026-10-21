@@ -61,10 +61,20 @@ documented CPU constant, not a second lighting model and not console
 final-colour parity.
 
 Environment flag 0x10 rebuilds its material when the caller supplies an image.
-The camera adapter uploads the documented rows each frame. The two GS passes
+The camera adapter uploads the documented rows each frame. It reads
+`g_cameraMatrix` as three rows that are the camera-space images of the world
+x, y and z axes (render-pipeline section 3), so row i is
+(right[i], down[i], forward[i]). The two GS passes
 are one opaque shader: the environment sample replaces the destination, then
 the chunk equation runs against that sample. A cutout keeps the environment
-sample. With no image, the chunk uses ALPHA 9 against the framebuffer.
+sample. The environment sample is modulated by the same vertex colour
+(render-pipeline section 9 item 6). Its coordinates are computed per vertex,
+as program 0x48 does, with the screen term in pixels of the 1280 × 448 buffer
+from its centre, y down: `sx = F cam.x / cam.z`, `sy = F × 0.4666667 cam.y /
+cam.z`, `F = 477.5 / tan(fov / 2)` taken from the Godot camera's vertical
+field of view (render-pipeline sections 3 and 4.6). With no image the ALPHA 9
+second pass is not composited on its own: the chunk's base pass draws opaque,
+as before this adapter, and the environment stays gated.
 Automap quads are built only when the caller supplies a decoded atlas, and
 that mesh stays hidden on the play camera because the HUD rectangle is
 unknown.
