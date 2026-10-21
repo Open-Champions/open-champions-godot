@@ -656,27 +656,49 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "Skeleton_shatter")
     { combat_ctors::skeleton_shatter(model,ar(0),ar(1));return iv(0); }
+  // The executed prop and gold table slots are installed when an
+  // instance is constructed. Older Full reference cases compare all memory
+  // and have none of these objects.
+  auto prop_slots = [&](Address table,Raw dtor,Raw run) {
+    for (auto pair:{std::pair<unsigned,Raw>{1,dtor},{4,run}}) {
+      w(table+8*pair.first,2,0);
+      w(table+8*pair.first+4,pair.second);
+    }
+  };
   if (n == "GutChunk_ctor") {
     if (a.size()!=5 || ar(4)!=ONE)
       throw Unsupported("GutChunk_ctor outside the executed unit-scale chain");
+    prop_slots(0x50f3b8,0x3c4d48,0x1edb18);
     combat_ctors::gutchunk_ctor(model,ar(0),v(1),ar(2),ar(3));
     return iv(0);
   }
   if (n == "PhProp_ctor") {
+    prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
     auto parts=std::uint64_t(std::get<std::int64_t>(a.at(6)));
     combat_ctors::phprop_ctor(model,ar(1),v(2),ar(3),ar(4),ar(5),parts,ar(7),ar(8),ar(0));
     return iv(0);
   }
   if (n == "PhProp_ctor2")
-    { combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
+    { prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
+      combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
         std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));return iv(0); }
   if (n == "Gold_ctor2")
-    { combat_ctors::gold_ctor2(model,ar(0),v(1),ar(2));return iv(0); }
+    { for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},
+                                                     {6,0x157a9c}}) {
+        w(0x511a88+8*entry.first,2,0);
+        w(0x511a88+8*entry.first+4,entry.second);
+      }
+      combat_ctors::gold_ctor2(model,ar(0),v(1),ar(2));return iv(0); }
   if (n == "model_getSamplePoint")
     throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
                       "0x21, Soul_takeDamage with sample points) is not a World "
                       "service");
   if (n == "AntWave_ctor") {
+    // Install the executed table when the wave first exists. Older Full
+    // reference cases have no AntWave and compare their entire memory image.
+    const std::map<unsigned,Raw> slots{{1,0x238750},{4,0x238938},
+                                        {5,0x2387d0},{15,0x11fcd0}};
+    write_table(0x50d298,&slots);
     combat_ctors::antwave_ctor(model,ar(0),ar(1),v(2),ar(3),ar(4));
     return iv(0);
   }
