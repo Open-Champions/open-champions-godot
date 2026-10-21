@@ -11,6 +11,9 @@ var last_tick := 0
 var menu_accumulator := 0.0
 var pushed_frames := 0
 var events: Array[Dictionary] = []
+# The player's music option, supplied by the owner. The executable's stored
+# g_musicVolume is not documented, so native music is refused while this is null.
+var music_volume = null
 var errors: Array[String] = []
 var label: Label
 
@@ -35,6 +38,7 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	level_key = key
 	menu_accumulator = 0
 	events.clear()
+	apply_music_volume()
 	var bank := Bank.vat(["mx_maintheme_l.vag","mx_ba_broon_l.vag"])
 	if not bridge.set_global_vat(bank.directory,bank.bytes,0): errors.append(bridge.get_last_error())
 	if not bridge.register_vag("synthetic-step.vag",Bank.vag()): errors.append(bridge.get_last_error())
@@ -46,6 +50,14 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	player.play()
 	bridge.attach_playback(player.get_stream_playback())
 	update_label()
+
+func set_music_volume(volume: float) -> bool:
+	if bridge == null or not bridge.set_music_volume(volume): return false
+	music_volume = volume
+	return true
+
+func apply_music_volume() -> void:
+	if music_volume != null and not bridge.set_music_volume(music_volume): errors.append(bridge.get_last_error())
 
 func start_level(key: String) -> void:
 	level_key = key

@@ -101,6 +101,7 @@ Sources: `add_stream` (registered PCM), `set_global_vat` (`MOUTH.VAT`) and
 
 | Call | Original |
 |---|---|
+| `set_music_volume(bits)` | The player's `g_musicVolume` 0x4f8944 option as a raw float pattern. The research gives the address but no stored value, so there is no default: until it is set, `music_play_global`, `music_play_level` and a named `play_boss_music` throw `Unsupported` without changing state, a `step_duck()` that would send throws `Unsupported`, and the level poll's `music_playLevel` call is refused and counted in `refused_music_polls()`. |
 | `music_play_global(name, flags)` | `music_playGlobal` 0x2110e0: stream 2, `flags \| 0x22`, only when `g_musicVolume` compares `>= 0x3d4ccccc` and the row's length is nonzero. |
 | `music_play_level(name, flags)` | `music_playLevel` 0x215f48: the same gate, OR and length check. |
 | `play_menu_music(wait)` | `frontend_run`: global `mx_maintheme_l.vag`, flags 5 if waiting, else 1. This path does not use the music gate. |
@@ -160,6 +161,7 @@ audio.pump_frames(4096)                                 # FIFO -> generator
 | `animation_event(mask, clip_role, sample_name, position)` with clip_role 0 attack, 1 locomotion, 2 other | voice or −1 |
 | `queue_level_entry(stream, name, flags)`, `queue_global_entry(stream, name, flags)`, `queue_stop(stream)` | bool |
 | `release_stream(stream)`, `set_stream_scale(stream, scale)`, `set_two_channel_output(bool)`, `set_frozen(bool)`, `set_sfx_volume(volume)` | — |
+| `set_music_volume(volume)` | bool; the player's 0..1 option as a float. Music is refused until it is called |
 | `play_menu_music(wait)`, `play_boss_music(type, object_name)`, `stop_boss_music()` | bool |
 | `get_stream_time(stream)` | seconds at 24 kHz |
 | `get_gated_flag_entries()` | count |

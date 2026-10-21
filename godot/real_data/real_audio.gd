@@ -21,6 +21,7 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	level_key = key
 	menu_accumulator = 0
 	events.clear()
+	apply_music_volume()
 	if not global_bank.is_empty() and not bridge.set_global_vat(global_bank.directory, _vat(global_bank), 0):
 		bank_errors.append(bridge.get_last_error())
 	if play:

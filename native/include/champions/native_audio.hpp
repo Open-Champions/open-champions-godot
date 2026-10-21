@@ -5,6 +5,7 @@
 #include <deque>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,11 @@
 // presentation state only: nothing here may feed shared gameplay state.
 // See docs/NATIVE_AUDIO.md.
 namespace champions::audio {
+
+// Behaviour the research does not document. The call changes no state.
+struct Unsupported : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 
 struct Bytes {
   const std::uint8_t *data = nullptr;
@@ -49,11 +55,10 @@ constexpr std::uint32_t stream_pitch = 0x7fe;   // HELLO+0x1018
 constexpr double game_stream_rate = 24000.0;    // dialog_syncMouth 0x22fdd8
 
 // Image words and executed playback constants (docs/audio-playback.md,
-// tools/ref_audio_playback.py). g_musicVolume's image is the static word at
-// 0x4f8944, read the same way as g_soundFrame and g_drawFrame.
+// tools/ref_audio_playback.py). g_musicVolume 0x4f8944 has no documented image
+// (docs/audio-playback.md 225, docs/audio-save.md 278), so the caller supplies it.
 constexpr std::uint32_t music_volume_gate = 0x3d4ccccc;
 constexpr std::uint32_t music_volume_scale = 0x3f480000;
-constexpr std::uint32_t music_volume_image = 0x3f800000;
 constexpr std::uint32_t duck_voice_level = 0x3e4cccd0;
 constexpr std::uint32_t duck_creep = 0x3c888888;
 constexpr std::uint32_t duck_ease = 0x3c23d70a;
@@ -231,20 +236,23 @@ public:
   std::uint64_t stream_samples_played(std::size_t stream) const;
   double stream_time(std::size_t stream) const;
 
+  // Both read g_musicVolume: they throw Unsupported until set_music_volume.
   bool music_play_global(const std::string &name, std::uint32_t flags);
   bool music_play_level(const std::string &name, std::uint32_t flags);
   bool play_menu_music(bool wait_for_current);
   static std::optional<std::string> boss_music_name(const std::string &creature_type,
                                                     const std::string &object_name);
   // creature_startBossMusic: stop stream 2, then one mouth.vat entry, or silence.
+  // A named creature throws Unsupported, before the stop, until set_music_volume.
   bool play_boss_music(const std::string &creature_type,
                        const std::string &object_name = {});
   // creature_stopBossMusic. No boss name leaves the queue unchanged.
   bool stop_boss_music(const std::string &creature_type, const std::string &object_name = {});
   // Explicit stream-2 stop marker for a caller that already decided to stop.
   bool stop_boss_music() { return queue_stop(2); }
+  // The player's g_musicVolume option as a raw float pattern. There is no default.
   void set_music_volume(std::uint32_t bits) { music_volume_ = bits; }
-  std::uint32_t music_volume() const { return music_volume_; }
+  std::optional<std::uint32_t> music_volume() const { return music_volume_; }
   // music_setDuck: target = 1 - argument. The current scalar is left alone.
   std::uint32_t set_duck(std::uint32_t argument);
   // One music_updateDucking call. tick() does not call it: its call site and
@@ -260,7 +268,8 @@ public:
   void set_language(std::int16_t language) { language_ = language; }
 
   // mainloop_pollAmbientAudio, once per displayed frame; draw is 0..7199.
-  // The amb_ poll reads g_drawFrame and does not advance it.
+  // The amb_ poll reads g_drawFrame and does not advance it. Without a music
+  // volume the music_playLevel call is refused and counted, not queued.
   bool poll_level(std::uint32_t cosmetic_draw);
   void advance_draw_frame() { draw_frame_ = (draw_frame_ + 1) & 0xffffffffu; }
   // audio_streamStop: clear the queue and the active name. The volume word stays.
@@ -290,6 +299,7 @@ public:
   std::uint64_t dropped_frames() const { return dropped_frames_; }
   std::uint64_t failed_stream_entries() const { return failed_stream_entries_; }
   std::uint64_t volume_sends() const { return volume_sends_; }
+  std::uint64_t refused_music_polls() const { return refused_music_polls_; }
 
 private:
   struct Vat {
@@ -310,9 +320,9 @@ private:
   std::uint32_t sound_frame_ = sound_frame_image, draw_frame_ = draw_frame_image;
   std::uint64_t output_samples_ = 0, next_timer_ = 480;
   std::uint64_t gated_flag_entries_ = 0, dropped_frames_ = 0, failed_stream_entries_ = 0;
-  std::uint64_t volume_sends_ = 0;
+  std::uint64_t volume_sends_ = 0, refused_music_polls_ = 0;
   std::uint32_t countdown_ = level_countdown_image;
-  std::uint32_t music_volume_ = music_volume_image;
+  std::optional<std::uint32_t> music_volume_;
   std::uint32_t duck_current_ = duck_current_image, duck_target_ = duck_target_image;
   std::uint32_t music_channel_ = float_one;
   std::int16_t language_ = 0;

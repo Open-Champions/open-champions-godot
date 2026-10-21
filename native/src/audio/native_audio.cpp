@@ -787,8 +787,15 @@ void Playback::step_stream_volumes() {
 
 // --- music policy -----------------------------------------------------------
 
+namespace {
+const char *const no_music_volume =
+    "g_musicVolume 0x4f8944 has no documented stored value; call set_music_volume first";
+}
+
 bool Playback::queue_music(const std::string &name, std::uint32_t flags, StreamSource source) {
-  if (!music_gate_open(music_volume_))
+  if (!music_volume_)
+    throw Unsupported(no_music_volume);
+  if (!music_gate_open(*music_volume_))
     return false;
   const auto &vat = source == StreamSource::level ? level_ : global_;
   const auto entry = find_vat_entry(vat.entries, name, vat.language);
@@ -847,13 +854,15 @@ bool Playback::play_boss_music(const std::string &type, const std::string &objec
   const auto name = boss_music_name(type, object);
   if (!name)
     return false;
+  if (!music_volume_)
+    throw Unsupported(no_music_volume);
   // audio_streamStop clears the queue and the active name, then one new span
   // is queued. A second boss therefore replaces the first. The volume word is
   // left alone, so the fade bit inside 0x123 waits until that word reads 0.
   stream_stop(2);
   const auto entry = find_vat_entry(global_.entries, *name, global_.language);
   const auto length = entry ? entry->length : 0u;
-  if (boss_action(true, music_volume_, length) != BossAction::replace)
+  if (boss_action(true, *music_volume_, length) != BossAction::replace)
     return false;
   return music_play_global(*name, 0x103);
 }
@@ -871,7 +880,11 @@ std::uint32_t Playback::set_duck(std::uint32_t argument) {
 
 DuckStep Playback::step_duck() {
   const auto step = duck_step(duck_current_, duck_target_, stream_status(1), stream_status(2),
-                              level_name_ == "actintro" && language_ != 0, music_volume_);
+                              level_name_ == "actintro" && language_ != 0,
+                              music_volume_.value_or(0));
+  // The easing does not read g_musicVolume; the channel argument of a send does.
+  if (step.sent && !music_volume_)
+    throw Unsupported(no_music_volume);
   duck_current_ = step.current;
   duck_target_ = step.target;
   duck_sent_ = step.sent;
@@ -952,7 +965,12 @@ bool Playback::poll_level(std::uint32_t draw) {
       for (const auto &e : level_.entries)
         if (e.name.find("_env_") != std::string::npos ||
             e.name.find("mx_theme") != std::string::npos) {
-          queued = music_play_level(e.name, 0x102) || queued;
+          // music_playLevel reads g_musicVolume; with no supplied value the
+          // call is refused. The countdown store above does not read it.
+          if (!music_volume_)
+            ++refused_music_polls_;
+          else
+            queued = music_play_level(e.name, 0x102) || queued;
           break;
         }
   }

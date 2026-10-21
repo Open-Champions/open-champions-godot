@@ -13,6 +13,9 @@ func continuation_cases() -> void:
 	scene.animated_choice.button_pressed = false
 	scene.actions.play.pressed.emit()
 	var audio: Node = scene.audio
+	check(not audio.bridge.play_boss_music("FatCyclops","Broon") and audio.bridge.get_last_error().contains("g_musicVolume"), "music is refused until the owner supplies the music volume")
+	# Fixture option: the test is the owner, as tools/difftest_audio.py writes 0x3F800000 to G_MUSIC.
+	check(audio.set_music_volume(1.0), "fixture music volume option")
 	var before: Dictionary = scene.controller.get_observation()
 	check(audio.playing and audio.bridge.get_observation().tick == 0, "fresh play owns fresh cosmetic mixer")
 	scene.advance_step()
