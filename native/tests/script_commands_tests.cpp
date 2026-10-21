@@ -47,8 +47,12 @@ struct Call {
   std::string native;
   std::vector<a::Cell> args;
 };
+// A call whose native starts with '.' is one raw instruction with its args as
+// operands. Without keep_result an entry ends ZERO.pri, RETN, as a Pawn
+// function without a return value does; with it, RETN returns the last PRI.
 Built build_calls(const std::vector<std::pair<std::string, std::vector<Call>>> &publics,
-                  const std::vector<std::pair<unsigned, std::string>> &strings) {
+                  const std::vector<std::pair<unsigned, std::string>> &strings,
+                  bool keep_result = false) {
   std::vector<std::string> natives;
   auto native_index = [&](const std::string &name) {
     auto found = std::find(natives.begin(), natives.end(), name);
@@ -66,12 +70,19 @@ Built build_calls(const std::vector<std::pair<std::string, std::vector<Call>>> &
     program.push_back(a::Label{entry.first + ":"});
     ins("PROC");
     for (const auto &call : entry.second) {
+      if (!call.native.empty() && call.native[0] == '.') {
+        std::vector<a::AsmValue> operands(call.args.begin(), call.args.end());
+        ins(call.native.substr(1), operands);
+        continue;
+      }
       for (auto it = call.args.rbegin(); it != call.args.rend(); ++it)
         ins("PUSH.C", {*it});
       ins("PUSH.C", {a::Cell(4 * call.args.size())});
       ins("SYSREQ.C", {native_index(call.native)});
       ins("STACK", {a::Cell(4 * (call.args.size() + 1))});
     }
+    if (!keep_result)
+      ins("ZERO.pri");
     ins("RETN");
   }
   const auto code = a::assemble(program);
@@ -188,7 +199,7 @@ void test_variables_and_seed() {
   const auto rand = index_of("getRand");
   check(setv >= 0 && getv >= 0 && rand >= 0, "binder indexes");
   auto built = build_calls({{"start", {{"setv", {2000, 7}}, {"getv", {2000}}, {"getRand", {}}}}},
-                           {{2000, "quest"}});
+                           {{2000, "quest"}}, true);
   sc::Host host;
   SharedRandom live(20973);
   Lcg expected(20973);
@@ -372,6 +383,39 @@ void test_stub_objects() {
         "a command that reads only the stub's position still runs");
 }
 
+void test_refused_result_stops_entry() {
+  const auto has = static_cast<std::size_t>(index_of("playerHasItem"));
+  const auto setv = static_cast<std::size_t>(index_of("setv"));
+  // Discarded: the next call's SYSREQ.C overwrites PRI. The entry goes on.
+  auto discarded = build_calls({{"start", {{"playerHasItem", {2000}}, {"setv", {2100, 1}}}}},
+                               {{2000, "key"}, {2100, "flag"}});
+  sc::Host quiet;
+  plant(quiet, discarded);
+  quiet.run_prestart();
+  check(quiet.run_start() == sc::Stop::Complete, "a discarded refusal does not stop the entry");
+  check(quiet.counts().refusal_stops == 0 && quiet.counts().executed[setv] == 1,
+        "the entry runs on after a discarded refusal");
+  // Used: STOR.pri stores the refused answer. The entry stops there.
+  auto stored = build_calls({{"start", {{"playerHasItem", {2000}}, {".STOR.pri", {2400}},
+                                        {"setv", {2100, 1}}}}},
+                            {{2000, "key"}, {2100, "flag"}});
+  sc::Host host;
+  plant(host, stored);
+  host.run_prestart();
+  check(host.run_start() == sc::Stop::Refused, "a used refusal stops the entry");
+  check(host.counts().refusal_stops == 1 && host.counts().faults == 0,
+        "the stop is counted apart from faults");
+  check(host.counts().refused[has] == 1 && host.counts().executed[setv] == 0,
+        "nothing after the used refusal runs");
+  check(host.counts().reached_complete == 0, "a stopped entry has not completed");
+  check(host.stopped_on_refusal(), "the host reports the refusal stop");
+  // Used: RETN returns PRI as the entry's value.
+  auto returned = build_calls({{"start", {{"playerHasItem", {2000}}}}}, {{2000, "key"}}, true);
+  sc::Host tail;
+  plant(tail, returned);
+  check(tail.run("start") == sc::Stop::Refused, "a returned refusal stops the entry");
+}
+
 void test_missing_and_bad_image() {
   auto built = build_calls({{"other", {}}}, {});
   sc::Host host;
@@ -400,6 +444,7 @@ int main(int argc, char **argv) {
   test_wait_then_complete();
   test_prestart_before_objects();
   test_stub_objects();
+  test_refused_result_stops_entry();
   test_missing_and_bad_image();
   if (failed) {
     std::cerr << failed << " failed\n";

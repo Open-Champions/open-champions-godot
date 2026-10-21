@@ -19,7 +19,8 @@ inline constexpr const char *POLICY = "rta-script-commands-v1";
 inline constexpr std::size_t COMMANDS = 191;
 
 enum class Effect : std::uint8_t { Documented, Partial, Unknown };
-enum class Stop : std::uint8_t { Missing, Complete, Wait, Fault };
+// Refused: a refused command's answer was used, so the entry stopped there.
+enum class Stop : std::uint8_t { Missing, Complete, Wait, Fault, Refused };
 
 struct Row {
   int index;
@@ -37,6 +38,8 @@ struct Counts {
   std::uint64_t reached_complete = 0;
   std::uint64_t faults = 0;
   std::uint64_t missing_entries = 0;
+  // Entries stopped because the script used a refused command's answer.
+  std::uint64_t refusal_stops = 0;
   std::uint64_t objects_registered = 0;
   std::uint64_t objects_refused = 0;
   // Documented commands refused because their binder path would read an
@@ -60,6 +63,13 @@ struct Queue {
   std::uint32_t count = 0;
   std::uint32_t queued = 0;
   std::uint32_t flip = 0;
+};
+
+// Thrown out of a refused command whose answer the script uses; the host
+// counts it in refusal_stops and stops the entry.
+class RefusedResult : public amx::HostFault {
+public:
+  using amx::HostFault::HostFault;
 };
 
 // One level script. Not copied: its command closures capture this.
@@ -115,6 +125,7 @@ public:
   const std::string &last_fault() const { return last_fault_; }
   bool waiting() const { return waiting_; }
   bool faulted() const { return faulted_; }
+  bool stopped_on_refusal() const { return refusal_stopped_; }
   bool is_stub(std::uint32_t address) const { return stubs_.count(address) != 0; }
   Queue queue() const;
   // Deferred name table plus the two counters, without the flip. A repeated
@@ -136,6 +147,8 @@ private:
   Stop enter_level(const char *name);
   bool seed_refused() const;
   bool touches_stub(std::size_t index, amx::Machine &machine) const;
+  void refuse(std::size_t index, amx::Machine &machine);
+  Stop stopped() const;
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;
@@ -148,6 +161,7 @@ private:
   bool level_started_ = false;
   bool waiting_ = false;
   bool faulted_ = false;
+  bool refusal_stopped_ = false;
   bool counted_wait_ = false;
   bool counted_complete_ = false;
   amx::Cell last_value_ = 0;

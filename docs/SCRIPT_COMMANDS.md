@@ -54,7 +54,18 @@ stub's position or angle (`moveMonster`, `addParticleOnObject`,
 
 Combat runtime, creature AI, audio and HUD have no command whose whole effect
 is documented. Those commands, and every partly documented or unknown command,
-return 0 and increment that command's refusal count. The binder does not run.
+increment that command's refusal count. The binder does not run.
+
+A refusal has no answer. The host looks at the script code after the call,
+using the opcode table of research `docs/script.md` section 1. When
+straight-line code sets PRI without reading it (for example the next
+`SYSREQ.C`, or `ZERO.pri` before `RETN`), the answer is discarded: the
+machine gets 0 and the entry goes on. Anything else (a store, a compare, a
+jump, a `RETN` that returns it) uses the answer. Then the entry stops there
+with `Stop::Refused`, the host counts it in `refusal_stops`, and nothing
+else of that script runs: the rest of the level's script would depend on an
+answer nobody knows. A refusal stop is not counted as a fault or as a
+completion.
 
 ## Level entry
 

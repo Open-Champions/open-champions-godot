@@ -77,6 +77,7 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.reached_complete += one.reached_complete;
   total.faults += one.faults;
   total.missing_entries += one.missing_entries;
+  total.refusal_stops += one.refusal_stops;
   total.objects_registered += one.objects_registered;
   total.objects_refused += one.objects_refused;
   total.stub_refusals += one.stub_refusals;
@@ -208,6 +209,7 @@ int main(int argc, char **argv) {
   std::cout << "scripts_reached_wait " << total.reached_wait << '\n';
   std::cout << "scripts_reached_complete " << total.reached_complete << '\n';
   std::cout << "script_faults " << total.faults << '\n';
+  std::cout << "scripts_stopped_on_refusal " << total.refusal_stops << '\n';
   std::cout << "objects_registered " << total.objects_registered << '\n';
   std::cout << "objects_refused " << total.objects_refused << '\n';
   std::cout << "stub_refusals " << total.stub_refusals << '\n';

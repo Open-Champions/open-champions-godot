@@ -540,6 +540,7 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["reached_complete"] = static_cast<int64_t>(counts.reached_complete);
   result["faults"] = static_cast<int64_t>(counts.faults);
   result["missing_entries"] = static_cast<int64_t>(counts.missing_entries);
+  result["refusal_stops"] = static_cast<int64_t>(counts.refusal_stops);
   result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
   result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);

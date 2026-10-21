@@ -36,6 +36,56 @@ const StubRead *stub_read(const char *name) {
   return nullptr;
 }
 
+// Opcode semantics: research 9649e6b docs/script.md section 1 (the opcode
+// table). After a native returns, PRI holds its answer. The answer counts as
+// discarded only when straight-line code sets PRI without reading it before
+// anything reads PRI or transfers control; everything else is a use.
+bool keeps_pri(amx::Cell op) {
+  switch (op) {
+  case 0x02: case 0x04: case 0x06: case 0x08: // LOAD.alt LOAD.S.alt LREF.alt LREF.S.alt
+  case 0x0c: case 0x0e:                       // CONST.alt ADDR.alt
+  case 0x10: case 0x12: case 0x14: case 0x16: // STOR.alt STOR.S.alt SREF.alt SREF.S.alt
+  case 0x25: case 0x27: case 0x28: case 0x29: // PUSH.alt PUSH.C PUSH PUSH.S
+  case 0x2b: case 0x2c: case 0x2d:            // POP.alt STACK HEAP
+  case 0x5a: case 0x5b: case 0x5c:            // ZERO.alt ZERO ZERO.S
+  case 0x7c: case 0x7d: case 0x7e: case 0x7f: // FILE LINE SYMBOL SRANGE
+    return true;
+  default:
+    return false;
+  }
+}
+bool sets_pri(amx::Cell op) {
+  switch (op) {
+  case 0x01: case 0x03: case 0x05: case 0x07: // LOAD.pri LOAD.S.pri LREF.pri LREF.S.pri
+  case 0x0b: case 0x0d: case 0x1f:            // CONST.pri ADDR.pri LCTRL
+  case 0x21: case 0x2a: case 0x59:            // MOVE.pri POP.pri ZERO.pri
+  case 0x7b:                                  // SYSREQ.C: PRI = the next native's answer
+    return true;
+  default:
+    return false;
+  }
+}
+// The machine stores the address after the SYSREQ in cip before it calls a
+// native (amx_execute.cpp), so the scan starts there.
+bool result_used(const amx::Machine &machine) {
+  const auto code = machine.decoded;
+  if (!code)
+    return true;
+  amx::Address at = machine.cip;
+  for (int step = 0; step < 64; ++step) {
+    const auto found = code->find(at);
+    if (found == code->end())
+      return true;
+    const auto op = found->second.opcode;
+    if (sets_pri(op))
+      return false;
+    if (!keeps_pri(op))
+      return true;
+    at = found->second.next;
+  }
+  return true;
+}
+
 std::uint32_t word_of(const builtins::Variables::ServiceValue &value) {
   if (const auto *word = std::get_if<std::uint32_t>(&value))
     return *word;
@@ -103,6 +153,14 @@ void Host::install() {
   };
 }
 
+// A refusal has no answer. When the script goes on to use the answer, the
+// entry stops here instead of running on an invented 0.
+void Host::refuse(std::size_t index, amx::Machine &machine) {
+  counts_.refused[index] += 1;
+  if (result_used(machine))
+    throw RefusedResult(std::string("refused ") + kRows[index].name);
+}
+
 // Reads the name argument as the binder does (the cell at params + 4). An
 // address the machine refuses makes the binder use a remembered string slot,
 // which the host does not track; that counts as touching a stub.
@@ -124,9 +182,9 @@ amx::NativeMap Host::command_map() {
   amx::NativeMap out;
   for (std::size_t i = 0; i < COMMANDS; ++i) {
     if (kRows[i].effect != Effect::Documented) {
-      out.emplace(kRows[i].name, [this, i](amx::Machine &, const std::vector<amx::Cell> &)
+      out.emplace(kRows[i].name, [this, i](amx::Machine &machine, const std::vector<amx::Cell> &)
                                      -> std::optional<amx::Address> {
-        counts_.refused[i] += 1;
+        refuse(i, machine);
         return 0;
       });
       continue;
@@ -139,12 +197,12 @@ amx::NativeMap Host::command_map() {
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
       if (sync_seed && seed_refused()) {
-        counts_.refused[i] += 1;
+        refuse(i, machine);
         return 0;
       }
       if (touches_stub(i, machine)) {
         counts_.stub_refusals += 1;
-        counts_.refused[i] += 1;
+        refuse(i, machine);
         return 0;
       }
       counts_.executed[i] += 1;
@@ -179,6 +237,7 @@ bool Host::load(const amx::ByteVector &image) {
   level_started_ = false;
   waiting_ = false;
   faulted_ = false;
+  refusal_stopped_ = false;
   counted_wait_ = false;
   counted_complete_ = false;
   last_value_ = 0;
@@ -243,8 +302,16 @@ void Host::note_fault() {
 void Host::remember(const std::exception &error) {
   if (last_fault_.empty())
     last_fault_ = error.what();
+  if (dynamic_cast<const RefusedResult *>(&error)) {
+    counts_.refusal_stops += 1;
+    refusal_stopped_ = true;
+    faulted_ = true;
+    waiting_ = false;
+    return;
+  }
   note_fault();
 }
+Stop Host::stopped() const { return refusal_stopped_ ? Stop::Refused : Stop::Fault; }
 void Host::note_queue() {
   const auto state = queue();
   if (state.count == 0 && state.queued == 0) {
@@ -263,7 +330,7 @@ void Host::note_queue() {
 }
 Stop Host::classify() {
   if (faulted_)
-    return Stop::Fault;
+    return stopped();
   note_queue();
   if (waiting_)
     return Stop::Wait;
@@ -276,7 +343,7 @@ Stop Host::enter(const std::string &name, bool optional) {
   if (!machine_ || faulted_) {
     if (!faulted_)
       note_fault();
-    return Stop::Fault;
+    return stopped();
   }
   const auto found = machine_->find_public(name);
   if (found.first != amx::ERR_NONE) {
@@ -294,7 +361,7 @@ Stop Host::enter(const std::string &name, bool optional) {
     }
   } catch (const std::exception &error) {
     remember(error);
-    return Stop::Fault;
+    return stopped();
   }
   return Stop::Complete;
 }
@@ -303,7 +370,7 @@ Stop Host::enter_level(const char *name) {
   if (!machine_ || faulted_) {
     if (!faulted_)
       note_fault();
-    return Stop::Fault;
+    return stopped();
   }
   if (machine_->find_public(name).first != amx::ERR_NONE)
     return Stop::Missing;
@@ -324,7 +391,7 @@ Stop Host::run_prestart() { return enter_level("preStart"); }
 // on the first ready tick.
 Stop Host::run_start() {
   const auto stop = enter_level("start");
-  if (stop == Stop::Fault)
+  if (stop == Stop::Fault || stop == Stop::Refused)
     return stop;
   if (!level_started_)
     return Stop::Missing;
@@ -356,11 +423,9 @@ void Host::on_ready_tick() {
 
 Stop Host::run(const std::string &entry) {
   const auto stop = enter(entry, false);
-  if (stop == Stop::Fault || stop == Stop::Missing)
+  if (stop != Stop::Complete)
     return stop;
   note_queue();
-  if (faulted_)
-    return Stop::Fault;
   return waiting_ ? Stop::Wait : Stop::Complete;
 }
 
