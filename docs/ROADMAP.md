@@ -92,8 +92,10 @@ its own launch and rendering evidence.
    the remaining 147 built-ins and scene integration remain unsupported.
    The [level-script command host](SCRIPT_COMMANDS.md) runs the 81 documented commands through that binder and routes hide, show, move, the shared seed, the level entrance and particle spawn into the subsystems that already exist. Every other command is a counted host refusal. The play session installs it only when asked.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
-   packet, peer state and callback tests. Engine commands and socket integration
-   remain separate work.
+   packet, peer state and callback tests. The [lockstep session](NETPLAY.md)
+   runs that model for 2–4 peers on an in-process loopback and compares Full
+   combat seed and health traces. Internet datagrams, the lobby and rendezvous
+   remain open. Engine commands and socket integration remain separate work.
    The standalone [game-message transport subset](GAME_MESSAGES.md) adds pinned
    registration, all sender encoders, ring writes and external/null delivery;
    inventory, HUD and shop handler execution remains explicitly unsupported.
