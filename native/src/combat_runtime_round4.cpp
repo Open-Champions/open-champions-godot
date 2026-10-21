@@ -23,7 +23,7 @@ constexpr Address P_FLAME_A = 0x8658b0, P_FLAME_B = 0x865900, P_HOLY = 0x8e5ff0,
                   S_STONE_HIT_THROWN = 0x537b70, S_FIRE = 0x537b90,
                   S_BLAST = 0x537bc8, G_LEVEL_TEXT = 0x44fe18, S_INNPIT = 0x535ed8;
 constexpr std::uint64_t D_FOUR = 0x4010000000000000ULL;
-constexpr Address HOLY_TYPEINFO = 0x3cf124;
+constexpr Address HOLY_TYPEINFO = 0x3cf124, VT_HOLY_SHIELD = 0x519ce0;
 Raw signed_unit(Raw draw) {
   auto unit = mul(from_int(draw), F_INV65536);
   return sub(add(unit, unit), ONE);
@@ -220,21 +220,31 @@ Raw World::State::holy_shield_absorb(Address spell) {
 Address World::State::attach_holy_shield(Address caster, Address skill, Raw level) {
   // Authored plant of the words SpellHolyShield_absorb reads. Not the
   // constructor: that skill path is still refused.
+  // Size and table are skills-35-68 section 54 (SkillHolyShield_cast
+  // allocates 0x28; table 0x519ce0: slot 0 the getter 0x3cf124
+  // (runtime.tsv), slot 1 the base destructor 0x3cf0c4, slot 2 the run
+  // 0x2e8428). Slots 3 and 4 are "base" with no documented address and stay
+  // 0, so a call there refuses in spell_virtual. Like the cloud's table, the
+  // slot words enter the image when the first shield is planted.
   actor(caster);
-  auto block = pool_new(0x40);
+  auto block = pool_new(0x28);
   if (!block)
     throw Unsupported("the pool refused a Holy Shield spell");
   spell_record(block);
+  for (unsigned slot = 0; slot < 3; ++slot)
+    w(VT_HOLY_SHIELD + 8 * slot, 2, 0);
+  w(VT_HOLY_SHIELD + 4, HOLY_TYPEINFO);
+  w(VT_HOLY_SHIELD + 12, 0x3cf0c4);
+  w(VT_HOLY_SHIELD + 20, 0x2e8428);
   w(block, 1, level & 0xff);
   w(block + 8, skill);
   w(block + 0xc, caster);
+  // +0x10 is the constructor's shared draw (the spell's own generator). The
+  // constructor is not run, so this is an authored fixture value.
   w(block + 0x10, 1);
   w(block + 0x1c, 0);
   w(block + 0x24, 0);
-  auto table = alloc_fixture(16);
-  w(table, 2, 0);
-  w(table + 4, HOLY_TYPEINFO);
-  w(block + 0x14, table);
+  w(block + 0x14, VT_HOLY_SHIELD);
   handle_link(caster + 0x364, block + 4, block);
   return block;
 }

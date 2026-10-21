@@ -183,6 +183,25 @@ void host() {
           "a shield with no samples stays refused");
   }
   {
+    // skills-35-68 section 54: SpellHolyShield is 0x28 bytes on table
+    // 0x519ce0 (slot 0 getter 0x3cf124, slot 1 0x3cf0c4, slot 2 0x2e8428).
+    Host h;
+    auto player = h.player_at({0, 0, 0});
+    C::SkillSetup setup;
+    setup.stats[0] = {1, 1, 0};
+    auto skill = h.w->give_skill(16, setup);
+    h.w->clear_history();
+    auto spell = h.w->attach_holy_shield(player, skill, 1);
+    auto pool = find_event(*h.w, "pool_new");
+    check(pool && !pool->args.empty() && pool->args[0] == 0x28, "the Holy Shield block is 0x28 bytes");
+    check(h.w->read(spell + 0x14) == 0x519ce0, "the shield uses table 0x519ce0");
+    check(h.w->read(0x519ce0 + 4) == 0x3cf124 && h.w->read(0x519ce0 + 12) == 0x3cf0c4 &&
+              h.w->read(0x519ce0 + 20) == 0x2e8428,
+          "table 0x519ce0 slots 0, 1 and 2");
+    check(h.w->read(0x519ce0 + 28) == 0 && h.w->read(0x519ce0 + 36) == 0,
+          "slots 3 and 4 (base, address not documented) stay 0");
+  }
+  {
     Host h;
     h.points = 4;
     auto player = h.player_at({0, 0, 0});
