@@ -205,3 +205,48 @@ mission command. The binder's `clearAllSkills` (exactly `ref_natives`) writes
 are +0x4bbf–+0x4bc7, the first 9 mission bytes of difficulty 0. Either the
 slot count or the mission offset in the research is wrong, or the original
 does this. That needs a research answer. This port follows the reference.
+
+## After the audit's script-host fixes (wave 17, 2026-10-21)
+
+Integrated on `codex/playable-integration` with `codex/audit-fixes`
+(SC-1..7, docs/SCRIPT_COMMANDS.md). Three things change what the quest
+commands reach:
+
+- An entry enters in the loader's order, preStart, the objects.ob records,
+  then start (`run_prestart`, `adopt_objects`, `run_start`;
+  `begin_level` is gone).
+- A refused answer that the script uses stops that entry (`refusal_stops`).
+  The quest commands that stay refused (item counts, grants and removals)
+  therefore end their entry where they used to return 0 and go on.
+- `setCFlag` tests the creature flag 0x20 on each object it finds
+  (`ref_natives.n_setCFlag`), so it joins the stub-read list: every
+  objects.ob record is an unconstructed stub, and a `setCFlag` that finds one
+  is refused (`stub_refusals`).
+
+The synthetic host test script ends `ZERO.pri`, `RETN`, as a compiled
+function with no return value does, so its last refused command does not
+stop it.
+
+Same private run, same tool (`champions-quests-measure`):
+
+| Measure | Round 1 | Wave 17 |
+|---|---|---|
+| Scripts loaded / started / wait / complete | 111 / 76 / 41 / 37 | 111 / 76 / 14 / 28 |
+| Executed: getv, setv, getEvil, setPlayerFlag | 244, 116, 19, 9 | 142, 82, 11, 8 |
+| Executed / refused: setCFlag | 23 / 0 | 0 / 1 |
+| Refused: countQuestItems, playerHasItem, onePlayerHasItem, removePlayerItem | 34, 18, 119, 47 | 1, 15, 12, 37 |
+| setCFlag bit 0 / bit 26 | 1 / 22 | 0 / 0 |
+| After the runs: quest lines, available bits, complete bits, variables (non-zero) | 8, 41, 22, 198 (78) | 8, 41, 22, 158 (56) |
+| Chain: act changes, resets, lines cleared, round trips, faults | 18, 18, 6, 111, 0 | 18, 18, 6, 111, 0 |
+
+addQuest, removeQuest, the mission commands, getMadeDecision and
+getPlayerFlag are unchanged. Every executable-table and menu count is
+unchanged.
+
+The Godot session's script host carries this campaign. `script_command_counts`
+reports it under `campaign`, and `enable_level_script(script, objects, true)`
+starts the next level's host from the previous host's campaign image. The
+real-data sweep leaves that off, so each level's counts do not depend on load
+order. The act tables are not read in the session, so no act change runs
+there.
+

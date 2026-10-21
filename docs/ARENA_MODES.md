@@ -19,6 +19,25 @@ them, but this tree does not copy level file names, the same rule as
 `level_flow`'s `ArenaRotationTable`. A table of the wrong size refuses. Tests
 use synthetic names.
 
+`arena_executable.{hpp,cpp}` reads both tables (and, for the measure tool, the
+recipes) from the owner's executable at run time: ELF32 little-endian,
+file-backed `PT_LOAD` bytes only, a null pointer within 32 entries, and exactly
+13 and 7 names (`read_names`). `mode_a_index` matches a level name ASCII
+case-insensitively. Nothing it reads is stored in the tree.
+
+## Callers (wave 17)
+
+- `level_flow::arena_respawn` forwards the registered spawn table to
+  `pick_spawn` with flag 0 (the respawn pick that research-levels left open).
+  `level-flow-exact` replays the three generated flag-0 cases through it.
+- The Godot session reads the mode-A table from the game folder's executable
+  (`ChampionsSessionController.load_arena_tables`) and starts a level in mode
+  A (`level_flow::arena_mode_a_start_ground`) only when its story snap has no
+  ground and the table lists it. On the private disc that is the three cold
+  arena indices, and the real-data sweep is 111 / 111 again.
+- No match runs in the scene. `Match` (waves, scores, respawn timing) is not
+  bound to Godot.
+
 ## What runs
 
 - Shared generator `seed * 0x19660d + 0x3c6ef35f`, draw `seed >> 16`, the

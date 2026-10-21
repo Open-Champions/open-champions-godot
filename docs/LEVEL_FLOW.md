@@ -102,8 +102,12 @@ render-frame elapsed time, or Godot physics as substitutes.
   it to data the research never ran, so the story start stays the story snap
   and reports no ground there. The caller that knows the level was loaded in
   mode A (mode B set, 0x4f7124 clear: the executed case) calls
-  `arena_mode_a_start_ground` itself. The Godot session does not select an
-  arena mode, so it refuses those levels.
+  `arena_mode_a_start_ground` itself. The Godot session does so (wave 17)
+  only for a level whose story snap has no ground and whose name is in the
+  mode-A table it reads from the owner's executable at run time
+  (`arena_modes::read_names`, [ARENA_MODES.md](ARENA_MODES.md)); it publishes
+  `start.arena_mode` "A". Without that table, or for an unlisted level, it
+  still refuses.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared
@@ -247,13 +251,16 @@ These are explicit limits, not inferred approvals:
 - Prose says 18 save-filter classes; the executable reference lists 17. The
   exact list is ported, with no invented eighteenth class.
 - `refuse_open` throws `Unsupported` for an item named below. Production
-  paths call it for arena respawn (`arena_respawn`), the net-peer index
-  (`arena_net_peer_index`) and the gate anyHeight search
-  (`entry_start_ground`); the others are named limits that no function here
-  implements. The items that were not executed: the
+  paths call it for the net-peer index (`arena_net_peer_index`) and the gate
+  anyHeight search (`entry_start_ground`); the others are named limits that no
+  function here implements. Arena respawn (`arena_pickSpawnPoint` with a0 = 0)
+  was not executed by research-levels, but research-arena 17810bb executed it:
+  `arena_respawn` now forwards the registered spawn table to
+  `arena_modes::pick_spawn` with flag 0, and refuses an empty table or a hole
+  below count. `OpenItem::ArenaRespawn` stays as the name of the
+  research-levels gap. The items that were not executed: the
   live seed at `Player1_ctor`, the class-constructor radii inside
-  `findFreeSpot`, arena respawn (`arena_respawn`, `arena_pickSpawnPoint` with
-  a0 = 0), the arena name table (the index step is `arena_mode_a_next`; the
+  `findFreeSpot`, the arena name table (the index step is `arena_mode_a_next`; the
   names are not copied), the rest of `Player_ctor` after the radius store and
   the snap, readers of the copied orientation byte, a first-tick sentinel
   reject beyond the snap and the kill plane, a nonzero store of the arena
