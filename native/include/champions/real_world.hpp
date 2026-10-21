@@ -28,9 +28,9 @@ struct Error : std::runtime_error {
 // Read-only relocated image of a WORLD for creature_water::Service. Pointer
 // fields read by the services (world +0x04 root node past the 0x4567 marker,
 // +0x24 chunk table, water chunk +0x00 payload) hold BASE + file offset. Each
-// payload's +0x08 ripple-grid pointer reads 0: grids are allocated only when a
-// tile is drawn and are cosmetic (level-flow section 12), so water_test and
-// the water_disturb return value stay exact; no ripple is written.
+// payload's +0x08 ripple-grid pointer reads 0. The service therefore returns
+// the chunk count and writes nothing. The drawn field keeps the cosmetic grid
+// and receives the same disturb when that count is not zero.
 class WaterImage {
 public:
   static constexpr cw::Address BASE = 0x01000000;
@@ -45,6 +45,9 @@ public:
   };
   Test test(Raw radius, const cw::Vec3 &position);
   std::uint32_t disturb(Raw strength, Raw radius, const cw::Vec3 &position);
+  // Chunk-table indices of the water chunks water_disturb's query admits, in
+  // query order (water-draw section 6). Empty when the cut byte is set.
+  std::vector<std::uint32_t> disturb_chunks(Raw radius, const cw::Vec3 &position);
 
 private:
   std::vector<std::uint8_t> image_;

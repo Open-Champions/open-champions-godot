@@ -1,5 +1,6 @@
 #include "champions/level_texture.hpp"
 #include "champions/water_draw.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -204,19 +205,151 @@ int main() {
               W::SPLASH_STRENGTH == 1500.f && W::SPLASH_RADIUS == 6.f &&
               W::SETUP_INTEGER == 4,
           "the stored splash constants stay with the setup");
-    rejects([] { W::refuse_claim_weights(); }, "claim-frame weights stay refused");
-    rejects([] { W::refuse_splash_point(); }, "the splash point stays refused");
+    const std::array<std::uint32_t, 6> splash_bounds{
+        raw_f(0.4), raw_f(-1.2), raw_f(3.5), raw_f(120.6), raw_f(10.0), raw_f(40.0)};
+    check(W::splash_seed(324).fire, "seed 324 is a splash hit");
+    const auto point = W::splash_point(324, splash_bounds);
+    check(point.hit && point.seed == 0xaa3e5b7du &&
+              point.point == std::array<std::uint32_t, 3>{0x42a10bbdu, 0x40c88098u, 0x40600000u},
+          "the splash point shares one unit interval and keeps minimum z");
+    check(W::second_particle_z(0x42f70000u, point.seed) == 0x4348b360u,
+          "the second particle lifts off the terrain height");
+    const auto missed = W::splash_point(325, splash_bounds);
+    check(!missed.hit && missed.seed == W::splash_seed(325).seed,
+          "seed 325 is one generator step and no disturb");
     rejects([] { W::refuse_countdown_splash(); }, "the countdown splash stays refused");
-    rejects([] { W::refuse_setup_integer(); }, "the integer 4 stays unread");
-    rejects([] { W::refuse_diagonal_slots(); }, "slots 1 and 3 stay unread");
+    rejects([] { W::refuse_setup_integer(); }, "the setup timer stays unread");
+    rejects([] { W::refuse_diagonal_slots(); }, "the per-frame exchange still skips slots 1 and 3");
+    rejects([] { W::refuse_property_order(); }, "the factory order versus setup stays unexecuted");
+    rejects([] { W::refuse_player_move_disturb(); }, "Player_move disturb immediates stay unpublished");
+    rejects([] { W::refuse_splash_particles(); }, "zero particle definitions stay refused");
+    rejects([] { W::refuse_splash_start_seed(); }, "the retail splash seed start stays refused");
+
+    check(W::colour_word(10, 20, 30) == 0x001e140au, "waterColor packs three bytes");
+    check(W::wavyness_scale(0x3f800000u) == W::SET1_SCALE, "wavyness 1 stores the set-1 scale");
+    check(W::wavyness_scale(0x3f000000u) == 0x3c400000u, "wavyness 0.5 is half of that scale");
+    const auto loaded = W::load_appearance();
+    check(loaded.fix[0] == 102 && loaded.colour[0] == W::SET0_COLOUR &&
+              loaded.scale[0] == W::SET0_SCALE && loaded.strength == raw_f(41.0) &&
+              loaded.radius == raw_f(10.0) && loaded.timer == 4 && loaded.fix[1] == 0 &&
+              loaded.colour[1] == 0 && loaded.scale[1] == 0,
+          "reset zeros set 1, then setup replaces set 0 only");
+    const auto parsed = W::replacing(
+        {"waterColor2=1,2,3,4", "waterColor=10,20,30,40", "waterWavyness2=0.5",
+         "waterWavyness=1", "waterBumpAmount=12.5", "waterBumpRadius=3", "waterBumpTimer=7",
+         "runSpeed=2"});
+    check(parsed.applied == 7 && parsed.refused == 0, "seven water lines apply, others are not water");
+    const auto replaced = parsed.appearance;
+    check(replaced.colour[1] == W::colour_word(1, 2, 3) && replaced.fix[1] == 4 &&
+              replaced.colour[0] == 0x001e140au && replaced.fix[0] == 40 &&
+              replaced.scale[1] == 0x3c400000u && replaced.scale[0] == W::SET1_SCALE &&
+              replaced.strength == raw_f(12.5) && replaced.radius == raw_f(3.0) &&
+              replaced.timer == 7,
+          "level lines replace colour, fix, wavyness, bump and the timer word");
+    const auto earlier = W::before_setup({"waterColor2=1,2,3,4", "waterColor=10,20,30,40",
+                                           "waterBumpTimer=7"}).appearance;
+    check(earlier.colour[1] == W::colour_word(1, 2, 3) && earlier.fix[1] == 4 &&
+              earlier.colour[0] == W::SET0_COLOUR && earlier.fix[0] == 102 &&
+              earlier.timer == 4,
+          "a set-1 line before setup survives and a set-0 line is replaced");
+
+    {
+      const auto refused = W::replacing({"waterColor=1,2,3", "waterColor=1, 2,3,4",
+                                         "waterBumpTimer=7.5", "waterWavyness=1e2",
+                                         "waterWavyness=", "waterBumpRadius=+3",
+                                         "waterColor=1,2,3,256", "waterColor2=1,2,3,-300",
+                                         "waterBumpTimer=7 "});
+      check(refused.applied == 0 && refused.refused == 9 &&
+                refused.appearance.colour == W::load_appearance().colour &&
+                refused.appearance.scale == W::load_appearance().scale &&
+                refused.appearance.timer == 4,
+            "a water line outside the executed shapes is refused and stores nothing");
+      const auto shapes = W::replacing({"waterWavyness=.5\r", "waterColor2=255,0,9,-100\r",
+                                        "waterBumpTimer=7\r"});
+      check(shapes.applied == 3 && shapes.appearance.timer == 7 && shapes.appearance.scale[0] == 0x3c400000u &&
+                shapes.appearance.fix[1] == -100 &&
+                shapes.appearance.colour[1] == W::colour_word(255, 0, 9),
+            "a leading point decimal, a negative fix and a closing carriage return apply");
+      check(W::colour_word(-1, -2, 3) == 0x0003feffu,
+            "colour_word keeps the low byte of each part, as the reference does");
+      check(W::alpha_words(-100) == std::array<std::uint32_t, 2>{W::ALPHA_ADD, 100u},
+            "a negative level fix selects the additive blend");
+    }
+    using Heights = std::array<std::array<std::int16_t, 32>, 33>;
+    Heights claim_edge{};
+    claim_edge[1][31] = 1001;
+    std::array<const Heights *, 4> one{{&claim_edge, nullptr, nullptr, nullptr}};
+    const auto claimed = W::claim_grid(one);
+    check(claimed.heights[0] == std::array<std::int16_t, 32>{} &&
+              claimed.heights[1] ==
+                  std::array<std::int16_t, 32>{1000, 900, 800, 700, 600, 500, 400, 300, 200, 100} &&
+              claimed.heights[2] == std::array<std::int16_t, 32>{},
+          "one edge is truncated against one");
+    bool disturb_clear = true;
+    for (const auto &row : claimed.velocity)
+      for (const auto sample : row)
+        disturb_clear = disturb_clear && sample == 0;
+    check(disturb_clear, "a claim clears every disturbance sample");
+    claim_edge[1][31] = -30000;
+    const auto negative = W::claim_grid(one);
+    check(negative.heights[1][0] == -29999 && negative.heights[1][9] == -2999,
+          "a negative claim sample stays signed");
+    Heights left{};
+    Heights far{};
+    left[1][31] = 30000;
+    left[10][31] = 30000;
+    far[32][9] = 30000;
+    std::array<const Heights *, 4> both{{&left, nullptr, &far, nullptr}};
+    std::array<const Heights *, 4> left_only{{&left, nullptr, nullptr, nullptr}};
+    check(W::claim_grid(left_only).heights[1][0] == 29999 &&
+              W::claim_grid(both).heights[1][0] == 14999 &&
+              W::claim_grid(both).heights[10][9] == 5999,
+          "two edges normalise only once the weight sum reaches one");
+
+    std::array<std::array<std::int16_t, 32>, 32> cells{};
+    W::disturb_cells(cells, raw_f(1500.0), raw_f(6.0), {0, 0}, {raw_f(-60.0), raw_f(60.0)},
+                     {raw_f(0.0), raw_f(0.0)});
+    check(cells[15][15] == 328 && cells[15][16] == 914 && cells[15][17] == 328 &&
+              cells[16][15] == 914 && cells[16][16] == 1500 && cells[16][17] == 914 &&
+              cells[17][15] == 328 && cells[17][16] == 914 && cells[17][17] == 328,
+          "a centre splash is the documented 3 by 3");
+    int splash_sum = 0;
+    for (const auto &row : cells)
+      for (const auto sample : row)
+        splash_sum += sample;
+    check(splash_sum == 328 * 4 + 914 * 4 + 1500, "the centre splash writes only that 3 by 3");
+    std::array<std::array<std::int16_t, 32>, 32> shifted{};
+    W::disturb_cells(shifted, raw_f(1500.0), raw_f(6.0), {0, 0}, {raw_f(-60.0), raw_f(60.0)},
+                     {raw_f(30.0), raw_f(0.0)});
+    int row_lo = 32, row_hi = -1, col_lo = 32, col_hi = -1;
+    for (int r = 0; r < 32; ++r)
+      for (int c = 0; c < 32; ++c)
+        if (shifted[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)]) {
+          row_lo = std::min(row_lo, r);
+          row_hi = std::max(row_hi, r);
+          col_lo = std::min(col_lo, c);
+          col_hi = std::max(col_hi, c);
+        }
+    check(row_lo == 23 && row_hi == 25 && col_lo == 15 && col_hi == 17,
+          "moving the point in world x moves the rows");
+    std::array<std::array<std::int16_t, 32>, 32> clamped{};
+    for (auto &row : clamped)
+      row.fill(-100);
+    clamped[16][16] = 32000;
+    W::disturb_cells(clamped, raw_f(1500.0), raw_f(6.0), {0, 0}, {raw_f(-60.0), raw_f(60.0)},
+                     {raw_f(0.0), raw_f(0.0)});
+    check(clamped[16][16] == 32767 && clamped[16][15] > -100 && clamped[0][0] == -100,
+          "only a sum above 32767 is clamped");
+    std::array<std::array<std::int16_t, 32>, 32> neg_strength{};
+    W::disturb_cells(neg_strength, raw_f(-100.0), raw_f(6.0), {0, 0},
+                     {raw_f(-60.0), raw_f(60.0)}, {raw_f(0.0), raw_f(0.0)});
+    check(neg_strength[16][16] == -100, "a negative strength keeps the low 16 bits");
 
     W::TileSource a;
     a.chunk = 0;
     a.neighbours = {1, -1, -1, -1};
     a.mask = ones();
-    a.min_x = raw_f(0);
-    a.max_x = raw_f(120);
-    a.min_y = raw_f(0);
+    a.bounds = {raw_f(0), raw_f(0), raw_f(0), raw_f(120), raw_f(120), raw_f(1)};
     W::TileSource b = a;
     b.chunk = 1;
     b.neighbours = {-1, -1, -1, -1};
@@ -224,8 +357,8 @@ int main() {
     b.flag_0x200 = true;
     W::Field field({a, b});
     field.on_tick(0, false);
-    check(field.live_blocks() == 2 && field.claim_seed_refused() && field.dirty(),
-          "drawing claims a zero block and does not apply the refused seed");
+    check(field.live_blocks() == 2 && !field.claim_seed_refused() && field.dirty(),
+          "drawing claims a block from the neighbour weights");
     W::Grid spike;
     spike.velocity[4][5] = 1000;
     field.supply_grid(0, spike);
@@ -241,10 +374,58 @@ int main() {
     const auto drawn = field.surfaces();
     check(drawn[0].layer == 3 && drawn[1].layer == 3 && drawn[0].triangles == 1800 &&
               drawn[1].triangles == 1800 && drawn[0].fix == 102.f / 128.f &&
-              drawn[1].fix == 98.f / 128.f && drawn[0].positions.size() == 31u * 31u,
-          "each tile is 30 strips of records 2..32 on layer 3");
+              drawn[1].fix == 0.f && drawn[1].colour == 0 &&
+              drawn[0].positions.size() == 31u * 31u,
+          "a loaded field uses setup set 0 and the zeroed set 1");
     check(drawn[0].uv_texels[0][0] == 32.f && drawn[0].uv_texels[0][1] == 32.f,
           "a flat tile samples 32 texels");
+    field.set_appearance(replaced);
+    rejects([&] {
+      W::Field unseeded({a});
+      unseeded.set_level_flags(W::LEVEL_OPTION_SPLASH);
+    }, "the drawer splash needs a supplied seed");
+    const auto painted = field.surfaces();
+    check(painted[1].fix == 4.f / 128.f && painted[1].colour == W::colour_word(1, 2, 3),
+          "a level colour replaces the drawn second set");
+    auto solo = a;
+    solo.neighbours = {-1, -1, -1, -1};
+    solo.bounds = {raw_f(-60), raw_f(-60), raw_f(0), raw_f(60), raw_f(60), raw_f(1)};
+    W::Field ripples({solo});
+    ripples.on_tick(0, false);
+    rejects([&] { ripples.disturb(raw_f(1500.0), raw_f(6.0), {0, 0, 0}); },
+            "water_disturb needs the WORLD chunk query");
+    std::vector<std::uint32_t> asked;
+    ripples.set_chunk_query([&](std::uint32_t radius, const std::array<std::uint32_t, 3> &) {
+      asked.push_back(radius);
+      return std::vector<std::uint32_t>{solo.chunk};
+    });
+    check(ripples.disturb(raw_f(1500.0), raw_f(6.0), {raw_f(0), raw_f(0), raw_f(0)}) == 1 &&
+              ripples.grid(0).velocity[16][16] == 1500 && ripples.grid(0).velocity[16][15] == 914 &&
+              ripples.grid(0).velocity[15][15] == 328 &&
+              ripples.grid(0).heights[17][16] == 0,
+          "a disturb writes the velocity grid and leaves the drawn heights");
+    const auto carried = W::step_grid(ripples.grid(0), solo.mask);
+    ripples.on_tick(1, false);
+    check(ripples.grid(0).heights == carried.heights && carried.heights[17][16] != 0,
+          "the next step carries that splash into the drawn heights");
+    const auto seed = 324u;
+    ripples.set_splash_seed(seed);
+    ripples.set_level_flags(W::LEVEL_OPTION_SPLASH);
+    const auto expected = W::splash_point(seed, solo.bounds);
+    ripples.on_tick(2, false);
+    check(expected.hit && ripples.splash_seed() == expected.seed &&
+              asked.back() == raw_f(6.0),
+          "the drawer splash rolls once per live tile when the option is set");
+    ripples.set_splash_seed(seed);
+    ripples.on_tick(3, true);
+    check(ripples.splash_seed() == seed, "a frozen frame does not roll the splash generator");
+    W::Field quiet({solo});
+    quiet.set_splash_seed(seed);
+    quiet.set_chunk_query([](std::uint32_t, const std::array<std::uint32_t, 3> &) {
+      return std::vector<std::uint32_t>{};
+    });
+    quiet.on_tick(0, false);
+    check(quiet.splash_seed() == seed, "the splash option has to be set before the generator rolls");
 
     std::cout << "PASS water draw: " << checks << " checks\n";
     return 0;

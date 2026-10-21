@@ -3,18 +3,33 @@ extends RefCounted
 # Water tiles and moving pieces of the loaded game-folder level, through the
 # native ChampionsRealWorld adapter (water services and level-flow pieces).
 # Drawn water is the documented colour, slope UVs and layer-3 blend
-# (docs/WATER_DRAW.md). The wave steps on the simulation tick. The claim-frame
-# seed stays refused, so a new block is a zero grid.
+# (docs/WATER_DRAW.md). The wave, the claim and any water_disturb call run on
+# the simulation tick. The level flag word comes from the level-lights JSON
+# when one is chosen. A negative fix uses the additive shader. A player
+# wading does not disturb the water here: Player_move's immediates are not
+# published.
 # Piece poses come from level_flow::move_piece; collision changes stay in the
 # adapter's terrain copy (the play session keeps its own collision).
 const WATER_SHADER := """shader_type spatial;
 render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled;
 uniform sampler2D water_tex : source_color, filter_linear, repeat_enable;
 uniform float fix = 0.796875;
+uniform vec3 tint = vec3(1.0);
 void fragment() {
 	vec3 texel = texture(water_tex, UV / vec2(textureSize(water_tex, 0))).rgb;
-	ALBEDO = texel * COLOR.rgb;
+	ALBEDO = min(texel * tint, vec3(1.0));
 	ALPHA = fix;
+}
+"""
+const WATER_ADD_SHADER := """shader_type spatial;
+render_mode unshaded, cull_disabled, blend_add, depth_draw_never, depth_test_disabled;
+uniform sampler2D water_tex : source_color, filter_linear, repeat_enable;
+uniform float fix = 0.796875;
+uniform vec3 tint = vec3(1.0);
+void fragment() {
+	vec3 texel = texture(water_tex, UV / vec2(textureSize(water_tex, 0))).rgb;
+	ALBEDO = min(texel * tint, vec3(1.0)) * fix;
+	ALPHA = 1.0;
 }
 """
 const ENTER_RADIUS_RAW := 0x41400000 # water_test(12), level-flow section 12
@@ -24,6 +39,7 @@ var info: Dictionary = {}
 var water_root: Node3D
 var water_instance: MeshInstance3D
 var water_shader: Shader
+var water_add_shader: Shader
 var water_materials: Array = []
 var water_texture: Texture2D
 var water_texture_refused := false
@@ -72,14 +88,20 @@ func set_water_texture(bytes: PackedByteArray) -> Dictionary:
 	if water_instance != null: water_instance.visible = true
 	return {"ok": true, "width": image.get_width(), "height": image.get_height(), "tiles_refused": 0}
 
-func _water_material(fix: float) -> ShaderMaterial:
+# Modulate is texel × colour / 128, saturating at 255 (COLCLAMP 1). The tint
+# is a uniform because a vertex colour channel stops at 1.0.
+func _water_material(fix: float, additive: bool, tint: Vector3) -> ShaderMaterial:
 	if water_shader == null:
 		water_shader = Shader.new()
 		water_shader.code = WATER_SHADER
+		water_add_shader = Shader.new()
+		water_add_shader.code = WATER_ADD_SHADER
 	var material := ShaderMaterial.new()
-	material.shader = water_shader
+	material.shader = water_add_shader if additive else water_shader
+	if additive: fix = absf(fix)
 	material.render_priority = 3
 	material.set_shader_parameter("fix", fix)
+	material.set_shader_parameter("tint", tint)
 	if water_texture != null:
 		material.set_shader_parameter("water_tex", water_texture)
 	water_materials.append(material)
@@ -98,7 +120,7 @@ func _build_water(terrain_root: Node3D) -> void:
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var surfaces: Array = sync.get("surfaces", [])
 	for i in surfaces.size():
-		instance.set_surface_override_material(i, _water_material(float(surfaces[i].fix)))
+		instance.set_surface_override_material(i, _water_material(float(surfaces[i].fix), bool(surfaces[i].get("additive", false)), surfaces[i].get("tint", Vector3.ONE)))
 	water_instance = instance
 	# Hidden until set_water_texture decodes the level's waterenv image.
 	instance.visible = water_texture != null
@@ -201,6 +223,15 @@ func _advance_waves(raw: Dictionary) -> void:
 	wave_frame = tick
 	if last.get("dirty", false):
 		water_instance.mesh = last.mesh
+
+# Level flag word 0x44fe08 from the chosen level-lights row. 0x8 fills the
+# masks; 0x10 (drawer splash) is refused because the seed's start is unknown.
+func set_level_flags(flags: int) -> Dictionary:
+	if native == null: return {"ok": false, "error": "adapter unavailable"}
+	var applied: Dictionary = native.set_level_flags(flags)
+	if not applied.get("ok", false) and not str(applied.get("error", "")) in errors:
+		errors.append(str(applied.get("error", "")))
+	return applied
 
 # water_test at the session's player position after each observation.
 func observe(raw: Dictionary) -> void:

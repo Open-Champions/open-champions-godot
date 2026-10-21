@@ -1,7 +1,9 @@
 #include "champions/water_draw.hpp"
 #include "champions/core_arithmetic.hpp"
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -24,14 +26,24 @@ float f32(Raw bits) {
 }
 double promoted(Raw bits) { return static_cast<double>(f32(bits)); }
 
-Raw cpu_add(Raw a, Raw b) {
-  return Fpu(Fpu::Model::Ps2).add(a, b);
+Fpu cpu() { return Fpu(Fpu::Model::Ps2); }
+Raw cpu_add(Raw a, Raw b) { return cpu().add(a, b); }
+Raw cpu_sub(Raw a, Raw b) { return cpu().sub(a, b); }
+Raw cpu_mul(Raw a, Raw b) { return cpu().mul(a, b); }
+Raw cpu_div(Raw a, Raw b) { return cpu().div(a, b); }
+Raw cpu_from_int(std::uint32_t value) { return cpu().from_int(value); }
+int cpu_cmp(Raw a, Raw b) { return Fpu::compare(a, b); }
+std::int32_t cpu_to_int(Raw value) { return Fpu::to_int(value); }
+Raw from_i32(std::int32_t value) {
+  return cpu_from_int(static_cast<std::uint32_t>(value));
 }
-Raw cpu_mul(Raw a, Raw b) {
-  return Fpu(Fpu::Model::Ps2).mul(a, b);
+std::int16_t low_s16(std::uint32_t bits) {
+  return static_cast<std::int16_t>(bits & 0xffffu);
 }
-Raw cpu_from_int(std::uint32_t value) {
-  return Fpu(Fpu::Model::Ps2).from_int(value);
+std::uint32_t raw_of(float value) {
+  std::uint32_t bits = 0;
+  std::memcpy(&bits, &value, 4);
+  return bits;
 }
 
 Fpu vu_fpu() { return Fpu(Fpu::Model::Chop); }
@@ -495,25 +507,282 @@ Splash splash_seed(std::uint32_t seed) {
       static_cast<std::uint32_t>(static_cast<std::uint64_t>(seed) * LCG_MUL + LCG_ADD);
   return {next, (next >> 16) % static_cast<std::uint32_t>(SPLASH_MODULUS) == 0};
 }
-
-void refuse_claim_weights() {
-  throw Unsupported(
-      "water_init weights on the frame a block is claimed were not executed");
+Raw unit_interval(std::uint32_t seed) {
+  return cpu_mul(cpu_from_int(seed >> 16), SPLASH_UNIT);
 }
-void refuse_splash_point() {
-  throw Unsupported(
-      "the drawer splash point inside the chunk bounds was not reduced");
+Raw along(Raw lo, Raw hi, Raw unit) {
+  return cpu_add(lo, cpu_mul(cpu_sub(hi, lo), unit));
+}
+SplashPoint splash_point(std::uint32_t seed, const std::array<std::uint32_t, 6> &bounds) {
+  const auto first = splash_seed(seed);
+  SplashPoint out;
+  if (!first.fire) {
+    out.seed = first.seed;
+    return out;
+  }
+  const auto second = splash_seed(first.seed);
+  const auto unit = unit_interval(second.seed);
+  out.hit = true;
+  out.seed = splash_seed(second.seed).seed;
+  out.point = {along(bounds[0], bounds[3], unit), along(bounds[1], bounds[4], unit),
+               bounds[2]};
+  return out;
+}
+std::uint32_t second_particle_z(std::uint32_t terrain, std::uint32_t seed) {
+  const auto lift = cpu_mul(unit_interval(seed), PARTICLE_RISE);
+  return cpu_add(cpu_add(terrain, lift), PARTICLE_LIFT);
+}
+
+std::uint32_t colour_word(int red, int green, int blue) {
+  return (static_cast<std::uint32_t>(red) & 0xffu) |
+         ((static_cast<std::uint32_t>(green) & 0xffu) << 8) |
+         ((static_cast<std::uint32_t>(blue) & 0xffu) << 16);
+}
+std::uint32_t wavyness_scale(std::uint32_t parsed) {
+  return cpu_mul(parsed, SET1_SCALE);
+}
+Appearance reset_appearance() {
+  Appearance out;
+  out.fix[0] = static_cast<int>(SET1_FIX);
+  out.colour[0] = SET1_COLOUR;
+  out.scale[0] = SET1_SCALE;
+  out.strength = raw_f(WAVE_STRENGTH);
+  out.radius = raw_f(4.0);
+  out.timer = 6;
+  return out;
+}
+void setup_appearance(Appearance &appearance) {
+  appearance.fix[0] = static_cast<int>(SET0_FIX);
+  appearance.colour[0] = SET0_COLOUR;
+  appearance.scale[0] = SET0_SCALE;
+  appearance.strength = raw_f(WAVE_STRENGTH);
+  appearance.radius = raw_f(WAVE_RADIUS);
+  appearance.timer = SETUP_INTEGER;
+}
+Appearance load_appearance() {
+  auto out = reset_appearance();
+  setup_appearance(out);
+  return out;
+}
+// The executed shapes only: an optional minus and digits, or a decimal with
+// one optional point. No space, sign plus, or exponent was executed.
+std::optional<std::int32_t> strict_int(std::string_view text) {
+  std::size_t i = text.size() > 0 && text[0] == '-' ? 1u : 0u;
+  if (i == text.size())
+    return std::nullopt;
+  std::int64_t value = 0;
+  for (; i < text.size(); ++i) {
+    if (text[i] < '0' || text[i] > '9')
+      return std::nullopt;
+    value = value * 10 + (text[i] - '0');
+    if (value > 0x80000000ll)
+      return std::nullopt;
+  }
+  if (text[0] == '-')
+    value = -value;
+  if (value > std::numeric_limits<std::int32_t>::max())
+    return std::nullopt;
+  return static_cast<std::int32_t>(value);
+}
+std::optional<std::uint32_t> strict_decimal(std::string_view text) {
+  std::size_t i = text.size() > 0 && text[0] == '-' ? 1u : 0u;
+  int digits = 0;
+  int points = 0;
+  for (std::size_t j = i; j < text.size(); ++j) {
+    if (text[j] == '.')
+      ++points;
+    else if (text[j] >= '0' && text[j] <= '9')
+      ++digits;
+    else
+      return std::nullopt;
+  }
+  if (digits == 0 || points > 1)
+    return std::nullopt;
+  // Decimal to double, then to float, as the difftest packed float(text).
+  const auto owned = std::string(text);
+  errno = 0;
+  char *end = nullptr;
+  const double value = std::strtod(owned.c_str(), &end);
+  if (end != owned.c_str() + owned.size() || errno == ERANGE ||
+      std::fabs(value) > static_cast<double>(std::numeric_limits<float>::max()))
+    return std::nullopt;
+  return raw_of(static_cast<float>(value));
+}
+Property apply_property(Appearance &appearance, std::string_view line) {
+  const auto eq = line.find('=');
+  if (eq == std::string_view::npos)
+    return Property::Other;
+  const auto key = line.substr(0, eq);
+  auto value = line.substr(eq + 1);
+  // Level lines end in a carriage return. sscanf stops at the first
+  // character a conversion cannot take, so it does not change the stored word.
+  while (!value.empty() && value.back() == '\r')
+    value.remove_suffix(1);
+  const bool colour = key == "waterColor" || key == "waterColor2";
+  const bool wave = key == "waterWavyness" || key == "waterWavyness2";
+  const bool amount = key == "waterBumpAmount";
+  const bool radius = key == "waterBumpRadius";
+  const bool timer = key == "waterBumpTimer";
+  if (!colour && !wave && !amount && !radius && !timer)
+    return Property::Other;
+  const std::size_t set = (key.back() == '2') ? 1u : 0u;
+  if (colour) {
+    std::array<std::int32_t, 4> parts{};
+    std::string_view rest = value;
+    for (std::size_t i = 0; i < 4; ++i) {
+      const auto comma = i < 3 ? rest.find(',') : std::string_view::npos;
+      if (i < 3 && comma == std::string_view::npos)
+        return Property::Refused;
+      const auto got = strict_int(rest.substr(0, comma));
+      if (!got)
+        return Property::Refused;
+      parts[i] = *got;
+      rest = i < 3 ? rest.substr(comma + 1) : std::string_view{};
+    }
+    // The fix becomes the high word of ALPHA_1. Which bits of that word the
+    // GS keeps is not in the pin, so a fix that one byte cannot hold is refused.
+    if (parts[3] > 255 || parts[3] < -255)
+      return Property::Refused;
+    // tools/ref_waterdraw.py colour_word keeps the low byte of each part.
+    appearance.colour[set] = colour_word(parts[0], parts[1], parts[2]);
+    appearance.fix[set] = parts[3];
+    return Property::Applied;
+  }
+  if (timer) {
+    const auto got = strict_int(value);
+    if (!got)
+      return Property::Refused;
+    appearance.timer = *got;
+    return Property::Applied;
+  }
+  const auto bits = strict_decimal(value);
+  if (!bits)
+    return Property::Refused;
+  if (wave)
+    appearance.scale[set] = wavyness_scale(*bits);
+  else if (amount)
+    appearance.strength = *bits;
+  else
+    appearance.radius = *bits;
+  return Property::Applied;
+}
+void count_lines(Parsed &out, const std::vector<std::string> &lines) {
+  for (const auto &line : lines) {
+    const auto got = apply_property(out.appearance, line);
+    out.applied += got == Property::Applied ? 1 : 0;
+    out.refused += got == Property::Refused ? 1 : 0;
+  }
+}
+Parsed replacing(const std::vector<std::string> &lines) {
+  Parsed out{load_appearance()};
+  count_lines(out, lines);
+  return out;
+}
+Parsed before_setup(const std::vector<std::string> &lines) {
+  Parsed out{reset_appearance()};
+  count_lines(out, lines);
+  setup_appearance(out.appearance);
+  return out;
+}
+
+Claim claim_grid(const std::array<const std::array<std::array<std::int16_t, SAMPLES>, ROWS> *, 4> &slots) {
+  Claim out;
+  for (int row = 0; row < SAMPLES; ++row) {
+    for (int col = 0; col < SAMPLES; ++col) {
+      Raw hsum = 0;
+      Raw wsum = 0;
+      const auto add = [&](std::int16_t sample, int distance) {
+        const auto weight = cpu_mul(cpu_from_int(static_cast<std::uint32_t>(distance)), EDGE_WEIGHT);
+        hsum = cpu_add(hsum, cpu_mul(from_i32(sample), weight));
+        wsum = cpu_add(wsum, weight);
+      };
+      if (col < 10 && slots[0] != nullptr)
+        add((*slots[0])[static_cast<std::size_t>(row + 1)][31], 10 - col);
+      if (row < 10 && slots[2] != nullptr)
+        add((*slots[2])[32][static_cast<std::size_t>(col)], 10 - row);
+      if (col >= 22 && slots[1] != nullptr)
+        add((*slots[1])[static_cast<std::size_t>(row + 1)][0], col - 21);
+      if (row >= 22 && slots[3] != nullptr)
+        add((*slots[3])[1][static_cast<std::size_t>(col)], row - 21);
+      if (cpu_cmp(wsum, CLAIM_ONE) < 0)
+        wsum = CLAIM_ONE;
+      out.heights[static_cast<std::size_t>(row + 1)][static_cast<std::size_t>(col)] =
+          low_s16(static_cast<std::uint32_t>(cpu_to_int(cpu_div(hsum, wsum))));
+    }
+  }
+  return out;
+}
+
+void disturb_cells(std::array<std::array<std::int16_t, SAMPLES>, SAMPLES> &grid,
+                   std::uint32_t strength, std::uint32_t radius,
+                   const std::array<std::int32_t, 2> &origin,
+                   const std::array<std::uint32_t, 2> &span,
+                   const std::array<std::uint32_t, 2> &pos) {
+  const auto ox = cpu_mul(from_i32(origin[0]), raw_f(0.25));
+  const auto oy = cpu_mul(from_i32(origin[1]), raw_f(0.25));
+  const auto width = cpu_sub(span[1], span[0]);
+  const auto count = cpu_to_int(cpu_add(cpu_mul(width, DISTURB_WIDTH), raw_f(0.5)));
+  if (count <= 0)
+    throw Unsupported("water rounded chunk width must be positive");
+  const auto inv = cpu_div(CLAIM_ONE, cpu_mul(cpu_from_int(static_cast<std::uint32_t>(count)), raw_f(12.0)));
+  const auto scale = raw_f(32.0);
+  const auto gx = cpu_add(cpu_mul(cpu_mul(cpu_sub(pos[0], ox), scale), inv), raw_f(16.0));
+  const auto gy = cpu_add(cpu_mul(cpu_mul(cpu_sub(pos[1], oy), scale), inv), raw_f(16.0));
+  const auto reach = cpu_mul(cpu_mul(radius, scale), inv);
+  const auto limit = cpu_mul(reach, reach);
+  const auto gain = cpu_div(strength, limit);
+  const auto window = [&](Raw centre) {
+    const auto lo = cpu_to_int(cpu_sub(cpu_sub(centre, radius), CLAIM_ONE));
+    const auto hi = cpu_to_int(cpu_add(cpu_add(centre, radius), CLAIM_ONE));
+    return std::array<int, 2>{std::max(0, lo), std::min(31, hi)};
+  };
+  const auto xw = window(gx);
+  const auto yw = window(gy);
+  if (xw[1] < xw[0] || yw[1] < yw[0])
+    return;
+  for (int row = xw[0]; row <= xw[1]; ++row) {
+    for (int col = yw[0]; col <= yw[1]; ++col) {
+      const auto gap_x = cpu_sub(cpu_from_int(static_cast<std::uint32_t>(row)), gx);
+      const auto gap_y = cpu_sub(cpu_from_int(static_cast<std::uint32_t>(col)), gy);
+      const auto dist = cpu_add(cpu_mul(gap_x, gap_x), cpu_mul(gap_y, gap_y));
+      if (cpu_cmp(limit, dist) < 0)
+        continue;
+      const auto amount = cpu_to_int(cpu_sub(strength, cpu_mul(dist, gain)));
+      const auto total = static_cast<std::uint32_t>(
+          static_cast<std::uint32_t>(grid[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)]) +
+          static_cast<std::uint32_t>(amount));
+      const auto signed_total = simulation::rta::s32(total);
+      grid[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)] =
+          signed_total > 32767 ? 32767 : low_s16(total);
+    }
+  }
 }
 void refuse_countdown_splash() {
   throw Unsupported(
       "the simulation splash taken when the countdown is negative was not executed");
 }
 void refuse_setup_integer() {
-  throw Unsupported("nothing documented reads the integer 4 stored by water_setup");
+  throw Unsupported("nothing documented reads the integer stored by water_setup");
 }
 void refuse_diagonal_slots() {
   throw Unsupported(
       "neighbour slots 1 and 3 are not read by the per-frame exchange");
+}
+void refuse_property_order() {
+  throw Unsupported(
+      "whether the object factory runs before or after water_setup was not executed");
+}
+void refuse_player_move_disturb() {
+  throw Unsupported(
+      "Player_move's water_disturb immediates are not in the water-draw pin");
+}
+void refuse_splash_particles() {
+  throw Unsupported(
+      "the splash particle definitions are zero in the executable and their names are not in the image");
+}
+void refuse_splash_start_seed() {
+  throw Unsupported(
+      "the retail start value of the drawer splash seed at 0x404460 is not in the pin");
 }
 
 Field::Field(std::vector<TileSource> tiles) : tiles_(std::move(tiles)) {
@@ -604,14 +873,37 @@ void Field::on_tick(std::uint32_t frame, bool frozen) {
         dirty_ = true;
     }
   }
-  for (auto &block : blocks_) {
-    if (block.live)
+  for (std::size_t i = 0; i < blocks_.size(); ++i) {
+    if (blocks_[i].live)
       continue;
-    // A refused claim seed is a zero grid. The first mesh uses the
-    // constructor's dirty flag; reclaiming zeros does not rebuild it.
-    block.live = true;
-    block.stamp = frame;
-    block.grid = {};
+    std::array<const std::array<std::array<std::int16_t, SAMPLES>, ROWS> *, 4> slots{};
+    for (int slot = 0; slot < 4; ++slot) {
+      const auto neighbour = tiles_[i].neighbours[static_cast<std::size_t>(slot)];
+      if (neighbour < 0)
+        continue;
+      const auto other = by_chunk_.at(static_cast<std::size_t>(neighbour));
+      if (other < 0 || !blocks_[static_cast<std::size_t>(other)].live)
+        continue;
+      slots[static_cast<std::size_t>(slot)] =
+          &blocks_[static_cast<std::size_t>(other)].grid.heights;
+    }
+    const auto claimed = claim_grid(slots);
+    if (claimed.heights != blocks_[i].grid.heights)
+      dirty_ = true;
+    blocks_[i].grid = {};
+    blocks_[i].grid.heights = claimed.heights;
+    blocks_[i].live = true;
+    blocks_[i].stamp = frame;
+  }
+  if (!frozen && (level_flags_ & LEVEL_OPTION_SPLASH) != 0) {
+    for (std::size_t i = 0; i < tiles_.size(); ++i) {
+      if (!blocks_[i].live)
+        continue;
+      const auto splash = splash_point(*splash_seed_, tiles_[i].bounds);
+      splash_seed_ = splash.seed;
+      if (splash.hit)
+        disturb(raw_f(SPLASH_STRENGTH), raw_f(SPLASH_RADIUS), splash.point);
+    }
   }
 }
 std::size_t Field::live_blocks() const {
@@ -619,6 +911,44 @@ std::size_t Field::live_blocks() const {
   for (const auto &block : blocks_)
     n += block.live ? 1u : 0u;
   return n;
+}
+void Field::set_level_flags(std::uint32_t flags) {
+  if ((flags & LEVEL_OPTION_SPLASH) != 0 && !splash_seed_)
+    refuse_splash_start_seed();
+  level_flags_ = flags;
+  if ((flags & LEVEL_OPTION_FILL) == 0)
+    return;
+  const auto filled = filled_mask();
+  for (auto &tile : tiles_)
+    tile.mask = filled;
+}
+void Field::set_appearance(Appearance appearance) {
+  if (appearance.colour != appearance_.colour || appearance.fix != appearance_.fix ||
+      appearance.scale != appearance_.scale)
+    dirty_ = true;
+  appearance_ = appearance;
+}
+std::uint32_t Field::disturb(std::uint32_t strength, std::uint32_t radius,
+                             const std::array<std::uint32_t, 3> &position) {
+  if (!query_)
+    throw Unsupported("water_disturb needs the WORLD chunk query");
+  const auto chunks = query_(radius, position);
+  for (const auto chunk : chunks) {
+    const auto index = chunk < by_chunk_.size() ? by_chunk_[chunk] : -1;
+    if (index < 0)
+      throw Error("the chunk query returned a chunk that is not a water tile");
+    auto &block = blocks_[static_cast<std::size_t>(index)];
+    // A chunk with no simulation block is counted and not written.
+    if (!block.live)
+      continue;
+    const auto &tile = tiles_[static_cast<std::size_t>(index)];
+    const auto before = block.grid.velocity;
+    disturb_cells(block.grid.velocity, strength, radius, tile.origin,
+                  {tile.bounds[0], tile.bounds[3]}, {position[0], position[1]});
+    if (block.grid.velocity != before)
+      dirty_ = true;
+  }
+  return static_cast<std::uint32_t>(chunks.size());
 }
 void Field::supply_grid(std::size_t index, Grid grid) {
   if (!blocks_.at(index).live)
@@ -633,10 +963,10 @@ const Grid &Field::grid(std::size_t index) const {
 std::array<DrawSurface, 2> Field::surfaces() const {
   std::array<DrawSurface, 2> out{};
   for (int set = 0; set < 2; ++set) {
-    const auto state = gs_state(set);
     out[static_cast<std::size_t>(set)].fix =
-        static_cast<float>(state.fix) / 128.f;
-    out[static_cast<std::size_t>(set)].colour = state.colour;
+        static_cast<float>(appearance_.fix[static_cast<std::size_t>(set)]) / 128.f;
+    out[static_cast<std::size_t>(set)].colour =
+        appearance_.colour[static_cast<std::size_t>(set)];
     out[static_cast<std::size_t>(set)].layer = LAYER;
   }
   for (std::size_t t = 0; t < tiles_.size(); ++t) {
@@ -645,12 +975,12 @@ std::array<DrawSurface, 2> Field::surfaces() const {
     const auto &tile = tiles_[t];
     const int set = tile.second_set ? 1 : 0;
     auto &surface = out[static_cast<std::size_t>(set)];
-    const auto state = gs_state(set);
-    const float min_x = bits_to_float(tile.min_x);
-    const float max_x = bits_to_float(tile.max_x);
-    const float min_y = bits_to_float(tile.min_y);
+    const float min_x = bits_to_float(tile.bounds[0]);
+    const float max_x = bits_to_float(tile.bounds[3]);
+    const float min_y = bits_to_float(tile.bounds[1]);
     const auto step = tile_step_bits(min_x, max_x);
     const auto org = origin(min_x, min_y, tile.chunk_z);
+    const auto scale = appearance_.scale[static_cast<std::size_t>(set)];
     std::vector<std::array<std::int16_t, SAMPLES>> rows;
     rows.reserve(32);
     for (int record = 1; record <= 32; ++record)
@@ -659,7 +989,7 @@ std::array<DrawSurface, 2> Field::surfaces() const {
     for (int call = 1; call <= 31; ++call) {
       for (int column = 0; column <= 30; ++column) {
         const auto sample =
-            world_sample(rows, call, column, step, org, state.scale);
+            world_sample(rows, call, column, step, org, scale);
         surface.positions.push_back(
             {promoted(sample.x_bits), promoted(sample.y_bits),
              promoted(sample.z_bits)});

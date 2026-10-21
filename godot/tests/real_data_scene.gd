@@ -10,6 +10,14 @@ extends SceneTree
 #   [--from=I] [--to=J]  only level indices I..J-1 (for parallel slices)
 #   [--scripts]   opt into the level script after load and before play
 #   [--water]     capture only levels that have water tiles
+#   [--wade]      walk the player toward the nearest water and capture that view
+#   [--wade-probe] with --wade: once in water, one harness water_disturb with
+#                 the Player jump-state strength and radius (ref_player.py
+#                 state_jump, 0x453b8000 and 0x41c00000) at the player
+#                 position, then 24 ticks and a capture. A test stimulus: the
+#                 scene does not run that state, and the jump's 12-unit drop
+#                 in z is not applied.
+#   [--level-lights=FILE] level-lights JSON; also supplies the level flag word
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
@@ -167,6 +175,12 @@ func run() -> void:
 			add("water.tiles_not_drawn", int(result.get("water_tiles_refused", 0)))
 			peak("water.texture_width", int(result.get("water_texture_width", 0)))
 			peak("water.texture_height", int(result.get("water_texture_height", 0)))
+			add("water.lines_applied", int(result.get("water_lines", 0)))
+			add("water.lines_refused", int(result.get("water_lines_refused", 0)))
+			if int(result.get("water_lines", 0)) > 0: add("water.levels_with_lines")
+			if result.get("water_negative_fix", false): add("water.levels_additive")
+			add("water.level_flags_loaded" if result.get("level_flags_loaded", false) else "water.level_flags_absent")
+			if not str(result.get("level_flags_error", "")).is_empty(): refuse("water.level_flags", str(result.level_flags_error))
 		add("pieces.total", int(result.get("pieces", 0)))
 		add("pieces.claimed", int(result.get("claimed", 0)))
 		add("pieces.drawn_claimed", int(result.get("drawn_claimed", 0)))
@@ -221,7 +235,10 @@ func run() -> void:
 				add("creature.textured" if creature.get("textured", false) else "creature.untextured")
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
-		for t in range(ticks): scene.advance_step()
+		if args.has("wade") and int(result.get("water_tiles", 0)) > 0:
+			wade(maxi(ticks, 2400))
+		else:
+			for t in range(ticks): scene.advance_step()
 		# Constant-light chunks (flags 0x100 / 0x2000 / 0x200) take the loaded
 		# level's base level from its light record; without one they are gated.
 		var constant_chunks := 0
@@ -250,6 +267,12 @@ func run() -> void:
 		add("fx.lighting_world_calls", int(scene.fx.lighting_calls.get("world", 0)))
 		for why in scene.fx.refusals: refuse("fx.runtime", str(why))
 		if capture_this:
+			if args.has("wade"):
+				var look: Vector3 = scene.actor.position
+				scene.camera.position = look + Vector3(24, 16, 28)
+				scene.camera.look_at(look, Vector3.UP)
+				await capture("level-%d-wade" % shown)
+				if args.has("wade-probe"): await probe(shown)
 			await capture("level-%d-play" % shown)
 			if creature.ok:
 				var shape: MeshInstance3D = scene.components.animation.mesh_instance
@@ -272,6 +295,87 @@ func run() -> void:
 	counts["complete"] = 1
 	print(JSON.stringify(write_summary(), "  ", true))
 	quit(0 if failures == 0 else 1)
+
+# Water tile centres, nearest first, at the tile's minimum height.
+func _water_targets() -> Array:
+	var here: Vector3 = scene.actor.position
+	var out: Array = []
+	for tile in scene.real.world.info.get("water", []):
+		var lo: Vector3 = tile.min
+		var hi: Vector3 = tile.max
+		out.append(Vector3((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5))
+	out.sort_custom(func(a, b): return Vector2(a.x - here.x, a.z - here.z).length() < Vector2(b.x - here.x, b.z - here.z).length())
+	return out
+
+func _stick_toward(target: Vector3) -> int:
+	# Godot (x, z, -y) from native (x, y, z). Bit 8 decreases native y.
+	var here: Vector3 = scene.actor.position
+	var bits := 0
+	if target.x > here.x + 4.0: bits |= 1
+	elif target.x < here.x - 4.0: bits |= 2
+	if target.z > here.z + 4.0: bits |= 8
+	elif target.z < here.z - 4.0: bits |= 4
+	return bits
+
+# Stick toward the nearest tile centre; after 90 ticks without getting 8 units
+# closer, try the next tile. Stops after 48 ticks in water.
+func wade(max_ticks: int) -> void:
+	var world = scene.real.world
+	if world == null or world.info.get("water", []).is_empty():
+		add("water.wade_unavailable")
+		return
+	var before := int(world.ticks_in_water)
+	var targets := _water_targets()
+	var pick := 0
+	var best := INF
+	var since := 0
+	var held_in := 0
+	for _t in range(max_ticks):
+		if scene.stopped:
+			add("water.wade_stopped")
+			break
+		var target: Vector3 = targets[pick % targets.size()]
+		var bits := _stick_toward(target)
+		if bits == 0: bits = 1
+		scene.held_commands = bits
+		scene.advance_step()
+		if world.in_water:
+			held_in += 1
+			if held_in >= 48: break
+			continue
+		held_in = 0
+		var here: Vector3 = scene.actor.position
+		var d := Vector2(target.x - here.x, target.z - here.z).length()
+		if d < best - 8.0:
+			best = d
+			since = 0
+		else:
+			since += 1
+			if since >= 90:
+				pick += 1
+				best = INF
+				since = 0
+	scene.held_commands = 0
+	add("water.wade_targets_tried", pick + 1)
+	add("water.wade_ticks_in", int(world.ticks_in_water) - before)
+	add("water.wade_reached" if world.in_water else "water.wade_missed")
+
+const PROBE_STRENGTH := 0x453B8000 # 3000, Player state 7 (ref_player.py state_jump)
+const PROBE_RADIUS := 0x41C00000 # 24
+func probe(shown: int) -> void:
+	var world = scene.real.world
+	if world == null or not world.in_water or not scene.raw_observation.has("position_raw"):
+		add("water.probe_skipped")
+		return
+	var position := PackedInt64Array()
+	for word in scene.raw_observation.position_raw: position.push_back(int(word))
+	var count := int(world.native.water_disturb(PROBE_STRENGTH, PROBE_RADIUS, position))
+	add("water.probe_chunks", maxi(count, 0))
+	for _t in range(24): scene.advance_step()
+	var look: Vector3 = scene.actor.position
+	scene.camera.position = look + Vector3(24, 16, 28)
+	scene.camera.look_at(look, Vector3.UP)
+	await capture("level-%d-probe" % shown)
 
 func take_script_counts() -> void:
 	var counts: Dictionary = scene.controller.script_command_counts()

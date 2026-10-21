@@ -165,6 +165,12 @@ int main() {
     check(image.disturb(from_int(300), from_int(12), {0, 0, 0}) == 1,
           "disturb counts the tile even without a ripple grid");
     check(image.service().writes().empty(), "no ripple grid is written");
+    check(image.disturb_chunks(from_int(12), {0, 0, 0}) == std::vector<std::uint32_t>{1},
+          "the disturb query names the water chunk by its table index");
+    check(image.disturb_chunks(from_int(12), {from_int(200), 0, 0}).empty(),
+          "a disturb outside the tile admits no chunk");
+    check(image.disturb_chunks(from_int(12), {0, 0, from_int(-100)}).empty(),
+          "more than 60 below the surface admits no chunk");
     check(bytes == w.b, "input bytes stay unchanged");
 
     L::Record door;
