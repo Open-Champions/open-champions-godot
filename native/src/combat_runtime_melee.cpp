@@ -116,7 +116,10 @@ std::int32_t round_half(Raw x) {
 const std::map<Raw, Raw> TYPE_DESC = {
     {0x3c2608, 0x908130}, {0x3c9558, 0x9089e0}, {0x3c3308, 0x908140},
     {0x3cc62c, 0x908e20}, {0x3c7bc8, 0x908560}, {0x3c62c0, 0x908330},
-    {0x3c3ab8, 0x9083d0}, {0x3cc6dc, 0x908e10}, {0x3c9508, 0x9089f0}};
+    {0x3c3ab8, 0x9083d0}, {0x3cc6dc, 0x908e10}, {0x3c9508, 0x9089f0},
+    // AntQueen_typeinfo and Soul_typeinfo (symbols/runtime.tsv descriptors);
+    // their name words enter the image with the first such creature.
+    {0x3c3c78, 0x908680}, {0x3cc7a0, 0x908e30}};
 } // namespace
 Raw World::State::type_of(Address obj) {
   auto fn = u(u(obj + 0x48) + 4);

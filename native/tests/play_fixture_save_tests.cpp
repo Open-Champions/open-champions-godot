@@ -206,16 +206,20 @@ void full_combat() {
       if (cut != std::string::npos) last = line.substr(cut);
     }
   }
-  // Slots 4-6 stay empty: AntQueen, Skeleton and Soul refuse to spawn
-  // (their constructors are not executed; audit CAI-4), so the fight has no
-  // demon test.
-  bool round5 = false;
-  for (const auto &a : whole.scene->actors())
-    round5 = round5 || (a.slot >= 4 && a.present);
-  check(!round5, "the Full fight places no AntQueen, Skeleton or Soul");
+  // Slot 6 is the Soul (research-combat-ctors e9777eb constructor, set-state
+  // and run prologue); slots 4 and 5 stay empty: on the round-5 placement the
+  // Skeleton's first scan calls the refused Skeleton_isEnemy and the AntQueen
+  // asks for state 3, whose switch is not executed. The Soul's demon tests are
+  // in the trace, so the save/load comparison covers them.
+  bool soul = false, others = false;
+  for (const auto &a : whole.scene->actors()) {
+    soul = soul || (a.slot == 6 && a.present);
+    others = others || ((a.slot == 4 || a.slot == 5) && a.present);
+  }
+  check(soul && !others, "the Full fight places the Soul in slot 6 and nothing in slots 4 and 5");
   std::cout << "full combat round 5: " << whole.demon_tests << " demon tests, " << whole.shield_samples
             << " Holy Shield sample points\n";
-  check(whole.demon_tests == 0, "no Soul tests for a demon in the live fight");
+  check(whole.demon_tests == 300 / 16 + 1, "the Soul tests for a demon every 16 frames of the live fight");
   check(whole.shield_samples > 0 && whole.shield_samples % 241 == 0,
         "Holy Shield absorbs in the live fight, 241 sample points each time");
   auto player = whole.scene->session().world().target(whole.scene->actors().at(0).handle);
@@ -268,8 +272,8 @@ void wave12_extensions() {
   }
   FullRun whole = full_start();
   run(whole, 0, TICKS);
-  check(whole.scene->actors().size() == 4 && whole.scene->own_creature_class() == "Gnaw",
-        "the own-machine creature is observed in slot 3");
+  check(whole.scene->actors().size() == 5 && whole.scene->own_creature_class() == "Gnaw",
+        "the own-machine creature is observed in slot 3, beside the Soul");
   FullRun first = full_start();
   run(first, 0, SAVE_AT);
   const auto presentation = FX::sim::save_world(*first.world);

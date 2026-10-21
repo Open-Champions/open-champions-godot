@@ -92,6 +92,10 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // model_buildHideMask (model, variant bits): the 64-bit show mask the
+  // AntQueen and Skeleton constructors store at +0x220. A missing function
+  // refuses.
+  std::function<std::uint64_t(Raw model, Raw variant)> hide_mask;
   // model_getSamplePoint. The weight out-parameter is not retained. A missing
   // function refuses; a count of 0 never calls it.
   std::function<Vec3(Raw model, Address anim, const Vec3 &position, Raw facing,

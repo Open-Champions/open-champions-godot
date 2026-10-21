@@ -402,6 +402,8 @@ void World::State::destroy(Address a) {
     return projectile_destroy(a, 3);
   if (fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  if (fn == 0x3c3c10 || fn == 0x3cc5b8 || fn == 0x3cc72c)
+    throw Unsupported(ctor_class_dtor_refusal(fn));
   if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);
@@ -829,6 +831,9 @@ Services flat_fixture_services() {
   s.attach_point = [](Address, Raw, const Vec3 &pos, Raw, Raw) { return pos; };
   s.sample_point_count = [](Raw) { return Raw(0); };
   s.resource = [](const ResourceQuery &) { return Raw(0); };
+  // Synthetic: the placements' class definitions hold no model (+0xc is 0),
+  // so every part is shown, the mask Creature_ctor itself stores.
+  s.hide_mask = [](Raw, Raw) { return UINT64_MAX; };
   return s;
 }
 } // namespace champions::simulation::rta::combat_runtime

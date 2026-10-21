@@ -177,6 +177,9 @@ Value Model::external_call(const std::string &name, std::vector<Value> args) {
   return call(name,std::move(args));
 }
 void Model::store(Address a, std::size_t size, std::uint64_t value) { write(a,size,value); }
+void Model::base_take_damage(Address c, Raw attacker, Raw flags, Raw amount) {
+  Depth guard(depth_,limits_.depth); take_damage(c,attacker,flags,amount);
+}
 Raw Model::u32(Address a) const { return Raw(mem.load(a,4)); }
 Vec3 Model::vec(Address a) const { return {u32(a),u32(a+4),u32(a+8)}; }
 Raw Model::clip(Address c, std::uint32_t off) const { raw_creature(c); return u32(Address(u32(c+0x24))+off); }

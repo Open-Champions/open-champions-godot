@@ -12,8 +12,8 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  // Slot 3 is the optional one-per-session creature. Slots 4-6 were the Full
-  // fixture's AntQueen, Skeleton and Soul; they stay empty (full_setup).
+  // Slot 3 is the optional one-per-session creature. Slot 6 is the Full
+  // fixture's Soul; slots 4 and 5 (AntQueen, Skeleton) stay empty (full_setup).
   std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
@@ -246,11 +246,27 @@ struct Session::State {
       for (Raw off : {0x1cu, 0x24u})
         clips[Raw(world->read(definition + off))] = Clip{30, {{10u, Raw(1)}}};
     }
-    // Slots 4-6 (AntQueen, Skeleton, Soul) stay empty: World::spawn_class
-    // refuses those classes because their constructors, run prologues and
-    // setState side effects were not executed (audit CAI-1, CAI-2, CAI-4;
-    // research-anim own-state-machines.md section 1). The round-5 bodies they
-    // used (bank fade/spring, isDemonNear) stay callable on the World.
+    // Slot 6: a Soul on the placement the round-5 fixture used (-60, 100),
+    // facing the player, 120 HP, built by its executed constructor
+    // (research-combat-ctors e9777eb; World::spawn_class). Soul_setCharm puts
+    // it on team 0, and it wanders in states 0 and 1 for the whole fight.
+    // Slots 4 and 5 stay empty. The AntQueen and the Skeleton are built by
+    // their executed constructors too (spawn_creature), but on the round-5
+    // placement they stop this fight early on refusals the job keeps: the
+    // Skeleton's first target scan (ready tick 32) calls Skeleton_isEnemy
+    // 0x2a7e04, a recording stub of the research, and the AntQueen sees the
+    // player and requests state 3, whose switch is not executed (tick 33).
+    auto place = [&](unsigned slot, const char *cls, int x, int y) {
+      C::Spawn s;
+      s.position[0] = from_int(Raw(x));
+      s.position[1] = from_int(Raw(y));
+      s.facing = 0xc000;
+      s.hp = 0x42f00000;
+      if (world_queries::terrain_height_below(terrain, from_int(4), s.position) != 0)
+        throw C::Unsupported("combat fixture actor has no flat ground");
+      handles[slot] = world->retain(world->spawn_class(cls, s));
+    };
+    place(6, "Soul", -60, 100);
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
     adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);

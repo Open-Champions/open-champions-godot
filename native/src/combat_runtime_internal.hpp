@@ -46,6 +46,14 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
 // 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
 inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =
     "DiseaseCloud_dtor 0x3cd480 (slot 1 of 0x5186f0): body not read";
+// AntQueen_dtor 0x3c3c10, Skeleton_dtor 0x3cc5b8, Soul_dtor 0x3cc72c: research
+// symbols/runtime.tsv names them (inline destructors); no body was read.
+inline std::string ctor_class_dtor_refusal(Raw fn) {
+  const char *name = fn == 0x3c3c10   ? "AntQueen_dtor 0x3c3c10"
+                     : fn == 0x3cc5b8 ? "Skeleton_dtor 0x3cc5b8"
+                                      : "Soul_dtor 0x3cc72c";
+  return std::string(name) + ": body not read";
+}
 struct World::State {
   enum class Kind { Creature, Player, Missile, Thrown, Effect, Spell };
   struct Actor : Object {
@@ -155,6 +163,11 @@ struct World::State {
   void skelight_run(Address);
   bool own_run(Address, Raw fn);
   void own_class_run(Address, const char *name);
+  void ctor_class_run(Address, const std::string &name);
+  Address spawn_ctor_class(const std::string &, const Spawn &);
+  void plant_ctor_fixtures(const std::string &);
+  bool ctor_bodies = false, skeleton_fixture = false, soul_fixture = false;
+  Address skeleton_type_name = 0;
   void apply_own_state(Address, const char *name, Raw requested);
   const char *own_set_class(Raw fn) const;
   void player_run(Address);
@@ -164,6 +177,7 @@ struct World::State {
   void actor_domain(Address) const;
   void note(std::string name, std::vector<std::uint64_t> args = {});
   void install_services();
+  void install_ctor_services();
   Value service(const std::string &, const std::vector<Value> &);
   Value vcall(Address, unsigned, std::vector<Value> = {});
   Value full_vcall(Address, unsigned, std::vector<Value>);

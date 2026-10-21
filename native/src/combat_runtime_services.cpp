@@ -32,6 +32,12 @@ bool knows(Raw fn) {
   case 0x2c2440: case 0x2c382c: case 0x2c34e4: case 0x2c3c54:
   case 0x10e658: case 0x10beb8: case 0x3c2708:
   case 0x267a0c:                         // Gnaw_setState (creature-ai)
+  case 0x237918: case 0x2a7768: case 0x2aac38: // combat-ctors set-states
+  case 0x2ab298:                               // Soul_getModel
+  case 0x2378fc: case 0x2378f4: case 0x2aab60: // AntQueen slot 2; slot 3s
+  case 0x2a774c: case 0x2aa908: case 0x2a7e04: // refused recording stubs
+  case 0x2a7688:
+  case 0x3c3c78: case 0x3cc7a0:                // AntQueen, Soul type-info
   case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
   case 0x3c3b40:
   case 0x11a290: case 0x3c7ef8: case 0x3c3b10: case 0x3c3b08: // empty
@@ -229,6 +235,8 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
   }
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  if (slot == 1 && (fn == 0x3c3c10 || fn == 0x3cc5b8 || fn == 0x3cc72c))
+    throw Unsupported(ctor_class_dtor_refusal(fn));
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
                     fn == 0x3c6888)) {
     note("destroy", {self});
@@ -241,6 +249,23 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
     return object_body(self, fn, slot, std::move(args));
   throw Unsupported("virtual slot " + std::to_string(slot) + " reaches " +
                     std::to_string(fn) + ", which has no model");
+}
+// The call-outs of the AntQueen, Skeleton and Soul constructors and
+// set-states (combat_ctors), registered with the first such creature so other
+// worlds keep their callback table.
+void World::State::install_ctor_services() {
+  for (const char *name :
+       {"anim_clear", "anim_push", "anim_pushWithWeights", "anim_pushChained",
+        "anim_findTrack", "model_buildHideMask", "Creature_init",
+        "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
+        "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
+        "Holder.v21", "Skeleton_shatter", "AntQueen_pickFlyDest",
+        "model_getSamplePoint"}) {
+    std::string n = name;
+    model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &a) {
+      return service(n, a);
+    };
+  }
 }
 void World::State::install_services() {
   const char *names[] = {"handle_clear",
@@ -468,6 +493,70 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "fx_shatterToLooseIce")
     throw Unsupported("fx_shatterToLooseIce (shared-seed ice shatter; effects 17)");
   auto v = [&](unsigned k) { return std::get<Vec3>(a.at(k)); };
+  // Call-outs of the AntQueen, Skeleton and Soul constructors and set-states
+  // (combat_ctors; research-combat-ctors e9777eb). The animation player's push
+  // calls, Creature_init and the class-definition event times are recorded:
+  // the World's animation service is the authored fixture that starts clips
+  // and keeps its own timeline (as Gnaw_ctor's anim_clear and event times).
+  if (n == "anim_clear" || n == "anim_push" || n == "anim_pushWithWeights" ||
+      n == "anim_pushChained" || n == "Creature_init" ||
+      n == "creature_setDefEntryParams" || n == "anm_setEventSlots") {
+    std::vector<std::uint64_t> args;
+    for (const auto &x : a)
+      if (auto p = std::get_if<std::int64_t>(&x))
+        args.push_back(std::uint64_t(*p));
+    note(n, std::move(args));
+    return iv(0);
+  }
+  if (n == "anim_findTrack")
+    throw Unsupported("anim_findTrack: the World's animation fixture keeps no "
+                      "tracks to search (AntQueen_setState 0x14)");
+  if (n == "model_buildHideMask") {
+    if (!services.hide_mask)
+      throw Unsupported("model_buildHideMask service missing");
+    return std::int64_t(services.hide_mask(ar(0), ar(1)));
+  }
+  if (n == "Creature_setCharm") {
+    // Creature_setCharm 0x1189f0 (Observed, skills-35-68.md "Creature_setCharm";
+    // script.md charmMonster): nothing when +0x312 is -1 (a permanent charm),
+    // without object flag 0x20, or for a player (0x40). Otherwise the team
+    // byte +0x310, the charm timer +0x312, and the target handle cleared.
+    auto c = ar(0);
+    actor(c);
+    note(n, {c, ar(1), ar(2)});
+    if (s16m(c + 0x312) == -1 || !(u(c + 0xc) & 0x20) || (u(c + 0xc) & 0x40))
+      return iv(0);
+    w(c + 0x310, 1, ar(2));
+    w(c + 0x312, 2, ar(1));
+    if (full())
+      list_head(c + 0x234);
+    clear(c + 0x234);
+    return iv(0);
+  }
+  if (n == "Holder.v1" || n == "Holder.v21") {
+    // Skeleton's weapon holder: slot 1 puts a model entry in a hand, slot 21
+    // is the per-frame update that only feeds fx_modelStatusEffects
+    // (docs/monsters-2.md 2.2; FINDINGS D37). The research records both as
+    // call-outs; their bodies are not executed. Recorded here.
+    std::vector<std::uint64_t> args;
+    for (const auto &x : a)
+      if (auto p = std::get_if<std::int64_t>(&x))
+        args.push_back(std::uint64_t(*p));
+    note(n, std::move(args));
+    return iv(0);
+  }
+  if (n == "Holder.v2" || n == "Holder.v3" || n == "Holder.v4")
+    throw Unsupported(n + ": a Skeleton weapon element (creature_buildElementDamage "
+                          "draws the shared seed; docs/monsters-2.md) is not executed");
+  if (n == "Holder.v11")
+    throw Unsupported("Holder.v11: dropping a held part as a physics prop is not executed");
+  if (n == "Skeleton_shatter")
+    throw Unsupported("Skeleton_shatter 0x2a7ef0 is a recording stub of the research");
+  if (n == "AntQueen_pickFlyDest")
+    throw Unsupported("AntQueen_pickFlyDest 0x238150 is a recording stub of the research");
+  if (n == "model_getSamplePoint")
+    throw Unsupported("model_getSamplePoint for Soul_setState 0x21's burst is not "
+                      "a World service");
   if (n == "handle_clear") {
     if (full())
       list_head(ar(0));

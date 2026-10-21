@@ -146,6 +146,8 @@ public:
   // Recorded call-out and logged store for bodies ported outside this file.
   Value external_call(const std::string &name, std::vector<Value> args);
   void store(Address, std::size_t, std::uint64_t);
+  // Creature_takeDamage 0x116638, for a class slot 2 that only jumps to it.
+  void base_take_damage(Address c, Raw attacker, Raw flags, Raw amount);
   explicit Model(Memory &, creature_hp::Limits = {});
   // Shared data/holder family. Strings retain bytes without text decoding.
   std::string cstr(Address address, std::size_t limit = 64) const;
