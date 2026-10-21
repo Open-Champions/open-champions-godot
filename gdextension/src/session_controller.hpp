@@ -61,6 +61,8 @@ class ChampionsSessionController : public godot::RefCounted {
   int64_t next_candidate_ = 1;
   godot::String start_objects_path_;
   std::vector<uint8_t> start_objects_;
+  std::string start_level_name_;
+  std::vector<std::string> arena_names_a_;
   godot::Dictionary terrain_;
   godot::String terrain_name_ = "Practice ground";
   static godot::Dictionary
@@ -110,8 +112,13 @@ public:
   // Level script for the loaded level. Empty bytes are refused and leave the
   // session observation unchanged. A loaded script runs its level entry now;
   // later ready ticks resume deferred calls.
+  // carry_campaign: the new host starts from the previous host's quest and
+  // mission campaign image (quests::Campaign::save), as the binder record
+  // and quest variables persist across a level change. Off by default, so
+  // each level's script counts stay independent of load order.
   godot::Dictionary enable_level_script(const godot::PackedByteArray &script,
-                                        const godot::PackedByteArray &objects);
+                                        const godot::PackedByteArray &objects,
+                                        bool carry_campaign = false);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
   godot::Dictionary reset_session();
@@ -132,8 +139,14 @@ public:
   // Level-spawn story start for the next terrain prepared from exactly `path`:
   // that level's objects.ob bytes (level_flow::story_start_ground). Empty
   // bytes or another path keep the historical origin start and check.
+  // level_name is the level's own name, used only to look it up in the
+  // mode-A arena table read by load_arena_tables.
   godot::Dictionary set_terrain_start_objects(const godot::String &path,
-                                              const godot::PackedByteArray &objects);
+                                              const godot::PackedByteArray &objects,
+                                              const godot::String &level_name = godot::String());
+  // The arena name tables from the owner's executable, read at run time
+  // (arena_modes::read_names). Kept in memory only; the result is counts.
+  godot::Dictionary load_arena_tables(const godot::String &executable_path);
   godot::Dictionary commit_terrain_file(int64_t token);
   bool cancel_terrain_file(int64_t token);
 };

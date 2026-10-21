@@ -10,6 +10,7 @@
 // executable at the addresses in research t3/research-arena docs/arena-modes.md
 // section 1. They stay in memory. Every scenario input that the research does
 // not supply is named "stand-in" in the trace and in docs/ARENA_MODES.md.
+#include "champions/arena_executable.hpp"
 #include "champions/arena_modes.hpp"
 #include "champions/core_arithmetic.hpp"
 #include "champions/core_math.hpp"
@@ -38,10 +39,10 @@ using namespace champions::simulation::rta::level_flow;
 namespace fs = std::filesystem;
 
 // Research addresses (docs/arena-modes.md section 1).
-constexpr std::uint32_t NAMES_A = 0x5037b8;
-constexpr std::uint32_t NAMES_B = 0x503798;
-constexpr std::uint32_t RECIPES = 0x503868;
-constexpr std::uint32_t RECIPE_COUNT = 0x503886;
+constexpr std::uint32_t NAMES_A = NAMES_A_TABLE;
+constexpr std::uint32_t NAMES_B = NAMES_B_TABLE;
+constexpr std::uint32_t RECIPES = RECIPE_TABLE;
+constexpr std::uint32_t RECIPE_COUNT = RECIPE_COUNT_HALF;
 // The three cold arena indices in paired-archive order (level-spawn-2 report).
 constexpr unsigned CAPTURE_INDICES[] = {69, 70, 71};
 
@@ -84,52 +85,11 @@ std::string cstr(const std::vector<std::uint8_t> &b, std::size_t at) {
   return std::string(reinterpret_cast<const char *>(b.data() + at), end - at);
 }
 
-// ELF32 little-endian PT_LOAD mapping, file-backed bytes only.
-struct Exe {
-  struct Seg {
-    std::uint32_t va = 0, off = 0, size = 0;
-  };
-  std::vector<std::uint8_t> bytes;
-  std::vector<Seg> segs;
+// The library's ELF reader (arena_executable.hpp), fed from a file.
+struct Exe : Executable {
   bool load(const fs::path &path) {
-    if (!read_file(path, bytes) || bytes.size() < 0x34 || bytes[0] != 0x7f || bytes[1] != 'E' ||
-        bytes[2] != 'L' || bytes[3] != 'F' || bytes[4] != 1 || bytes[5] != 1)
-      return false;
-    const auto phoff = u32(bytes, 0x1c);
-    const auto phentsize = u16(bytes, 0x2a);
-    const auto phnum = u16(bytes, 0x2c);
-    for (unsigned i = 0; i < phnum; ++i) {
-      const std::size_t at = phoff + std::size_t(i) * phentsize;
-      if (at + 0x20 > bytes.size())
-        return false;
-      if (u32(bytes, at) != 1)
-        continue;
-      Seg seg{u32(bytes, at + 8), u32(bytes, at + 4), u32(bytes, at + 16)};
-      if (std::uint64_t(seg.off) + seg.size > bytes.size())
-        return false;
-      segs.push_back(seg);
-    }
-    return !segs.empty();
-  }
-  std::size_t offset(std::uint32_t va, std::size_t n) const {
-    for (const auto &seg : segs)
-      if (va >= seg.va && std::uint64_t(va) + n <= std::uint64_t(seg.va) + seg.size)
-        return seg.off + (va - seg.va);
-    throw arena_modes::Unsupported("address is not file-backed in the executable");
-  }
-  std::uint32_t word(std::uint32_t va) const { return u32(bytes, offset(va, 4)); }
-  std::uint16_t half(std::uint32_t va) const { return u16(bytes, offset(va, 2)); }
-  std::uint8_t byte(std::uint32_t va) const { return bytes[offset(va, 1)]; }
-  std::string string(std::uint32_t va) const { return cstr(bytes, offset(va, 1)); }
-  NameTable names(std::uint32_t va) const {
-    NameTable out;
-    for (int i = 0; i < 32; ++i) {
-      const auto p = word(va + 4u * unsigned(i));
-      if (!p)
-        return out;
-      out.push_back(string(p));
-    }
-    throw arena_modes::Unsupported("name table has no null pointer within 32 entries");
+    std::vector<std::uint8_t> bytes;
+    return read_file(path, bytes) && Executable::load(std::move(bytes));
   }
 };
 

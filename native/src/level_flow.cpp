@@ -1,4 +1,6 @@
 #include "champions/level_flow.hpp"
+
+#include "champions/arena_modes.hpp"
 #include "champions/core_math.hpp"
 #include <algorithm>
 #include <limits>
@@ -405,7 +407,8 @@ const char *open_item_reason(OpenItem item) {
   case OpenItem::RealObjectList:
     return "findFreeSpot's class-constructor radii were not executed";
   case OpenItem::ArenaRespawn:
-    return "arena respawn (arena_pickSpawnPoint a0 = 0) was not executed";
+    return "arena respawn (arena_pickSpawnPoint a0 = 0) was not executed in research-levels; "
+           "use arena_respawn, the research-arena port";
   case OpenItem::ArenaRotationTable:
     return "the arena name table is not copied; the index step is arena_mode_a_next";
   case OpenItem::PlayerCtorRemainder:
@@ -426,7 +429,30 @@ const char *open_item_reason(OpenItem item) {
   return "open level-start item";
 }
 void refuse_open(OpenItem item) { throw Unsupported(open_item_reason(item)); }
-void arena_respawn() { refuse_open(OpenItem::ArenaRespawn); }
+ArenaRespawnPick arena_respawn(const ArenaSpawnTable &table, std::uint32_t seed,
+                               bool network, const Vec3 &focus,
+                               const Vec3 &camera, const ArenaSeededSearch &search) {
+  if (table.count < 1 || std::size_t(table.count) > table.entries.size())
+    throw Unsupported("arena respawn needs a registered spawn table");
+  std::vector<arena_modes::SpawnPoint> points;
+  for (int i = 0; i < table.count; ++i) {
+    const auto &entry = table.entries[std::size_t(i)];
+    if (!entry.occupied)
+      throw Unsupported("arena respawn would read a spawn-table hole");
+    points.push_back({entry.point[0], entry.point[1], entry.point[2], entry.angle});
+  }
+  arena_modes::Search forward;
+  if (search)
+    forward = [&search](const Vec3 &centre, int spread, int radius, std::uint32_t &state) {
+      const auto found = search(centre, spread, radius, state);
+      return arena_modes::Spot{found.first, found.second};
+    };
+  // flag 0. slot, mode_a, scramble and the active count are read only by the
+  // a0 != 0 branch.
+  const auto pick = arena_modes::pick_spawn(0, 0, points.data(), table.count, seed, false, false,
+                                            network, focus, 0, forward, camera);
+  return {pick.pos, pick.facing, pick.seed};
+}
 void arena_net_peer_index() { refuse_open(OpenItem::NetPeerIndex); }
 std::int32_t arena_ring_angle(int slot, int active_count) {
   if (active_count <= 0)

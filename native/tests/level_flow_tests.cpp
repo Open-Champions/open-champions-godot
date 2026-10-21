@@ -1271,7 +1271,44 @@ void round3_cases() {
   CHECK(arena_ring_angle(2, 4) == 32766);
   CHECK(arena_ring_angle(2, 3) == -21846);
   refuses([] { arena_ring_angle(0, 0); });
-  refuses([] { arena_respawn(); });
+  // arena_respawn forwards to the research-arena port. The three flag-0
+  // cases generated from ref_arena_modes (arena_modes_vectors.inc), with the
+  // table built through arena_register_spawn.
+  {
+    ArenaSpawnTable three;
+    three = arena_register_spawn(three, -1, Vec3{0x00000000u, 0x00000000u, 0x40a00000u}, 4096);
+    three = arena_register_spawn(three, -1, Vec3{0x43000000u, 0x00000000u, 0x3f800000u}, 8192);
+    three = arena_register_spawn(three, -1, Vec3{0x43800000u, 0x00000000u, 0x41100000u}, 256);
+    const Vec3 camera{0x40400000u, 0x40800000u, 0x40a00000u};
+    int searches = 0;
+    const ArenaSeededSearch none = [&](const Vec3 &c, int, int, std::uint32_t &) {
+      ++searches;
+      return std::make_pair(c, 0);
+    };
+    const auto net = arena_respawn(three, 20973, true, Vec3{}, camera, none);
+    CHECK(searches == 0 && net.pos == (Vec3{0x00000000u, 0x00000000u, 0x40a00000u}) &&
+          net.facing == 20480 && net.seed == 0x5d3c8a68u);
+    const auto near = arena_respawn(three, 7, false, Vec3{}, camera, none);
+    CHECK(searches == 0 && near.pos == (Vec3{0x00000000u, 0x00000000u, 0x40a00000u}) &&
+          near.facing == 20480 && near.seed == 0x3d20bdbau);
+    ArenaSpawnTable far;
+    far = arena_register_spawn(far, -1, Vec3{0x43800000u, 0x00000000u, 0x41100000u}, 256);
+    std::vector<std::pair<int, int>> spreads;
+    const auto fell = arena_respawn(far, 3, false, Vec3{}, camera,
+                                    [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
+                                      spreads.push_back({spread, radius});
+                                      return std::make_pair(camera, 1);
+                                    });
+    CHECK(spreads.size() == 1 && spreads[0] == std::make_pair(72, 24));
+    CHECK(fell.pos == camera && fell.facing == 0 && fell.seed == 3u);
+    // A hole below count was never written by a factory; an empty table has
+    // no entry to pick.
+    ArenaSpawnTable holed;
+    holed = arena_register_spawn(holed, 1, Vec3{}, 0);
+    holed.count = 2;
+    refuses([&] { arena_respawn(holed, 1, true, Vec3{}, camera, none); });
+    refuses([&] { arena_respawn(ArenaSpawnTable{}, 1, true, Vec3{}, camera, none); });
+  }
   for (auto item : {OpenItem::LiveFindFreeSpotSeed, OpenItem::RealObjectList,
                     OpenItem::ArenaRespawn, OpenItem::ArenaRotationTable,
                     OpenItem::PlayerCtorRemainder,

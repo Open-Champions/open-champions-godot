@@ -2,6 +2,7 @@
 #include "champions/script_commands.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
+#include "champions/arena_executable.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
@@ -87,8 +88,8 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects"),
-                       &ChampionsSessionController::enable_level_script);
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false));
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -131,8 +132,10 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_terrain_file);
   ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path"),
                        &ChampionsSessionController::prepare_terrain_file);
-  ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects"),
-                       &ChampionsSessionController::set_terrain_start_objects);
+  ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name"),
+                       &ChampionsSessionController::set_terrain_start_objects, DEFVAL(String()));
+  ClassDB::bind_method(D_METHOD("load_arena_tables", "executable_path"),
+                       &ChampionsSessionController::load_arena_tables);
   ClassDB::bind_method(D_METHOD("commit_terrain_file", "token"),
                        &ChampionsSessionController::commit_terrain_file);
   ClassDB::bind_method(D_METHOD("cancel_terrain_file", "token"),
@@ -502,7 +505,8 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     scripts_->on_ready_tick();
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
-                                                          const PackedByteArray &objects) {
+                                                          const PackedByteArray &objects,
+                                                          bool carry_campaign) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -511,6 +515,9 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    const bool carried = carry_campaign && scripts_;
+    if (carried)
+      next->load_campaign(scripts_->save_campaign());
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {
@@ -522,6 +529,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     scripts_ = std::move(next);
     Dictionary result;
     result["ok"] = true;
+    result["campaign_carried"] = carried;
     return result;
   } catch (const std::exception &e) {
     return failure(e);
@@ -560,6 +568,35 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   }
   result["executed"] = executed;
   result["refused"] = refused;
+  // The quest and mission campaign the host's commands wrote (QUESTS.md).
+  const auto &campaign = scripts_->campaign();
+  Dictionary quest;
+  quest["num_players"] = int64_t(campaign.num_players());
+  int64_t lines = 0, available = 0, complete = 0;
+  for (int slot = 0; slot < campaign.num_players(); ++slot) {
+    const auto &record = campaign.record(slot);
+    lines += record.quest_count;
+    for (const auto mission : record.missions) {
+      available += mission & 1;
+      complete += (mission >> 1) & 1;
+    }
+  }
+  quest["quest_lines"] = lines;
+  quest["mission_available_bits"] = available;
+  quest["mission_complete_bits"] = complete;
+  int64_t nonzero = 0;
+  for (const auto &var : campaign.vars())
+    nonzero += var.value != 0;
+  quest["vars"] = int64_t(campaign.vars().size());
+  quest["vars_nonzero"] = nonzero;
+  const auto &events = campaign.events();
+  quest["menu_opens"] = int64_t(events.menu_opens);
+  quest["menu_launches"] = int64_t(events.menu_launches);
+  quest["cflag_bit0"] = int64_t(events.cflag_bit0);
+  quest["cflag_bit26"] = int64_t(events.cflag_bit26);
+  quest["boss_music"] = int64_t(events.boss_music);
+  quest["exp_grants"] = int64_t(events.exp_grants);
+  result["campaign"] = quest;
   return result;
 }
 Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture,
@@ -961,12 +998,27 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     if (!start_objects_path_.is_empty() && start_objects_path_ == path) {
       const auto records = rta::level_flow::parse_objects(
           {start_objects_.data(), start_objects_.size()});
-      const auto story = rta::level_flow::story_start_ground({}, records, query);
+      auto story = rta::level_flow::story_start_ground({}, records, query);
+      // A level the story snap cannot start is loaded in arena mode A only
+      // when the owner's executable lists it in the mode-A table (0x5037b8,
+      // research-levels 13fafa4 section 18.1: those archives are reached
+      // through that table). That is the menu's mode-A load; the start is
+      // arena_mode_a_start_ground, before the search and with no facing.
+      bool arena_a = false;
+      if (!story.ground &&
+          rta::arena_modes::mode_a_index(arena_names_a_, start_level_name_) >= 0) {
+        story = rta::level_flow::arena_mode_a_start_ground(records, query);
+        arena_a = story.ground;
+      }
       if (!story.ground)
         throw std::runtime_error(
-            "This WORLD has no ground at its story start (radius 12 snap). "
-            "A mode-A arena start needs the arena mode, which this session "
-            "does not select.");
+            arena_names_a_.empty()
+                ? "This WORLD has no ground at its story start (radius 12 snap). "
+                  "A mode-A arena start needs the executable's arena tables."
+                : "This WORLD has no ground at its story start (radius 12 snap) "
+                  "and is not a mode-A arena level with an ArenaPlayerStart.");
+      if (arena_a)
+        start_info["arena_mode"] = "A";
       start = rta::world_queries::Vec3{story.position[0], story.position[1],
                                        story.object_z};
       start_info["marker_taken"] = story.marker_taken;
@@ -1026,7 +1078,7 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
   }
 }
 Dictionary ChampionsSessionController::set_terrain_start_objects(
-    const String &path, const PackedByteArray &objects) {
+    const String &path, const PackedByteArray &objects, const String &level_name) {
   Dictionary result;
   if (objects.size() > 16 * 1024 * 1024) {
     result["ok"] = false;
@@ -1037,8 +1089,34 @@ Dictionary ChampionsSessionController::set_terrain_start_objects(
   start_objects_.clear();
   if (!objects.is_empty())
     start_objects_.assign(objects.ptr(), objects.ptr() + objects.size());
+  start_level_name_ = objects.is_empty() ? std::string() : std::string(level_name.utf8().get_data());
   result["ok"] = true;
   return result;
+}
+Dictionary ChampionsSessionController::load_arena_tables(const String &executable_path) {
+  try {
+    arena_names_a_.clear();
+    const Ref<FileAccess> file = FileAccess::open(executable_path, FileAccess::READ);
+    if (file.is_null())
+      throw std::runtime_error("The executable could not be opened.");
+    const auto size = file->get_length();
+    if (size > 64u * 1024u * 1024u)
+      throw std::runtime_error("The executable exceeds 64 MiB.");
+    const auto bytes = file->get_buffer(size);
+    std::vector<uint8_t> input(bytes.ptr(), bytes.ptr() + bytes.size());
+    rta::arena_modes::Executable exe;
+    if (!exe.load(std::move(input)))
+      throw std::runtime_error("The executable is not an ELF32 image.");
+    auto names = rta::arena_modes::read_names(exe);
+    arena_names_a_ = std::move(names.names_a);
+    Dictionary result;
+    result["ok"] = true;
+    result["names_a"] = int64_t(arena_names_a_.size());
+    result["names_b"] = int64_t(names.names_b.size());
+    return result;
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
 }
 Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
   try {

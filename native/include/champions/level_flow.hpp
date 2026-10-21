@@ -140,7 +140,7 @@ Raw player_ctor_z(const Vec3 &pos, Raw radius, const Height &);
 enum class OpenItem {
   LiveFindFreeSpotSeed,  // g_randSeed at Player1_ctor is not a fixed constant
   RealObjectList,        // class-constructor radii were not executed
-  ArenaRespawn,          // arena_pickSpawnPoint a0 = 0, read and not executed
+  ArenaRespawn,          // arena_pickSpawnPoint a0 = 0: not in research-levels; arena_respawn forwards to research-arena
   ArenaRotationTable,    // the mode-A name table is not copied into this module
   PlayerCtorRemainder,   // Player_ctor after the radius store and the snap
   OrientationCopyReaders, // readers of the copied orientation byte 0x41b7c1
@@ -152,7 +152,6 @@ enum class OpenItem {
 };
 const char *open_item_reason(OpenItem);
 [[noreturn]] void refuse_open(OpenItem);
-[[noreturn]] void arena_respawn(); // arena_pickSpawnPoint a0 = 0
 [[noreturn]] void arena_net_peer_index(); // message offset 0xf4, unchecked
 // Low 16 bits of s16(65535 / count) * slot. A non-positive count divides by
 // zero in the original and is refused here.
@@ -198,6 +197,25 @@ struct ArenaSpawnTable {
 // refused: the count is a byte, and the factories pass 0 or -1.
 ArenaSpawnTable arena_register_spawn(ArenaSpawnTable, int index,
                                      const Vec3 &point, std::uint16_t angle);
+// arena_pickSpawnPoint 0x3050a4 with a0 == 0, the respawn pick. Research-levels
+// section 18 read it and did not execute it (OpenItem::ArenaRespawn).
+// Research-arena 17810bb executed both arguments, and this forwards the
+// registered table to arena_modes::pick_spawn with flag 0: networked, a
+// shared-seed index into the whole table; offline, a shared-seed index into
+// the entries near `focus`, or findFreeSpot (spread 72, radius 24) around
+// `camera` when none is near. The search draws from the shared seed and
+// leaves it where its draws end. A hole below count refuses: no factory wrote
+// those bytes.
+using ArenaSeededSearch = std::function<std::pair<Vec3, int>(
+    const Vec3 &centre, int spread, int radius, std::uint32_t &seed)>;
+struct ArenaRespawnPick {
+  Vec3 pos{};
+  int facing = 0;
+  std::uint32_t seed = 0;
+};
+ArenaRespawnPick arena_respawn(const ArenaSpawnTable &, std::uint32_t seed,
+                               bool network, const Vec3 &focus,
+                               const Vec3 &camera, const ArenaSeededSearch &);
 // Acts do not choose a marker. act_changed only clears recall destinations,
 // and only when the card state is not 4 and no death task is running.
 struct StartEntry {

@@ -1,3 +1,4 @@
+#include "champions/arena_executable.hpp"
 #include "champions/arena_modes.hpp"
 
 #include <cstdio>
@@ -615,12 +616,60 @@ void respawn_and_names() {
 }
 } // namespace
 
+// A synthetic ELF32 with one PT_LOAD segment over the two documented table
+// addresses. The names are authored, not the executable's.
+std::vector<std::uint8_t> synthetic_exe(int count_a, int count_b) {
+  const std::uint32_t base = 0x503000, size = 0x1000, at = 0x100;
+  std::vector<std::uint8_t> b(at + size, 0);
+  auto put = [&](std::size_t o, std::uint32_t v) {
+    for (int i = 0; i < 4; ++i)
+      b[o + std::size_t(i)] = std::uint8_t(v >> (8 * i));
+  };
+  b[0] = 0x7f, b[1] = 'E', b[2] = 'L', b[3] = 'F', b[4] = 1, b[5] = 1;
+  put(0x1c, 0x34);                     // phoff
+  b[0x2a] = 0x20, b[0x2c] = 1;         // phentsize, phnum
+  put(0x34, 1);                        // PT_LOAD
+  put(0x38, at);                       // offset
+  put(0x3c, base);                     // vaddr
+  put(0x44, size);                     // filesz
+  std::uint32_t text = 0x503c00;
+  auto table = [&](std::uint32_t va, int count, char tag) {
+    for (int i = 0; i < count; ++i) {
+      put(at + (va - base) + 4u * unsigned(i), text);
+      const std::string name = std::string(1, tag) + "Map" + std::to_string(i);
+      for (std::size_t k = 0; k < name.size(); ++k)
+        b[at + (text - base) + k] = std::uint8_t(name[k]);
+      text += 16;
+    }
+  };
+  table(NAMES_A_TABLE, count_a, 'a');
+  table(NAMES_B_TABLE, count_b, 'b');
+  return b;
+}
+
+void executable_tables() {
+  Executable exe;
+  CHECK(exe.load(synthetic_exe(MODE_A_MAPS, MODE_B_MAPS)));
+  const auto names = read_names(exe);
+  CHECK(names.names_a.size() == 13u && names.names_b.size() == 7u);
+  CHECK(names.names_a[0] == "aMap0" && names.names_b[6] == "bMap6");
+  CHECK(mode_a_index(names.names_a, "AMAP12") == 12);
+  CHECK(mode_a_index(names.names_a, "bMap0") == -1 && mode_a_index(names.names_a, "") == -1);
+  CHECK_THROWS(exe.word(0x400000));
+  Executable short_a;
+  CHECK(short_a.load(synthetic_exe(12, MODE_B_MAPS)));
+  CHECK_THROWS(read_names(short_a));
+  Executable not_elf;
+  CHECK(!not_elf.load(std::vector<std::uint8_t>(0x40, 0)));
+}
+
 int main() {
   vectors();
   refusals();
   scoring_and_spawn_table();
   task_frames();
   respawn_and_names();
+  executable_tables();
   if (g_fails) {
     std::fprintf(stderr, "arena modes: %d failed\n", g_fails);
     return 1;

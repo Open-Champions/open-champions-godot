@@ -1,15 +1,7 @@
 include_guard(GLOBAL)
 set(CHAMPIONS_ARENA_MODES_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 
-add_library(champions-arena-modes "${CHAMPIONS_ARENA_MODES_ROOT}/src/arena_modes.cpp")
-target_include_directories(champions-arena-modes PUBLIC "${CHAMPIONS_ARENA_MODES_ROOT}/include")
-target_link_libraries(champions-arena-modes PUBLIC champions-core)
-set_target_properties(champions-arena-modes PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(MSVC)
-  target_compile_options(champions-arena-modes PRIVATE /W4 /utf-8 /fp:strict)
-else()
-  target_compile_options(champions-arena-modes PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/arena_modes_library.cmake")
 
 if(BUILD_TESTING)
   add_executable(champions-arena-modes-tests "${CHAMPIONS_ARENA_MODES_ROOT}/tests/arena_modes_tests.cpp")
