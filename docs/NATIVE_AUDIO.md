@@ -42,7 +42,11 @@ End-flag reads run when the low three bits are clear; a voice that ends during
 the first mix is reclaimed on the tick that enters with the counter at 8.
 `audio_sendVolumes` is due after the increment, when the new value's low four
 bits are clear. The payload of that call is not documented, so the model counts
-`volume_sends()` and does not change the mix. `g_drawFrame` starts at 0x400 and
+`volume_sends()` and does not change the mix. `tick()` does not run
+`music_updateDucking`: one call is executed, but where it is called, how often
+and in which order against the queue service (which changes the stream statuses
+it reads) are not documented, so the owner calls `step_duck()` explicitly.
+`g_drawFrame` starts at 0x400 and
 moves only through `advance_draw_frame()`. The two counters are independent.
 The stream-driver timer still steps volumes at output sample 480, then every
 288 samples. That timer is not the frame cadence.
@@ -102,7 +106,7 @@ Sources: `add_stream` (registered PCM), `set_global_vat` (`MOUTH.VAT`) and
 | `play_menu_music(wait)` | `frontend_run`: global `mx_maintheme_l.vag`, flags 5 if waiting, else 1. This path does not use the music gate. |
 | `boss_music_name(type, object)` / `play_boss_music` | The 11-row `creature_bossMusicName` table (the type is compared without case; the cyclops object names are compared the same way). No boss name is a no-op. Otherwise stream 2 is stopped, then one `mouth.vat` span is queued with `music_playGlobal(name, 0x103)` → 0x123. A second boss replaces the queued span. A closed gate, or a missing or zero-length row, leaves the stream stopped and queues nothing. |
 | `stop_boss_music(type, object)` | Appends the empty flags-2 marker only when that creature has a boss name. `stop_boss_music()` is the marker alone, for a caller that already decided to stop. |
-| `set_duck(argument)` / `step_duck()` | `music_setDuck` writes `1 - argument` to the target. Each step, while stream 1 status has bit 0x20, sets the target to `0x3e4cccd0` and adds `0x3c888888`, which holds at `0x3e5ddde1`. The current scalar eases by `0x3c23d70a` and snaps if one step would pass the target. `actintro` with a nonzero language byte stores the scalar as integer 0. A changed scalar is sent only when stream 2 status has bit 0x20; the channel word is `scalar * g_musicVolume * 0x3f480000`. Arithmetic is the R5900 truncate model. The channel word is recorded in `music_channel()` and does not change the mix: how the driver volume RPC 0x80 applies it to the output is not documented, so stream 2's gain stays `volume*scale`. |
+| `set_duck(argument)` / `step_duck()` | `music_setDuck` writes `1 - argument` to the target. `step_duck()` is one `music_updateDucking` call, made only by the owner. Each step, while stream 1 status has bit 0x20, sets the target to `0x3e4cccd0` and adds `0x3c888888`, which holds at `0x3e5ddde1`. The current scalar eases by `0x3c23d70a` and snaps if one step would pass the target. `actintro` with a nonzero language byte stores the scalar as integer 0. A changed scalar is sent only when stream 2 status has bit 0x20; the channel word is `scalar * g_musicVolume * 0x3f480000`. Arithmetic is the R5900 truncate model. The channel word is recorded in `music_channel()` and does not change the mix: how the driver volume RPC 0x80 applies it to the output is not documented, so stream 2's gain stays `volume*scale`. |
 | `poll_level(draw)` | `mainloop_pollAmbientAudio`. The countdown is decremented; at zero it resets to `14400 + draw` (draw 0..7199 from the cosmetic RNG, supplied by the caller), and unless stream 2's current or queued flags contain 0x20, the first level entry containing `_env_` or `mx_theme` is queued with `music_playLevel(name, 0x102)`. When `g_drawFrame`'s low four bits are clear and stream 0 is idle, the first `amb_` entry is queued on stream 0 with flags 3. The same draw frames are when the group-volume refresh is due; table `0x41bac8` is not specified, so no group volumes are written. The process image of the countdown is `0x2a30`. A level load's store of that word was not re-executed, so `set_level_vat` still takes the caller's countdown. The poll does not advance `g_drawFrame`. |
 
 Voice lines (stream 1, `0x28` then `release_stream` at the dialog key) and the intro

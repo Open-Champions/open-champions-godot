@@ -72,7 +72,9 @@ boss identities. Current combat carriers are not silently classified as bosses.
 
 Flags 0x40 and 0x100 are stored. Recall slices fade-stop stream 2 when status bit
 0x40 is set, and a cutscene gate leaves a stream-2 entry alone when bit 0x100 is
-set. Music ducking and VAT loop-restart spans follow the executed contract.
+set. VAT loop-restart spans follow the executed contract. Music ducking is
+not run by the client: the call site and order of `music_updateDucking` are not
+documented, and its channel word is not applied to the mix.
 Intro movie drift, the cutscene ±0.1 threshold, the 48 kHz labelling question,
 mute-for, delayed starts, original ANM sound tables, group-volume table values,
 SPU exhaustion, interpolation and final hardware mixing remain unimplemented.

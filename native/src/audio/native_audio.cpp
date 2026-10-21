@@ -1070,13 +1070,15 @@ void Playback::tick() {
   // sound_update reads the counters before it increments g_soundFrame.
   // Queue service: low two bits clear. End flags: low three bits clear.
   // audio_sendVolumes runs after the increment, when the new value's low four
-  // bits are clear. g_drawFrame is a separate counter.
+  // bits are clear. g_drawFrame is a separate counter. music_updateDucking is
+  // not run here: one call is executed, but its call site, cadence and order
+  // against the queue service are not documented (docs/audio-playback.md 210),
+  // so the owner calls step_duck() explicitly.
   const auto entering = sound_frame_;
   if ((entering & 3u) == 0)
     service_streams();
   if ((entering & 7u) == 0)
     reclaim_ended();
-  step_duck();
   sound_frame_ = (sound_frame_ + 1u) & 0xffffffffu;
   if ((sound_frame_ & 0xfu) == 0)
     ++volume_sends_;

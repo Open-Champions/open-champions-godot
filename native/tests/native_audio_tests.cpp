@@ -788,9 +788,23 @@ void duck_channel_not_mixed() {
   check(out.size() == 800 && out[0][0] == 0.125f && out[799][0] == 0.125f && out[0][1] == -0.125f,
         "the channel word does not scale stream 2's mix");
 }
+// Audit AUD-3: the research executes one music_updateDucking call; its call
+// site, cadence and order inside sound_update are not documented, so tick()
+// does not run it. Callers run step_duck() explicitly.
+void duck_not_in_tick() {
+  Playback p;
+  p.add_stream("v", stream_pcm(100000));
+  p.queue_stream(1, "v", 0x20);
+  p.queue_stream(2, "v", 0x20);
+  ticks(p, 8);
+  check(p.duck_current() == duck_current_image && p.duck_target() == duck_target_image &&
+            !p.duck_sent(),
+        "tick() leaves the duck words at their images");
+}
 int main() {
   try {
     duck_channel_not_mixed();
+    duck_not_in_tick();
     replaced_directory();
     short_loops();
     formats();

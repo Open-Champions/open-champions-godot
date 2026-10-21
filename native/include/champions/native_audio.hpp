@@ -247,6 +247,8 @@ public:
   std::uint32_t music_volume() const { return music_volume_; }
   // music_setDuck: target = 1 - argument. The current scalar is left alone.
   std::uint32_t set_duck(std::uint32_t argument);
+  // One music_updateDucking call. tick() does not call it: its call site and
+  // order inside the frame are not documented, so the owner decides when.
   DuckStep step_duck();
   std::uint32_t duck_current() const { return duck_current_; }
   std::uint32_t duck_target() const { return duck_target_; }
