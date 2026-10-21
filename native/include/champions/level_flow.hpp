@@ -209,8 +209,10 @@ StoryGround story_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &,
                                world_queries::Level &);
 // Same snap for an explicit entry (previous level, entrance, recall flag,
-// gate, owner-supplied restore xy). The gate plan uses the gate's own xy.
-// It does not apply the anyHeight move; that disc re-run is refused.
+// gate, owner-supplied restore xy). A gate entry that takes a Portal or
+// PortalHurt would run JumpGate_ctor's anyHeight search, which was not re-run
+// on the disc: it throws Unsupported (OpenItem::GateAnyHeightOnDisc). A gate
+// flag with no portal takes nothing and is the plain marker snap.
 StoryGround entry_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &, const StartEntry &,
                                const Placement &, world_queries::Level &);

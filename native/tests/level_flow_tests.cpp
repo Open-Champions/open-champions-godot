@@ -993,6 +993,31 @@ void round3_cases() {
   CHECK(!untouched.pre_search && untouched.facing.has_value() &&
         *untouched.facing == 0x1234);
   CHECK(!cold.pre_search && cold.facing.has_value() && *cold.facing == 0);
+  // LS-2: the gate's anyHeight search (JumpGate_ctor, section 17.4) was not
+  // re-run on the disc, so an entry that takes a portal is refused.
+  StartEntry through_gate;
+  through_gate.gate = true;
+  bool gate_refused = false;
+  try {
+    entry_start_ground({}, {record("Portal", {}, v(400, 0, 0))}, through_gate,
+                       one, far);
+  } catch (const Unsupported &) {
+    gate_refused = true;
+  }
+  CHECK(gate_refused);
+  gate_refused = false;
+  try {
+    entry_start_ground({}, {record("PortalHurt", {}, v(400, 0, 0))},
+                       through_gate, one, far);
+  } catch (const Unsupported &) {
+    gate_refused = true;
+  }
+  CHECK(gate_refused);
+  // The gate flag with no portal takes nothing, so nothing is searched.
+  auto no_portal = entry_start_ground(
+      {}, {record("Player1", {}, v(400, 0, 0))}, through_gate, one, far);
+  CHECK(no_portal.marker_taken && no_portal.ground && no_portal.pre_search &&
+        no_portal.position == v(400, 0, 8));
   auto reach = flat_field(2, 0, 4, 2, 30);
   CHECK(world_queries::terrain_height(reach, f(4), origin) ==
         world_queries::NO_FLOOR);

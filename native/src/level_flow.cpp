@@ -525,8 +525,15 @@ Height level_height(world_queries::Level &level) {
     return world_queries::terrain_height(level, radius, pos);
   };
 }
+// The identity search stands in for Player1_ctor's anyHeight-0 search only.
+// A gate arrival is JumpGate_ctor's anyHeight-1 search, which was not re-run
+// on the disc (research-levels 3ef714a docs/level-flow.md 17.4).
 FindSpot identity_spot() {
-  return [](const Vec3 &centre, Raw, Raw, bool) { return centre; };
+  return [](const Vec3 &centre, Raw, Raw, bool any_height) {
+    if (any_height)
+      refuse_open(OpenItem::GateAnyHeightOnDisc);
+    return centre;
+  };
 }
 Draw zero_draw() {
   return []() -> std::uint16_t { return 0; };

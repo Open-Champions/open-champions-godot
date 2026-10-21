@@ -66,7 +66,9 @@ render-frame elapsed time, or Godot physics as substitutes.
   taken nothing is searched or drawn, `pre_search` is false and `facing` is
   the incoming slot's. `entry_start_ground` is the same snap for an explicit
   previous level, entrance, recall flag, gate, or owner-supplied restore xy.
-  A gate plan keeps the gate's own xy. `resolve_start` runs the caller's
+  A gate entry that takes a `Portal` or `PortalHurt` throws `Unsupported`
+  (`GateAnyHeightOnDisc`): `JumpGate_ctor`'s anyHeight search was not re-run
+  on the disc (section 17.4). A gate flag with no portal takes nothing. `resolve_start` runs the caller's
   search; the caller owns the seed and the object list. `apply_act_entry`
   writes `None` into each recall destination when the act changed, the card
   state is not 4, and no death task is running. Acts do not choose a marker.
@@ -217,8 +219,10 @@ These are explicit limits, not inferred approvals:
   the original functions in an emulator. They are implemented above.
 - Prose says 18 save-filter classes; the executable reference lists 17. The
   exact list is ported, with no invented eighteenth class.
-- `refuse_open` throws `Unsupported` for the section 17 items that were not
-  executed: the live seed at `Player1_ctor`, a real object list inside
+- `refuse_open` throws `Unsupported` for an item named below. Production
+  paths call it only for arena respawn (`arena_respawn`) and the gate
+  anyHeight search (`entry_start_ground`); the others are named limits that no
+  function here implements. The section 17 items that were not executed: the live seed at `Player1_ctor`, a real object list inside
   `findFreeSpot`, arena respawn (`arena_respawn`, a0 = 0), the arena rotation
   table, the rest of `Player_ctor` after the radius store and the snap,
   readers of the copied orientation byte, a first-tick sentinel reject beyond
