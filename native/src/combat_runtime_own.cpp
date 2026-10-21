@@ -6,10 +6,9 @@
 // CAI-1, CAI-2, CAI-4, CAI-5, CAI-6). Gnaw has an executed constructor, run
 // and setState (research-anim 5694ae3 tools/ref_monsters_1.py gnaw_ctor,
 // gnaw_run, gnaw_set_state; docs/spec/monsters-1.md section 4). AntQueen,
-// Skeleton and Soul have executed constructors, set-states and run prologues
-// (research-combat-ctors e9777eb, docs/spec/combat-ctors.md; the bodies are
-// combat_ctors.cpp); their switches run states 0 and 1 only (round 5 and
-// own-state-machines.md sections 8, 9 and 11). Skelight keeps its own body
+// Skeleton and Soul have executed constructors and set-states
+// (research-combat-ctors e9777eb), and full run switches
+// (research-combat-ctors-3 9ff6ae0). Skelight keeps its own body
 // (skelight_run). Every other class's constructor, run prologue and setState
 // side effects were not executed, so spawning one refuses.
 namespace champions::simulation::rta::combat_runtime {

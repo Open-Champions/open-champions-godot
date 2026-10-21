@@ -12,9 +12,8 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  // Slot 3 is the optional one-per-session creature. Slots 4 and 6 are the
-  // Full fixture's AntQueen and Soul; slot 5 (Skeleton) stays empty
-  // (full_setup).
+  // Slot 3 is the optional one-per-session creature. Slots 4, 5 and 6 are
+  // the Full fixture's AntQueen, Skeleton and Soul.
   std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
@@ -260,10 +259,8 @@ struct Session::State {
     // Slot 6: a Soul on the placement the round-5 fixture used (-60, 100),
     // facing the player, 120 HP. Creature_setCharm puts it on team 0, and it
     // wanders in states 0 and 1 for the whole fight.
-    // Slot 5 stays empty: a Skeleton gets past Skeleton_isEnemy now, but stops
-    // at its first sighting of the player, in Skeleton_run state 3 and
-    // creature_allyInLineOfFire, which are not executed (full-placement.md
-    // section 4). It can still be built through spawn_creature.
+    // Slot 5's Skeleton is the authored combat placement; its run and
+    // ally-in-line-of-fire bodies are from research-combat-ctors-3 9ff6ae0.
     auto place = [&](unsigned slot, const char *cls, int x, int y) {
       C::Spawn s;
       s.position[0] = from_int(Raw(x));

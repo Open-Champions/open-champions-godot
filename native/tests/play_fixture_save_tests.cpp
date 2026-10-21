@@ -206,12 +206,8 @@ void full_combat() {
       if (cut != std::string::npos) last = line.substr(cut);
     }
   }
-  // Slot 4 is the AntQueen at (-110, 110) (AntQueen_run in every state,
-  // research-combat-ctors-2 5b92837) and slot 6 the Soul (research-combat-ctors e9777eb); slot 5 stays
-  // empty: a Skeleton stops at its first sighting, in Skeleton_run state 3 and
-  // creature_allyInLineOfFire, which are not executed. The AntQueen's states
-  // and the Soul's demon tests are in the trace, so the save/load comparison
-  // covers them.
+  // The AntQueen, Skeleton and Soul occupy slots 4, 5 and 6. The trace
+  // includes their states and positions through the save/load boundary.
   bool queen = false, soul = false, skeleton = false;
   for (const auto &a : whole.scene->actors()) {
     queen = queen || (a.slot == 4 && a.present);
@@ -279,18 +275,25 @@ void wave12_extensions() {
     std::cout << "potion " << kind << " stops at ready tick " << ticks << ": " << error << "\n";
   }
   {
-    // How far the idle Full fight runs with the AntQueen in slot 4, and where a
-    // spawned Skeleton stops: past Skeleton_isEnemy, at its first sighting in
-    // Skeleton_run state 3 (full-placement.md section 4).
+    // How far the Full fight runs with its Skeleton in slot 5, and with a
+    // second Skeleton spawned through the authored operation.
     for (bool skeleton : {false, true}) {
       FullRun r = full_start();
       std::string error;
       int ticks = 0;
+      int first_chase = -1;
       for (; ticks < 4000 && error.empty(); ++ticks) {
         if (skeleton && ticks == 3)
           r.scene->spawn_creature(6);
         const auto o = r.scene->advance(0);
         if (o.failed) error = o.error;
+        if (!o.failed && first_chase < 0)
+          for (const auto &a : r.scene->actors())
+            if (a.slot == 5 && a.present) {
+              auto obj=r.scene->session().world().target(a.handle);
+              if (r.scene->session().world().read(obj+0x232,2)==3)
+                first_chase=ticks;
+            }
       }
       if (skeleton)
         check(ticks > 300 && error.find("party wipe") != std::string::npos,
@@ -298,8 +301,19 @@ void wave12_extensions() {
       else
         check(ticks > 300, "the idle Full fight with the AntQueen runs past 300 ticks: '" + error + "'");
       std::cout << (skeleton ? "spawned Skeleton" : "idle Full fight") << " stops at ready tick "
-                << ticks << ": " << error << "\n";
+                << ticks << ", first chase at frame " << first_chase << ": " << error << "\n";
     }
+    FullRun r=full_start();
+    std::string error;
+    int ticks=0;
+    for (;ticks<4000&&error.empty();++ticks) {
+      if (ticks>=95&&ticks%12==0) r.scene->press_attack(true);
+      const auto o=r.scene->advance(0);
+      if (o.failed) error=o.error;
+    }
+    std::cout << "attacking Full fight stops at ready tick " << ticks
+              << ": " << error << "\n";
+    check(ticks>300,"attacking Full fight runs past 300 ticks");
   }
   FullRun whole = full_start();
   run(whole, 0, TICKS);
