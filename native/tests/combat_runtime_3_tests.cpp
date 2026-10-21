@@ -78,11 +78,22 @@ const C::Event *find_event(const C::World &w, const std::string &name) {
       return &e;
   return nullptr;
 }
+bool refused_self(C::World &w, C::Address cloud) {
+  try {
+    w.run_actor(cloud);
+  } catch (const C::Unsupported &e) {
+    return std::string(e.what()).find("DiseaseCloud damage_apply on itself") !=
+           std::string::npos;
+  }
+  return false;
+}
 void host() {
   {
+    // The victim and owner sit one cell column below the cloud, so the box walk
+    // meets them before the cloud, which is in its own box and refuses.
     Host h;
-    auto victim = h.creature({0, 0, 0});
-    auto owner = h.creature({0, 0, 0});
+    auto victim = h.creature({from_int(-5), 0, 0});
+    auto owner = h.creature({from_int(-5), 0, 0});
     h.w->write(C::FRAME, 4, 60);
     h.w->write(0x41b1e4, 4, 0x41b000);
     auto cloud = h.w->spawn_disease_cloud({0, 0, 0}, 3, owner);
@@ -90,7 +101,7 @@ void host() {
     h.w->write(cloud + 0x5c, 4, 0x41200000);
     h.w->write(cloud + 0x60, 4, 20);
     h.w->clear_history();
-    h.w->run_actor(cloud);
+    check(refused_self(*h.w, cloud), "the cloud's damage_apply on itself is refused");
     check(h.w->read(cloud + 0x5c) == add(0x41200000, HALF), "cloud radius grows by 1/2");
     check(count_event(*h.w, "presentation:particle_spawn") == 12,
           "four particles on each of three streams");
@@ -108,23 +119,23 @@ void host() {
     check(h.w->read(spell + 8) == 0, "spell base skill word is null");
     auto pools = count_event(*h.w, "pool_new");
     h.w->clear_history();
-    h.w->run_actor(cloud);
+    check(refused_self(*h.w, cloud), "the second tick refuses at the cloud again");
     check(h.w->attached_spells(victim).size() == 1, "a second hit does not allocate");
     check(!has_event(*h.w, "creature_addSpell"), "no second disease allocation");
     (void)pools;
   }
   {
     Host h;
-    auto owner = h.creature({0, 0, 0});
+    auto owner = h.creature({from_int(-5), 0, 0});
     h.w->write(owner + 12, 4, h.w->read(owner + 12) | 0x40);
-    auto victim = h.creature({0, 0, 0});
+    auto victim = h.creature({from_int(-5), 0, 0});
     h.w->write(victim + 12, 4, h.w->read(victim + 12) | 0x40);
     h.w->write(C::FRAME, 4, 60);
     auto cloud = h.w->spawn_disease_cloud({0, 0, 0}, 1, owner);
     h.w->write(cloud + 0x58, 4, 10);
     h.w->write(cloud + 0x5c, 4, 0x41200000);
     h.w->clear_history();
-    h.w->run_actor(cloud);
+    check(refused_self(*h.w, cloud), "the cloud itself is not a player and is refused");
     check(!has_event(*h.w, "damage_apply"), "two players are skipped");
   }
   {
@@ -371,6 +382,10 @@ struct Exact {
   std::vector<std::array<Raw, 7>> particles;
   std::vector<Raw> fx, samples;
   std::optional<std::array<Raw, 4>> ring, light;
+  // (role, attacker, attack, flags, descriptor slot 0) per damage_apply call.
+  std::vector<std::pair<std::string, std::vector<Raw>>> damage;
+  std::optional<Raw> seed;
+  std::vector<Raw> spell, swarm;
 };
 Raw hexword(const std::string &s) {
   return Raw(std::stoul(s, nullptr, 16));
@@ -424,6 +439,22 @@ std::vector<Exact> load_vectors(const char *path) {
         w = hexword(t);
       }
       (tag == "RING" ? cur.ring : cur.light) = row;
+    } else if (tag == "DAMAGE") {
+      std::string role, t;
+      ss >> role;
+      std::vector<Raw> row;
+      while (ss >> t)
+        row.push_back(hexword(t));
+      cur.damage.emplace_back(role, row);
+    } else if (tag == "SEED") {
+      std::string t;
+      ss >> t;
+      cur.seed = hexword(t);
+    } else if (tag == "SPELL" || tag == "SWARM") {
+      std::string t;
+      auto &out = tag == "SPELL" ? cur.spell : cur.swarm;
+      while (ss >> t)
+        out.push_back(hexword(t));
     } else
       throw Mismatch("unknown vector tag " + tag);
   }
@@ -465,6 +496,53 @@ void replay(const Exact &c) {
     h.w->run_actor(cloud);
     check(c.radius && h.w->read(cloud + 0x5c) == *c.radius, "cloud radius word");
     expect_particles(*h.w, c);
+    return;
+  }
+  if (c.name == "cloud-tick") {
+    // The victim sits one cell column below the cloud, so the grid walk meets
+    // it first, as the research box callback lists it first. The cloud is in
+    // its own box (GameObject_ctor links it into grid A, radius 24).
+    Host h;
+    auto owner = far_owner(h);
+    auto victim = h.creature({from_int(-5), 0x40000000, 0});
+    h.w->write(C::FRAME, 4, 60);
+    auto cloud = h.w->spawn_disease_cloud({0x3f800000, 0x40000000, 0x40400000}, 1, owner);
+    h.w->write(cloud + 0x44, 4, 0x12345678);
+    h.w->write(cloud + 0x54, 4, 1000);
+    h.w->write(cloud + 0x58, 4, 10);
+    h.w->write(cloud + 0x5c, 4, 0x41200000);
+    h.w->write(cloud + 0x60, 4, 20);
+    h.w->clear_history();
+    std::string refusal;
+    try {
+      h.w->run_actor(cloud);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(c.radius && h.w->read(cloud + 0x5c) == *c.radius, "cloud-tick radius word");
+    expect_particles(*h.w, c);
+    std::vector<const C::Event *> hits;
+    for (auto &e : h.w->events())
+      if (e.name == "damage_apply")
+        hits.push_back(&e);
+    // Every research damage_apply on a creature is matched; the one on the
+    // cloud itself is where the native World refuses (slot 2 of 0x5186f0).
+    std::size_t matched = 0;
+    for (auto &row : c.damage) {
+      if (row.first == "self") {
+        check(refusal.find("DiseaseCloud damage_apply on itself") != std::string::npos,
+              "cloud-tick: the cloud's own damage_apply is refused: '" + refusal + "'");
+        break;
+      }
+      check(matched < hits.size(), "cloud-tick damage call " + std::to_string(matched));
+      auto &e = *hits[matched++];
+      check(e.args.size() >= 4 && Raw(e.args[0]) == victim && Raw(e.args[1]) == row.second.at(0) &&
+                Raw(e.args[2]) == row.second.at(1) && Raw(e.args[3]) == row.second.at(2),
+            "cloud-tick damage arguments");
+    }
+    check(matched == hits.size(), "cloud-tick damage count");
+    auto spells = h.w->attached_spells(victim);
+    check(spells.size() == 1, "cloud-tick: the creature took the 0x26 disease entry");
     return;
   }
   int kind = 0;

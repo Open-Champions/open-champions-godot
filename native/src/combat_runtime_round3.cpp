@@ -102,10 +102,10 @@ void World::State::diseasecloud_run(Address obj) {
     hi[k] = add(pos[k], radius);
   }
   for (auto victim : box(lo, hi, 0x40)) {
-    // The box can return the cloud. Its documented size is 0x64 and it has no
-    // creature lanes; the damage call is for the other objects in the box.
-    if (victim == obj)
-      continue;
+    // ref_combat_round3.diseasecloud_run skips only the owner and two players.
+    // The cloud is in grid A (GameObject_ctor) inside its own box, so it is
+    // handed to damage_apply too (non-creature: one shared draw, then slot 2
+    // of 0x5186f0). That slot is not documented; refuse there.
     auto node = u(obj + 0x4c);
     if (!node)
       continue;
@@ -114,6 +114,9 @@ void World::State::diseasecloud_run(Address obj) {
       continue;
     if ((u(cloud_owner + 12) & 0x40) && (u(victim + 12) & 0x40))
       continue;
+    if (victim == obj)
+      throw Unsupported("DiseaseCloud damage_apply on itself: slot 2 of table "
+                        "0x5186f0 is not documented");
     auto value = u(obj + 0x60) & 0xffff;
     damage_with_descriptor(*this, victim, 0, 100000, 0x1000040,
                            disease_row(value), 0, 0);
