@@ -50,7 +50,8 @@ const std::set<std::string> FULL_PRESENTATION = {
     "hud_showMessage",   "fx_disintegrateModel", "light_link",
     "light_dtor",        "trail_addPoint",       "trail_release",
     "mat3_transpose",    "mat3_setIdentity",     "mat3_rotateAxis",
-    "mat3_mul",          "Player_blockSparks",   "water_disturb"};
+    "mat3_mul",          "Player_blockSparks",   "water_disturb",
+    "fx_modelStatusEffects", "model_drawPart", "model_draw"};
 const std::set<std::string> ROUND1_PRESENTATION = {
     "fx_spawn",          "particle_spawn",      "sound_playOnObject",
     "sound_playAtPos",   "decal_add",           "anim_releaseCaches",
@@ -313,7 +314,7 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Holder.v21", "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2",
+        "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2",
         "model_getSamplePoint", "AntWave_ctor",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
         "CT_type_info_equals"}) {
@@ -322,7 +323,7 @@ void World::State::install_ctor_services() {
       return service(n, a);
     };
   }
-  for (unsigned slot=1;slot<=17;++slot) {
+  for (unsigned slot=1;slot<=24;++slot) {
     auto n="Holder.v"+std::to_string(slot);
     model.callbacks[n]=[this,n](A::Model &,const std::vector<Value> &a) {
       return service(n,a);
@@ -384,6 +385,10 @@ void World::State::install_services() {
                          "world_notifyObjectsNear",
                          "model_getBounds",
                          "model_getAttachPoint",
+                         "isNearView",
+                         "fx_modelStatusEffects",
+                         "model_drawPart",
+                         "model_draw",
                          "model_getMeshJoint",
                          "anim_getJointMatrix",
                          "rigidbody_init",
@@ -611,18 +616,9 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return iv(type_of(ar(0)));
   if (n == "CT_type_info_equals")
     return iv(same_type(ar(0),ar(1)) ? 1 : 0);
-  if (n == "Holder.v21") {
-    // The presentation slot remains a recorded call-out in round 3.
-    std::vector<std::uint64_t> args;
-    for (const auto &x : a)
-      if (auto p = std::get_if<std::int64_t>(&x))
-        args.push_back(std::uint64_t(*p));
-    note(n, std::move(args));
-    return iv(0);
-  }
   if (n.rfind("Holder.v",0)==0) {
     auto slot=unsigned(std::stoul(n.substr(8)));
-    if (slot>=1&&slot<=17) {
+    if (slot>=1&&slot<=24) {
       std::vector<Value> rest(a.begin()+1,a.end());
       return iv(combat_ctors::holder_slot(model,ar(0),slot,rest));
     }
@@ -821,6 +817,8 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getBounds")
     return A::Bounds{};
+  if (n == "isNearView")
+    return iv(is_near_view(ar(0), ar(2)));
   if (n == "model_getAttachPoint") {
     if (!services.attach_point)
       throw Unsupported("model_getAttachPoint service missing");

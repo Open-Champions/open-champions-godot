@@ -1,5 +1,5 @@
 // Authored from research-combat-ctors-3 9ff6ae0, weapon-holder.md and
-// ref_weapon_holder.py. Weapon2 remains a separate, refused table.
+// ref_weapon_holder.py; round-4 slots from ref_holder_slots.py at 6baf4cd.
 #include "champions/combat_ctors.hpp"
 #include "champions/core_math.hpp"
 
@@ -80,17 +80,68 @@ void drop_held_part(A::Model &m,Raw part,Address c,Address definition,Raw flags)
                      iv(1),iv(flags),iv(0)});
 }
 
+// creature_drawHeldPart 0x117f08, research-combat-ctors-4
+// weapon-holder-slots.md section 5.3.  The matrix is a 12-word tuple supplied
+// by the attach-matrix body/callback, and is only passed to model_draw.
+void draw_held_part(A::Model &m,Address,Raw part,Address c) {
+  if (!part||!c) return;
+  B b{m};
+  auto row=Address(b.u32(c+0x24)+8*part+4);
+  auto rec=b.u32(row);
+  auto bone=std::int32_t(std::int8_t(b.u8(rec+0x13)));
+  if (bone<0) return;
+  auto scale=b.u32(c+0xdc);
+  auto pos=b.vec(c+0x10);
+  auto facing=Raw(s16(b.u16(c+0x38)));
+  auto model=Raw(number(m.vcall(c,16)));
+  auto point=b.call("model_getAttachPoint",{iv(scale),iv(model),pos,iv(facing),
+                    iv(c+0x114),iv(Raw(bone)),iv(0)});
+  model=Raw(number(m.vcall(c,16)));
+  auto matrix=b.call("model_getAttachWorldMatrix",{iv(scale),iv(model),pos,iv(facing),
+                    iv(c+0x114),iv(Raw(bone))});
+  auto wide=b.u64(c+0x220);
+  b.call("model_draw",{iv(b.u32(row)),iv(b.u32(row)),iv(1),point,matrix,
+        iv(c+0x114),iv(wide),iv(0),iv(0)});
+}
+
 Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &args) {
   B b{m};
   auto table=b.u32(h);
   bool shield=table==VT_WEAPONSHIELD;
-  if (!shield&&table!=0x50cf40)
-    throw A::Unsupported("Weapon2 or unknown holder table is not executed in round 3");
+  bool two=table==0x50ce70;
+  if (!shield&&!two&&table!=0x50cf40)
+    throw A::Unsupported("unknown holder table");
+  if (two&&slot<18&&slot!=8&&slot!=16)
+    throw A::Unsupported("Weapon2 slot outside round-4 executed bodies");
   auto which=arg(args,0);
   auto hand=s32(which);
   auto bits=[&]{return b.u8(h+4);};
   auto put=[&](Raw x){b.w8(h+4,x);};
   auto drop=[&](Raw part){drop_held_part(m,part,arg(args,1),arg(args,2),arg(args,3));};
+  auto drawn=[&](Raw part,Raw definition,Raw parent,Raw chain) {
+    if (!part||!definition||!parent||!chain) return;
+    Address row=definition+8*part;
+    b.call("model_drawPart",{iv(b.u32(row+4)),iv(b.u32(row+0xc)),iv(0),
+                             iv(parent),iv(chain),iv(0xffffffff),iv(0xffffffff),iv(0)});
+  };
+  auto effect=[&](Address desc,Address block,Raw model_word,Address c,Raw f12) {
+    if (b.u32(c+0xc)&2) return;
+    if (!number(b.call("isNearView",{iv(c+0x10),b.vec(c+0x10),iv(0x43f00000)}))) return;
+    if (b.u8(c+0x231)&8) return;
+    auto state=b.u16(c+0x232);
+    auto attacking=Raw(state-6)<10 ? 1u:0u;
+    auto model=Raw(number(m.vcall(c,16)));
+    b.call("fx_modelStatusEffects",{iv(f12),iv(b.u32(c+0xdc)),iv(desc),iv(model_word),
+           iv(block),b.vec(c+0x10),iv(Raw(s16(b.u16(c+0x38)))),iv(model),
+           iv(c+0x114),iv(attacking),iv(0),iv(0)});
+  };
+  auto effect_hand=[&](Raw mask,Address part_off,Address desc,Address block,
+                       Address definition,Address c,Raw f12) {
+    if (!(bits()&mask)) return;
+    auto part=b.u8(h+part_off);
+    if (part&&definition&&c)
+      effect(desc,block,b.u32(definition+8*part+4),c,f12);
+  };
   switch (slot) {
   case 1: {
     auto part=arg(args,1)&255;
@@ -109,6 +160,7 @@ Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &ar
     break;
   case 8:
     if (first_hand(which)) build_element_damage(m,h+0x50,arg(args,1));
+    if (two&&(hand==0||hand==2)) build_element_damage(m,h+0xe0,arg(args,1));
     break;
   case 9:case 10:
     if (first_hand(which)) {
@@ -134,11 +186,53 @@ Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &ar
   case 15:
     return hand==1 ? b.u8(h+8) : shield&&hand==2 ? b.u8(h+0x98) : 0;
   case 16:
-    return hand==1 ? damage_desc_get_element(m,h+0x50) : 0;
+    return hand==1 ? damage_desc_get_element(m,h+0x50) :
+           two&&hand==2 ? damage_desc_get_element(m,h+0xe0) : 0;
   case 17:
     return hand==1 ? h+0x50 : 0;
+  case 18: {
+    auto definition=arg(args,0),parent=arg(args,1),chain=arg(args,2);
+    if (bits()&1) drawn(b.u8(h+8),definition,parent,chain);
+    if ((shield||two)&&(bits()&2)) drawn(b.u8(h+0x98),definition,parent,chain);
+    break;
+  }
+  case 19:
+    if ((bits()&1)&&arg(args,0)&&arg(args,1)&&arg(args,2)&&arg(args,3))
+      b.call("model_drawPart",{iv(arg(args,0)),iv(arg(args,1)),iv(0),
+               iv(arg(args,2)),iv(arg(args,3)),iv(0xffffffff),iv(0xffffffff),iv(0)});
+    break;
+  case 20:
+    if (bits()&1) draw_held_part(m,h+4,b.u8(h+8),arg(args,0));
+    if ((shield||two)&&(bits()&2)) draw_held_part(m,h+4,b.u8(h+0x98),arg(args,0));
+    break;
+  case 21: {
+    auto definition=arg(args,0),c=arg(args,1),f12=arg(args,2);
+    effect_hand(1,8,h+0x50,h+0xc,definition,c,f12);
+    if (two) effect_hand(2,0x98,h+0xe0,h+0x9c,definition,c,f12);
+    break;
+  }
+  case 22:
+    if ((bits()&1)&&arg(args,0)&&arg(args,1))
+      effect(h+0x50,h+0xc,arg(args,0),arg(args,1),arg(args,2));
+    break;
+  case 23: {
+    auto out=Address(arg(args,0));
+    b.w8(out,bits());b.w8(out+1,b.u8(h+8));
+    b.w8(out+2,holder_slot(m,h,16,{iv(1)}));
+    if (shield||two) b.w8(out+3,b.u8(h+0x98));
+    if (two) b.w8(out+4,holder_slot(m,h,16,{iv(2)}));
+    return two?5:shield?4:3;
+  }
+  case 24: {
+    auto in=Address(arg(args,0));
+    put(b.u8(in));b.w8(h+8,b.u8(in+1));
+    holder_slot(m,h,8,{iv(1),iv(b.u8(in+2))});
+    if (shield||two) b.w8(h+0x98,b.u8(in+3));
+    if (two) holder_slot(m,h,8,{iv(2),iv(b.u8(in+4))});
+    return two?5:shield?4:3;
+  }
   default:
-    throw A::Unsupported("holder slot outside executed 1-17");
+    throw A::Unsupported("holder slot outside executed 1-24");
   }
   return 0;
 }

@@ -52,6 +52,77 @@ void holder_cases(Raw table) {
   check((get(H+4,1)&1)==(table==CT::VT_WEAPONSHIELD?1u:0u),"slot 13 class difference");
   check((get(H+4,1)&2)==0,"slot 13 hides shield hand");
 }
+void holder_round4_cases() {
+  // Replay tools/test_ref_holder_slots.py: drawing, the effect gates and
+  // serialized layouts (research-combat-ctors-4 6baf4cd).
+  constexpr A::Address def=0x120000,rec=0x180000,buf=0x170000;
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  auto get=[&](A::Address a,unsigned n){return mem.load(a,n);};
+  put(H,4,0x50cf40);put(H+4,1,1);put(H+8,1,5);
+  put(def+8*5+4,4,rec+0xa0);put(def+8*5+0xc,4,rec+0xc0);
+  m.callbacks["model_drawPart"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  CT::holder_slot(m,H,18,{std::int64_t(def),std::int64_t(0x77),std::int64_t(0x88)});
+  check(m.calls.size()==1&&m.calls[0].name=="model_drawPart", "slot 18 draws one part");
+  check(std::get<std::int64_t>(m.calls[0].args[0])==rec+0xa0&&
+        std::get<std::int64_t>(m.calls[0].args[1])==rec+0xc0,
+        "slot 18 reads part and next-row texture");
+  m.calls.clear();
+  CT::holder_slot(m,H,18,{std::int64_t(def),std::int64_t(0),std::int64_t(0x88)});
+  check(m.calls.empty(),"slot 18 requires parent and chain");
+  CT::holder_slot(m,H,19,{std::int64_t(0x11),std::int64_t(0x22),
+                          std::int64_t(0x33),std::int64_t(0x44)});
+  check(m.calls.size()==1&&std::get<std::int64_t>(m.calls[0].args[0])==0x11,
+        "slot 19 uses given part");
+  m.calls.clear();
+  put(H,4,CT::VT_WEAPONSHIELD);put(H+4,1,2);put(H+0x98,1,3);
+  put(def+8*3+4,4,rec+0x60);
+  CT::holder_slot(m,H,18,{std::int64_t(def),std::int64_t(1),std::int64_t(2)});
+  check(m.calls.size()==1&&std::get<std::int64_t>(m.calls[0].args[0])==rec+0x60,
+        "shield slot 18 draws second hand");
+  m.calls.clear();
+  put(H+4,1,1);put(H+8,1,2);put(def+8*2+4,4,rec+0x40);
+  put(C+0x10,4,0x41200000);put(C+0x14,4,0x41a00000);put(C+0x18,4,0x41f00000);
+  put(C+0x38,2,0xc000);put(C+0xdc,4,0x3fa00000);
+  put(C+0x232,2,8);put(C+0x48,4,0x150000);
+  m.external.insert("Creature.v16");
+  m.callbacks["Creature.v16"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0xc00080);
+  };
+  m.callbacks["isNearView"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(1);
+  };
+  m.callbacks["fx_modelStatusEffects"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  CT::holder_slot(m,H,21,{std::int64_t(def),std::int64_t(C),std::int64_t(0x3f000000)});
+  check(m.calls.size()==3&&m.calls[0].name=="isNearView"&&
+        m.calls[1].name=="Creature.v16"&&m.calls[2].name=="fx_modelStatusEffects",
+        "slot 21 effect callback order");
+  check(std::get<std::int64_t>(m.calls[2].args[2])==H+0x50&&
+        std::get<std::int64_t>(m.calls[2].args[3])==rec+0x40&&
+        std::get<std::int64_t>(m.calls[2].args[9])==1,
+        "slot 21 descriptor model and attacking state");
+  m.calls.clear();put(C+0xc,4,2);
+  CT::holder_slot(m,H,21,{std::int64_t(def),std::int64_t(C),std::int64_t(0)});
+  check(m.calls.empty(),"slot 21 hidden creature gate");put(C+0xc,4,0);
+  put(H,4,0x50ce70);put(0x404464,4,0);put(0x4f714c,4,0x41200000);
+  for (auto i:{12u,13u,14u,25u,26u}) put(0x41b170+4*i,4,0x130000);
+  put(0x130060,4,0x140000);
+  m.callbacks["Skill.v11"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(100);
+  };
+  constexpr unsigned saved[5]={3,0x52,1,0x54,3};
+  for (unsigned k=0;k<5;++k) put(buf+k,1,saved[k]);
+  check(CT::holder_slot(m,H,24,{std::int64_t(buf)})==5,"Weapon2 load size");
+  check(get(H+0x74,2)==0x15&&get(H+0x104,2)==0x17&&m.draws==2,
+        "Weapon2 load rebuilds both elements with two shared draws");
+  check(CT::holder_slot(m,H,23,{std::int64_t(buf+8)})==5,"Weapon2 save size");
+  for (unsigned k=0;k<5;++k)
+    check(get(buf+8+k,1)==saved[k],"Weapon2 round trip byte");
+}
 void charm_cases() {
   A::Memory mem;A::Model m(mem);
   int cleared=0;
@@ -130,6 +201,7 @@ int main() {
   try {
     holder_cases(0x50cf40);
     holder_cases(CT::VT_WEAPONSHIELD);
+    holder_round4_cases();
     charm_cases();
     shatter_cases();
     prop_cases();

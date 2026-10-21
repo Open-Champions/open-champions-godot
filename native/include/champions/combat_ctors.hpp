@@ -152,9 +152,11 @@ Raw creature_obj_in_arc_range(A::Model &, Address c, Address object, Raw arc,
                               Raw range);
 Raw lead_target_point(A::Model &, Address c, Vec3 *out, Raw speed);
 void install_round3(A::Model &);
-// Weapon1 and WeaponShield slots 1–17, research-combat-ctors-3 weapon-holder.md.
+// Weapon1/WeaponShield slots 1–17 at 9ff6ae0; slots 18–24 and Weapon2
+// element access at research-combat-ctors-4 6baf4cd.
 Raw holder_slot(A::Model &, Address holder, unsigned slot,
                 const std::vector<A::Value> &args);
+void draw_held_part(A::Model &, Address x, Raw part, Address creature);
 void build_element_damage(A::Model &, Address descriptor, Raw kind);
 Raw damage_desc_get_element(A::Model &, Address descriptor);
 void drop_held_part(A::Model &, Raw part, Address creature, Address definition,
