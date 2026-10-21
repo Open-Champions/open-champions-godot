@@ -1,6 +1,7 @@
 #include "champions/creature_anim/dispatch.hpp"
 #include "creature_dispatch_fixture.hpp"
 #include <iostream>
+#include <map>
 #include <sstream>
 using dispatch_fixture::clip_bytes;
 using namespace champions::simulation::rta;
@@ -35,6 +36,71 @@ int main() {
       std::istringstream in(line);
       std::string op;
       in >> op;
+      if (op == "agony") {
+        Raw flags;
+        in >> flags;
+        std::cout << agony_hit_entry(flags) << '\n';
+        continue;
+      }
+      if (op == "clockwork") {
+        Raw form;
+        in >> form;
+        auto e = clockwork_idle_entry(form);
+        std::cout << (e ? std::to_string(*e) : std::string("none")) << '\n';
+        continue;
+      }
+      if (op == "combined") {
+        std::string name;
+        Raw s, f0, v0, f1, v1;
+        in >> name >> s >> f0 >> v0 >> f1 >> v1;
+        auto d = combined_dispatch(name, s, {{f0, v0}, {f1, v1}});
+        std::cout << d.stored << ' ' << d.ops.size() << ' ';
+        for (const auto &o : d.ops) {
+          std::cout << o.kind << ' ' << o.args.size() << ' ';
+          for (auto a : o.args)
+            std::cout << a << ' ';
+        }
+        std::cout << '\n';
+        continue;
+      }
+      if (op == "skill") {
+        // Skill-driven states (ref_skill_anim): each looked-up name gets its
+        // own clip; a named op prints the name of the clip it starts. The
+        // looked-up names print sorted (their order is not compared).
+        std::string a;
+        PlayerInput p;
+        in >> a >> p.weapon_class >> p.object_flags;
+        Runtime rr(8, {}, 3);
+        std::map<std::string, ClipId> named;
+        auto sel = player_action(a, p, [&](const std::string &n) {
+          auto it = named.find(n);
+          if (it == named.end())
+            it = named.emplace(n, rr.add_clip(clip_bytes(120))).first;
+          return it->second;
+        });
+        std::cout << sel.stored << ' '
+                  << (sel.object_flags ? std::to_string(*sel.object_flags) : std::string("-"))
+                  << ' ' << sel.ops.size() << ' ';
+        for (const auto &o : sel.ops) {
+          std::cout << o.kind << ' ' << o.args.size() << ' ';
+          for (std::size_t k = 0; k < o.args.size(); ++k) {
+            std::string clip;
+            if (k == 0 && o.kind.rfind("named_", 0) == 0)
+              for (const auto &[n, id] : named)
+                if (std::int64_t(id) == o.args[0])
+                  clip = n;
+            if (!clip.empty())
+              std::cout << clip << ' ';
+            else
+              std::cout << o.args[k] << ' ';
+          }
+        }
+        std::cout << named.size() << ' ';
+        for (const auto &[n, id] : named)
+          std::cout << n << ' ';
+        std::cout << '\n';
+        continue;
+      }
       if (op == "combo") {
         Raw m, c, v, f;
         in >> m >> c >> v >> f;

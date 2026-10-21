@@ -300,13 +300,11 @@ int main() try {
     }
   }
   skill_input.weapon_class = 0;
-  skill_input.object_flags = 0x41;
+  // Executed inputs only (ref_skill_anim.charge_state: 0x40 and 0); the
+  // generated skill vectors in creature_dispatch.json.gz cover the rest.
+  skill_input.object_flags = 0x40;
   auto charged = player_action("charge", skill_input, skill);
   check(charged.stored == 9 && charged.ops.empty(), "charge with flag 0x40");
-  skill_input.object_flags = 0x20;
-  check(player_action("charge", skill_input, skill).stored == 0 &&
-            player_action("charge", skill_input, skill).ops.empty(),
-        "charge without flag 0x40");
   skill_input.object_flags = 0;
   check(player_action("charge", skill_input, skill).stored == 0,
         "charge with clear flags");

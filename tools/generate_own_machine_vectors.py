@@ -1,20 +1,44 @@
 #!/usr/bin/env python3
 """Write the locked own-machine ticks as a synthetic text fixture.
 
-The tuples come from the research reference. This script does not copy
-retail bytes. Run it with the research tools directory on disk; the committed
-fixture is what the native test reads.
+The tuples come from the research reference at the commit pinned in
+native/tests/vectors/creature_dispatch_sources.json; the two research files
+are read with `git show <pin>:<path>` and checked against their sha256 there.
+This script does not copy retail bytes. The committed fixture is what the
+native test reads.
+
+usage: generate_own_machine_vectors.py RESEARCH_REPO OUT
 """
+import hashlib
+import json
+import pathlib
+import subprocess
 import sys
+import tempfile
 import unittest
 
 unittest  # imported before the research tools directory can shadow stdlib dis
 
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+PINS = ROOT / "native/tests/vectors/creature_dispatch_sources.json"
+FILES = ("tools/ref_own_machines.py", "tools/test_ref_own_machines.py")
+
 
 def main():
     if len(sys.argv) != 3:
-        raise SystemExit("usage: generate_own_machine_vectors.py RESEARCH_TOOLS OUT")
-    sys.path.insert(0, sys.argv[1])
+        raise SystemExit("usage: generate_own_machine_vectors.py RESEARCH_REPO OUT")
+    pins = json.loads(PINS.read_text())
+    tmp = tempfile.mkdtemp(prefix="own-machines-")
+    shas = {}
+    for name in FILES:
+        data = subprocess.check_output(
+            ["git", "-C", sys.argv[1], "show", pins["commit"] + ":" + name])
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != pins["sha256"][name]:
+            raise SystemExit("pin mismatch " + name)
+        shas[name] = digest
+        (pathlib.Path(tmp) / pathlib.Path(name).name).write_bytes(data)
+    sys.path.insert(0, tmp)
     import test_ref_own_machines as T
 
     bools = {
@@ -25,7 +49,8 @@ def main():
     lines = [
         "# Synthetic own-machine ticks. Defaults match the reference tick:",
         "# clock 1000, queue 1, other fields 0. 253 cases.",
-    ]
+        "# research-anim %s" % pins["commit"],
+    ] + ["# %s sha256 %s" % (name, shas[name]) for name in FILES]
     if len(T.LOCKED) != 253:
         raise SystemExit("expected 253 locked ticks, got %s" % len(T.LOCKED))
     for name, state, ctx, req, calls, words in T.LOCKED:
