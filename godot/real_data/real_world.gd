@@ -5,9 +5,9 @@ extends RefCounted
 # Drawn water is the documented colour, slope UVs and layer-3 blend
 # (docs/WATER_DRAW.md). The wave, the claim and any water_disturb call run on
 # the simulation tick. The level flag word comes from the level-lights JSON
-# when one is chosen. A negative fix uses the additive shader. A player
-# wading does not disturb the water here: Player_move's immediates are not
-# published.
+# when one is chosen. A negative fix uses the additive shader. The observed
+# player wades through the native Wader (docs/PLAYER_WADING.md): the water
+# test, the in-water bit and the entry and wading ripples of Player_move.
 # Piece poses come from level_flow::move_piece; collision changes stay in the
 # adapter's terrain copy (the play session keeps its own collision).
 const WATER_SHADER := """shader_type spatial;
@@ -52,6 +52,11 @@ var ticks_in_water := 0
 var entries := 0
 var in_water := false
 var last_height := 0.0
+# Player_move's water step on the observed player (player-wading.md): cumulative
+# counts of the native Wader. The control walk has no stick, jump, hit points or
+# shared seed, so draws and hurts are counted, not applied.
+var wade := {}
+var _wade_position := PackedInt64Array()
 var errors: Array[String] = []
 
 func open(world_path: String, objects: PackedByteArray, terrain_root: Node3D) -> Dictionary:
@@ -217,12 +222,26 @@ func _advance_waves(raw: Dictionary) -> void:
 		last = native.water_sync(tick, true)
 	else:
 		var frame := wave_frame + 1
+		var position := PackedInt64Array()
+		if raw.has("position_raw"):
+			for word in raw.position_raw: position.push_back(int(word))
+		# The stick stand-in: the feet moved since the previous observation.
+		var moving := not _wade_position.is_empty() and position != _wade_position
 		while frame <= tick:
+			if not position.is_empty(): _wade_step(frame, position, moving)
 			last = native.water_sync(frame, false)
 			frame += 1
+		if not position.is_empty(): _wade_position = position
 	wave_frame = tick
 	if last.get("dirty", false):
 		water_instance.mesh = last.mesh
+
+func _wade_step(frame: int, position: PackedInt64Array, moving: bool) -> void:
+	var result: Dictionary = native.wade_step(frame, position, moving)
+	if not result.get("ok", false):
+		if not str(result.get("error", "")) in errors: errors.append(str(result.get("error", "")))
+		return
+	if result.has("steps"): wade = result
 
 # Level flag word 0x44fe08 from the chosen level-lights row. 0x8 fills the
 # masks; 0x10 (drawer splash) is refused because the seed's start is unknown.

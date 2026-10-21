@@ -282,6 +282,9 @@ func run() -> void:
 			add("water.ticks_observed", scene.real.world.ticks_observed)
 			add("water.ticks_in_water", scene.real.world.ticks_in_water)
 			add("water.entries", scene.real.world.entries)
+			# Player_move's water step on the observed player (native Wader).
+			for key in ["steps", "ticks_in_water", "entries", "exits", "draws", "hurts", "disturbs", "touched", "splashes"]:
+				if scene.real.world.wade.has(key): add("water.wading_" + key, int(scene.real.world.wade[key]))
 			for why in scene.real.world.errors: refuse("water.service", why)
 		add("audio.frames_pushed", scene.audio.pushed_frames - frames_before)
 		add("audio.bank_errors", scene.audio.bank_errors.size())

@@ -552,8 +552,9 @@ What changed for real data:
   water lines: 157 applied, 6 refused (a fix outside ±255, whose kept
   `ALPHA_1` bits the pin does not give). 1 level draws additive (negative
   fix). On this disc no row sets flag 0x8 or 0x10, so the mask fill and the
-  drawer splash stay off as a measurement. A wading player does not disturb
-  the water (refused: `Player_move`'s immediates are not published).
+  drawer splash stay off as a measurement. A wading player now disturbs
+  the water through `Wader` (docs/PLAYER_WADING.md); the sweep adds the
+  `water.wading_*` counts.
 - combat-runtime-6 and save-import add nothing the sweep reaches: no
   round-6 object or spell exists in a level session, and the disc holds no
   memory-card saves.
