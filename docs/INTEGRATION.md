@@ -2906,3 +2906,80 @@ Limits: the live `Player1_ctor` seed, the `findFreeSpot` class radii, the
 mode-A name table, `arena_pickSpawnPoint` with a0 = 0 and the unchecked
 net-peer index stay refused. No native Intel, Windows or Linux run (x86_64 is
 Rosetta only). No manual play is claimed.
+
+## Playable integration wave 15 — script-commands (opt-in level scripts) — 2026-10-20
+
+Start `6081211`. `codex/script-commands` (`037e26d..2088ab1`, three commits) is
+merged in `b2882e5` with no conflicts. See [SCRIPT_COMMANDS.md](SCRIPT_COMMANDS.md).
+
+What it adds: `champions-script-commands`, an opt-in host for a level's script.
+Documented commands run the existing binder, and six of them route to existing
+subsystems. Partly documented and unknown commands return 0 and are counted as
+refusals. The session controller gains `enable_level_script`,
+`disable_level_script` and `script_command_counts`. It pumps one ready tick per
+simulation step only while a script is enabled. The counts are not observation
+fields. The host owns its own variables, object world, effect world and
+level-flow state, so script effects do not reach the drawn level.
+
+Scene wiring: `real_data_play` already had a "Level script (opt in)"
+checkbox and `--level-script`. With either, `load_real_level` reads the level's
+`script.scr` and `objects.ob` and attaches the host, and `start_play` reattaches
+it after a reset. Without them the scene calls `disable_level_script`, and no
+host exists. The merged code needed no change. `8141634` adds per-level counts
+for each command to `real_data_scene.gd --scripts`. `becea3e` raises
+`skills-a-exact`'s CTest limit from 120 s to 300 s. Under Rosetta it ran 116 s
+alone in wave 14, about five times its arm64 time.
+
+Verification (`work/playable-wave15/`):
+- Native Release arm64 and x86_64 builds pass, as do the four universal
+  extension builds.
+- Full CTest arm64 `-j3`: **199/199**, 694 s (`player-exact` 147 s,
+  `skills-a-exact` 28 s). A first attempt ran while sibling worktrees held the
+  load average near 200. `player-exact` timed out there, so that attempt was
+  stopped and rerun once the load fell.
+- x86_64 Rosetta, `build/native-x64` `-j3`: **199/199** on the first run,
+  1,076 s, no timeouts (`skills-a-exact` 47 s, `monsters-1-exact` 79 s).
+  The new `script-commands` tests pass on both architectures.
+- `champions-script-commands-measure --game rta` from the integrated build
+  matches the branch: 111 scripts loaded, 76 started, 41 wait, 37 complete,
+  0 faults, 1,681 executed across 36 names, 529 refused across 27.
+- Real data (counts only, `work/run-slices-r15.sh r15 --scripts`): **111 / 111**
+  loaded and played, 0 refused, 0 failed checks. 111 scripts attached and 76
+  started. 22,371 commands executed across 38 names and 1,375 refused across
+  28. Every count outside the host equals wave 14. See
+  [REAL_DATA.md](REAL_DATA.md).
+- The scene's own path, with `--level-script`, attached on 3 / 3 levels.
+  Without the flag, 0 / 3 attached.
+- Godot dev matrix **45/45**: the wave-14 43 plus `script_commands_smoke.gd`
+  and `real_data_play.tscn -- --level-script` with no game folder. Full combat
+  2,616 checks, combined FX 1,876, wave-12 extensions 40, FX bridge refusals
+  33, creature-anim 32 / 25 / 231, `native_fx_visual` 4 runs with no
+  refusals.
+- Export matrix **18/18**: the wave-14 16 plus the same two script checks
+  exported. The 36,000-tick 1280×720 Full run passed 108,822 checks with
+  0 failures (142 s). Exported headless passed 2,616 and 800×600 passed
+  2,742. The 960×720 run stalled once in the matrix: its window drew no
+  frames, so it wrote 0 captures, the headless-versus-drawn trace check failed,
+  and it was killed after 1,179 s. Rerun alone it passed 2,742 checks with
+  63 captures in 18 s. Every `FULL_TRACE` is still `8dc349c1…aa0c`.
+- Exported app on real data:
+  - The 12-level set equals wave 14 apart from timing, both without and with
+    `--scripts`. With scripts, 6 of the 12 levels started a script: 656
+    commands executed and 112 refused, 0 faults.
+  - The three arena indices: 3 / 3, equal to wave 14. Their scripts have no
+    level entry, so none started.
+
+App: `build/exports/wave15-final/Open Champions.app`.
+ZIP SHA-256: `87423687cd015a4d854bd80ecfeca6708d1b8dee926641426ea72eeb23b8f019`.
+Main universal extension: `283420664a26c469ec66842379ca859c3d0c6c8160191b56dd36a7e6046ee95a`.
+Texture universal extension (unchanged from wave 14): `0b93213ee395cfd16701fea24f0c375aeb77e7fd7f7aa7d87c24aa1b64349941`.
+The packaged libraries are byte-identical to the local builds (x86_64 + arm64).
+
+Limits:
+- Combat, creature AI, audio, HUD text, item, cutscene and path commands stay
+  refusals.
+- Script effects stay in the host's own worlds. Particles are not drawn, and
+  `hide`/`show`/`moveMonster` do not move drawn meshes.
+- The post action runs once at load.
+- No native Intel, Windows or Linux run (x86_64 is Rosetta only). No manual
+  play is claimed.
