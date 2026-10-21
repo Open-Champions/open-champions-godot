@@ -338,6 +338,7 @@ void World::State::install_ctor_services() {
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
         "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
+        "MissileWeapon_ctor",
         "model_getSamplePoint", "AntWave_ctor",
         "creature_getAttachMatrix0", "model_getAttachMatrix",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
@@ -850,6 +851,20 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getBounds")
     return A::Bounds{};
+  if (n == "MissileWeapon_ctor") {
+    // Skeleton_run state 8's plain-arrow argument vector, executed in
+    // research-combat-ctors-4 6baf4cd, arrow-run.md section 4.1.
+    if (!full() || a.size()!=17 || ar(1)!=0 || ar(8)!=0 || ar(9)!=0 ||
+        ar(12)!=0 || ar(13)!=0 || ar(15)!=4 || ar(16)!=0)
+      throw Unsupported("MissileWeapon_ctor outside the Skeleton bow release");
+    Missile arrow;
+    arrow.position=v(4);arrow.velocity=v(5);arrow.facing=ar(6);
+    arrow.models={ar(2),ar(3)};
+    arrow.minimum=ar(10);arrow.maximum=ar(11);arrow.attack=ar(14);
+    arrow.damage_flags=4;
+    missile_ctor(ar(0),arrow,ar(7));
+    return iv(0);
+  }
   if (n == "creature_getAttachMatrix0")
     return matrix_result(combat_ctors::creature_get_attach_matrix0(model,ar(0)));
   if (n == "model_getAttachMatrix")

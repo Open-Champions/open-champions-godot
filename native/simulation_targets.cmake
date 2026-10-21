@@ -244,6 +244,7 @@ add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctor
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_weapon_holder.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_death_ctors.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_phprop_ctors.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_phprop_run.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_gold.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_prop_dtors.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_attach_matrix.cpp"

@@ -383,6 +383,74 @@ void antwave_round4_cases() {
         "AntWave draws its particle from own seed");
   check(m.draws==0,"AntWave draw consumes no shared seed");
 }
+void phprop_run_round4_cases() {
+  // Replay the gravity, life/rest and GutChunk decal cases in
+  // research-combat-ctors-4 tools/test_ref_phprop_run.py.
+  constexpr A::Address obj=0x180000,block=0x181000;
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  auto get=[&](A::Address a,unsigned n){return mem.load(a,n);};
+  for (const char *name:{"obj_updateGridCell","obj_delete","handle_link",
+      "obj_getPropInt","res_find","obj_runEveryFrame","decal_add","sound_playOnObject",
+      "GutChunk_dtor","PhProp_dtor"})
+    m.callbacks[name]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+      return std::int64_t(0);
+    };
+  m.callbacks["water_test"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  m.callbacks["terrain_heightBelow"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  m.callbacks["terrain_height"]=m.callbacks["terrain_heightBelow"];
+  m.callbacks["pool_new"]=[&](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(block);
+  };
+  auto init=[&] {
+    for (unsigned i=0;i<0x270;i+=4) put(obj+i,4,0);
+    put(obj+0x10,4,0x41200000);put(obj+0x14,4,0x41a00000);
+    put(obj+0x18,4,0x42480000);
+    put(obj+0x1c,4,0x40800000);
+    put(obj+0x48,4,0x511ba8);
+    put(obj+0x10e,2,180);
+    for (unsigned off:{0x190u,0x194u,0x198u,0x19cu,0x1b8u,
+                       0x1d4u,0x1e4u,0x1f4u}) put(obj+off,4,champions::simulation::rta::ONE);
+    put(obj+0x1a0,4,0x41200000);put(obj+0x1a4,4,0x41a00000);
+    put(obj+0x1a8,4,0x42480000);
+    put(obj+0x228,4,0xc2c80000);
+    put(obj+0x23c,4,0xbecccccc);put(obj+0x240,4,champions::simulation::rta::ONE);
+    const char *names[]={"fx.lmp","gutchunks.vif","gutchunks.tex"};
+    const A::Address addresses[]={obj+0x54,obj+0x64,obj+0xa4};
+    for (unsigned k=0;k<3;++k)
+      for (unsigned j=0;;++j) {
+        put(addresses[k]+j,1,std::uint8_t(names[k][j]));
+        if (!names[k][j]) break;
+      }
+    put(0x44fdcc,4,1);put(0x404464,4,0x1234);
+    m.calls.clear();m.draws=0;
+  };
+  init();
+  CT::phprop_run(m,obj);
+  check(get(obj+0x1c4,4)==0xbe3851e9,"PhProp gravity momentum");
+  check(get(obj+0x18,4)==0x42480000,"PhProp position uses old body z");
+  check(get(obj+0x10e,2)==179,"PhProp life decrements");
+  check(get(obj+0x228,4)==0,"PhProp ground service result");
+  check(m.calls.size()==2&&m.calls[0].name=="terrain_heightBelow"&&
+        m.calls[1].name=="obj_updateGridCell","PhProp flight call order");
+  init();put(obj+0x10e,2,0);
+  CT::phprop_run(m,obj);
+  check(get(block+0x48,4)==0x511d58,"PhProp rest builds named Prop");
+  check(m.draws==1,"PhProp rest consumes one shared draw");
+  check(get(obj+0x10e,2)==0xffff,"PhProp rest decrements life first");
+  check(m.calls.back().name=="obj_delete","PhProp rest deletes flying prop");
+  init();put(obj+0x248,4,1);put(obj+0x24c,4,0xbf000000);
+  put(obj+0x1c4,4,0xbf8ccccd);put(obj+0x48,4,0x50f3b8);
+  CT::gutchunk_run(m,obj);
+  auto decals=0;
+  for (const auto &c:m.calls) if (c.name=="decal_add") ++decals;
+  check(decals==1,"GutChunk downward threshold decal");
+  check(m.draws==0,"GutChunk decal uses own seed only");
+}
 }
 int main() {
   try {
@@ -396,6 +464,7 @@ int main() {
     prop_dtor_round4_cases();
     attach_matrix_round4_cases();
     antwave_round4_cases();
+    phprop_run_round4_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {
