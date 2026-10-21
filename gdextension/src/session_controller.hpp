@@ -1,6 +1,8 @@
 #pragma once
 #include "champions/frame_clock.hpp"
+#include "champions/arena_executable.hpp"
 #include "champions/combat_play.hpp"
+#include "champions/core_state.hpp"
 #include "champions/combat_play_effects.hpp"
 #include "champions/level_play.hpp"
 #include "champions/native_save.hpp"
@@ -43,6 +45,23 @@ class ChampionsSessionController : public godot::RefCounted {
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
   void pump_scripts(std::size_t ready_ticks_before);
+  // The level script's draws and the play session's World are one stream
+  // (script_commands::SeedPolicy::OfflineSession, research
+  // t3/research-script-session 6841b8a docs/script-session.md section 1): it
+  // starts at the play session's configured shared seed when the script
+  // attaches (the port's stand-in for the offline session's clock seed), the
+  // load's draws come first, and play starts its World from where they left
+  // it. script_world_ is the World's state at that hand-over; a World that
+  // draws on its own, or a session that replaces it, unpairs them, and getRand
+  // is refused from then on.
+  std::unique_ptr<champions::simulation::rta::SharedRandom> script_seed_;
+  std::optional<std::uint32_t> script_world_;
+  bool script_seed_unpaired_ = false;
+  void unpair_script_seed();
+  void unpair_script_seed_if_paired();
+  // The owner's executable, kept by load_arena_tables: the level script's
+  // object factory reads its strings (script_commands::Host::set_executable).
+  std::shared_ptr<const champions::simulation::rta::arena_modes::Executable> executable_;
   champions::simulation::rta::session_control::Setup combat_setup_;
   champions::simulation::rta::session_control::Observation active_observation() const;
   champions::simulation::rta::session_control::Observation active_advance(uint32_t);

@@ -81,11 +81,26 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.objects_registered += one.objects_registered;
   total.objects_refused += one.objects_refused;
   total.stub_refusals += one.stub_refusals;
+
+  total.callee_refusals += one.callee_refusals;
+
+  total.objects_built += one.objects_built;
+  total.objects_unbuilt += one.objects_unbuilt;
+  total.objects_not_created += one.objects_not_created;
+  total.objects_pool_refused += one.objects_pool_refused;
+  total.objects_unclassified += one.objects_unclassified;
+  total.load_draws_unmodelled += one.load_draws_unmodelled;
+  for (const auto &kv : one.unbuilt_constructors)
+    total.unbuilt_constructors[kv.first] += kv.second;
+  for (const auto &kv : one.build_refusals)
+    total.build_refusals[kv.first] += kv.second;
   total.callee_refusals += one.callee_refusals;
   for (std::size_t i = 0; i < sc::COMMANDS; ++i) {
     total.executed[i] += one.executed[i];
     total.refused[i] += one.refused[i];
+    total.stopped[i] += one.stopped[i];
     total.inferred[i] += one.inferred[i];
+
   }
 }
 
@@ -107,23 +122,53 @@ void drain(sc::Host &host) {
 int main(int argc, char **argv) {
   std::string game;
   std::string root;
+  // --bare: the host as the play session left it before docs/script-session.md
+  // (no executable, no seed, no player count). Otherwise each level runs as the
+  // play session runs it: one player, difficulty 1, the session seed fixture
+  // below with SeedPolicy::OfflineSession, and the directory's SLUS_209.73 for
+  // the object factory when there is one.
+  bool bare = false;
+  // Leave one part of the session binding out, to attribute count changes.
+  bool no_seed = false, no_players = false, no_objects = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--game" && i + 1 < argc)
       game = argv[++i];
+    else if (arg == "--bare")
+      bare = true;
+    else if (arg == "--no-seed")
+      no_seed = true;
+    else if (arg == "--no-players")
+      no_players = true;
+    else if (arg == "--no-objects")
+      no_objects = true;
     else if (!arg.empty() && arg[0] != '-')
       root = arg;
     else {
-      std::cerr << "usage: champions-script-commands-measure --game rta DIR\n";
+      std::cerr << "usage: champions-script-commands-measure --game rta [--bare] DIR\n";
       return 2;
     }
   }
+  if (bare && (no_seed || no_players || no_objects)) {
+    std::cerr << "--bare already leaves every part out\n";
+    return 2;
+  }
   if (game != "rta" || root.empty() || !fs::is_directory(root)) {
-    std::cerr << "usage: champions-script-commands-measure --game rta DIR\n";
+    std::cerr << "usage: champions-script-commands-measure --game rta [--bare] DIR\n";
     return 2;
   }
   std::map<std::string, fs::path> files;
   scan(root, 0, files);
+  // The play session's default shared seed (session_control::Config), as a
+  // fixture: an offline session's seed is a clock reading.
+  constexpr std::uint32_t SESSION_SEED = 17;
+  std::shared_ptr<champions::simulation::rta::arena_modes::Executable> exe;
+  if (!bare && !no_objects && files.count("slus_209.73")) {
+    auto bytes = read_file(files["slus_209.73"]);
+    auto next = std::make_shared<champions::simulation::rta::arena_modes::Executable>();
+    if (next->load(std::move(bytes)))
+      exe = std::move(next);
+  }
   sc::Counts total;
   std::uint64_t levels_with_tex = 0, scripts_found = 0, scripts_loaded = 0;
   std::uint64_t scripts_no_level_entry = 0, scripts_load_refused = 0;
@@ -176,6 +221,15 @@ int main(int argc, char **argv) {
       continue;
     }
     sc::Host host;
+    champions::simulation::rta::SharedRandom seed(SESSION_SEED);
+    if (!bare) {
+      if (!no_seed)
+        host.bind_seed(&seed, sc::SeedPolicy::OfflineSession);
+      if (!no_players)
+        host.start_single_player();
+      if (exe)
+        host.set_executable(sc::executable_view(exe));
+    }
     champions::simulation::rta::amx::ByteVector image(script_bytes.data, script_bytes.data + script_bytes.size);
     if (!host.load(image)) {
       ++scripts_load_refused;
@@ -217,7 +271,22 @@ int main(int argc, char **argv) {
   std::cout << "objects_registered " << total.objects_registered << '\n';
   std::cout << "objects_refused " << total.objects_refused << '\n';
   std::cout << "stub_refusals " << total.stub_refusals << '\n';
+
   std::cout << "callee_refusals " << total.callee_refusals << '\n';
+
+  std::cout << "mode " << (bare ? "bare" : "session") << (no_seed ? " no-seed" : "")
+            << (no_players ? " no-players" : "") << (no_objects ? " no-objects" : "") << '\n';
+  std::cout << "executable_used " << (exe ? 1 : 0) << '\n';
+  std::cout << "objects_built " << total.objects_built << '\n';
+  std::cout << "objects_unbuilt " << total.objects_unbuilt << '\n';
+  std::cout << "objects_not_created " << total.objects_not_created << '\n';
+  std::cout << "objects_pool_refused " << total.objects_pool_refused << '\n';
+  std::cout << "objects_unclassified " << total.objects_unclassified << '\n';
+  std::cout << "load_draws_unmodelled " << total.load_draws_unmodelled << '\n';
+  std::cout << "unbuilt_constructors " << total.unbuilt_constructors.size() << '\n';
+  for (const auto &kv : total.build_refusals)
+    std::cout << "build_refused " << kv.first << ' ' << kv.second << '\n';
+
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     std::cout << "executed " << sc::row(i).name << ' ' << total.executed[i] << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
@@ -225,5 +294,8 @@ int main(int argc, char **argv) {
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     if (total.inferred[i])
       std::cout << "inferred " << sc::row(i).name << ' ' << total.inferred[i] << '\n';
+  for (std::size_t i = 0; i < sc::COMMANDS; ++i)
+    std::cout << "stopped " << sc::row(i).name << ' ' << total.stopped[i] << '\n';
+
   return 0;
 }

@@ -148,6 +148,59 @@ std::vector<std::uint8_t> gate_objects(const char *cls = "Stub") {
   return blob;
 }
 
+// A synthetic objects.ob with several records (class, name). Authored strings.
+std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records) {
+  std::vector<std::uint8_t> strtab{0}, body, out;
+  auto intern = [&](const std::string &text) {
+    const auto at = static_cast<std::uint32_t>(strtab.size());
+    strtab.insert(strtab.end(), text.begin(), text.end());
+    strtab.push_back(0);
+    return at;
+  };
+  auto put = [](std::vector<std::uint8_t> &v, std::uint32_t value, int n) {
+    for (int k = 0; k < n; ++k)
+      v.push_back(static_cast<std::uint8_t>(value >> (8 * k)));
+  };
+  for (const auto &r : records) {
+    put(body, intern(r.first), 4);
+    put(body, 28, 2);
+    put(body, 0, 2);
+    for (int k = 0; k < 3; ++k)
+      put(body, 0, 4);
+    put(body, intern("name=" + r.second), 4);
+    put(body, 0, 4);
+  }
+  put(out, static_cast<std::uint32_t>(records.size()), 2);
+  put(out, 0, 2);
+  put(out, static_cast<std::uint32_t>(8 + body.size()), 4);
+  out.insert(out.end(), body.begin(), body.end());
+  out.insert(out.end(), strtab.begin(), strtab.end());
+  return out;
+}
+
+// An authored executable for the object factory: a placeholder string at every
+// name test's address, "Gnaw" at the Gnaw row's (level_factory_table.inc), the
+// change-key format Creature_init needs, an ASCII class table. Not the game's.
+champions::simulation::rta::level_factory::Executable authored_executable() {
+  namespace LF = champions::simulation::rta::level_factory;
+  auto strings = std::make_shared<std::map<std::uint32_t, std::string>>();
+  int k = 0;
+  for (const auto &row : LF::tests())
+    (*strings)[row.name] = "Cls" + std::to_string(k++);
+  (*strings)[0x532b88] = "Gnaw";
+  (*strings)[0x52fad0] = "change%d";
+  LF::Executable exe;
+  exe.string = [strings](std::uint32_t a) {
+    auto it = strings->find(a);
+    return it == strings->end() ? std::string() : it->second;
+  };
+  exe.byte = [](std::uint32_t a) -> std::uint8_t {
+    const auto c = std::int64_t(a) - std::int64_t(LF::CTYPE);
+    return std::uint8_t((c >= 'A' && c <= 'Z') ? 1 : 0);
+  };
+  return exe;
+}
+
 void test_table(const std::string &path) {
   std::ifstream in(path);
   check(static_cast<bool>(in), "vector file opens");
@@ -248,6 +301,84 @@ void test_seed_refused_without_session_seed() {
   check(stubbed.counts().executed[rand] == 0 && stubbed.counts().refused[rand] == 1,
         "getRand is refused once an unconstructed object is adopted");
   check(live.state == 20973u, "the refused draw leaves the session seed alone");
+}
+
+// research t3/research-script-session 6841b8a, docs/script-session.md section 1:
+// an offline session's seed is a clock reading, so the session's generator
+// answers getRand although an adopted record was never constructed.
+void test_offline_seed_policy() {
+  const auto rand = static_cast<std::size_t>(index_of("getRand"));
+  auto built = build_calls({{"start", {{"getRand", {}}}}}, {});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live, sc::SeedPolicy::OfflineSession);
+  plant(host, built);
+  const auto blob = gate_objects();
+  host.adopt_objects(blob.data(), blob.size());
+  host.run("start");
+  SharedRandom once(20973);
+  once.draw();
+  check(host.counts().executed[rand] == 1 && host.counts().refused[rand] == 0,
+        "getRand runs on the session generator after an unconstructed record");
+  check(live.state == once.state, "the session generator made the one draw");
+  check(host.counts().load_draws_unmodelled == 1, "the record's draws are counted as unmodelled");
+}
+
+// docs/script-session.md section 2: g_numPlayers 1, g_difficultyIdx 1.
+void test_single_player() {
+  sc::Host none;
+  check(none.campaign().num_players() == 0, "no player count before start_single_player");
+  sc::Host host;
+  host.start_single_player();
+  check(host.variables().memory.word(0x4d8ae0) == 1 && host.variables().memory.word(0x4f719c) == 1,
+        "one player, difficulty 1");
+  check(host.campaign().num_players() == 1 && host.campaign().difficulty() == 1,
+        "the campaign mirrors them");
+  auto built = build_calls({{"start", {{"addQuest", {2000, 2100}}}}}, {{2000, "title"}, {2100, "text"}});
+  plant(host, built);
+  check(host.run("start") == sc::Stop::Complete, "addQuest completes");
+  check(host.campaign().record(0).quest_count == 1, "addQuest writes the one player's quest list");
+}
+
+// docs/script-session.md sections 3-5: the factory decides what is registered;
+// a built creature is readable by hideMonster, its hit points are not.
+void test_classified_objects() {
+  const auto hide = static_cast<std::size_t>(index_of("hideMonster"));
+  const auto hp = static_cast<std::size_t>(index_of("getHitPoints"));
+  auto built = build_calls({{"start",
+                             {{"hideMonster", {2000}},
+                              {"hideMonster", {2100}},
+                              {"hideMonster", {2200}},
+                              {"getHitPoints", {2000}}}}},
+                           {{2000, "gnawling"}, {2100, "ghost"}, {2200, "lamp"}});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live);
+  host.set_executable(authored_executable());
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = objects_blob({{"gnaw", "gnawling"}, {"Nope", "ghost"}, {"Cls0", "lamp"}});
+  check(host.adopt_objects(blob.data(), blob.size()), "classified records adopt");
+  const auto &counts = host.counts();
+  check(counts.objects_built == 1 && counts.objects_unbuilt == 1 && counts.objects_not_created == 1 &&
+            counts.objects_registered == 2,
+        "one built, one stub, one record the factory builds nothing for");
+  check(counts.unbuilt_constructors.size() == 1 && counts.unbuilt_constructors.count(0x158bcc) == 1,
+        "the stub is counted by its constructor");
+  auto *gnaw = host.variables().find_first("gnawling");
+  check(gnaw && host.is_built(gnaw->addr), "the built creature is found by name");
+  check(host.variables().find_first("ghost") == nullptr, "a record the factory skips is not registered");
+  SharedRandom once(20973);
+  once.draw();
+  check(live.state == once.state, "GameObject_ctor drew once from the session seed");
+  host.run_start();
+  check(counts.executed[hide] == 2 && counts.refused[hide] == 1,
+        "hideMonster runs on the built creature and on no object, refuses on the stub");
+  check(counts.refused[hp] == 1 && counts.executed[hp] == 0, "a built creature's hit points refuse");
+  const auto flags = host.variables().memory.word(gnaw->addr + 0xc);
+  check((flags & 0x20) && (flags & 0x8000), "creature flag and the hidden flag");
+  check(host.variables().memory.u8(gnaw->addr + 0x231) & 8, "the inert hidden bit");
+  check(counts.stub_refusals == 2, "both refusals counted");
 }
 
 void test_entrance_grid_and_particle() {
@@ -781,6 +912,9 @@ int main(int argc, char **argv) {
   test_host_vectors(argv[2]);
   test_variables_and_seed();
   test_seed_refused_without_session_seed();
+  test_offline_seed_policy();
+  test_single_player();
+  test_classified_objects();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();

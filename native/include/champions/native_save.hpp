@@ -44,6 +44,7 @@ public:
   void stop();
   void reset();
   session_control::Observation observation() const;
+  std::uint32_t shared_seed() const;
   session_control::Setup setup() const;
   session_control::Snapshot snapshot() const;
   session_control::Snapshot continuation_snapshot() const;

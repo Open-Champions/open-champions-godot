@@ -5,6 +5,7 @@
 #include "champions/level_flow.hpp"
 #include "champions/objects.hpp"
 #include "champions/terrain_file.hpp"
+#include "level_spawn_lmp.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -50,17 +51,6 @@ std::uint32_t u32(const std::vector<std::uint8_t> &b, std::size_t at) {
   return std::uint32_t(b[at]) | std::uint32_t(b[at + 1]) << 8 |
          std::uint32_t(b[at + 2]) << 16 | std::uint32_t(b[at + 3]) << 24;
 }
-std::uint16_t u16(const std::vector<std::uint8_t> &b, std::size_t at) {
-  return std::uint16_t(b[at] | (b[at + 1] << 8));
-}
-std::string cstr(const std::vector<std::uint8_t> &b, std::size_t at) {
-  if (at >= b.size())
-    return {};
-  auto end = at;
-  while (end < b.size() && b[end])
-    ++end;
-  return std::string(reinterpret_cast<const char *>(b.data() + at), end - at);
-}
 struct Lump {
   std::string name;
   std::vector<std::uint8_t> bytes;
@@ -93,23 +83,14 @@ bool sequential_lumps(const std::vector<std::uint8_t> &data,
   }
   return false;
 }
+// champions::readLmp (u32 count; tools/level_spawn_lmp.hpp). The old u16
+// reading here is the NET-3 bug on codex/netplay (b06c4e5).
 bool lmp_entries(const std::vector<std::uint8_t> &blob, std::vector<Lump> &out) {
-  if (blob.size() < 4)
+  std::vector<champions::level_spawn::LmpEntry> entries;
+  if (!champions::level_spawn::lmp_entries(blob, entries))
     return false;
-  const unsigned count = u16(blob, 0);
-  if (4ull + std::uint64_t(count) * 12 > blob.size())
-    return false;
-  for (unsigned i = 0; i < count; ++i) {
-    const auto rec = 4 + i * 12;
-    const auto name_at = u32(blob, rec);
-    const auto data_at = u32(blob, rec + 4);
-    const auto size = u32(blob, rec + 8);
-    if (std::uint64_t(data_at) + size > blob.size())
-      return false;
-    out.push_back({cstr(blob, name_at),
-                   std::vector<std::uint8_t>(
-                       blob.begin() + data_at, blob.begin() + data_at + size)});
-  }
+  for (auto &entry : entries)
+    out.push_back({std::move(entry.name), std::move(entry.bytes)});
   return true;
 }
 enum class Census { Skip, Bad, Open };
@@ -324,7 +305,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   std::sort(gobs.begin(), gobs.end());
-  unsigned paired = 0, read_failures = 0, lump_failures = 0, decode_failures = 0,
+  unsigned paired = 0, read_failures = 0, lump_failures = 0, lmp_refused = 0,
+           decode_failures = 0,
            geometry_bad = 0, geometry_skipped = 0, origin_test = 0,
            story_ground = 0, origin_r4_floor = 0, origin_r12_floor = 0,
            marker_floor = 0, search_floor = 0, search_cases = 0, arena_n = 0,
@@ -357,7 +339,7 @@ int main(int argc, char **argv) {
       continue;
     std::vector<Lump> entries;
     if (!lmp_entries(level_lump->bytes, entries)) {
-      ++lump_failures;
+      ++lmp_refused;
       continue;
     }
     std::vector<std::string> names;
@@ -506,6 +488,7 @@ int main(int argc, char **argv) {
             << "scenario_misses " << scenario_miss << '\n'
             << "read_failures " << read_failures << '\n'
             << "lump_failures " << lump_failures << '\n'
+            << "lmp_refused " << lmp_refused << '\n'
             << "decode_failures " << decode_failures << '\n'
             << "geometry_bad " << geometry_bad << '\n'
             << "geometry_skipped " << geometry_skipped << '\n'
@@ -536,7 +519,8 @@ int main(int argc, char **argv) {
   for (auto value : cold.index)
     std::cout << ' ' << value;
   std::cout << '\n';
-  return measure_failures || read_failures || lump_failures || decode_failures ||
+  return measure_failures || read_failures || lump_failures || lmp_refused ||
+                 decode_failures ||
                  geometry_bad
              ? 1
              : 0;

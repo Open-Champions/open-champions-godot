@@ -416,6 +416,11 @@ void Controller::reset() {
                                       state.initial_terrain.limits);
   state_ = std::move(next);
 }
+std::uint32_t Controller::shared_seed() const {
+  std::uint32_t seed = 0;
+  state_->session->with_world([&](objects::World &world) { seed = world.shared.state; });
+  return seed;
+}
 Observation Controller::observation() const {
   const auto &state = *state_;
   auto out = state.session->control_observation(state.actor_serial, state.hp);

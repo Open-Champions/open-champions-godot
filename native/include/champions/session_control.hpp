@@ -147,6 +147,9 @@ public:
   // Explicit fresh Session with the same configuration and initial terrain.
   void reset();
   Observation observation() const;
+  // The session World's shared generator (read only). An opted-in level
+  // script draws from the same stream (script_commands, SeedPolicy).
+  std::uint32_t shared_seed() const;
   Setup setup() const;
   Snapshot snapshot() const;
   // Explicit partial-history observation for the opted-in continuation mode.

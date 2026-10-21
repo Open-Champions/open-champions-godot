@@ -300,7 +300,13 @@ for three record lists, composed in the generator from the reference's
 story-fallback function; that composition is native glue the research did not
 execute as one call. `round4_cases` ports `Round4ArenaEntry` and keeps only
 structural checks of the fallback. `champions-level-spawn-measure` reads a paired
-archive directory and prints counts only. The origin-test pass is unchanged.
+archive directory and prints counts only. It reads each level lump with
+`champions::readLmp` (u32 entry count, research `FORMATS.md`) through
+`native/tools/level_spawn_lmp.hpp` and counts the lumps `readLmp` refuses
+(`lmp_refused`). It used to read the count as u16, the bug NET-3 fixed in the
+netplay tool (`codex/netplay` b06c4e5); `level-flow-exact` feeds an authored
+lump whose count word is 0x00010001, which the u16 reading accepted. The
+origin-test pass is unchanged.
 A second pass decodes geometry-skipped archives and counts a level only when
 radius 12 at the origin is the sentinel and an `ArenaPlayerStart` exists. It
 prints cold, floor, search-snap, stand-in, lattice, water, alternate and

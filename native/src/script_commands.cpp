@@ -30,23 +30,27 @@ constexpr std::uint32_t PAUSED_WORD = 0x41b4f4, PENDING_WORD = 0x41b6d0, ORIENT_
 // name (script_builtins.cpp creature_dispatch and menu_dispatch; research
 // 9649e6b tools/ref_natives.py n_<name>). limit is the binder's lookup limit;
 // setHitPoints looks up the first object only, which is limit 2.
+// hit_points: the path also reads hit points at +0x228 (getHitPoints).
 struct StubRead {
   const char *name;
   std::int64_t limit;
+  bool hit_points;
 };
 const StubRead kStubReads[] = {
-    {"increaseEnemyRank", 0x200}, {"unRootMonster", 0x200}, {"stopFollowingPlayer", 0x200},
-    {"friendly", 0x200},          {"unFriendly", 0x200},    {"hideMonster", 0x200},
-    {"showMonster", 0x200},       {"getHitPoints", 0x200},  {"setHitPoints", 2},
-    {"countLiveObjects", 0x80},   {"showOnMap", 100},
+    {"increaseEnemyRank", 0x200, false}, {"unRootMonster", 0x200, false},
+    {"stopFollowingPlayer", 0x200, false}, {"friendly", 0x200, false},
+    {"unFriendly", 0x200, false},          {"hideMonster", 0x200, false},
+    {"showMonster", 0x200, false},         {"getHitPoints", 0x200, true},
+    {"setHitPoints", 2, false},            {"countLiveObjects", 0x80, false},
+    {"showOnMap", 100, false},
     // setCFlag tests the creature flag 0x20 on each object it finds
     // (research-quests 7efd3ce tools/ref_natives.py n_setCFlag).
-    {"setCFlag", 0x200},
-    // The 52984db callees act only on a creature: each tests flag 0x20 on
-    // every object its name finds (script_builtins.cpp creature_dispatch,
-    // find(name, 0x200); research 52984db docs/script-effects.md).
-    {"setMonsterVal", 0x200},     {"setMonsterRange", 0x200}, {"setCreatureParams", 0x200},
-    {"charmMonster", 0x200},      {"followPlayer", 0x200},
+    {"setCFlag", 0x200, false},
+    // Executed callee routes also read the creature flag.
+    {"setMonsterVal", 0x200, false}, {"setMonsterRange", 0x200, false},
+    {"setCreatureParams", 0x200, false}, {"charmMonster", 0x200, false},
+    {"followPlayer", 0x200, false},
+
 };
 // The select* forms act on g_scriptSelectedObj and test the same flag.
 bool selected_form(const char *name) {
@@ -265,27 +269,32 @@ void Host::install() {
 // entry stops here instead of running on an invented 0.
 void Host::refuse(std::size_t index, amx::Machine &machine) {
   counts_.refused[index] += 1;
-  if (result_used(machine))
+  if (result_used(machine)) {
+    counts_.stopped[index] += 1;
     throw RefusedResult(std::string("refused ") + kRows[index].name);
+  }
 }
 
 // Reads the name argument as the binder does (the cell at params + 4). An
 // address the machine refuses makes the binder use a remembered string slot,
 // which the host does not track; that counts as touching a stub.
 bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
-  if (stubs_.empty())
-    return false;
   if (selected_form(kRows[index].name))
     return stubs_.count(variables_->memory.word(SELECTED_WORD)) != 0;
   const auto *read = stub_read(kRows[index].name);
-  if (!read)
+  if (!read || (stubs_.empty() && built_.empty()))
     return false;
   const auto address = machine.cell(machine.params + 4);
   if (machine.get_addr(address) != amx::ERR_NONE)
     return true;
-  for (const auto *obj : variables_->find(machine.get_string(address), read->limit))
+  for (const auto *obj : variables_->find(machine.get_string(address), read->limit)) {
     if (stubs_.count(obj->addr))
       return true;
+    // A built creature's hit points come from Creature_setStats, which is not
+    // ported (docs/script-session.md section 5).
+    if (read->hit_points && built_.count(obj->addr))
+      return true;
+  }
   return false;
 }
 
@@ -356,12 +365,23 @@ amx::NativeMap Host::command_map() {
 // desynchronise combat and FX. Without a bound seed the draw is refused. An
 // adopted stub was never constructed, and each constructed object draws once
 // from the shared seed during the objects.ob load (docs/issues/arena-entry.md
-// 1.4), so after a stub the bound seed's state is not the original's either.
-bool Host::seed_refused() const { return !external_seed_ || !stubs_.empty(); }
+// 1.4), so after a stub the bound seed's state is not the original's either:
+// with SeedPolicy::Exact that refuses. Nothing reseeds the shared seed at a
+// level start; an offline session seeds it once from the cycle counter
+// (research-script-session 6841b8a, docs/script-session.md section 1), so with
+// SeedPolicy::OfflineSession the session's generator answers and the missing
+// draws are only counted.
+bool Host::seed_refused() const {
+  if (!external_seed_)
+    return true;
+  if (seed_policy_ == SeedPolicy::OfflineSession)
+    return false;
+  return !stubs_.empty() || counts_.load_draws_unmodelled != 0;
+}
 void Host::sync_seed_in() { variables_->memory.word(SEED_WORD, external_seed_->state); }
 void Host::sync_seed_out() { external_seed_->state = variables_->memory.word(SEED_WORD); }
 void Host::apply_entrance() { flow_.entrance = variables_->memory.cstr(ENTRANCE_WORD); }
-void Host::bind_seed(SharedRandom *next) { external_seed_ = next; }
+
 // The objects the binder's name argument finds. nullopt when the address is
 // one the machine refuses: the binder would then reuse a remembered string
 // slot the host does not track.
@@ -540,6 +560,12 @@ std::uint32_t Host::scene(const std::string &name,
   throw amx::HostFault("undocumented scene service");
 }
 
+
+void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
+  external_seed_ = next;
+  seed_policy_ = policy;
+}
+
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
   mirror();
   auto result = quests::change_level(*campaign_, flow_, options, {});
@@ -606,6 +632,8 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
   }
   try {
     const auto records = level_flow::parse_objects(champions::Bytes{data, size});
+    if (exe_)
+      return adopt_classified(records);
     for (const auto &record : records) {
       auto props = std::make_shared<std::vector<std::string>>(record.props);
       // No factory class: nothing says what the record is. Not registered.
@@ -616,6 +644,8 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
       const auto obj = variables_->new_object({}, 0, record.position, record.angle, record.cls, props);
       stubs_.insert(obj->addr);
       counts_.objects_registered += 1;
+      counts_.objects_unclassified += 1;
+      counts_.load_draws_unmodelled += 1;
     }
     return true;
   } catch (const std::exception &) {

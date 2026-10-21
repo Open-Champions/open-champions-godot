@@ -1,6 +1,7 @@
 #include "champions/core_math.hpp"
 #include "champions/objects.hpp"
 #include "champions/session_level_flow.hpp"
+#include "../tools/level_spawn_lmp.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -1433,8 +1434,38 @@ void round4_cases() {
   // seeded search) are reference-generated in level_flow_vectors.inc.
 }
 } // namespace
+// Authored LMP: one record naming "a.world" (4 payload bytes) and a count
+// word whose low 16 bits are 1. Research FORMATS.md: the LMP count is u32, so
+// the old u16 reading of level_spawn_measure (NET-3) accepted a lump that
+// champions::readLmp refuses.
+std::vector<std::uint8_t> authored_lmp(std::uint32_t count) {
+  std::vector<std::uint8_t> lmp(4 + 12, 0);
+  auto put = [&](std::size_t at, std::uint32_t value) {
+    for (unsigned k = 0; k < 4; ++k)
+      lmp[at + k] = std::uint8_t(value >> (8 * k));
+  };
+  put(0, count);
+  put(4, 16);
+  put(8, 24);
+  put(12, 4);
+  for (char c : std::string("a.world"))
+    lmp.push_back(std::uint8_t(c));
+  lmp.push_back(0);
+  lmp.insert(lmp.end(), {1, 2, 3, 4});
+  return lmp;
+}
+void spawn_tool_lmp_count() {
+  std::vector<champions::level_spawn::LmpEntry> entries;
+  CHECK(champions::level_spawn::lmp_entries(authored_lmp(1), entries));
+  CHECK(entries.size() == 1 && entries[0].name == "a.world" &&
+        entries[0].bytes == std::vector<std::uint8_t>{1, 2, 3, 4});
+  CHECK(!champions::level_spawn::lmp_entries(authored_lmp(0x00010001u), entries));
+  CHECK(entries.empty());
+}
+
 int main() {
   try {
+    spawn_tool_lmp_count();
     reference_vectors();
     reference_cases();
     round2_cases();

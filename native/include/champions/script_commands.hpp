@@ -1,9 +1,13 @@
 #pragma once
+
 // Opt-in level-script host. Documented commands run the existing binder.
 // Commands whose callee research executed at t3/research-script 52984db also
 // run that binder, and the host answers the call. Every other command is a
 // counted refusal. The composition census stays the 9649e6b table.
+#include "champions/arena_executable.hpp"
+
 #include "champions/fx_simulation.hpp"
+#include "champions/level_factory.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/quests.hpp"
@@ -25,6 +29,14 @@ inline constexpr const char *POLICY = "rta-script-commands-v2";
 inline constexpr std::size_t COMMANDS = 191;
 
 enum class Effect : std::uint8_t { Documented, Partial, Unknown };
+// How getRand treats load draws the host did not make (research
+// t3/research-script-session 6841b8a, docs/script-session.md section 1).
+// Exact: refused once an adopted record's construction was not run, because
+// the original draws from the shared seed while it constructs. OfflineSession:
+// the session's generator stands in for the offline session's clock seed
+// (COP0 Count, 0x322a04), so its draws are answered; the records whose draws
+// the host did not make are counted in load_draws_unmodelled.
+enum class SeedPolicy : std::uint8_t { Exact, OfflineSession };
 // Refused: a refused command's answer was used, so the entry stopped there.
 enum class Stop : std::uint8_t { Missing, Complete, Wait, Fault, Refused };
 
@@ -48,9 +60,27 @@ struct Counts {
   std::uint64_t refusal_stops = 0;
   std::uint64_t objects_registered = 0;
   std::uint64_t objects_refused = 0;
+  // With an executable (set_executable), each record goes through the object
+  // factory (level_factory): built by a ported constructor chain, unbuilt (the
+  // factory builds an object whose constructor is not ported here, or whose
+  // construction takes a path that is not; a stub), not created (the factory
+  // builds no object; nothing is registered), or refused by the pool.
+  std::uint64_t objects_built = 0;
+  std::uint64_t objects_unbuilt = 0;
+  std::uint64_t objects_not_created = 0;
+  std::uint64_t objects_pool_refused = 0;
+  // Without an executable every record is a stub, as before.
+  std::uint64_t objects_unclassified = 0;
+  // Records the original constructs whose shared-seed draws the host did not
+  // make (each draws at least once, in GameObject_ctor).
+  std::uint64_t load_draws_unmodelled = 0;
+  // Unbuilt records by constructor address, and build refusals by reason.
+  std::map<std::uint32_t, std::uint64_t> unbuilt_constructors;
+  std::map<std::string, std::uint64_t> build_refusals;
   // Documented commands refused because their binder path would read an
-  // unconstructed stub's creature flag, hit points or type name. Each is also
-  // in refused[].
+  // unconstructed stub's creature flag, hit points or type name, or a built
+  // object's field no ported code wrote (hit points). Each is also in
+  // refused[].
   std::uint64_t stub_refusals = 0;
   // Routed commands refused because, for this state, they would reach a
   // callee research did not execute: a live charm target, a music volume or
@@ -58,11 +88,17 @@ struct Counts {
   std::uint64_t callee_refusals = 0;
   std::array<std::uint64_t, COMMANDS> executed{};
   std::array<std::uint64_t, COMMANDS> refused{};
+
   // Executions whose route runs an inferred body: setCFlag and
   // selectSetCFlag with bit 0, which reach creature_startBossMusic (the
   // boss-music stop and queue, research-audio 6b08886). Each is also in
   // executed[].
   std::array<std::uint64_t, COMMANDS> inferred{};
+
+  // Refusals whose answer the script used, so the entry stopped (refusal_stops
+  // by command).
+  std::array<std::uint64_t, COMMANDS> stopped{};
+
 };
 
 // One particle_spawn the binder asked for. Words are the binder's, unscaled
@@ -86,6 +122,9 @@ class RefusedResult : public amx::HostFault {
 public:
   using amx::HostFault::HostFault;
 };
+
+// The owner's executable as the object factory reads it. The view shares it.
+level_factory::Executable executable_view(std::shared_ptr<const arena_modes::Executable>);
 
 // One level script. Not copied: its command closures capture this.
 class Host {
@@ -111,14 +150,24 @@ public:
   // string is ref_natives.GameState.new_object's default.
   void add_object(const std::string &name, std::uint32_t flags,
                   const std::array<std::uint32_t, 3> &pos, std::uint32_t angle);
-  // The play session's shared generator. Without one getRand is refused. It
-  // is also refused once an objects.ob record is adopted: records are not
-  // constructed, and construction draws from the shared seed.
-  void bind_seed(SharedRandom *seed);
-  // The player's g_musicVolume option as a raw float pattern, from the
-  // caller. Until it is set, startMusic, and a setCFlag bit-0 call that would
-  // name a boss track, are refused (callee_refusals).
+
+  // The play session's shared generator. Without one getRand is refused.
+  // Built objects draw from it in GameObject_ctor; without it nothing is built.
+  // Exact: getRand is also refused once an adopted record was not constructed
+  // here. OfflineSession: such records are counted instead (SeedPolicy).
+  void bind_seed(SharedRandom *seed, SeedPolicy policy = SeedPolicy::Exact);
+  // A single-player game (docs/script-session.md section 2): g_numPlayers
+  // 0x4d8ae0 = 1 and g_difficultyIdx 0x4f719c = 1, the executable image values
+  // and the offline setup's stores. Call before run_prestart.
+  void start_single_player();
+  // The owner's executable, for the object factory's strings and the class
+  // table, and the image under the ported constructors. Without it
+  // adopt_objects registers every record as a stub.
+  void set_executable(level_factory::Executable);
+  bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
+  // Caller-supplied music volume gates level and boss music.
   void set_music_volume(std::uint32_t bits);
+
 
   // Level entry in the loader's order (research docs/script.md 2.1):
   // run_prestart, then adopt_objects, then run_start. run_start runs start,
@@ -194,6 +243,12 @@ private:
   Stop enter_level(const char *name);
   bool seed_refused() const;
   bool touches_stub(std::size_t index, amx::Machine &machine) const;
+  bool adopt_classified(const std::vector<level_flow::Record> &);
+  enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
+  Build build(const level_flow::Record &, const level_factory::Outcome &,
+              std::uint32_t address, const std::vector<std::string> &props);
+  void stub(const level_flow::Record &, std::uint32_t address,
+            std::vector<std::string> props, std::int64_t size);
   void refuse(std::size_t index, amx::Machine &machine);
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
@@ -214,8 +269,12 @@ private:
   bool fade_known_ = false;
   level_flow::State flow_;
   SharedRandom *external_seed_ = nullptr;
-  // Addresses of adopted objects.ob records: unconstructed stubs.
+  SeedPolicy seed_policy_ = SeedPolicy::Exact;
+  std::unique_ptr<level_factory::Executable> exe_;
+  // Addresses of adopted objects.ob records: unconstructed stubs, and records
+  // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
+  std::set<std::uint32_t> built_;
   Counts counts_;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;
