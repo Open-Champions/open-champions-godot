@@ -208,9 +208,10 @@ int main(int argc, char **argv) {
       put(0x532d58 + static_cast<std::uint32_t>(i),
           static_cast<std::uint8_t>(skelight_class[i]), 1);
     put(0x532d58 + static_cast<std::uint32_t>(skelight_class.size()), 0, 1);
+    // Authored class labels occupy the executed factory's test addresses.
     for (const auto &entry : std::array<std::pair<std::uint32_t, std::string>, 3>{{
-             {0x532cc8, "RiderDisease"}, {0x532dc8, "UndeadKnight1"},
-             {0x532e80, "raloszek"}}}) {
+             {0x532cc8, "MountedVariant"}, {0x532dc8, "FootVariant"},
+             {0x532e80, "ZekVariant"}}}) {
       for (std::size_t i = 0; i < entry.second.size(); ++i)
         put(entry.first + static_cast<std::uint32_t>(i),
             static_cast<std::uint8_t>(entry.second[i]), 1);
@@ -260,8 +261,8 @@ int main(int argc, char **argv) {
           "Skelight's level and embedded weapon holder");
     for (const auto &[cls, size, should_build] :
          std::array<std::tuple<std::string, std::uint32_t, bool>, 3>{{
-             {"UndeadKnight1", 0x478, true}, {"raloszek", 0x480, true},
-             {"RiderDisease", 0x478, false}}}) {
+             {"FootVariant", 0x478, true}, {"ZekVariant", 0x480, true},
+             {"MountedVariant", 0x478, false}}}) {
       rta::SharedRandom class_seed(20973);
       sc::Host class_host;
       class_host.bind_seed(&class_seed);
