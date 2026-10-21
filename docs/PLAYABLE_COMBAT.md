@@ -128,7 +128,7 @@ are unchanged and remain the defaults of their own selections.
 Set-up is the research composed runtime's walk-and-combo scenario: a strength-40
 player with a 30–40 / attack 50 / type 8 weapon, a 120-HP Skelight 80 ahead
 facing the player, plus a second 120-HP Skelight 40 behind for blocking and Holy
-Strike (skill 16, rank 1). These are authored fixtures, not an original encounter.
+Strike (skill 16, rank 1). Round 5 adds three more authored actors, each at 120 HP facing `0xc000`: an AntQueen at (0, 140), a Skeleton at (70, 140) and a Soul at (−70, 140). The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
 Services are `flat_fixture_services()` with the session's terrain height,
 `dialog_isOpen` = paused, no loot class. Animation is the research `PlayerAnim`
 fixture (player clips 20 ticks; creature swings 30 ticks with mask 0x1 on tick
@@ -178,20 +178,26 @@ continues byte-identically (`fixture-save`, `wave12_extensions`).
   Skelight spawn values. One per session. The placement is the fixture's, not
   original spawn data. Over 300 ready ticks with the player attacking
   (`playable_wave_smoke_wave12.gd`): Critter, Gnaw, GnomeNavigator, Mermaid,
-  NPC, Natasla and Skelight run; AntQueen (`aq_ground` decision), Skeleton
-  (slot-25 force argument) and Soul (`demon` decision, tick 9) stop the
-  session on their documented refusals.
+  NPC, Natasla, Skelight, AntQueen, Skeleton and Soul run. AntQueen states 0
+  and 1 fade the bank tracks and then spring the bank. Skeleton's first sight
+  passes force 0, and a kind word of 4 passes force 1 on the second call when
+  the first returned 0. Soul's demon test reads the byte at `+0x230`; the word
+  at `+0x44` is the generator. States past those, and a missing flat ground,
+  still stop the session.
 - **Thrown potions 1–3** (`combat_drop_potion(kind)`, buttons Potion 1/2/3).
   `World::spawn_thrown` at the player with the `Thrown` defaults and zero
   velocity, since the throw call site and its arc are not contracted. The
   combat-runtime-4 `playerProjectile_run` bodies then run: kind 1 makes five
   LooseFire call-outs and five decals, kind 2 one poison-gas spell, kind 3 the
   ring's LightEffect and floor decal. The sessions keep running.
-- **Not offered:** Holy Shield. `SpellHolyShield_absorb` needs the model
-  sample-point services (the fixture has no player model), and
-  `give_skill(16)` would rewrite the fixture's Holy Strike table.
-  `SpellHolyShield_ctor`, deflection, the state-0 bow release and silent
-  block-spark callers stay refused as combat-runtime-4 records.
+- **Holy Shield.** The Full fixture plants the sample model and the pose, then
+  `arm_fixture_holy_shield` attaches a shield on skill 16. A player hit with
+  mana and a pose follows `model_getSamplePoint` at scale 1 (241 particles).
+  The round-4 stub remains the path when the pose word is 0. The shield's
+  executed run (`0x2e8428`) steps its clock every tick and ends it through the
+  base Spell destructor when the duration (skill statistic 1) passes.
+  `SpellHolyShield_ctor`, deflection, the state-0 bow release and a nonzero
+  silent block-spark caller stay refused.
 
 The Full fixture needs flat ground at height 0 at its authored positions
 (`terrain_height_below` at radius 4); a terrain without it refuses with

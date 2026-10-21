@@ -217,3 +217,5 @@ Its round-3 bodies add the disease cloud and the DiseaseEffect object it
 attaches, the GutChunk constructor, the Strong Stance phantom, and arrow kinds
 1, 2, 5 and 6. Potions, deflection, the bow release, the Holy Shield light,
 silent block sparks and the remaining skill paths stay refused.
+Round 4 adds thrown potions 1–3, the Holy Shield absorb stub and silent block sparks.
+Round 5 follows the sample-point absorb, the processDamage and silent-0 block-spark angles, AntQueen states 0 and 1, Skeleton states 0 and 1, Soul's demon gate and MultiFireProjectile_run. PlanarSteel, HornOmen, SpellArena, Pustule, SmokeGen and DiseaseCorpse stay unexecuted.
