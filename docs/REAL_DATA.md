@@ -364,3 +364,42 @@ ripples, which is the refused claim seed. On the third level the sheet
 draws over nearer rock: the documented test does not reject a pixel for
 being behind existing geometry.
 
+
+## Wave 16 (2026-10-21): drawn water on real levels, 111 / 111
+
+Integration of water-draw on `codex/playable-integration`. Counts only, same
+disc copy. Water tiles now use the documented layer-3 surface
+([WATER_DRAW.md](WATER_DRAW.md)) in place of the neutral tile.
+
+Sweep: `work/run-slices-r16.sh`, four headless slices, 60 ready ticks per
+level, light and recipe JSON as in wave 14. It ran twice: `r16 --scripts`
+(3 min 39 s) and `r16n` with no level script (3 min 44 s). All eight slices
+exited 0 with 0 failed checks.
+
+| Measure | Wave 15 | Wave 16, scripts on | Wave 16, scripts off |
+|---|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **111 / 111** | **111 / 111** |
+| Refused (all reasons) | 0 | 0 | 0 |
+| Levels with water / water tiles shown | 48 / 9,451 | 48 / 9,451 | 48 / 9,451 |
+| Water textures decoded / refused | not drawn | 48 / 0 | 48 / 0 |
+| Meshes / textured | 174,456 / 174,408 | 174,456 / 174,408 | 174,456 / 174,408 |
+| Mesh surfaces | 174,456 | 174,457 | 174,457 |
+| Ready ticks / checks passed | 6,549 / 119 | 6,549 / 119 | 6,549 / 119 |
+
+Each decoded water texture is 64×64. The one extra surface is a level whose
+water uses both documented sets (set 1 is chunk flag `0x1000`). Its one water
+mesh now has a surface per set, where the neutral mesh had one. The mesh count
+is unchanged. Every other deterministic count equals wave 15 with scripts on
+and wave 14 with scripts off, including every script count. Only `time.*`,
+`audio.frames_pushed` and peak static memory (+25 MB) differ.
+
+Water entries and ticks in water stay 4 and 252 of 3,024 observed. Drawing
+does not touch the creature `water_test` grid.
+
+Still refused or not done:
+- No ripples. The claim-frame seed is refused, so every block starts as a zero
+  grid and stays flat. A real tile samples one texel of the water texture.
+- The drawer's splash point and the simulation splash stay refused, so nothing
+  disturbs the drawn grid.
+- Water draws without a depth test, as documented, so a pool can draw over
+  nearer rock.
