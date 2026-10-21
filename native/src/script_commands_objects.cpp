@@ -171,6 +171,21 @@ void Host::start_single_player() {
   mirror();
 }
 
+void Host::receive_launch(const net_launch::Record &record0) {
+  const auto got = net_launch::launch_receive(record0);
+  auto &memory = variables_->memory;
+  memory.word(script_items::G_DIFFICULTY, got.difficulty);
+  campaign_->set_difficulty(static_cast<std::int32_t>(got.difficulty));
+  memory.byte(0x4f8408, got.kill_limit);
+  memory.word(0x4f711c, got.pvp_mode_a ? 1u : 0u);
+  memory.word(0x4f7120, got.pvp_mode_b ? 1u : 0u);
+  memory.word(0x4f7124, got.mode_3 ? 1u : 0u);
+  if (got.set_cm1)
+    script_items::set_cm1_word(memory, *got.set_cm1,
+                               [this](const std::string &name) { return variables_->profile_get(name); });
+  mirror();
+}
+
 void Host::stub(const level_flow::Record &record, std::uint32_t address,
                 std::vector<std::string> props, std::int64_t size) {
   auto list = std::make_shared<std::vector<std::string>>(std::move(props));

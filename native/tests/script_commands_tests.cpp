@@ -519,6 +519,31 @@ void test_generate_monster() {
   check(counts.objects_built == 2, "the spawn is counted as built");
 }
 
+// docs/spec/items-gaps.md 2.3: every machine applies record 0; only modes 2 and
+// 3 copy +0xf4 into 0x4f7110.
+void test_receive_launch() {
+  namespace nl = champions::simulation::rta::net_launch;
+  sc::Host host;
+  host.start_single_player();
+  nl::Record rec;
+  rec.difficulty = 0xfe;
+  rec.kill_limit = 30;
+  rec.mode = 1;
+  rec.cm1 = 4;
+  host.receive_launch(rec);
+  auto &memory = host.variables().memory;
+  check(memory.word(0x4f719c) == 0xfffffffeu && memory.u8(0x4f8408) == 30, "difficulty is signed; kill limit");
+  check(memory.word(0x4f711c) == 0 && memory.word(0x4f7120) == 1 && memory.word(0x4f7124) == 0, "mode 1: B only");
+  check(memory.s32(0x4f7110) == -1, "mode 1 leaves the cm1 word at the image's -1");
+  rec.mode = 3;
+  host.receive_launch(rec);
+  check(memory.word(0x4f711c) == 1 && memory.word(0x4f7124) == 1, "mode 3: A and mode 3");
+  check(memory.s32(0x4f7110) == 4, "mode 3 copies the host's +0xf4 into 0x4f7110");
+  rec.cm1 = 0xffffffffu; // game_set4f7110(-1) rescans this machine's profile: none set -> 9
+  host.receive_launch(rec);
+  check(memory.s32(0x4f7110) == 9, "-1 rescans the profile");
+}
+
 void test_entrance_grid_and_particle() {
   const auto entrance = index_of("setEntrance");
   const auto hide = index_of("hideMonster");
@@ -1059,6 +1084,7 @@ int main(int argc, char **argv) {
   test_classified_objects();
   test_hide_show_on_stubs();
   test_generate_monster();
+  test_receive_launch();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();

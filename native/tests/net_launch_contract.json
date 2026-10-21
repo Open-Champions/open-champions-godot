@@ -1,0 +1,12 @@
+{
+  "research_commit": "ecf9742",
+  "policy": "rta-net-launch-v1",
+  "seed": 20973,
+  "cases": 1612,
+  "files": {
+    "docs/spec/items-gaps.md": "45be1683799b972d49ca1e30c1d30c28eba9c979c37c8f924a23dabf0c2179cd",
+    "tools/ref_items_gaps.py": "4ca7c3b0cc367a1c84e33e62a539eb8695b787eaa98c52fcd640f1682ac70f67",
+    "tools/difftest_items_gaps.py": "69b4fa1a1953966f02ed4a42e604218b9e44bc6767c388234482e84da418a853",
+    "tools/test_ref_items_gaps.py": "8569f783a5161cf286a518283638ca324d1cc79d64f941d6011a378bd2f1bf41"
+  }
+}

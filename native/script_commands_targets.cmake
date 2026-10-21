@@ -104,6 +104,18 @@ if(BUILD_TESTING AND NOT TARGET champions-script-items-tests)
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_contract.json")
 endif()
 
+if(BUILD_TESTING AND NOT TARGET champions-net-launch-tests)
+    add_executable(champions-net-launch-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/net_launch_tests.cpp")
+    target_link_libraries(champions-net-launch-tests PRIVATE champions-script-items)
+    if(MSVC)
+        target_compile_options(champions-net-launch-tests PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(champions-net-launch-tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME net-launch COMMAND champions-net-launch-tests
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/net_launch.txt")
+endif()
+
 # The host links champions-quests; define it here so every build that includes
 # this file (native and the GDExtension) has the target.
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/quests_targets.cmake")

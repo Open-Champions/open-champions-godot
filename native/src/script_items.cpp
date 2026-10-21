@@ -232,7 +232,7 @@ void recalc_load_limits(View &v) {
     if (obj == 0)
       continue;
     const auto level = passive_level(v, v.s32(obj + OBJ_SLOT), PASSIVE_LOAD);
-    v.store(r + P_LOAD_LIMIT, 4, load_limit(v.s32(r + P_EFF_STRENGTH), level, v.s32(G_LOAD_BONUS)));
+    v.store(r + P_LOAD_LIMIT, 4, load_limit(v.s32(r + P_EFF_STRENGTH), level, LOAD_BONUS_VALUE));
   }
 }
 bool fits(const View &v, std::int32_t slot, Raw weight, bool strict) {

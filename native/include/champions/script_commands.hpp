@@ -10,6 +10,7 @@
 #include "champions/level_factory.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
+#include "champions/net_launch.hpp"
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
@@ -228,6 +229,11 @@ public:
   // 0x4d8ae0 = 1 and g_difficultyIdx 0x4f719c = 1, the executable image values
   // and the offline setup's stores. Call before run_prestart.
   void start_single_player();
+  // net_launchUpdate's end of launch (docs/spec/items-gaps.md 2.3): record 0, the
+  // host's, sets g_difficultyIdx, the kill limit and the PvP mode words on every
+  // machine, and in modes 2 and 3 game_set4f7110(+0xf4). Nothing in the play
+  // session launches a net game yet; this is the contract's receiving half.
+  void receive_launch(const net_launch::Record &record0);
   // The owner's executable, for the object factory's strings and the class
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.

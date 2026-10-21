@@ -603,10 +603,13 @@ void synthetic_tests() {
     mem.word(r1 + si::P_CLASS, 3);
     mem.w64(si::G_CLASS_SKILLS + 2 * si::CLASS_SKILLS_SIZE + 4 * si::CLASS_SKILL_ROW, si::PASSIVE_LOAD);
     mem.byte(r0 + si::P_PASSIVES + 4, 2);              // slot 0's level: 2
-    mem.word(si::G_LOAD_BONUS, 1);
+    mem.word(si::G_LOAD_BONUS, 1); // no writer exists: the walk must not read it
     si::recalc_load_limits(v);
     check(mem.word(r0 + si::P_LOAD_LIMIT) == 0x12345678, "a record with no object keeps its limit");
-    check(mem.word(r1 + si::P_LOAD_LIMIT) == si::load_limit(46, 2, 1), "the passive is the object's slot's");
+    check(mem.word(r1 + si::P_LOAD_LIMIT) == si::load_limit(46, 2, 0),
+          "the passive is the object's slot's, and the bonus word is the constant 0");
+    check(si::LOAD_BONUS_VALUE == 0 && si::load_limit(46, 2, 1) != si::load_limit(46, 2, 0),
+          "the bonus branch is kept for parity but never taken");
     check(si::load_limit(46, 0, 0) == 0x432b0000, "171.0");
     check(si::load_limit(9000, 0, 1) == si::F_9999, "+5000 then the 9999 cap");
   }
