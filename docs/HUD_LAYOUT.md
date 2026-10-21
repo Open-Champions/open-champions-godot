@@ -299,6 +299,11 @@ takes a row only when exactly one row matches. The HUD font is `FONT.LMP`
 when exactly one row matches. That settles FONT-2's font choice for this view.
 The original-art panel still accepts any row as an explicit choice.
 
+On the game-folder levels (111-level sweep, scripts on and off) the view
+draws the status frame and the health bar on every level. The session
+reports no positive mana maximum there, so the mana bar is refused rather
+than drawn from a stand-in.
+
 Not drawn. `refusals` names each one and the missing input:
 - **Experience bar, level text, level-up glow.** They need the acknowledged
   level +0x58, level +0x59, experience +0x5c and the 0x41b554 rows. Play
