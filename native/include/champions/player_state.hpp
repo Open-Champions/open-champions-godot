@@ -34,15 +34,19 @@ struct Record {
 };
 
 // The new-character flow has already read class start stats from the same
-// executable and applied the twenty spent points. This function derives the
-// maxima with player_recalcStats' exact operation order and initializes the
-// character's documented level, experience and gold.
+// executable and applied the twenty spent points. This function returns the
+// record as player_initNewCharacter 0x1b1d70 builds it once the first
+// player_recalcStats with a live Player object has run: level 1, experience 0,
+// gold 500, effective = base, and the maxima in recalcStats' exact operation
+// order. init alone leaves max HP 0 and max mana 10 (see player_state.cpp).
+// Current HP/mana remain unknown (current_known false).
 Record create(const std::string &name, std::int32_t player_class,
               std::int32_t model, const std::array<std::int32_t, 4> &stats,
               const Tables &tables);
 // Imported fields come from the decoded live PS2 record. Item modifiers and
 // figurines are carried in its already calculated maxima; recomputing from
-// base stats alone would discard them.
+// base stats alone would discard them. Refuses a level above 50 or experience
+// above table[50]: player_importCharacter clamps both.
 Record import(Record record, const Tables &tables);
 void validate(const Record &, const Tables &);
 

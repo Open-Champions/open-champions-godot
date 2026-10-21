@@ -87,6 +87,22 @@ int main() {
     imported = p::import(imported, t);
     check(imported.imported && imported.current_known && imported.gold == 8765 && imported.mana == c::itof(15),
           "import retains record fields");
+    // player_importCharacter's caps (level 50, table[50]); table[51] is fine for
+    // a level reached in native play, but not for an import.
+    auto too_high = made; too_high.level = 51; too_high.acknowledged = 51;
+    bool capped = false;
+    try { (void)p::import(too_high, t); } catch (const p::Refusal &) { capped = true; }
+    check(capped, "import above level 50 refused");
+    auto too_much = made; too_much.experience = t.experience[50] + 1;
+    capped = false;
+    try { (void)p::import(too_much, t); } catch (const p::Refusal &) { capped = true; }
+    check(capped, "import above table[50] experience refused");
+    auto at_cap = made; at_cap.level = at_cap.acknowledged = 50; at_cap.experience = t.experience[50];
+    at_cap.hp = c::itof(1); at_cap.mana = c::itof(1);
+    check(p::import(at_cap, t).imported, "import at the documented caps accepted");
+    auto leveled = p::import(at_cap, t); leveled.level = 60; leveled.acknowledged = 60;
+    leveled.experience = t.experience[59];
+    check(p::load(p::save(leveled, t), t).level == 60, "imported record that levelled past 50 in native play still saves");
     const auto saved = p::save(imported, t);
     const auto restored = p::load(saved, t);
     check(restored.name == imported.name && restored.experience == imported.experience &&
@@ -105,7 +121,7 @@ int main() {
     try { (void)p::create("Mira", 0, 4, {{46, 37, 24, 28}}, t); }
     catch (const p::Refusal &) { refused = true; }
     check(refused, "model and class mismatch refused");
-    std::cout << "PASS player-state 12 checks\n";
+    std::cout << "PASS player-state 16 checks\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << "FAIL player-state: " << error.what() << '\n';

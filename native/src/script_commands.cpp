@@ -270,15 +270,24 @@ void Host::bind_campaign() {
 void Host::mirror() { quests::mirror_from_variables(*campaign_, *variables_, player_currents_known_); }
 
 namespace {
-bool needs_player_current(const char *name) {
-  // Every ported script route that reads current HP/mana, copies the unknown
-  // record, or writes a current field. Keep unknown distinct from a dead
-  // player or an empty mana pool (research-menus docs/player.md +0xac/+0xc0).
+// Routes that read current HP/mana (record +0xac/+0xc0), copy the whole record
+// with its unknown currents, or write a current field. Unknown stays distinct
+// from a dead player or an empty mana pool. Sources, all research-menus
+// docs/script.md (built-in table, rows by name) and docs/player.md:
+//   checkPlayerAlive 0x1470ac  count of players with HP > 0 when which == 0
+//   healPlayer 0x1468ac, giveFullHealth 0x146950, planarSteel 0x1466d4
+//                              write +0xac from +0xb0
+//   zeroPlayerMana 0x142450, refillPlayerMana 0x142494   write +0xc0
+//   givePlayerExp 0x146278     player_giveExp refills HP and mana on a level
+//   savePlayer 0x141724, restorePlayer 0x141744   whole-record copy
+//   playGotItemSound 0x1464e8  reads +0xac only with two or more players
+//                              (script.md row 61 and P7); one player never does
+bool needs_player_current(const char *name, std::int32_t players) {
   for (const char *route : {"checkPlayerAlive", "healPlayer", "giveFullHealth",
                             "zeroPlayerMana", "refillPlayerMana", "givePlayerExp",
-                            "planarSteel", "playGotItemSound", "savePlayer", "restorePlayer"})
+                            "planarSteel", "savePlayer", "restorePlayer"})
     if (std::strcmp(name, route) == 0) return true;
-  return false;
+  return players >= 2 && std::strcmp(name, "playGotItemSound") == 0;
 }
 }
 
@@ -381,7 +390,9 @@ amx::NativeMap Host::command_map() {
       // The dialog built-ins run only while dialog is attached; item and quest
       // handlers retain their own routing and refusal rules.
       const bool dialog_route = dialog_cmd && dialog_attached_;
-      if (!player_currents_known_ && needs_player_current(kRows[i].name)) {
+      if (!player_currents_known_ &&
+          needs_player_current(kRows[i].name,
+                               static_cast<std::int32_t>(variables_->memory.word(script_items::G_NUM_PLAYERS)))) {
         counts_.unknown_player_current_refusals += 1;
         refuse(i, machine);
         return 0;

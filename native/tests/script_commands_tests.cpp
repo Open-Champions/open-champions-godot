@@ -376,6 +376,23 @@ void test_unknown_player_currents() {
         "campaign restore does not write unknown current fields");
 }
 
+// playGotItemSound reads +0xac only with two or more players (research-menus
+// docs/script.md row 61), so unknown currents refuse it only then.
+void test_got_item_sound_unknown_currents() {
+  auto built = build_calls({{"start", {{"playGotItemSound", {}}}}}, {});
+  for (std::uint32_t players : {1u, 2u}) {
+    sc::Host host;
+    host.set_player_currents_known(false);
+    host.start_single_player();
+    host.variables().memory.word(0x4d8ae0, players);
+    plant(host, built);
+    host.run_start();
+    check(host.counts().unknown_player_current_refusals == (players >= 2 ? 1u : 0u),
+          players >= 2 ? "two players: playGotItemSound refused for unknown currents"
+                       : "one player: playGotItemSound is not blocked by unknown currents");
+  }
+}
+
 // docs/script-session.md sections 3-5: the factory decides what is registered;
 // a built creature is readable by hideMonster, its hit points are not.
 void test_classified_objects() {
@@ -948,6 +965,7 @@ int main(int argc, char **argv) {
   test_offline_seed_policy();
   test_single_player();
   test_unknown_player_currents();
+  test_got_item_sound_unknown_currents();
   test_classified_objects();
   test_entrance_grid_and_particle();
   test_routed_commands();

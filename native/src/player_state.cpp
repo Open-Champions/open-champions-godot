@@ -102,6 +102,25 @@ void validate(const Record &r, const Tables &t) {
     if (!finite(raw)) throw Refusal("player health or mana is not finite");
 }
 
+// Provenance of a created character's values (research-menus docs/player.md,
+// research-combat docs/data-tables.md 4.1-4.4, plus an executed difftest of
+// player_initNewCharacter 0x1b1d70 with tools/ee_emu.py, summarised in
+// work/loop-player-state-r3-report.md):
+//  * init zeroes the whole 0x4c30-byte record first (memset 0x3b60c0), so
+//    experience is 0; it stores level 1, acknowledged level 1 and gold 500, and
+//    copies base statistics to the effective block (+0x90).
+//  * init itself leaves maximum HP 0.0 and maximum mana 10.0 and sets both
+//    current values to the float 0x4e6e6b27. It calls player_recalcStats
+//    0x1b6458 at 0x1b23f8 *before* the character has a Player object (+0x43d8
+//    is null), and that call skips the maxima for such a record.
+//  * The first player_recalcStats with a Player object present computes the
+//    maxima with the formula below (starting gear adds no statistic modifier
+//    7..10 for any of the 12 models; effective = base) and trims each current
+//    value to its maximum. This function returns that state: the record a
+//    live Player object sees, not the bytes init alone leaves.
+// Current HP/mana stay unestablished here (current_known false): the session
+// does not run player_recalcStats for the record, so no current value is
+// claimed.
 Record create(const std::string &name, std::int32_t cls, std::int32_t model,
               const std::array<std::int32_t, 4> &stats, const Tables &tables) {
   if (cls < 0 || cls >= 7) throw Refusal("class is outside 0..6");
@@ -125,6 +144,13 @@ Record create(const std::string &name, std::int32_t cls, std::int32_t model,
 }
 
 Record import(Record r, const Tables &tables) {
+  // player_importCharacter 0x1bd458 clamps the level to 50 and the experience
+  // to table[50] (research-combat docs/data-tables.md 4.4; docs/player.md
+  // +0x58 and +0x5c). A decoded record beyond them did not come from it.
+  if (r.level > 50 || r.acknowledged > 50)
+    throw Refusal("imported level exceeds player_importCharacter's cap of 50");
+  if (r.experience > tables.experience[50])
+    throw Refusal("imported experience exceeds player_importCharacter's cap of table[50]");
   r.imported = true;
   r.current_known = true;
   validate(r, tables);
