@@ -284,8 +284,8 @@ func prepare_mesh(source: Mesh) -> ArrayMesh:
 		mesh.surface_set_material(surface, source.surface_get_material(surface))
 	return mesh
 
-func light(instance: MeshInstance3D, model: bool) -> void:
-	if instance == null or instance.mesh == null or not instance.visible: return
+func light(instance: MeshInstance3D, model: bool, prepare_hidden := false) -> void:
+	if instance == null or instance.mesh == null or (not instance.visible and not prepare_hidden): return
 	# Constant-light chunks take world_constant_channel on the loaded level's
 	# base level; shade_world stays on the dynamic chunks only.
 	if not model and not instance.get_meta("native_fx_world_dynamic", true):
