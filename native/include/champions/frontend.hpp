@@ -153,6 +153,9 @@ public:
   void return_to_frontend();
   void session_exit(int code); // g_sessionExitCode 1, 0x65, 0xc9
   void request_save();         // memcard_requestSave from a savepoint or script
+  // A play session the host started outside the front end (its host menu):
+  // the flow joins at Playing so start opens the pause menu. Host behaviour.
+  void attach_play();
   void set_stream2_playing(bool playing) { stream2_playing_ = playing; }
   void set_stream2_status(std::uint32_t status) { stream2_status_ = status; }
   void set_net_game(bool net);

@@ -156,6 +156,7 @@ private:
         out["class_index"] = int64_t(c.class_index);
         out["model_index"] = int64_t(c.model_index);
         out["level"] = int64_t(c.level);
+        out["acknowledged"] = int64_t(c.acknowledged_level);
         out["experience"] = int64_t(c.experience);
         out["gold"] = int64_t(c.gold);
         Array stats;

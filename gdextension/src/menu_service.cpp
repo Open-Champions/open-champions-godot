@@ -78,6 +78,7 @@ protected:
     ClassDB::bind_method(D_METHOD("save_bytes"), &ChampionsMenuService::save_bytes);
     ClassDB::bind_method(D_METHOD("load_bytes", "bytes"), &ChampionsMenuService::load_bytes);
     ClassDB::bind_method(D_METHOD("reset"), &ChampionsMenuService::reset);
+    ClassDB::bind_method(D_METHOD("adopt", "character"), &ChampionsMenuService::adopt);
     ClassDB::bind_method(D_METHOD("gaps"), &ChampionsMenuService::gaps);
     ClassDB::bind_method(D_METHOD("layout"), &ChampionsMenuService::layout);
   }
@@ -235,6 +236,27 @@ public:
       return failure(error);
     }
   }
+  // A front-end character (frontend view "character") or a PS2 import result.
+  Dictionary adopt(const Dictionary &c) {
+    try {
+      M::Ledger::Adopted a;
+      a.gold = int(c.get("gold", 0));
+      a.level = int(c.get("level", 1));
+      a.acknowledged = int(c.get("acknowledged", 1));
+      a.experience = int(c.get("experience", 0));
+      a.skill_points = int(c.get("skill_points", 0));
+      a.stat_points = int(c.get("stat_points", 0));
+      Array stats = c.get("stats", c.get("base_stats", Array()));
+      if (stats.size() != 4)
+        throw M::Refusal("adopt needs four base stats");
+      for (int i = 0; i < 4; ++i)
+        a.stats[i] = int(stats[i]);
+      ledger_->adopt(a);
+      return fill_state(success());
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
   Dictionary gaps() const {
     try {
       auto out = success();
@@ -282,4 +304,8 @@ public:
 };
 } // namespace
 
-void register_menu_service() { GDREGISTER_CLASS(ChampionsMenuService); }
+void register_frontend_service();
+void register_menu_service() {
+  GDREGISTER_CLASS(ChampionsMenuService);
+  register_frontend_service();
+}

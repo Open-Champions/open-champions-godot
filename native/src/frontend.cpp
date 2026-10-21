@@ -557,6 +557,11 @@ void Flow::options_loaded(std::optional<std::vector<std::uint8_t>> file) {
   go(Screen::Options, 1);
 }
 
+void Flow::attach_play() {
+  paused_ = false;
+  go(Screen::Playing);
+}
+
 void Flow::request_save() {
   if (screen_ != Screen::Playing)
     throw Refusal("a save screen is opened from play only");

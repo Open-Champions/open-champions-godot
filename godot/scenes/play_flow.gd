@@ -52,6 +52,9 @@ var frame_settings: Window
 var scene_scroll: ScrollContainer
 var hud_round3: Control
 var game_menus: Control
+# Boot screens, front end, character creation, options, load/save and the game
+# pause menu (ui/frontend_menus.gd over the native ChampionsFrontendService).
+var frontend: Control
 # PS2 memory-card character import (native ps2_save). Held apart from the
 # movement session: the import fills the native player record, inventory
 # words and quest table that the script and item natives read.
@@ -74,6 +77,7 @@ func _ready() -> void:
 	_attach_level_textures()
 	_attach_audio()
 	_attach_ps2_import()
+	_attach_frontend()
 	refresh_capabilities()
 	var frame_rate := get_node_or_null("/root/FrameRate")
 	if frame_rate != null:
@@ -422,6 +426,10 @@ func _full_key(event: InputEvent) -> bool:
 	return true
 
 func handle_input_event(event: InputEvent) -> bool:
+	if frontend != null and frontend.handle_key(event):
+		held_commands = 0
+		pending_damage = false
+		return true
 	if game_menus != null and game_menus.open and event is InputEventKey:
 		held_commands = 0
 		pending_damage = false
@@ -499,6 +507,8 @@ func _observe(result: Dictionary) -> void:
 		hud_round3.observe(raw_observation, play_mode)
 	if game_menus != null and components.has("art"):
 		game_menus.sync_font(components.art)
+	if frontend != null and components.has("art"):
+		frontend.sync_font(components.art)
 	if fx != null:
 		fx.observe(raw_observation)
 		fx_status.visible = fx.enabled
@@ -594,6 +604,7 @@ func _component_visibility_changed(component: Control) -> void:
 		_show_menu(flow)
 
 func _component_modal_open() -> bool:
+	if frontend != null and frontend.active(): return true
 	if level_tex_dialog != null and level_tex_dialog.visible: return true
 	if fx_definitions != null and fx_definitions.visible: return true
 	if frame_settings != null and frame_settings.visible:
@@ -987,3 +998,17 @@ func _show_ps2_import(result: Dictionary) -> Dictionary:
 		ps2_status.text += " · not applied: " + "; ".join(PackedStringArray(result.refusals))
 	_show_menu(flow)
 	return result
+
+func _attach_frontend() -> void:
+	frontend = load("res://ui/frontend_menus.gd").new()
+	frontend.configure(self)
+	add_child(frontend)
+	_add_action("frontend", "Title / front end", func(): frontend.boot())
+	if not frontend.available():
+		actions.frontend.disabled = true
+		actions.frontend.tooltip_text = "Install the native extension with ChampionsFrontendService."
+		return
+	actions.frontend.tooltip_text = "Boot card check, logo, film, main menu, character creation, options and load. Layouts are host-drawn: the research documents the flow, not the screens' positions. In play, P is the start button (pause menu)."
+	for argument in OS.get_cmdline_user_args():
+		if argument == "--frontend":
+			frontend.call_deferred("boot")

@@ -66,6 +66,7 @@ void ChampionsNativeAudio::_bind_methods() {
                        &ChampionsNativeAudio::set_options_file_music);
   ClassDB::bind_method(D_METHOD("end_session"), &ChampionsNativeAudio::end_session);
   ClassDB::bind_method(D_METHOD("play_menu_music", "wait_for_current"), &ChampionsNativeAudio::play_menu_music);
+  ClassDB::bind_method(D_METHOD("music_play_global", "name", "flags"), &ChampionsNativeAudio::music_play_global);
   ClassDB::bind_method(D_METHOD("play_boss_music", "creature_type", "object_name"),
                        &ChampionsNativeAudio::play_boss_music);
   ClassDB::bind_method(D_METHOD("stop_boss_music"), &ChampionsNativeAudio::stop_boss_music);
@@ -285,6 +286,20 @@ bool ChampionsNativeAudio::set_options_file_music(int64_t bits) {
 
 // Client session boundary; the process-lifetime counters and duck words stay.
 void ChampionsNativeAudio::end_session() { model_.end_session(); }
+
+// music_playGlobal 0x2110e0: the gate on g_musicVolume, then a stream-2 queue
+// with flags | 0x22. The options slider previews through it (flags 0x41).
+bool ChampionsNativeAudio::music_play_global(const String &name, int64_t flags) {
+  try {
+    if (flags < 0 || flags > 0xffffffffLL)
+      throw std::invalid_argument("flags are a 32-bit word");
+    auto utf = name.utf8();
+    return model_.music_play_global(utf.get_data() ? utf.get_data() : "", static_cast<std::uint32_t>(flags));
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
 
 bool ChampionsNativeAudio::play_menu_music(bool wait) {
   try {
