@@ -24,6 +24,7 @@ int main() {
     auto imported = made;
     imported.experience = 4000;
     imported.gold = 8765;
+    imported.effective_stats[0] += 7;
     imported.hp = c::itof(20); imported.mana = c::itof(15);
     imported = p::import(imported, t);
     check(imported.imported && imported.current_known && imported.gold == 8765 && imported.mana == c::itof(15),
@@ -31,6 +32,7 @@ int main() {
     const auto saved = p::save(imported, t);
     const auto restored = p::load(saved, t);
     check(restored.name == imported.name && restored.experience == imported.experience &&
+          restored.effective_stats == imported.effective_stats &&
           restored.max_mana == imported.max_mana && restored.imported,
           "native companion round trip");
     bool refused = false;

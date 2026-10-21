@@ -173,6 +173,10 @@ private:
         out["mana_raw"] = raw_word(0xc0);
         out["max_mana_raw"] = raw_word(0xc4);
         out["imported"] = true;
+        Array effective;
+        for (std::size_t n = 0; n < 4; ++n)
+            effective.push_back(int64_t(static_cast<std::int32_t>(raw_word(0x90 + n * 4))));
+        out["effective_stats"] = effective;
         Array stats;
         for (auto v : c.base_stats) stats.push_back(int64_t(v));
         out["base_stats"] = stats;

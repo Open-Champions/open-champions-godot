@@ -631,7 +631,7 @@ void ChampionsSessionController::bind_player_to_scripts(rta::script_commands::Ho
   m.word(rec + 0x5c, static_cast<std::uint32_t>(p.experience));
   for (std::size_t n = 0; n < 4; ++n) {
     m.word(rec + 0x78 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.base_stats[n]));
-    m.word(rec + 0x90 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.base_stats[n]));
+    m.word(rec + 0x90 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.effective_stats[n]));
   }
   if (p.current_known) {
     m.word(rec + 0xac, p.hp);
@@ -661,11 +661,15 @@ rta::player_state::Record ChampionsSessionController::observed_player() const {
   p.level = static_cast<std::int8_t>(m.read(rec + 0x59));
   p.experience = static_cast<std::int32_t>(m.word(rec + 0x5c));
   p.gold = static_cast<std::int32_t>(m.word(rec + 0xe4));
+  for (std::size_t n = 0; n < 4; ++n) {
+    p.base_stats[n] = static_cast<std::int32_t>(m.word(rec + 0x78 + std::uint32_t(n * 4)));
+    p.effective_stats[n] = static_cast<std::int32_t>(m.word(rec + 0x90 + std::uint32_t(n * 4)));
+  }
+  p.max_hp = m.word(rec + 0xb0);
+  p.max_mana = m.word(rec + 0xc4);
   if (p.current_known) {
     p.hp = m.word(rec + 0xac);
-    p.max_hp = m.word(rec + 0xb0);
     p.mana = m.word(rec + 0xc0);
-    p.max_mana = m.word(rec + 0xc4);
   }
   return p;
 }
@@ -684,9 +688,14 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
     for (int n = 0; n < 4; ++n) base[std::size_t(n)] = static_cast<std::int32_t>(int64_t(stats[n]));
     rta::player_state::Record next;
     if (imported) {
+      const Array effective = character.get("effective_stats", Array());
+      if (effective.size() != 4)
+        throw std::runtime_error("Imported player record lacks effective statistics +0x90.");
       next.name = named; next.player_class = cls;
       next.model = static_cast<std::int32_t>(int64_t(character.get("model_index", -1)));
       next.base_stats = base;
+      for (int n = 0; n < 4; ++n)
+        next.effective_stats[std::size_t(n)] = static_cast<std::int32_t>(int64_t(effective[n]));
       next.level = static_cast<std::int32_t>(int64_t(character.get("level", 0)));
       next.acknowledged = static_cast<std::int32_t>(int64_t(character.get("acknowledged", 0)));
       next.experience = static_cast<std::int32_t>(int64_t(character.get("experience", -1)));
@@ -711,21 +720,32 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
 }
 
 Dictionary ChampionsSessionController::save_player_companion(const String &path) const {
+  const String dest = path + String(".player"), temp = dest + String(".tmp");
+  bool owns_temporary = false;
   try {
-    if (!player_ || !player_tables_) throw std::runtime_error("There is no player record to save.");
+    if (!player_) {
+      if (FileAccess::file_exists(dest) && DirAccess::remove_absolute(dest) != OK)
+        throw std::runtime_error("An old player companion could not be removed.");
+      Dictionary result; result["ok"] = true; result["saved"] = false; return result;
+    }
+    if (!player_tables_) throw std::runtime_error("The selected executable is unavailable for the player save.");
     const auto bytes = rta::player_state::save(observed_player(), *player_tables_);
-    const String dest = path + String(".player"), temp = dest + String(".tmp");
     if (FileAccess::file_exists(temp)) throw std::runtime_error("A player save temporary file already exists.");
     Ref<FileAccess> file = FileAccess::open(temp, FileAccess::WRITE);
     if (file.is_null()) throw std::runtime_error("The player companion could not be created.");
+    owns_temporary = true;
     PackedByteArray packed; packed.resize(bytes.size());
     std::copy(bytes.begin(), bytes.end(), packed.ptrw());
     file->store_buffer(packed); file->flush();
     const auto error = file->get_error(); file->close();
     if (error != OK || DirAccess::rename_absolute(temp, dest) != OK)
       throw std::runtime_error("The player companion could not be written.");
+    owns_temporary = false;
     Dictionary result; result["ok"] = true; result["saved"] = true; return result;
-  } catch (const std::exception &e) { return failure(e); }
+  } catch (const std::exception &e) {
+    if (owns_temporary) DirAccess::remove_absolute(temp);
+    return failure(e);
+  }
 }
 
 Dictionary ChampionsSessionController::load_player_companion(const String &path) {

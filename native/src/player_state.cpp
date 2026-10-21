@@ -9,7 +9,7 @@ namespace champions::simulation::rta::player_state {
 namespace {
 constexpr std::uint32_t XP_TABLE = 0x41b558; // research-combat data-tables.md 4.4
 constexpr std::uint32_t CHAIN_BEGIN = 0x1b6740, CHAIN_END = 0x1b694c;
-constexpr std::uint8_t MAGIC[8] = {'O','C','P','L','Y','R','0','1'};
+constexpr std::uint8_t MAGIC[8] = {'O','C','P','L','Y','R','0','2'};
 
 std::array<Raw, 6> class_formula(const arena_modes::Executable &exe, int cls) {
   // The bounded instruction subset and branch-delay walk are documented in
@@ -101,7 +101,8 @@ Record create(const std::string &name, std::int32_t cls, std::int32_t model,
               const std::array<std::int32_t, 4> &stats, const Tables &tables) {
   if (cls < 0 || cls >= 7) throw Refusal("class is outside 0..6");
   Record r;
-  r.name = name; r.player_class = cls; r.model = model; r.base_stats = stats;
+  r.name = name; r.player_class = cls; r.model = model;
+  r.base_stats = r.effective_stats = stats;
   r.level = r.acknowledged = 1; r.experience = 0; r.gold = 500;
   const auto &f = tables.formulas[std::size_t(cls)];
   // player_recalcStats 0x1b6458, exact order from research-combat 4.3.
@@ -133,13 +134,14 @@ std::vector<std::uint8_t> save(const Record &r, const Tables &tables) {
   for (auto v : {r.player_class, r.model, r.level, r.acknowledged, r.experience, r.gold})
     put32(out, static_cast<std::uint32_t>(v));
   for (auto v : r.base_stats) put32(out, static_cast<std::uint32_t>(v));
+  for (auto v : r.effective_stats) put32(out, static_cast<std::uint32_t>(v));
   for (auto v : {r.hp, r.max_hp, r.mana, r.max_mana}) put32(out, v);
   put32(out, r.imported ? 1u : 0u);
   put32(out, r.current_known ? 1u : 0u);
   return out;
 }
 Record load(const std::vector<std::uint8_t> &in, const Tables &tables) {
-  if (in.size() != 8 + 32 + (6 + 4 + 4 + 2) * 4 ||
+  if (in.size() != 8 + 32 + (6 + 4 + 4 + 4 + 2) * 4 ||
       !std::equal(std::begin(MAGIC), std::end(MAGIC), in.begin()))
     throw Refusal("native player companion has an unsupported size or version");
   Record r;
@@ -153,6 +155,7 @@ Record load(const std::vector<std::uint8_t> &in, const Tables &tables) {
   r.experience = static_cast<std::int32_t>(take32(in, at));
   r.gold = static_cast<std::int32_t>(take32(in, at));
   for (auto &v : r.base_stats) v = static_cast<std::int32_t>(take32(in, at));
+  for (auto &v : r.effective_stats) v = static_cast<std::int32_t>(take32(in, at));
   r.hp = take32(in, at); r.max_hp = take32(in, at);
   r.mana = take32(in, at); r.max_mana = take32(in, at);
   const auto imported = take32(in, at);

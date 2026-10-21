@@ -26,6 +26,7 @@ struct Record {
   std::string name;
   std::int32_t player_class = 0, model = 0;
   std::array<std::int32_t, 4> base_stats{}; // strength, intelligence, dexterity, stamina
+  std::array<std::int32_t, 4> effective_stats{}; // record +0x90, including imported equipment
   std::int32_t level = 0, acknowledged = 0, experience = 0, gold = 0;
   Raw hp = 0, max_hp = 0, mana = 0, max_mana = 0;
   bool imported = false;

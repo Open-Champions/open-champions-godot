@@ -799,7 +799,7 @@ func save_session_file(path: String) -> bool:
 	if result.get("ok", false) and level_textures != null: level_textures.remember_save(path)
 	if result.get("ok", false) and game_menus != null:
 		game_menus.save_companion(path)
-	if result.get("ok", false) and controller.has_method("save_player_companion") and raw_observation.get("player_ready", false):
+	if result.get("ok", false) and controller.has_method("save_player_companion"):
 		var player_saved: Dictionary = controller.save_player_companion(path)
 		if not player_saved.get("ok", false):
 			status_label.text = "Native scene saved, but player record refused: " + str(player_saved.get("error", "unknown"))

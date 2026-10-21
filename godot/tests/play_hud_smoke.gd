@@ -55,8 +55,13 @@ func _run() -> void:
 	var painted: Array[String] = []
 	for index in hud.painter_order: painted.append(hud._element(hud.records[index]))
 	check(painted == ["status_frame", "mana_bar", "pending_mana", "pending_health", "health_bar"], "painter order %s" % [painted])
+	var pending_level: Dictionary = value.duplicate()
+	pending_level["level"] = 2
+	pending_level["acknowledged_level"] = 1
+	hud.observe_play(pending_level, true)
+	check("level_up_glow" in hud.drawn and hud.records.any(func(r): return r.get("resource", "") == "hud_statusbar00glow.tex" and r.get("x", -1) == 8 and r.get("y", -1) == 36), "pending level glow at the documented origin")
 	for key in ["experience", "level_text", "name_text", "level_up_glow", "portrait", "quick_slots", "gold", "minimap"]:
-		check(not str(hud.refusals.get(key, "")).is_empty(), key + " refused with a reason")
+		if key != "level_up_glow": check(not str(hud.refusals.get(key, "")).is_empty(), key + " refused with a reason")
 	for key in ["status_gates", "health_flash", "mana_cooldown", "pending_dead_bit"]:
 		check(not str(hud.assumed.get(key, "")).is_empty(), key + " listed as an unobserved gate")
 	# No pending overlays when dead-bit evidence is missing (health 0) or
