@@ -3,7 +3,9 @@
 
 The generated include is the native test. It does not copy recipe bytes from
 the executable; those bytes are not in the research prose. Synthetic records
-are the ones in tools/test_ref_arena_modes.py.
+are the ones in tools/test_ref_arena_modes.py. The level-name tables are
+synthetic too: the research prints the names, but this tree does not copy
+level file names.
 """
 import hashlib
 import sys
@@ -230,10 +232,16 @@ def main():
     check("CHECK(intermission_done(INTERMISSION_OFFLINE, false));")
     check("CHECK(!intermission_done(INTERMISSION_OFFLINE, true));")
     check("CHECK(intermission_done(INTERMISSION_ONLINE, true));")
-    check('CHECK(mode_a_name(12) == "pvpfire");')
-    check('CHECK(mode_a_name(2) == "pvpfire2");')
-    check('CHECK(mode_b_name(0) == "pvparena");')
-    check('CHECK(mode_b_name(6) == "pvpnit");')
+    # Synthetic tables. The real names are read from the owner's executable.
+    check("{")
+    check("NameTable a, b;")
+    check("for (int i = 0; i < %d; ++i) a.push_back(\"a\" + std::to_string(i));" % A.MODE_A_MAPS)
+    check("for (int i = 0; i < 7; ++i) b.push_back(\"b\" + std::to_string(i));")
+    check('CHECK(mode_a_name(a, 12) == "a12");')
+    check('CHECK(mode_a_name(a, %d) == "a%d");' % (A.mode_a_next_index(12, 2), A.mode_a_next_index(12, 2)))
+    check('CHECK(mode_b_name(b, 0) == "b0");')
+    check('CHECK(mode_b_name(b, 6) == "b6");')
+    check("}")
     for wave, active in ((0, 1), (1, 1), (2, 4), (5, 1)):
         classes, seed, steps = A.wave_plan(wave, active, 1, [record], 20973, 0)
         check("{")
@@ -403,6 +411,7 @@ def main():
     check("const auto creature = visit_creature(0x20, %d);" % other)
     check("CHECK(creature.seed == %s && creature.called == %s);" % (hx(nxt2), "true" if bit2 & 1 else "false"))
     check("}")
+    check("CHECK_THROWS(visit_creature(0, 1));")
 
     text = "\n".join(lines) + "\n"
     destination.write_text(text)

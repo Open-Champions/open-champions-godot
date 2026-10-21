@@ -10,8 +10,11 @@ observed on a console.
 `native/src/arena_modes.cpp` is the port. Floats are raw patterns from
 `champions-core`. Recipe bytes stay caller arguments: the research reads them
 from the executable and does not publish them, so this tree does not embed
-them. The 13-name and 7-name tables are the strings printed in the research
-prose.
+them. The 13-name table (0x5037b8) and the 7-name table (0x503798) are caller
+arguments too (`Match::names_a`, `Match::names_b`). The research prose prints
+them, but this tree does not copy level file names, the same rule as
+`level_flow`'s `ArenaRotationTable`. A table of the wrong size refuses. Tests
+use synthetic names.
 
 ## What runs
 
@@ -26,7 +29,16 @@ prose.
 - Wave planning, ring step, monster level, intro lock, intermission limits
   `480` and `960`, kill limit, wipe, and the live-match player scan.
 - Mode A map rotation and mode B record selection. Confirm uses
-  `arena_levelName`. Cancel clears mode B and stores session exit 1.
+  `arena_levelName`. Cancel clears mode B and stores session exit 1. The mode-A
+  wrap to 0 and the mode-A `arena_levelName` need `game_scanCm1Vars(0)`
+  (`Match::scan0`). Its live value is not in this research, so an empty
+  `scan0` refuses there.
+- `arena_openEndPrompt` ranks and stores fade 0. It does not store the end
+  flag. The two mode-B wipe paths store the end flag before the call, as
+  executed. The mode-A kill limit stores countdown 1 and calls the prompt; no
+  end-flag store is documented there, so none is made. With distinct kill
+  counts the rank is the one any sort gives. Equal counts leave the rank empty
+  (`rank_known` false): the research did not assert the qsort tie order.
 - Mode A armour cut and the later player-only half. `combat::damage_apply`
   already applies both when `World::pvp_a` is set. This module exposes the
   same two formulas and does not re-enter that pipeline.
@@ -53,6 +65,11 @@ and cancel does not. That pair was not executed.
 | `arena_shutdown` body | Stubbed. Confirm records the call. |
 | Saved player-record bytes | Not in this research. Confirm counts one restore request per active slot. |
 | Retail recipe bytes | Not published. A missing record is a refusal, not a guessed table. |
+| Level-name tables | Not copied. A missing or wrong-size table refuses. |
+| `game_scanCm1Vars(0)` | Live value unknown. A mode-A wrap or mode-A level name without it refuses. |
+| Rank order for equal kills | qsort tie order not asserted. `rank_known` stays false. |
+| `arena_visitCreature` on an object with neither flag | Not executed. Refuses. |
+| A task tick with no active slot | Not executed. The wipe and live scans refuse. |
 
 `0x4f7124` is not derived here. Direct stores found by the research are zeroes.
 The session writers and the net field stay unknown.

@@ -54,6 +54,18 @@ Recipe recipe_nibble(std::uint8_t low) {
   return Recipe{low, 3, 1, 0, 0, 0};
 }
 
+// Synthetic stand-ins for the two executable tables.
+NameTable names(const char *prefix, int count) {
+  NameTable out;
+  for (int i = 0; i < count; ++i)
+    out.push_back(prefix + std::to_string(i));
+  return out;
+}
+void name_tables(Match &match) {
+  match.names_a = names("a", MODE_A_MAPS);
+  match.names_b = names("b", MODE_B_MAPS);
+}
+
 void refusals() {
   CHECK_THROWS(session_facing_word());
   CHECK_THROWS(net_message_peer());
@@ -66,10 +78,14 @@ void refusals() {
   CHECK_THROWS(player_respawn_body());
   CHECK_THROWS(shutdown_body());
   CHECK_THROWS(saved_record_bytes());
-  CHECK_THROWS(mode_a_name(13));
-  CHECK_THROWS(mode_a_name(-1));
-  CHECK_THROWS(mode_b_name(7));
-  CHECK_THROWS(mode_b_name(low_nibble(0x08)));
+  const auto table_a = names("a", MODE_A_MAPS);
+  const auto table_b = names("b", MODE_B_MAPS);
+  CHECK_THROWS(mode_a_name(table_a, 13));
+  CHECK_THROWS(mode_a_name(table_a, -1));
+  CHECK_THROWS(mode_b_name(table_b, 7));
+  CHECK_THROWS(mode_b_name(table_b, low_nibble(0x08)));
+  CHECK_THROWS(mode_a_name(NameTable{}, 0));
+  CHECK_THROWS(mode_b_name(names("b", 6), 0));
   CHECK(low_nibble(0x08) < 0);
   CHECK_THROWS_ZERO(sdiv(1, 0));
   CHECK_THROWS_ZERO(ring_step(1, 0));
@@ -80,6 +96,28 @@ void refusals() {
   bare.mode_a = false;
   CHECK_THROWS(bare.start_wave(1));
   CHECK_THROWS(bare.level_name());
+  Match unnamed;
+  unnamed.recipes = {recipe_nibble(0x01)};
+  CHECK_THROWS(unnamed.level_name());
+  Match noscan;
+  noscan.mode_a = true;
+  name_tables(noscan);
+  CHECK_THROWS(noscan.level_name());
+  Match nobody;
+  nobody.mode_b = true;
+  nobody.active.fill(false);
+  CHECK_THROWS(nobody.tick());
+  nobody.intermission = 5;
+  CHECK_THROWS(nobody.tick());
+  Match wrap;
+  wrap.mode_a = true;
+  wrap.mode_b = true;
+  name_tables(wrap);
+  wrap.intermission = static_cast<std::uint16_t>(INTERMISSION_OFFLINE);
+  wrap.map_index = 12;
+  wrap.hp[0] = from_int(1);
+  wrap.slots[0].lives = 2;
+  CHECK_THROWS(wrap.tick());
 }
 
 void scoring_and_spawn_table() {
@@ -203,7 +241,7 @@ void task_frames() {
   const auto opened = latch.tick();
   CHECK(opened.end_prompt);
   CHECK(latch.intermission == 1);
-  CHECK(latch.end_flag == 1);
+  CHECK(latch.end_flag == 0);
 
   Match early;
   early.mode_b = true;
@@ -218,6 +256,7 @@ void task_frames() {
   Match expired;
   expired.mode_b = true;
   expired.recipes = {recipe_nibble(0x01), recipe_nibble(0x04)};
+  name_tables(expired);
   expired.intermission = static_cast<std::uint16_t>(INTERMISSION_OFFLINE);
   expired.waves_left = 0;
   expired.wave = 2;
@@ -226,13 +265,14 @@ void task_frames() {
   CHECK(changed.close_menus);
   CHECK(expired.pending_copied);
   CHECK(expired.pending_orientation == -1);
-  CHECK(expired.pending_name == "compwat");
+  CHECK(expired.pending_name == "b4");
   CHECK(expired.intermission == INTERMISSION_OFFLINE + 1);
 
   Match online;
   online.mode_b = true;
   online.networked = true;
   online.recipes = {recipe_nibble(0x01)};
+  name_tables(online);
   online.intermission = static_cast<std::uint16_t>(INTERMISSION_ONLINE);
   online.waves_left = 0;
   online.wave = 2;
@@ -267,21 +307,23 @@ void task_frames() {
   wrapped.intermission = static_cast<std::uint16_t>(INTERMISSION_OFFLINE);
   wrapped.map_index = 12;
   wrapped.scan0 = 2;
+  name_tables(wrapped);
   wrapped.waves_left = 9;
   const auto spun = wrapped.tick();
   CHECK(spun.level_change);
   CHECK(wrapped.map_index == 2);
-  CHECK(wrapped.pending_name == "pvpfire2");
+  CHECK(wrapped.pending_name == "a2");
 
   Match plain;
   plain.mode_a = true;
   plain.mode_b = true;
   plain.intermission = static_cast<std::uint16_t>(INTERMISSION_OFFLINE);
   plain.map_index = 0;
+  name_tables(plain);
   plain.waves_left = 9;
   CHECK(plain.tick().level_change);
   CHECK(plain.map_index == 1);
-  CHECK(plain.pending_name == "compsto");
+  CHECK(plain.pending_name == "a1");
 
   Match won;
   won.mode_a = true;
@@ -291,7 +333,8 @@ void task_frames() {
   const auto prompt = won.tick();
   CHECK(prompt.end_prompt);
   CHECK(won.intermission == 1);
-  CHECK(won.end_flag == 1);
+  CHECK(won.end_flag == 0);
+  CHECK(won.fade == ZERO);
   Match below;
   below.mode_a = true;
   below.mode_b = true;
@@ -379,6 +422,7 @@ void task_frames() {
   Match confirm;
   confirm.mode_b = true;
   confirm.recipes = {recipe_nibble(0x01), recipe_nibble(0x04)};
+  name_tables(confirm);
   confirm.end_flag = 1;
   confirm.fade = ONE;
   confirm.slots[0].lives = 0xffff;
@@ -389,7 +433,7 @@ void task_frames() {
   CHECK(yes.restores == 1);
   CHECK(confirm.mode_b);
   CHECK(confirm.exit_code == 0);
-  CHECK(confirm.pending_name == "pvpblo");
+  CHECK(confirm.pending_name == "b1");
   CHECK_THROWS(saved_record_bytes());
 
   Match cancel;
@@ -416,9 +460,16 @@ void task_frames() {
   ranked.slots[2].kills = 1;
   ranked.fade = ONE;
   ranked.open_end_prompt();
-  CHECK(ranked.rank_order[0] == 1);
+  CHECK(!ranked.rank_known);
+  CHECK(ranked.rank_order.empty());
   CHECK(ranked.fade == ZERO);
-  CHECK(ranked.end_flag == 1);
+  CHECK(ranked.end_flag == 0);
+  ranked.slots[2].kills = 3;
+  ranked.fade = ONE;
+  ranked.open_end_prompt();
+  CHECK(ranked.rank_known);
+  CHECK((ranked.rank_order == std::vector<std::uint8_t>{1, 2, 0}));
+  CHECK(ranked.fade == ZERO);
 
   Match gate;
   gate.mode_b = true;
@@ -498,16 +549,20 @@ void respawn_and_names() {
   const auto scattered = visit.respawn(0, flags, 2);
   CHECK(scattered.visits == 2);
   CHECK(scattered.virtual_calls == 0);
+  const std::uint32_t prop[] = {0};
+  CHECK_THROWS(visit.respawn(0, prop, 1));
 
   Match named;
   named.mode_a = true;
+  name_tables(named);
   named.scan0 = 3;
-  CHECK(named.level_name() == "pvpval");
+  CHECK(named.level_name() == "a3");
   named.scan0 = 13;
   CHECK_THROWS(named.level_name());
   Match coop;
+  name_tables(coop);
   coop.recipes = {recipe_nibble(0x01), recipe_nibble(0x04)};
-  CHECK(coop.level_name() == "pvpblo");
+  CHECK(coop.level_name() == "b1");
 
   Match begun;
   begun.mode_a = true;

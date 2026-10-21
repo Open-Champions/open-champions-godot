@@ -16,7 +16,11 @@
 // RTA US v2.00 arena and versus rules. Authored from research
 // t3/research-arena 17810bb0f9a3474fbeae9e86d339cb72ccd0f154
 // (docs/arena-modes.md, tools/ref_arena_modes.py). Floats are raw patterns.
-// Recipe bytes are caller arguments: the research does not publish them.
+// Recipe bytes and the two level-name tables are caller arguments. The
+// research reads the recipes from the executable and does not publish them;
+// it prints the names, but this tree does not copy level file names (the
+// same rule as level_flow's ArenaRotationTable). An owner reads both from
+// its own executable at run time.
 namespace champions::simulation::rta::arena_modes {
 
 class Error : public std::runtime_error {
@@ -94,8 +98,12 @@ Draw lcg(std::uint32_t seed);
 std::pair<std::int32_t, std::int32_t> sdiv(std::int32_t n, std::int32_t d);
 int high_nibble(std::uint8_t byte);
 int low_nibble(std::uint8_t byte);
-std::string_view mode_a_name(int index);
-std::string_view mode_b_name(int index);
+// One of the two null-terminated pointer tables: 13 names at 0x5037b8 (mode
+// A) and 7 at 0x503798 (mode B). A table of another size, or an index outside
+// it, refuses.
+using NameTable = std::vector<std::string>;
+const std::string &mode_a_name(const NameTable &, int index);
+const std::string &mode_b_name(const NameTable &, int index);
 
 struct Slot {
   std::uint16_t kills = 0;
@@ -231,6 +239,9 @@ struct Visit {
   std::uint32_t seed = 0;
   bool called = false;
 };
+// arena_visitCreature 0x306af0. A player (0x40) takes no draw; a non-player
+// creature (0x20) takes one. An object with neither flag was not executed
+// and refuses.
 Visit visit_creature(std::uint32_t flags, std::uint32_t seed);
 
 // The run task and the functions it calls. Mode B must be set for init, begin
@@ -269,6 +280,7 @@ struct TickOut {
   bool close_menus = false;
   bool overlay_ticked = false;
   int restores = 0;
+  bool rank_refused = false;
 };
 struct RespawnOut {
   bool ran = false;
@@ -307,7 +319,7 @@ struct Match {
   Raw fade = ZERO;
   std::uint32_t frame = 1;
   int kill_limit = 0;
-  std::int32_t budget = 100;
+  std::int32_t budget = 0;
   int buyer_count = 0;
   std::array<int, SCORE_SLOTS> buyers{};
   Raw monster_level_value = 0;
@@ -315,12 +327,19 @@ struct Match {
   std::uint32_t match_word = 0;
   std::uint32_t lock_a = 0;
   std::uint32_t lock_b = 0;
-  std::uint32_t seed = 1;
+  std::uint32_t seed = 0;
   int map_index = 0;
-  int scan0 = 0;
+  // game_scanCm1Vars(0). Its value in a live session is not in this research;
+  // a mode-A step that needs it refuses while it is empty.
+  std::optional<int> scan0;
   int saved_monsters = 0;
   std::vector<Recipe> recipes;
+  NameTable names_a;
+  NameTable names_b;
+  // arena_rankSlots qsorts with arena_compareKills, which is not a strict
+  // order for equal kills. A tie leaves rank_order empty and rank_known false.
   std::vector<std::uint8_t> rank_order;
+  bool rank_known = false;
   int exit_code = 0;
   std::string pending_name;
   bool pending_copied = false;
@@ -337,6 +356,8 @@ struct Match {
   void begin();
   WaveOut start_wave(int delta);
   TickOut tick(bool confirm = false, bool cancel = false);
+  // arena_openEndPrompt 0x307ebc: rank, then fade 0. It does not store the
+  // end flag; the mode-B callers store it before the call.
   void open_end_prompt();
   std::string level_name() const;
   void register_spawn(int index, const SpawnPoint &point);

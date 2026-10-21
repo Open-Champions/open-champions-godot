@@ -2,12 +2,6 @@
 
 namespace champions::simulation::rta::arena_modes {
 namespace {
-constexpr const char *kModeA[MODE_A_MAPS] = {
-    "pvpnit", "compsto", "pvpfire2", "pvpval", "compdis", "pvptor", "compwat",
-    "pvpinn", "pvpblo2", "pvparena", "pvpblo", "pvpbas", "pvpfire"};
-constexpr const char *kModeB[MODE_B_MAPS] = {
-    "pvparena", "pvpblo", "pvpbas", "pvpfire", "compwat", "pvptor", "pvpnit"};
-
 std::int32_t arith_shr(std::int32_t value, int bits) {
   auto bits_u = static_cast<std::uint32_t>(value);
   if (value < 0)
@@ -24,10 +18,13 @@ void require_slots(int count) {
   if (count < 0 || count > SCORE_SLOTS)
     throw Unsupported("score block is 0x30 bytes");
 }
-int name_index(int index, int limit, const char *what) {
-  if (index < 0 || index >= limit)
+const std::string &table_name(const NameTable &table, int index, int size,
+                              const char *what) {
+  if (static_cast<int>(table.size()) != size)
+    throw Unsupported("level-name table was not supplied from the executable");
+  if (index < 0 || index >= size)
     throw Unsupported(what);
-  return index;
+  return table[static_cast<std::size_t>(index)];
 }
 } // namespace
 
@@ -83,11 +80,11 @@ int high_nibble(std::uint8_t byte) {
 int low_nibble(std::uint8_t byte) {
   return arith_shr(static_cast<std::int32_t>(static_cast<std::uint32_t>(byte) << 28), 26) / 4;
 }
-std::string_view mode_a_name(int index) {
-  return kModeA[name_index(index, MODE_A_MAPS, "mode A name index is outside the 13-name table")];
+const std::string &mode_a_name(const NameTable &table, int index) {
+  return table_name(table, index, MODE_A_MAPS, "mode A name index is outside the 13-name table");
 }
-std::string_view mode_b_name(int index) {
-  return kModeB[name_index(index, MODE_B_MAPS, "mode B name index is outside the 7-name table")];
+const std::string &mode_b_name(const NameTable &table, int index) {
+  return table_name(table, index, MODE_B_MAPS, "mode B name index is outside the 7-name table");
 }
 
 std::uint32_t reset_scores(Slot *slots, int count, bool networked) {
@@ -347,6 +344,7 @@ int level_record_index(int wave, int record_count) {
   return sdiv(quot, record_count).second;
 }
 int mode_a_next_index(int index, int scan0) {
+  // Callers with no scan value use Match, which refuses before this point.
   const auto next = sdiv(s32(static_cast<std::uint32_t>(index)) + 1, MODE_A_MAPS).second;
   if (next == 0)
     return s32(static_cast<std::uint32_t>(scan0)) & 0xff;
@@ -468,10 +466,11 @@ Visit visit_creature(std::uint32_t flags, std::uint32_t seed) {
     const auto drawn = lcg(seed);
     return {drawn.seed, (drawn.value & 1) != 0};
   }
-  return {seed, false};
+  throw Unsupported("arena_visitCreature on an object with neither flag was not executed");
 }
 
 void Match::init() {
+  // arena_init 0x304c4c returns at once while mode B is clear.
   if (!mode_b)
     return;
   wave = 0xffff;
@@ -530,9 +529,20 @@ WaveOut Match::start_wave(int delta) {
   return out;
 }
 void Match::open_end_prompt() {
+  require_slots(num_players);
+  fade = ZERO;
+  rank_order.clear();
+  rank_known = false;
+  // With distinct kill counts every sort gives the same order. Equal counts
+  // depend on the qsort the research did not assert.
+  for (int i = 0; i < num_players; ++i)
+    for (int j = i + 1; j < num_players; ++j)
+      if (s16(slots[static_cast<std::size_t>(i)].kills) == s16(slots[static_cast<std::size_t>(j)].kills))
+        return;
   rank_order.resize(static_cast<std::size_t>(num_players));
   for (int i = 0; i < num_players; ++i)
     rank_order[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(i);
+  rank_known = true;
   for (int i = 1; i < num_players; ++i) {
     const auto key = rank_order[static_cast<std::size_t>(i)];
     int j = i;
@@ -545,16 +555,17 @@ void Match::open_end_prompt() {
     }
     rank_order[static_cast<std::size_t>(j)] = key;
   }
-  fade = ZERO;
-  end_flag = 1;
 }
 std::string Match::level_name() const {
-  if (mode_a)
-    return std::string(mode_a_name(s32(static_cast<std::uint32_t>(scan0)) & 0xff));
+  if (mode_a) {
+    if (!scan0)
+      throw Unsupported("game_scanCm1Vars(0) was not supplied");
+    return mode_a_name(names_a, *scan0);
+  }
   if (recipes.empty())
     throw Unsupported("mode B level name needs recipe records; those bytes are not published");
   const auto record = sdiv(0, static_cast<std::int32_t>(recipes.size())).second;
-  return std::string(mode_b_name(low_nibble(recipes[static_cast<std::size_t>(record)][0])));
+  return mode_b_name(names_b, low_nibble(recipes[static_cast<std::size_t>(record)][0]));
 }
 void Match::register_spawn(int index, const SpawnPoint &point) {
   if (index == -1) {
@@ -644,25 +655,32 @@ TickOut Match::tick(bool confirm, bool cancel) {
       if (can_play_intermission(true, slots[static_cast<std::size_t>(i)].lives, hp[static_cast<std::size_t>(i)]))
         any_in = true;
     }
-    if (any_active && !any_in) {
+    if (!any_active)
+      throw Unsupported("an intermission with no active slot was not executed");
+    if (!any_in) {
+      end_flag = 1;
       open_end_prompt();
       intermission = 0;
       out.end_prompt = true;
+      out.rank_refused = !rank_known;
     } else {
       const auto old = s16(intermission);
       intermission = static_cast<std::uint16_t>(old + 1);
       if (old == intermission_limit(networked)) {
         if (round_expired(s16(waves_left), mode_a) == Round::Level) {
           if (mode_a) {
-            map_index = mode_a_next_index(map_index, scan0);
-            pending_name = std::string(mode_a_name(map_index));
+            const auto step = sdiv(s32(static_cast<std::uint32_t>(map_index)) + 1, MODE_A_MAPS).second;
+            if (step == 0 && !scan0)
+              throw Unsupported("the mode-A rotation wrapped and game_scanCm1Vars(0) was not supplied");
+            map_index = mode_a_next_index(map_index, scan0 ? *scan0 : 0);
+            pending_name = mode_a_name(names_a, map_index);
           } else {
             if (recipes.empty())
               throw Unsupported("mode B level change needs recipe records; those bytes are not published");
             const auto record = level_record_index(s16(wave), static_cast<int>(recipes.size()));
             if (record < 0 || record >= static_cast<int>(recipes.size()))
               throw Unsupported("recipe index is outside the records; that path was not executed");
-            pending_name = std::string(mode_b_name(low_nibble(recipes[static_cast<std::size_t>(record)][0])));
+            pending_name = mode_b_name(names_b, low_nibble(recipes[static_cast<std::size_t>(record)][0]));
           }
           pending_copied = true;
           pending_orientation = -1;
@@ -677,9 +695,12 @@ TickOut Match::tick(bool confirm, bool cancel) {
   } else if (mode_a) {
     for (int i = 0; i < num_players; ++i) {
       if (kill_limit_reached(slots[static_cast<std::size_t>(i)].kills, kill_limit)) {
+        // Section 4: the countdown becomes 1 and the prompt opens. No end-flag
+        // store is documented on this path.
         intermission = 1;
         open_end_prompt();
         out.end_prompt = true;
+        out.rank_refused = !rank_known;
         break;
       }
     }
@@ -699,13 +720,17 @@ TickOut Match::tick(bool confirm, bool cancel) {
       if (s16(column.snapshot) > 0)
         any_snap = true;
     }
-    if (any_active && !any_in) {
+    if (!any_active)
+      throw Unsupported("a live-match scan with no active slot was not executed");
+    if (!any_in) {
       if (any_snap) {
         out.next_wave = true;
         out.next_wave_arg = 0;
       } else {
+        end_flag = 1;
         open_end_prompt();
         out.end_prompt = true;
+        out.rank_refused = !rank_known;
       }
     }
   }
@@ -723,7 +748,8 @@ TickOut Match::tick(bool confirm, bool cancel) {
       out.session_exit = true;
     }
   }
-  if (mode_b && !mode_a && !out.shutdown) {
+  // The tail is gated only on mode A (branch 0x307170).
+  if (!mode_a) {
     for (int n = 0; n < buyer_count; ++n) {
       const auto slot = buyers[static_cast<std::size_t>(n)];
       if (slot < 0 || slot >= num_players)

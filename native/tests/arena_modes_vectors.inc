@@ -151,10 +151,15 @@ CHECK(round_expired(2, true) == Round::Level);
 CHECK(intermission_done(INTERMISSION_OFFLINE, false));
 CHECK(!intermission_done(INTERMISSION_OFFLINE, true));
 CHECK(intermission_done(INTERMISSION_ONLINE, true));
-CHECK(mode_a_name(12) == "pvpfire");
-CHECK(mode_a_name(2) == "pvpfire2");
-CHECK(mode_b_name(0) == "pvparena");
-CHECK(mode_b_name(6) == "pvpnit");
+{
+NameTable a, b;
+for (int i = 0; i < 13; ++i) a.push_back("a" + std::to_string(i));
+for (int i = 0; i < 7; ++i) b.push_back("b" + std::to_string(i));
+CHECK(mode_a_name(a, 12) == "a12");
+CHECK(mode_a_name(a, 2) == "a2");
+CHECK(mode_b_name(b, 0) == "b0");
+CHECK(mode_b_name(b, 6) == "b6");
+}
 {
 const Recipe record{{0x30, 3, 1, 0, 0, 0}};
 const auto plan = wave_plan(0, 1, &record, 1, 20973, 0);
@@ -426,3 +431,4 @@ CHECK(creature.called == false);
 const auto creature = visit_creature(0x20, 2);
 CHECK(creature.seed == 0x3ca1bf79u && creature.called == true);
 }
+CHECK_THROWS(visit_creature(0, 1));
