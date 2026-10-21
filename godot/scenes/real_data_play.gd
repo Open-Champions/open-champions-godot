@@ -144,7 +144,7 @@ func _observe(result: Dictionary) -> void:
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	if real.world == null: return
-	real.world.observe(raw_observation)
+	real.world.observe(raw_observation, (held_commands & 0xF) != 0)
 	var extra: String = real.world.label()
 	if not extra.is_empty() and not extra in terrain_label.text: terrain_label.text += " · " + extra
 

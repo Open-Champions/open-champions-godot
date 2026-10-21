@@ -10,6 +10,7 @@ extends SceneTree
 #   [--from=I] [--to=J]  only level indices I..J-1 (for parallel slices)
 #   [--scripts]   opt into the level script after load and before play
 #   [--water]     capture only levels that have water tiles
+#   [--wade]      walk the player toward the nearest water and capture that view
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
@@ -165,6 +166,8 @@ func run() -> void:
 			add("water.texture_ok" if result.get("water_texture_ok", false) else "water.texture_refused")
 			peak("water.texture_width", int(result.get("water_texture_width", 0)))
 			peak("water.texture_height", int(result.get("water_texture_height", 0)))
+			add("water.colour_lines", int(result.get("water_colour_lines", 0)))
+			if int(result.get("water_colour_lines", 0)) > 0: add("water.levels_with_colour")
 		add("pieces.total", int(result.get("pieces", 0)))
 		add("pieces.claimed", int(result.get("claimed", 0)))
 		add("pieces.drawn_claimed", int(result.get("drawn_claimed", 0)))
@@ -217,7 +220,10 @@ func run() -> void:
 				add("creature.textured" if creature.get("textured", false) else "creature.untextured")
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
-		for t in range(ticks): scene.advance_step()
+		if args.has("wade") and int(result.get("water_tiles", 0)) > 0:
+			wade(maxi(ticks, 400))
+		else:
+			for t in range(ticks): scene.advance_step()
 		var started_before := int(counts.get("scripts.started", 0))
 		if scripted: take_script_counts()
 		if int(counts.get("scripts.started", 0)) > started_before: print("script_started_index ", index)
@@ -235,6 +241,11 @@ func run() -> void:
 		add("fx.lighting_world_calls", int(scene.fx.lighting_calls.get("world", 0)))
 		for why in scene.fx.refusals: refuse("fx.runtime", str(why))
 		if capture_this:
+			if args.has("wade"):
+				var look: Vector3 = scene.actor.position
+				scene.camera.position = look + Vector3(24, 16, 28)
+				scene.camera.look_at(look, Vector3.UP)
+				await capture("level-%d-wade" % shown)
 			await capture("level-%d-play" % shown)
 			if creature.ok:
 				var shape: MeshInstance3D = scene.components.animation.mesh_instance
@@ -257,6 +268,58 @@ func run() -> void:
 	counts["complete"] = 1
 	print(JSON.stringify(write_summary(), "  ", true))
 	quit(0 if failures == 0 else 1)
+
+func _nearest_water_centre() -> Vector3:
+	var best := Vector3.ZERO
+	var best_d := INF
+	var here: Vector3 = scene.actor.position
+	for tile in scene.real.world.info.get("water", []):
+		var lo: Vector3 = tile.min
+		var hi: Vector3 = tile.max
+		var centre := Vector3((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)
+		var d := Vector2(centre.x - here.x, centre.z - here.z).length()
+		if d < best_d:
+			best_d = d
+			best = centre
+	return best
+
+func _stick_toward(target: Vector3) -> int:
+	# Godot (x, z, -y) from native (x, y, z). Bit 8 decreases native y.
+	var here: Vector3 = scene.actor.position
+	var bits := 0
+	if target.x > here.x + 4.0: bits |= 1
+	elif target.x < here.x - 4.0: bits |= 2
+	if target.z > here.z + 4.0: bits |= 8
+	elif target.z < here.z - 4.0: bits |= 4
+	return bits
+
+func wade(max_ticks: int) -> void:
+	var world = scene.real.world
+	if world == null or world.info.get("water", []).is_empty():
+		add("water.wade_unavailable")
+		return
+	var before := int(world.ticks_in_water)
+	var target := _nearest_water_centre()
+	var last_bits := 1
+	var held_in := 0
+	for _t in range(max_ticks):
+		if scene.stopped:
+			add("water.wade_stopped")
+			break
+		var bits := _stick_toward(target)
+		if bits == 0: bits = last_bits
+		else: last_bits = bits
+		scene.held_commands = bits
+		scene.advance_step()
+		if world.in_water:
+			held_in += 1
+			if held_in >= 48: break
+		else:
+			held_in = 0
+			if _t % 20 == 19: target = _nearest_water_centre()
+	scene.held_commands = 0
+	add("water.wade_ticks_in", int(world.ticks_in_water) - before)
+	add("water.wade_reached" if world.in_water else "water.wade_missed")
 
 func take_script_counts() -> void:
 	var counts: Dictionary = scene.controller.script_command_counts()

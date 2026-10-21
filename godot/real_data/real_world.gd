@@ -3,8 +3,9 @@ extends RefCounted
 # Water tiles and moving pieces of the loaded game-folder level, through the
 # native ChampionsRealWorld adapter (water services and level-flow pieces).
 # Drawn water is the documented colour, slope UVs and layer-3 blend
-# (docs/WATER_DRAW.md). The wave steps on the simulation tick. The claim-frame
-# seed stays refused, so a new block is a zero grid.
+# (docs/WATER_DRAW.md). The wave, the claim and a wade all run on the
+# simulation tick. The level option word is not loaded, so the drawer splash
+# stays off. A negative fix uses the additive shader.
 # Piece poses come from level_flow::move_piece; collision changes stay in the
 # adapter's terrain copy (the play session keeps its own collision).
 const WATER_SHADER := """shader_type spatial;
@@ -17,6 +18,16 @@ void fragment() {
 	ALPHA = fix;
 }
 """
+const WATER_ADD_SHADER := """shader_type spatial;
+render_mode unshaded, cull_disabled, blend_add, depth_draw_never, depth_test_disabled;
+uniform sampler2D water_tex : source_color, filter_linear, repeat_enable;
+uniform float fix = 0.796875;
+void fragment() {
+	vec3 texel = texture(water_tex, UV / vec2(textureSize(water_tex, 0))).rgb;
+	ALBEDO = texel * COLOR.rgb * fix;
+	ALPHA = 1.0;
+}
+"""
 const ENTER_RADIUS_RAW := 0x41400000 # water_test(12), level-flow section 12
 
 var native: RefCounted
@@ -24,6 +35,7 @@ var info: Dictionary = {}
 var water_root: Node3D
 var water_instance: MeshInstance3D
 var water_shader: Shader
+var water_add_shader: Shader
 var water_materials: Array = []
 var water_texture: Texture2D
 var water_texture_refused := false
@@ -64,12 +76,15 @@ func set_water_texture(bytes: PackedByteArray) -> Dictionary:
 		material.set_shader_parameter("water_tex", water_texture)
 	return {"ok": not water_texture_refused, "width": image.get_width(), "height": image.get_height()}
 
-func _water_material(fix: float) -> ShaderMaterial:
+func _water_material(fix: float, additive: bool) -> ShaderMaterial:
 	if water_shader == null:
 		water_shader = Shader.new()
 		water_shader.code = WATER_SHADER
+		water_add_shader = Shader.new()
+		water_add_shader.code = WATER_ADD_SHADER
 	var material := ShaderMaterial.new()
-	material.shader = water_shader
+	material.shader = water_add_shader if additive else water_shader
+	if additive: fix = absf(fix)
 	material.render_priority = 3
 	material.set_shader_parameter("fix", fix)
 	if water_texture != null:
@@ -90,7 +105,7 @@ func _build_water(terrain_root: Node3D) -> void:
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var surfaces: Array = sync.get("surfaces", [])
 	for i in surfaces.size():
-		instance.set_surface_override_material(i, _water_material(float(surfaces[i].fix)))
+		instance.set_surface_override_material(i, _water_material(float(surfaces[i].fix), bool(surfaces[i].get("additive", false))))
 	water_instance = instance
 	# A child of the terrain root, inserted before the first layer-4 surface.
 	# render_priority 3 is the documented layer: after opaque WORLD, before
@@ -176,7 +191,8 @@ func _advance_waves(raw: Dictionary) -> void:
 		water_instance.mesh = last.mesh
 
 # water_test at the session's player position after each observation.
-func observe(raw: Dictionary) -> void:
+# `moving` is the stick stand-in for the creature speed word at +0xb8.
+func observe(raw: Dictionary, moving: bool = false) -> void:
 	if native == null: return
 	_advance_waves(raw)
 	if info.get("water", []).is_empty() or not raw.has("position_raw"): return
@@ -187,11 +203,18 @@ func observe(raw: Dictionary) -> void:
 		if not str(result.get("error", "")) in errors: errors.append(str(result.get("error", "")))
 		return
 	ticks_observed += 1
+	var entered := bool(result.in_water) and not in_water
 	if result.in_water:
 		ticks_in_water += 1
 		last_height = float(result.height)
-		if not in_water: entries += 1
+		if entered: entries += 1
 	in_water = bool(result.in_water)
+	# After the tick, so the write stays in velocity until the next step.
+	# Player_move's own immediates are not in the pin; this is the creature body.
+	if in_water:
+		var gate: Dictionary = native.standing_disturb(int(raw.get("ready_ticks", 0)), entered, moving)
+		if gate.get("fire", false):
+			native.water_disturb(int(gate.strength), int(gate.radius), position)
 
 func label() -> String:
 	var parts: Array[String] = []

@@ -93,6 +93,7 @@ Ref<ArrayMesh> water_mesh(const std::array<WD::DrawSurface, 2> &surfaces,
     info["layer"] = surface.layer;
     info["triangles"] = surface.triangles;
     info["second_set"] = set == 1;
+    info["additive"] = surface.fix < 0.f;
     described.push_back(info);
   }
   return mesh;
@@ -101,6 +102,25 @@ RW::cw::Vec3 raw_position(const PackedInt64Array &p) {
   if (p.size() != 3)
     throw std::runtime_error("A raw position needs three words.");
   return {std::uint32_t(p[0]), std::uint32_t(p[1]), std::uint32_t(p[2])};
+}
+// world_objectFactory matches customVars as a case-insensitive full class name
+// and that constructor is levelSettings_parse. Other classes are not that parser.
+bool custom_vars(std::string_view cls) {
+  constexpr char name[] = "customvars";
+  if (cls.size() != sizeof(name) - 1)
+    return false;
+  for (std::size_t i = 0; i < cls.size(); ++i) {
+    const auto c = cls[i];
+    const auto lower = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+    if (lower != name[i])
+      return false;
+  }
+  return true;
+}
+bool colour_property(std::string_view line) {
+  while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+    line.remove_prefix(1);
+  return line.rfind("waterColor=", 0) == 0 || line.rfind("waterColor2=", 0) == 0;
 }
 } // namespace
 
@@ -124,6 +144,9 @@ protected:
     ClassDB::bind_method(
         D_METHOD("water_disturb", "strength_raw", "radius_raw", "position_raw"),
         &ChampionsRealWorld::water_disturb);
+    ClassDB::bind_method(
+        D_METHOD("standing_disturb", "frame", "entered", "moving"),
+        &ChampionsRealWorld::standing_disturb);
     ClassDB::bind_method(D_METHOD("set_door", "piece", "open"),
                          &ChampionsRealWorld::set_door);
     ClassDB::bind_method(D_METHOD("piece_draws"),
@@ -182,9 +205,8 @@ public:
           source.neighbours = w.neighbours;
           source.mask = w.mask;
           source.second_set = w.second_set;
-          source.min_x = c.bounds_bits[0];
-          source.min_y = c.bounds_bits[1];
-          source.max_x = c.bounds_bits[3];
+          source.bounds = c.bounds_bits;
+          source.origin = {c.translation[0], c.translation[1]};
           source.chunk_z = c.translation[2];
           source.flag_0x200 = (c.flags & 0x200u) != 0;
           sources.push_back(source);
@@ -213,6 +235,23 @@ public:
         out["started_open"] = std::int64_t(pieces_->started_open());
       }
       out["pieces"] = pieces;
+      if (waves_) {
+        // customVars lines after reset and setup. Whether the factory runs
+        // before setup was not executed. The level option word is not loaded,
+        // so the drawer splash and the mask fill stay off.
+        std::vector<std::string> lines;
+        std::int64_t colour_lines = 0;
+        for (const auto &record : records) {
+          if (!custom_vars(record.cls))
+            continue;
+          for (const auto &prop : record.props) {
+            lines.push_back(prop);
+            colour_lines += colour_property(prop) ? 1 : 0;
+          }
+        }
+        waves_->set_appearance(WD::replacing(lines));
+        out["water_colour_lines"] = colour_lines;
+      }
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());
@@ -242,11 +281,29 @@ public:
     if (!water_)
       return 0;
     try {
-      return water_->disturb(std::uint32_t(strength), std::uint32_t(radius),
-                             raw_position(position));
+      const auto point = raw_position(position);
+      const auto count = water_->disturb(std::uint32_t(strength),
+                                         std::uint32_t(radius), point);
+      // A zero count is the cut byte or an empty box. The service grid
+      // pointer stays 0, so the drawn field is the copy that shows the ripple.
+      if (count != 0 && waves_)
+        waves_->disturb(std::uint32_t(strength), std::uint32_t(radius), point);
+      return static_cast<std::int64_t>(count);
     } catch (const std::exception &) {
       return -1;
     }
+  }
+  Dictionary standing_disturb(int64_t frame, bool entered, bool moving) {
+    Dictionary out;
+    out["fire"] = false;
+    if (frame < 0 || frame > 0xffffffffll)
+      return out;
+    const auto gate = WD::creature_standing_disturb(
+        static_cast<std::uint32_t>(frame), entered, moving);
+    out["fire"] = gate.fire;
+    out["strength"] = static_cast<std::int64_t>(gate.strength);
+    out["radius"] = static_cast<std::int64_t>(gate.radius);
+    return out;
   }
   bool set_door(int64_t piece, bool open) {
     if (!pieces_ || piece < 0)
@@ -311,7 +368,7 @@ public:
       out["triangles"] = triangles;
       out["tiles"] = static_cast<std::int64_t>(waves_->tile_count());
       out["live"] = static_cast<std::int64_t>(waves_->live_blocks());
-      out["claim_seed"] = String("refused");
+      out["claim_seed"] = static_cast<std::int64_t>(waves_->splash_seed());
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());

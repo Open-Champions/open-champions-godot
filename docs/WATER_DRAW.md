@@ -1,11 +1,12 @@
 # Drawn water
 
-Water tiles use the colour, slope UVs, vertices and layer documented in
-`t3/research-textures` at `a9486c7` (`docs/formats/water-draw.md`,
-`tools/ref_waterdraw.py`). The native implementation is
-`champions::presentation::rta::water_draw`. It is presentation. Creature
-`water_test` / `water_disturb` stay on their own grids and are not written by
-this drawer.
+Water tiles use the colour, slope UVs, vertices, claim weights, drawer splash
+and per-level appearance documented in `t3/research-textures` at `1528708`
+(`docs/formats/water-draw.md`, `tools/ref_waterdraw.py`). The native
+implementation is `champions::presentation::rta::water_draw`. It is
+presentation. Creature `water_test` / `water_disturb` still return the service
+counts. The service grid pointer stays 0, so that call writes nothing there.
+When the count is not zero, the same call is applied to the drawn field.
 
 The drawer and the height step do not call `cos16` or `sin16`. Those functions
 are not used here.
@@ -22,6 +23,21 @@ pass.
 | FIX | 102 | 98 |
 | RGBAQ | `0x006D6B5F` (R 95, G 107, B 109, A 0) | `0x00808080` |
 | Height scale | bits `0x3B999999` (0.0046875) | bits `0x3CC00000` (five times set 0) |
+
+Those two rows are the executable tables. On a load, the reset runs first and
+writes set 1's fix, colour and scale as 0, then `water_setup` replaces set 0
+only. A `customVars` object (case-insensitive class match) can replace either
+set. The scene applies those lines after setup (`replacing`). `before_setup`
+is tested and is not what the scene uses. `refuse_property_order` records that
+the original factory-versus-setup order was not executed. Float properties use
+the deposited IEEE value of the decimal, because `sscanf` `%f` did not return
+in the interpreter. `waterWavyness` and `waterWavyness2` then multiply by the
+static set-1 scale `0x3CC00000`. Bump strength, radius and the timer word are
+stored. Nothing documented reads the timer.
+
+A negative fix selects `ALPHA` `0x68` and `Cs × F + Cd`. The play shader keeps
+`blend_mix` for a positive fix. A negative fix uses `blend_add` with
+`ALBEDO = texel × COLOR.rgb × abs(fix)`. Retail sets are positive.
 
 Alpha channel 0 is not the transparency. Positive FIX uses `ALPHA` `0x64`:
 `(Cs − Cd) × F + Cd` with F = FIX/128. The texture function is modulate:
@@ -75,37 +91,62 @@ both from the post-step snapshot. Where both slots write `height[1][0]` or
 executed case. Slots 1 and 3 are not read. Neighbour −1 is absent.
 
 A block is kept while the signed `(frame − stamp) < 200`. At 200 it drops and
-is not stepped. The next draw reclaims it.
+is not stepped. The next tick claims it again.
 
-`filled_mask()` is the level-option bit 8 fill. The scene does not turn that
-option on.
+The claim runs after the step and the two seams, in tile order, so an earlier
+tile claimed this tick is live for a later one. A neighbour that is not live
+contributes nothing. The weight is `0x3DCCCCCC`. Slots 0 and 2 are the edges
+the per-frame exchange also copies. Slots 1 and 3 are read by the claim and
+are still not read by that exchange. Height row 0 stays zero. Every
+disturbance sample is cleared. Ten weights stay strictly under 1, so one edge
+is truncated against 1.
+
+`filled_mask()` is level-option bit 8. The scene does not load the option word
+at `0x44fe08`, so the fill stays off and real masks stay the WORLD mask.
+
+## Splashes
+
+The drawer splash runs only when option bit `0x10` is set and the tick is not
+frozen. It is inside the per-tile draw, so the field rolls the generator once
+per live tile after the claim. A hit consumes three seeds, disturbs at
+strength 1500 and radius 6, and leaves the write in the velocity grid until
+the next step. The seed starts at 0. That is not a measurement of the retail
+word at `0x404460`, which this pin does not publish. The scene does not set
+the option bit, so this generator does not advance in play.
+
+A player standing in water uses the creature water body, not `Player_move`.
+Entry is strength `0x44BB8000` and radius `0x41C00000`. Continuing is strength
+`0x43960000` and radius `0x41400000` when the stick is held or
+`(frame & 0xf) == 0`. The call is after the tick, so it shows on the next
+step. `moving` stands in for the speed word at `+0xb8`, which the play
+observation does not carry.
 
 ## Refused
 
-These stay explicit refusals. A reclaimed or newly claimed block is a zero
-grid because the claim weights were not executed. That zero is not a
-measurement that the original seed is zero. With the seed refused, a real
-level stays flat: every UV is 32, so the tile samples one texel, tinted by
-the set colour and blended at F.
-
-- The numeric weights `water_init` uses on the frame a block is claimed.
-- The splash point the drawer picks inside the chunk bounds.
-- The simulation splash taken when the countdown at `0x44f200` is negative.
-  The constants (strength 41, radius 10, splash 1500/6, the LCG) are stored.
-  The scene does not splash.
-- The integer 4 at `0x44f06c`. Nothing documented reads it.
-- Neighbour slots 1 and 3 beyond `water_init`.
+- The simulation splash when the countdown at `0x44f200` is negative. A
+  countdown of 3 still skips. Strength 41 and radius 10 are stored and that
+  body does not run.
+- Any reader of `waterBumpTimer` at `0x44f06c`. Setup stores 4, the reset
+  stores 6, and a level line stores the integer.
+- Neighbour slots 1 and 3 in the per-frame exchange. The claim does read them.
+- Whether `customVars` runs before or after `water_setup`.
+- `Player_move`'s `water_disturb` immediates. The published player water calls
+  are the jump and the block move, and those constants are not used for walking.
+- Splash particles. Both definition words are zero in the executable and the
+  names are not in the image. `second_particle_z` is tested and nothing is spawned.
+- The retail initial splash seed, and the level option word, which this scene
+  does not load.
 
 ## Pins
 
-`t3/research-textures` `a9486c7f0052e533d3cc5c88f3d98d8f07bffdce`.
+`t3/research-textures` `1528708c99ab48c03339dad614f6c32c3892f905`.
 
 | Source | SHA-256 |
 |---|---|
-| `docs/formats/water-draw.md` | `a6d827ef663f5783512b8f2a1a72f874b543f96ffead241346dc73ad59f619aa` |
-| `tools/ref_waterdraw.py` | `7c2a005a39784d65b2e65ff8f321e1bd0a580820ccf202c2f77f0f6d27cb77b7` |
-| `tools/test_ref_waterdraw.py` | `d8a28cf81b05234a26eeb4041227e300cf7488972da7f285ac812cb5e082dea9` |
-| `tools/difftest_waterdraw.py` | `2fea3ba76add0440f4ccdce7ce4a7d81558608705a32986ad82ef2fd37b1333c` |
+| `docs/formats/water-draw.md` | `b762ef9462465336c165e6355c8d4ef6d56bbfb0e9fcc2d252757e432550e292` |
+| `tools/ref_waterdraw.py` | `f6830db4cb0a3f10d7aafe1052223de0f44808597ca677c43c8da2044756c839` |
+| `tools/test_ref_waterdraw.py` | `97a8076f94f09d2ca1bea276f4fdf8632b8b7d7b3496c20b722b523845fbb5de` |
+| `tools/difftest_waterdraw.py` | `707d2ab2d592e97822ece1cbe8e530c56c6e9f639314e7469bc7c03e4042a0f9` |
 
 `champions-water-draw-tests` ports the reference vectors. The difftest's
 original-executable run is research evidence; this repository does not run it.
