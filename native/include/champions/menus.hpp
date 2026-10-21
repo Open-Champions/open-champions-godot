@@ -215,6 +215,17 @@ public:
   std::uint32_t drag_cell() const { return drag_cell_; }
   int passive_level_at(std::uint64_t mask);
 
+  // A character from the front end (player_initNewCharacter fields) or a PS2
+  // import: gold +0xe4, level +0x59, acknowledged +0x58, experience +0x5c, base
+  // stats +0x78, skill points +0xe8, stat points +0xec. The bags and the
+  // equipment pointers are emptied: neither path supplies item definitions here.
+  struct Adopted {
+    std::int32_t gold = 0, level = 1, acknowledged = 1, experience = 0;
+    std::int32_t skill_points = 0, stat_points = 0;
+    std::int32_t stats[4] = {0, 0, 0, 0};
+  };
+  void adopt(const Adopted &character);
+
   Frame frame(const std::string &screen);
   std::vector<std::uint8_t> save() const;
   void load(const std::vector<std::uint8_t> &bytes);

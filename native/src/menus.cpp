@@ -541,6 +541,30 @@ Frame Ledger::frame(const std::string &screen) {
   return out;
 }
 
+void Ledger::adopt(const Adopted &c) {
+  if (c.level < 1 || c.level > 127 || c.acknowledged < 0 || c.acknowledged > 127)
+    throw Refusal("level does not fit the s8 level bytes");
+  if (c.stat_points < 0 || c.stat_points > 255)
+    throw Refusal("stat points do not fit byte +0xec");
+  const auto r = record();
+  for (int bag = 0; bag < BAGS; ++bag)
+    machine_->w32(r + BAG_COUNT + static_cast<std::uint32_t>(bag) * BAG_STRIDE, 0);
+  for (int slot = 0; slot < EQUIP_SLOTS; ++slot) {
+    const auto offset = slot < 17 ? 0x43f0 + slot * 4 : 0x4434 + (slot - 17) * 4;
+    machine_->w32(r + static_cast<std::uint32_t>(offset), 0);
+  }
+  dragging_ = 0;
+  drag_cell_ = 0;
+  machine_->w32(r + 0xe4, static_cast<std::uint32_t>(c.gold));
+  machine_->w32(r + 0xe8, static_cast<std::uint32_t>(c.skill_points));
+  machine_->w8(r + 0xec, static_cast<std::uint32_t>(c.stat_points));
+  machine_->w8(r + 0x59, static_cast<std::uint32_t>(c.level));
+  machine_->w8(r + 0x58, static_cast<std::uint32_t>(c.acknowledged));
+  machine_->w32(r + 0x5c, static_cast<std::uint32_t>(c.experience));
+  for (int i = 0; i < 4; ++i)
+    machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(c.stats[i]));
+}
+
 std::vector<std::uint8_t> Ledger::save() const {
   std::vector<std::uint8_t> out;
   const char magic[] = "OCMENU1";
