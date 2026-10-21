@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -285,6 +286,30 @@ int main() {
               surfaces[1].material.alpha1 == 2 &&
               surfaces[0].uv[1] == std::array<double, 2>{0.5, 0},
           "WORLD binding carries exact batch state and UV");
+    auto resident = bind_cells(world, file, packet_bytes, {5049});
+    check(resident.size() == surfaces.size() &&
+              resident[0].positions == surfaces[0].positions &&
+              resident[0].uv == surfaces[0].uv &&
+              resident[0].image->rgba == surfaces[0].image->rgba &&
+              resident[1].material.alpha1 == surfaces[1].material.alpha1,
+          "one requested cell matches the full bind");
+    check(bind_cells(world, file, packet_bytes, {1}).empty(),
+          "an unrequested cell binds nothing");
+    check(cell_id_of(0, 0, 720) == 5050, "origin is texture cell 5050");
+    check(cell_id_of(-0.1, 0, 720) == 5049, "cell id uses floor division");
+    check(cells_around(5050) ==
+              std::array<int, 9>{4951, 4950, 4949, 5051, 5050, 5049, 5151, 5150,
+                                 5149},
+          "texture window is the documented 3 by 3");
+    champions::presentation::rta::world_geometry::Geometry sized;
+    check(texture_cell_size(sized) == 960.0, "a zero cell-size word means 960");
+    const float seven_twenty = 720.f;
+    std::uint32_t size_bits = 0;
+    std::memcpy(&size_bits, &seven_twenty, sizeof size_bits);
+    sized.header_words[0x68 / 4] = size_bits;
+    check(texture_cell_size(sized) == 720.0, "cell size is the header float");
+    sized.header_words[0x68 / 4] = 0xbf800000u;
+    rejects([&] { texture_cell_size(sized); }, "negative cell size");
     // Explicit row provenance; inherited requires the actual preceding chunk.
     const std::array<std::int32_t, 4> rows{160, -1600, 32, 0};
     check(model_rows(ModelRows::DormantSetupZero, nullptr) ==
