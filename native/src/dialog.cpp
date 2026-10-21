@@ -267,6 +267,8 @@ std::int64_t next_of(std::vector<std::int64_t> &values) {
 } // namespace
 std::int64_t TickIO::camera_step(int frames) {
   asked.emplace_back("camera", frames);
+  if (look_at)
+    return look_at(frames);
   return next_of(camera);
 }
 std::int64_t TickIO::held_ready() {
@@ -383,6 +385,11 @@ bool Dialog::on_open(Host &host, const Bytes &msg, const std::vector<Node> &file
   if (remote)
     log.push_back(ev("fade_wait", {I(FADE_WAIT_FRAMES)}));
   if (swoop) {
+    if (host.view) {
+      if (!focus)
+        throw Refused("Camera_setupDialogView with no focus object: the original reads the stale focus word");
+      host.view(side, *focus, m.cam, m.yaw, m.pitch);
+    }
     log.push_back(ev("dialog_view", {I(side)}));
     cam_move = 1;
   }

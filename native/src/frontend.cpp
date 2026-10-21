@@ -1,4 +1,5 @@
 #include "champions/frontend.hpp"
+#include "champions/dialog_gaps.hpp"
 
 #include "champions/netwire.hpp"
 #include "champions/ps2_save.hpp"
@@ -451,6 +452,12 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     break;
   case Screen::Playing:
     if (pressed & START) {
+      // warpMenu 0x18e0e4 (offline): with a dialog open the start button cannot open
+      // the menu. The client's one camera is the follow camera, camera mode 1, the
+      // only mode in which the site lets it open (docs/spec/dialog-gaps.md 3).
+      if (!net_ && champions::simulation::rta::dialog_gaps::site_outcome("warp_menu", {{"dialog", dialog_open_ ? 1 : 0}, {"cam_mode", 1}}) ==
+                       "blocked")
+        break;
       // pauseMenu_open 0x18e334: g_paused only offline; menu-state message 2.
       paused_ = !net_;
       request("pause", {}, 1);
@@ -685,11 +692,17 @@ std::vector<Entry> Flow::entries() const {
     break;
   case Screen::Pause:
     out.push_back(entry("return", "Return to Game", "table 0x44f3b8 (Ran, native-online)"));
-    out.push_back(entry("gate", "Use Gate Scroll", "hudmsg_sendRecall 0x1de138 (Observed)"));
+    out.push_back(entry("gate", "Use Gate Scroll", "hudmsg_sendRecall 0x1de138 (Observed)",
+                        champions::simulation::rta::dialog_gaps::site_outcome("pause_recall", {{"dialog", dialog_open_ ? 1 : 0},
+                                                                    {"cam_mode", 1}, {"network", net_ ? 1 : 0}}) ==
+                            "enabled",
+                        "not selectable while a conversation is open (menu_recall +4 = 5, 0x18d400)"));
     out.push_back(entry("load", "Load Game", "opens the load screen offline (Ran, native-app)", !net_,
                         "greyed in a net game"));
     out.push_back(entry("options", "Options...", "pause option list 0x44f218"));
-    out.push_back(entry("exit", "Exit Game", "Exit Game? Yes / No (Ran)"));
+    out.push_back(entry("exit", "Exit Game", "Exit Game? Yes / No (Ran)",
+                        champions::simulation::rta::dialog_gaps::site_outcome("pause_exit", {{"dialog", dialog_open_ ? 1 : 0}}) != "disabled",
+                        "not selectable while a conversation is open (menu_exitmission +4 = 5, 0x18cd08)"));
     break;
   case Screen::ExitConfirm:
     out.push_back(entry("yes", "Yes", "left then cross confirms (Ran, live-rig 21.7)"));

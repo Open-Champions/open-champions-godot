@@ -77,6 +77,13 @@ void Host::attach_dialog(DialogLevel level, DialogServices services) {
   dialog_counts_ = DialogCounts{};
   dialog_stalled_ = false;
   dialog_attached_ = true;
+  camera_view_.reset();
+  camera_pose_.reset();
+  // dialog_loadBox 0x22f910: the word is written outside "intro" and arena mode B
+  // only; otherwise it keeps what an earlier load left (docs/spec/dialog-gaps.md 4).
+  box_word_ = dialog_gaps::load_box(dialog_level_.level, dialog_level_.pvp_mode_b,
+                                    dialog_level_.previous_box ? 1u : dialog_gaps::BOX_WORD_INITIAL,
+                                    dialog_level_.box_available ? 1u : 0u);
   auto &h = dialog_host_;
   h.network = false;
   h.local = {0};
@@ -101,6 +108,26 @@ void Host::attach_dialog(DialogLevel level, DialogServices services) {
       h.vag_length[name] = entry.second;
     }
   }
+  // Camera_setupDialogView 0x203bb8 (docs/spec/dialog-gaps.md 2.2). A speaker without
+  // a complete dialogOffset leaves the sideways offset to a stack word nobody
+  // initialised (section 10): refused.
+  h.view = [this](int side, const dialog::Object &focus, const std::array<Raw, 3> &cam, int yaw, int pitch) {
+    dialog_gaps::View view(yaw, pitch);
+    std::vector<Vec3> players;
+    for (const int slot : dialog_host_.alive) {
+      const auto it = dialog_host_.player_obj.find(slot);
+      if (it != dialog_host_.player_obj.end() && it->second)
+        players.push_back(it->second->pos);
+    }
+    const auto offset = focus.props.find("dialogoffset");
+    const std::optional<std::string> text =
+        offset == focus.props.end() ? std::nullopt : std::optional<std::string>(offset->second);
+    dialog_gaps::setup_dialog_view(view, focus.pos, s16(focus.facing), side, players, cam, text);
+    camera_view_ = view;
+    dialog_counts_.camera_views += 1;
+    // Message 0's Camera_apply of the carried position (docs/dialog.md 2.4 step 3).
+    dialog_camera_apply(cam, yaw, pitch, ZERO, false);
+  };
   dialog_.on_send = [this](const dialog::Bytes &msg) { dialog_message(msg); };
   dialog_.on_post_action = [this] {
     dialog_counts_.post_actions += 1;
@@ -131,6 +158,35 @@ void Host::attach_dialog(DialogLevel level, DialogServices services) {
       return inner(name, args);
     throw amx::HostFault("undocumented scene service");
   };
+}
+
+// Camera_apply(x, y, z, cam, 0) 0x2035c8 with the conversation camera's words; the pose
+// goes to the presenter as a "camera_pose" event (docs/spec/dialog-gaps.md 2.5).
+void Host::dialog_camera_apply(const Vec3 &pos, int yaw, int pitch, Raw h, bool dialog_open) {
+  auto &env = dialog_camera_env;
+  if (lt(ZERO, env.shake) && !env.cosmetic_seed)
+    throw dialog::Refused("camera shake with no cosmetic seed supplied: the shake draws it three times");
+  const auto a = dialog_gaps::camera_apply(pos, yaw, pitch, env.shake, env.cosmetic_seed ? *env.cosmetic_seed : 0,
+                                           env.frozen, dialog_open);
+  if (env.cosmetic_seed)
+    *env.cosmetic_seed = a.seed;
+  env.shake = a.shake;
+  camera_pose_ = DialogCameraPose{a.pos, s16(std::uint32_t(yaw)), s16(std::uint32_t(pitch)), h, a.matrix};
+  dialog_events_.push_back({"camera_pose",
+                            {std::int64_t(a.pos[0]), std::int64_t(a.pos[1]), std::int64_t(a.pos[2]),
+                             std::int64_t(camera_pose_->yaw), std::int64_t(camera_pose_->pitch), std::int64_t(h)}});
+}
+
+std::string Host::dialog_gate(const std::string &site, dialog_gaps::Conditions conditions) const {
+  conditions["dialog"] = dialog_.is_open() ? 1 : 0;
+  return dialog_gaps::site_outcome(site, conditions);
+}
+
+std::uint32_t Host::dialog_cursor_glyph(std::int32_t layout) const {
+  const auto glyph = dialog_gaps::cursor_glyph(layout);
+  if (!glyph)
+    throw dialog::Refused("cursor glyph: game_initCamera writes 0x41b978 only for layout bytes 0 and 1");
+  return *glyph;
 }
 
 // Seams the dialog built-ins call (script_builtins.cpp startDialog,
@@ -310,6 +366,9 @@ void Host::dialog_message(const dialog::Bytes &msg) {
       }
       if (!dialog_services_.text)
         throw dialog::Refused("no text table");
+      // The draw hands word 0x4fe538 straight to ui_drawSprite, which reads the
+      // texture's size first: with the word 0 that is address 0 (section 4).
+      dialog_gaps::box_sprite_reads(box_word_);
       if (dialog_.on_open(dialog_host_, msg, file->second, dialog_level_.level)) {
         dialog_counts_.opens += 1;
         dialog_stalled_ = false;
@@ -486,8 +545,20 @@ void Host::dialog_tick(const DialogInputs &in) {
   dialog_host_.pause_menu = in.pause_menu;
   dialog_host_.raw_pad = {{0, in.pad}};
   dialog::TickIO io;
-  io.camera = {in.camera_arrived};
-  io.look = in.look;
+  // Camera_lookAt: the port's conversation camera unless the caller owns the camera.
+  io.look_at = [this, &in](int frames) -> std::int64_t {
+    if (in.camera_arrived)
+      return *in.camera_arrived;
+    if (!camera_view_)
+      throw dialog::Refused("no conversation camera view was set up");
+    dialog_counts_.camera_steps += 1;
+    const auto look = dialog_gaps::look_at(*camera_view_, frames);
+    if (look.apply)
+      dialog_camera_apply(*look.apply, camera_view_->yaw, camera_view_->pitch, look.h, true);
+    return look.result;
+  };
+  // The camera's forward z, read once before the move (docs/spec/dialog-gaps.md 2.4).
+  io.look = in.look ? *in.look : camera_pose_ ? camera_pose_->matrix[8] : ZERO;
   io.held = {in.voice.held_ready};
   io.queue = {in.voice.queue_count};
   io.position = {in.voice.position};

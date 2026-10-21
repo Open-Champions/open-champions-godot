@@ -165,6 +165,11 @@ public:
   const std::vector<std::uint8_t> &options_image() const { return image_; }
   bool options_file_present() const { return file_present_; }
   bool paused() const { return paused_; }
+  // dialog_isOpen: a conversation is open (docs/spec/dialog-gaps.md 3). Offline the
+  // start button cannot open the pause menu (warpMenu 0x18e0e4), and the entries
+  // menu_recall (0x18d400) and menu_exitmission (0x18cd08) are not selectable.
+  void set_dialog_open(bool open) { dialog_open_ = open; }
+  bool dialog_open() const { return dialog_open_; }
   bool skip_splash() const { return skip_splash_; }
   int lockout() const { return lockout_; }
   int num_players() const { return num_players_; }
@@ -194,6 +199,7 @@ private:
   bool paused_ = false;
   bool skip_splash_ = false;
   bool net_ = false;
+  bool dialog_open_ = false;
   bool stream2_playing_ = false;
   std::uint32_t stream2_status_ = 0;
   bool hold_flag_ = false; // 0x41b500, set only by script pauseGameControl
