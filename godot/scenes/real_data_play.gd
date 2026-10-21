@@ -140,8 +140,22 @@ func _level_script_toggled(on: bool) -> void:
 
 # The level's script.scr and objects.ob. Refuses an empty image and does not
 # change the play observation. Entry names are the documented loader names.
+func _sync_saved_music() -> bool:
+	# Direct game-folder play can enter before the front-end has booted. Read
+	# its saved options through the native parser so the first script entry sees
+	# the same unclamped music word as a front-end-started session.
+	if frontend != null and not frontend.booted and FileAccess.file_exists(frontend.options_path):
+		var options_probe = ClassDB.instantiate("ChampionsFrontendService")
+		var options: Dictionary = options_probe.boot(FileAccess.get_file_as_bytes(frontend.options_path))
+		if not options.get("ok", false) or audio == null or not audio.load_options_file_music(int(options.get("music_image", -1))):
+			return false
+	return true
+
 func attach_level_script() -> bool:
 	if real == null or real.current < 0 or controller == null: return false
+	if not _sync_saved_music():
+		status_label.text = "Level script refused: saved music options could not be loaded."
+		return false
 	var level: Dictionary = real.levels[real.current]
 	var script: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "script.scr")
 	var objects: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
