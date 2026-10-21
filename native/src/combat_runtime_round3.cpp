@@ -285,8 +285,11 @@ void World::State::missile_arrow_run(Address self, std::int32_t kind) {
     note("presentation:sound_playOnObject", {sample, self, ONE});
     w(self + 0xec, 0);
     auto pos = vec(self + 0x10);
+    // fx_spawn id 5 builds 3 or 4 Fire objects on the shared seed
+    // (research-fx docs/effects.md row 5 and section 17). No Fire body is
+    // executed, so a World-only host refuses here as the playable observer does.
     if (res == 1 && kind == 1)
-      note("presentation:fx_spawn", {5, pos[0], pos[1], pos[2]});
+      throw Unsupported("fx_spawn id 5 (Fire construction) on a kind-1 arrow hit");
     if (res == 1) {
       auto impact = u(self + 0x1bc);
       if (impact)
@@ -297,9 +300,13 @@ void World::State::missile_arrow_run(Address self, std::int32_t kind) {
     if (kind == 1) {
       auto n = int(own(self) & 3) + 3;
       for (int step = 0; step < n; ++step) {
+        // ParticleProp_ctor 0x1549e8 (block, position, 8) is a call-out of
+        // ref_combat_round3 and "body not read" in symbols/objects.tsv. A
+        // ParticleProp is a 0x148-byte Prop (creatures.md), so its
+        // GameObject_ctor draws the shared seed; refuse instead of dropping it.
         auto block = pool_new(0x148);
         if (block)
-          note("ParticleProp_ctor", {block, pos[0], pos[1], pos[2], 8});
+          throw Unsupported("ParticleProp_ctor 0x1549e8 (kind-1 arrow hit): body not read");
       }
       light_of(pos, true);
     } else if (kind == 2) {

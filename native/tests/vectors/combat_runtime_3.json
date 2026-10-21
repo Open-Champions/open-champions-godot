@@ -12,7 +12,7 @@
     "docs/spec/combat-round3.md": "075c537c03a8df1efd2a461609b962b8517e986c15bd5e0df4c0c87c959c2c37",
     "docs/combat-runtime.md": "d1462c7a7c57d7618990cca77a19ffc6171e732b88272f0068d4db3bbe9cb40f"
   },
-  "vector_sha256": "9fe01b0e1ab5a1b2969a260b1518b8b8c74aed42bcf81aaca4ecde206c2a1bf1",
-  "content_sha256": "7287abcc211644c15eeb15fc0e7e5589efb0ffdd2178089cd9d9cbc2fbacb251",
-  "cases": 6
+  "vector_sha256": "413c75855046f606bd43275841ad47042237195b2a8de53bfa9e76ca363a255c",
+  "content_sha256": "0588248ac93fa93c44c0ee95f587581f5bfafe7decce8e2421c9f3661bf51c62",
+  "cases": 7
 }

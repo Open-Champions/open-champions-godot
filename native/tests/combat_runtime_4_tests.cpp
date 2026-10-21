@@ -227,11 +227,9 @@ void host() {
     m.position = {0, 0, 0x40400000};
     auto arrow = h.w->spawn_missile(owner, m);
     h.w->clear_history();
-    h.w->run_actor(arrow);
-    auto fx = find_event(*h.w, "presentation:fx_spawn");
-    check(fx && !fx->args.empty() && fx->args[0] == 5, "kind 1 still notes fx_spawn 5");
-    check(!has_event(*h.w, "Fire_ctor") && !has_event(*h.w, "LooseFire_ctor"),
+    check(refused([&] { h.w->run_actor(arrow); }, "fx_spawn id 5"),
           "Fire construction from fx_spawn 5 stays refused");
+    check(!has_event(*h.w, "presentation:fx_spawn"), "kind 1 does not note fx_spawn 5");
   }
   {
     Host h;

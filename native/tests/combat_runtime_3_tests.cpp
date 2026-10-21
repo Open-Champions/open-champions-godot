@@ -273,14 +273,41 @@ void host() {
     auto fx = find_event(*h.w, "presentation:fx_spawn");
     check(fx && !fx->args.empty() && fx->args[0] == 10, "kind 5 spawns effect 10");
     check(!has_event(*h.w, "presentation:fx_ringBurst"), "kind 5 has no radius burst");
-    auto kind1 = hit_kind(1);
-    check(!h.w->contains(kind1), "kind 1 hit destroys the arrow");
-    auto fx1 = find_event(*h.w, "presentation:fx_spawn");
-    check(fx1 && !fx1->args.empty() && fx1->args[0] == 5, "kind 1 spawns effect 5");
-    check(count_event(*h.w, "ParticleProp_ctor") >= 3 &&
-              count_event(*h.w, "ParticleProp_ctor") <= 6,
-          "kind 1 builds 3 to 6 props");
-    check(count_event(*h.w, "presentation:particle_spawn") == 48, "kind 1 emits 24 pairs");
+    // Kind 1 on the ground (result 1): fx_spawn 5 builds Fire objects that
+    // draw the shared seed (research-fx effects.md row 5); not executed.
+    bool fire = false;
+    try {
+      hit_kind(1);
+    } catch (const C::Unsupported &e) {
+      fire = std::string(e.what()).find("fx_spawn id 5") != std::string::npos;
+    }
+    check(fire, "a kind-1 ground hit refuses at fx_spawn 5");
+    check(!has_event(*h.w, "presentation:fx_spawn"), "effect 5 is not noted as presentation");
+    {
+      // Kind 1 into a creature (result 2, no ground): no effect 5, but the
+      // (draw & 3) + 3 ParticleProp blocks; ParticleProp_ctor 0x1549e8 is a
+      // Prop (GameObject_ctor, one shared draw) whose body is not read.
+      Host t;
+      auto shooter = t.creature({from_int(2000), 0, 0});
+      C::Spawn enemy;
+      enemy.team = 1; // the shooter's slot 20 must call it an enemy
+      t.w->spawn_skelight(enemy);
+      C::Missile m;
+      m.kind = 1;
+      m.position = {0, 0, from_int(36)};
+      m.velocity = {0, 0, 0};
+      auto arrow = t.w->spawn_missile(shooter, m);
+      t.w->clear_history();
+      std::string refusal;
+      try {
+        t.w->run_actor(arrow);
+      } catch (const C::Unsupported &e) {
+        refusal = e.what();
+      }
+      check(refusal.find("ParticleProp_ctor") != std::string::npos,
+            "a kind-1 creature hit refuses at ParticleProp_ctor: '" + refusal + "'");
+      check(!has_event(*t.w, "presentation:fx_spawn"), "a creature hit has no effect 5");
+    }
     auto kind6 = hit_kind(6);
     check(!h.w->contains(kind6), "kind 6 hit destroys the arrow");
     check(count_event(*h.w, "presentation:particle_spawn") == 100, "kind 6 emits 100");
@@ -550,6 +577,9 @@ void replay(const Exact &c) {
   if (c.name == "arrow5") {
     kind = 5;
     hit = false;
+  } else if (c.name == "arrow1-flight") {
+    kind = 1;
+    hit = false;
   } else if (c.name == "arrow1")
     kind = 1;
   else if (c.name == "arrow2")
@@ -571,6 +601,23 @@ void replay(const Exact &c) {
   h.w->write(arrow + 0xd8, 4, 40);
   h.w->write(arrow + 0xec, 4, 1000);
   h.w->clear_history();
+  if (c.name == "arrow1") {
+    // The research hit calls fx_spawn 5 (3 or 4 Fire objects drawing the
+    // shared seed, research-fx effects.md section 6) and ParticleProp_ctor;
+    // neither body is executed, so the native World refuses at fx_spawn 5.
+    check(c.fx.size() == 1 && c.fx[0] == 5, "arrow1: the research hit spawns effect 5");
+    std::string refusal;
+    try {
+      h.w->run_actor(arrow);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("fx_spawn id 5") != std::string::npos,
+          "arrow1: the hit refuses at fx_spawn 5: '" + refusal + "'");
+    check(!has_event(*h.w, "presentation:fx_spawn") && !has_event(*h.w, "ParticleProp_ctor"),
+          "arrow1: no silent effect 5 or prop");
+    return;
+  }
   h.w->run_actor(arrow);
   if (c.expiry)
     check(h.w->read(arrow + 0xec) == *c.expiry, c.name + " expiry");

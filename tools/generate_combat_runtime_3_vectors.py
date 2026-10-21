@@ -238,6 +238,9 @@ def main():
     lines += arrow_case('arrow6', 6, 1)
     # Audit fix CR3-1 (2026-10-21): a damage tick whose box holds the cloud.
     lines += cloud_tick_case()
+    # Audit fixes CR3-2/CR3-6: kind 1 in flight. Its 24 particle pairs are not
+    # behind the hit, which now refuses at fx_spawn 5 (arrow1 keeps its FX row).
+    lines += arrow_case('arrow1-flight', 1, 0)
     text = ('\n'.join(lines) + '\n').encode()
     out = Path(__file__).resolve().parents[1] / 'native/tests/vectors'
     out.mkdir(parents=True, exist_ok=True)
