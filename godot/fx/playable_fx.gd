@@ -81,15 +81,15 @@ func select_level_light(path: String, level_name: String, sub := "") -> void:
 	_synthetic_sun()
 	_apply_level_light_record()
 
+# game_loadLevel selects the row by the loaded level's name and
+# g_levelSubName (lighting.md 10.1 at research-fx 8e66747). Only the caller
+# that loaded the level supplies them (select_level_light); the command line
+# may name the JSON file but not the row.
 func _level_light_request() -> Dictionary:
 	var path := level_light_path
-	var level_name := level_light_name
-	var sub := level_light_sub
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--level-lights="): path = arg.substr(15)
-		elif arg.begins_with("--level-light-name="): level_name = arg.substr(19)
-		elif arg.begins_with("--level-light-sub="): sub = arg.substr(18)
-	return {"path": path, "name": level_name, "sub": sub}
+	return {"path": path, "name": level_light_name, "sub": level_light_sub}
 
 # The user's extractor JSON replaces the labelled synthetic sun. A missing path
 # leaves that sun in place. A file that does not load leaves it in place too.
@@ -98,6 +98,12 @@ func _apply_level_light_record() -> void:
 	level_light_record = {}
 	var request := _level_light_request()
 	if str(request.path).is_empty(): return
+	# The null-name row is what a miss selects, not a stand-in for a level
+	# whose name is unknown: without the loaded level's name, refuse.
+	if str(request.name).is_empty():
+		if not "level light refused: loaded level name unknown" in refusals:
+			refusals.append("level light refused: loaded level name unknown")
+		return
 	var file := FileAccess.open(str(request.path), FileAccess.READ)
 	if file == null:
 		refusals.append("level light JSON refused")
