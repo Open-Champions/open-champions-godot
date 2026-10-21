@@ -202,6 +202,11 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     class_dtor(self, fn, ar(0));
     return iv(0);
   }
+  if (slot == 1 && combat_ctors::is_prop_dtor(fn)) {
+    note("destroy",{self});
+    combat_ctors::prop_dtor(model,fn,self,ar(0));
+    return iv(0);
+  }
   if (slot == 6 && fn == LOOSEFIRE_TOUCH) {
     loosefire_on_touch(self, ar(0));
     return iv(0);
@@ -396,6 +401,7 @@ void World::State::install_services() {
                          "model_getMeshJoint",
                          "anim_getJointMatrix",
                          "anim_advanceUnitSpeed",
+                         "AnimState_dtor",
                          "rigidbody_init",
                          "quat_fromMat3",
                          "quat_normalize",
@@ -828,6 +834,10 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     // The end bit is supplied by the loaded clip at runtime. Synthetic
     // fixtures have no clip and preserve their anim-state bytes.
     note(n,{ar(0),ar(1),ar(2),ar(3)});
+    return iv(0);
+  }
+  if (n == "AnimState_dtor") {
+    note(n,{ar(0),ar(1)});
     return iv(0);
   }
   if (n == "isNearView")

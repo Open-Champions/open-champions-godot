@@ -406,6 +406,11 @@ void World::State::destroy(Address a) {
     note("destroy", {a});
     return class_dtor(a, fn, 3);
   }
+  if (combat_ctors::is_prop_dtor(fn)) {
+    note("destroy",{a});
+    combat_ctors::prop_dtor(model,fn,a,3);
+    return;
+  }
   if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);

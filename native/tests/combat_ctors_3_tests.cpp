@@ -254,6 +254,37 @@ void gold_round4_cases() {
   check(get(0x4d8af0+3*0x4c30+0xe4,4)==99999999,
         "busy floaters credit immediately with cap");
 }
+void prop_dtor_round4_cases() {
+  // Replay tools/test_ref_prop_dtors.py: table write, base call, free bit,
+  // Gold's animation release order, and the 1.0-speed wrapper.
+  for (Raw fn:{0x3c2fc8u,0x3c4d48u,0x3c2d30u,0x3c2ed8u,0x3c31d8u})
+    for (Raw flags:{0u,1u,2u,3u}) {
+      A::Memory mem;A::Model m(mem);
+      for (const char *n:{"AnimState_dtor","GameObject_dtor","pool_free"})
+        m.callbacks[n]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+          return std::int64_t(0);
+        };
+      CT::prop_dtor(m,fn,C,flags);
+      bool gold=fn==0x3c31d8;
+      check(mem.load(C+0x48,4)==(gold?0x511a88u:0x511d58u),
+            "prop destructor table");
+      unsigned n=0;
+      if (gold) check(m.calls[n++].name=="AnimState_dtor",
+                      "Gold releases clip state first");
+      check(m.calls[n++].name=="GameObject_dtor","prop base destructor order");
+      if (flags&1) check(m.calls[n++].name=="pool_free","prop free bit");
+      check(m.calls.size()==n,"prop destructor call count");
+    }
+  A::Memory mem;A::Model m(mem);
+  m.callbacks["anim_advance"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0x81);
+  };
+  auto answer=CT::anim_advance_unit_speed(m,0x2000,0,0x3000,0x3004);
+  check(std::get<std::int64_t>(answer)==0x81,"unit speed returns anim result");
+  check(m.calls.size()==1&&m.calls[0].name=="anim_advance"&&
+        std::get<std::int64_t>(m.calls[0].args[4])==0x3f800000,
+        "unit speed passes exact one and four arguments");
+}
 }
 int main() {
   try {
@@ -264,6 +295,7 @@ int main() {
     shatter_cases();
     prop_cases();
     gold_round4_cases();
+    prop_dtor_round4_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

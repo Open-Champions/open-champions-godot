@@ -244,7 +244,8 @@ add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctor
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_weapon_holder.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_death_ctors.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_phprop_ctors.cpp"
-    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_gold.cpp")
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_gold.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_prop_dtors.cpp")
 target_include_directories(champions-combat-ctors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 target_link_libraries(champions-combat-ctors PUBLIC champions-arena-monsters)
 if(MSVC)

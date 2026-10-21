@@ -177,4 +177,8 @@ void gold_on_touch(A::Model &, Address gold, Address toucher);
 void hud_add_gold_floater(A::Model &, Raw slot, const Vec3 &position, Raw amount);
 void hud_tick_gold(A::Model &);
 void hud_flush_gold(A::Model &);
+bool is_prop_dtor(Raw fn);
+void prop_dtor(A::Model &, Raw fn, Address prop, Raw flags);
+A::Value anim_advance_unit_speed(A::Model &, Address state, Address sound,
+                                 Address root, Address yaw);
 } // namespace champions::simulation::rta::combat_ctors
