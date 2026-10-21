@@ -184,6 +184,10 @@ World build(const Vectors &v, const Case &c, const std::shared_ptr<champions::si
                            "vars_get", "text_lookup", "player_countPotions", "player_recalcStats",
                            "player_resetIdleAnim", "vars_set", "hud_showHelpMessage", "inventory_selectIdleAnim",
                            "inventory_equipItem", "ItemProp_ctor2"}) {
+    // givePlayerRandom's vectors run the ground item itself (one shared and one
+    // own draw, the block bytes), so it is not delegated there.
+    if (c.kind == "givePlayerRandom" && std::string(name) == "ItemProp_ctor2")
+      continue;
     std::uint64_t answer = 0;
     const auto found = c.answers.find(name);
     if (found != c.answers.end())
@@ -708,6 +712,26 @@ int main(int argc, char **argv) {
     check(index == std::stoi(f[2]) && asked == f[3], "cm1 scan order and index");
   }
   synthetic_tests();
+  if (argc > 3) {
+    // docs/spec/item-drops.md section 2: givePlayerRandom with its real callees.
+    const auto random = read(argv[3]);
+    const auto random_image = random.image;
+    auto random_tables = si::image_tables([&random_image](std::uint32_t at, std::size_t n) {
+      std::vector<std::uint8_t> out(n);
+      for (std::size_t k = 0; k < n; ++k) {
+        const auto found = random_image.find(at + static_cast<std::uint32_t>(k));
+        out[k] = found == random_image.end() ? 0 : found->second;
+      }
+      return out;
+    });
+    unsigned faults = 0, runs = 0;
+    for (const auto &c : random.cases) {
+      run_handler(random, c, random_tables);
+      ran["random:" + c.kind] += 1;
+      (c.fault ? faults : runs) += 1;
+    }
+    check(random.cases.size() == 120 && runs == 100 && faults == 20, "givePlayerRandom case counts");
+  }
   for (const auto &entry : ran)
     std::cout << entry.first << ' ' << entry.second << '\n';
   std::cout << "checks " << checks << " failures " << failures << '\n';

@@ -39,6 +39,8 @@ inline constexpr std::uint32_t G_NUM_PLAYERS = 0x4d8ae0, G_PLAYERS = 0x4d8af0, R
 inline constexpr std::uint32_t G_LOAD_BONUS = 0x4d8ae8;
 inline constexpr std::int32_t LOAD_BONUS_VALUE = 0;
 inline constexpr std::uint32_t G_RAND_SEED = 0x404464;
+// g_weaponValueMult (7 floats) and g_lootQualityRows (12 rows of 3 floats), read for the generator.
+inline constexpr std::uint32_t A_WEAPON_MULT = 0x3e9cb0, A_QUALITY = 0x3e9c18, WEAPON_MULT_ROWS = 7, QUALITY_ROWS = 12;
 inline constexpr std::uint32_t G_MEDAL_MISSION = 0x4f713c, G_MEDAL_PLAYER = 0x4f7148;
 inline constexpr std::uint32_t G_ALIVE_LIST = 0x4f8440;
 inline constexpr std::uint32_t G_DIFFICULTY = 0x4f719c;   // g_difficultyIdx, 1..5; the image holds 1

@@ -539,6 +539,9 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
     if (!exe_ || !monster_level_bound_ || memory.cstr(0x41b721).empty())
       return true;
     try {
+      // An empty fragment would match every level name: the executable's is not empty.
+      if (exe_->string(0x5312a8u).empty())
+        return true;
       for (const std::uint32_t at : {0x5312a8u, 0x5312b8u, 0x531308u, 0x531358u})
         memory.string(at, exe_->string(at));
     } catch (const std::exception &) {

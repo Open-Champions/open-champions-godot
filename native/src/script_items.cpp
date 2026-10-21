@@ -356,6 +356,13 @@ std::shared_ptr<items::Tables> image_tables(const ImageReader &read) {
   t->name_space = str(S_SPACE);
   t->of_key = str(S_OF_KEY);
   t->gold_scale_multiplayer = u64(A_GOLD_SCALE_MP);
+  // item_generateWithAffixes reads the weapon value multipliers (a float per subtype
+  // 0-6, docs/data-tables.md; a subtype past the table refuses) and the loot quality
+  // rows (12 rows of 3 floats, docs/spec/items.md 3).
+  for (std::uint32_t k = 0; k < WEAPON_MULT_ROWS; ++k)
+    t->weapon_multipliers.push_back(u32(A_WEAPON_MULT + 4 * k));
+  for (std::uint32_t row = 0; row < QUALITY_ROWS; ++row)
+    t->quality_rows.push_back({u32(A_QUALITY + 12 * row), u32(A_QUALITY + 12 * row + 4), u32(A_QUALITY + 12 * row + 8)});
   return t;
 }
 

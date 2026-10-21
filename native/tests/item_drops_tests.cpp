@@ -88,9 +88,6 @@ int main(int argc, char **argv) {
     const auto expected = bytes_of(image);
     check(expected.size() == 0x190, "image size");
     for (std::uint32_t k = 0; k < expected.size(); ++k) {
-      // 0..0x0b are the object's list heads, which the world's handle lists own.
-      if (k < 0x0c)
-        continue;
       if (memory->u8(at + k) != expected[k]) {
         check(false, "block byte +0x" + std::to_string(k) + " of case " + seed + " " + block);
         break;

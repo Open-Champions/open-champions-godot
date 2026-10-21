@@ -101,7 +101,8 @@ if(BUILD_TESTING AND NOT TARGET champions-script-items-tests)
     endif()
     add_test(NAME script-items COMMAND champions-script-items-tests
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/script_items.txt"
-        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_contract.json")
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_contract.json"
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/give_random.txt")
 endif()
 
 if(BUILD_TESTING AND NOT TARGET champions-item-drops-tests)

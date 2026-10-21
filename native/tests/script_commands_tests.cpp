@@ -544,6 +544,37 @@ void test_receive_launch() {
   check(memory.s32(0x4f7110) == 9, "-1 rescans the profile");
 }
 
+// docs/spec/item-drops.md section 2: givePlayerRandom reads the level name, the
+// monster level and four strings of the executable; without them it refuses
+// before anything is drawn.
+void test_give_random_gate() {
+  namespace LF = champions::simulation::rta::level_factory;
+  const auto random = static_cast<std::size_t>(index_of("givePlayerRandom"));
+  auto built = build_calls({{"start", {{"givePlayerRandom", {}}}}}, {});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live);
+  host.items().bind_tables(std::make_shared<champions::simulation::rta::items::Tables>());
+  plant(host, built);
+  host.variables().memory.word(0x4d8ae0, 1);
+  check(host.run("start") == sc::Stop::Complete && host.counts().refused[random] == 1 &&
+            host.counts().callee_refusals == 1,
+        "refused: no executable, level name or monster level");
+  check(live.state == 20973u, "a gated refusal draws nothing");
+  // An executable whose fragment string is empty still refuses (it would match every level).
+  sc::Host second;
+  SharedRandom live2(20973);
+  second.bind_seed(&live2);
+  second.items().bind_tables(std::make_shared<champions::simulation::rta::items::Tables>());
+  second.set_executable(authored_executable());
+  plant(second, built);
+  second.bind_level_name("somewhere");
+  second.bind_monster_level(0x40a00000);
+  second.variables().memory.word(0x4d8ae0, 1);
+  second.run("start");
+  check(second.counts().callee_refusals == 1 && live2.state == 20973u, "an empty fragment string refuses");
+}
+
 void test_entrance_grid_and_particle() {
   const auto entrance = index_of("setEntrance");
   const auto hide = index_of("hideMonster");
@@ -1085,6 +1116,7 @@ int main(int argc, char **argv) {
   test_hide_show_on_stubs();
   test_generate_monster();
   test_receive_launch();
+  test_give_random_gate();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();
