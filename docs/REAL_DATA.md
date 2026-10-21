@@ -205,3 +205,56 @@ Still refused or not done:
   light modes stay gated (docs/NATIVE_FX.md).
 - The HUD font row is a user choice; FNT header +2 is still not a line height.
 
+
+## Wave 14 (2026-10-20): mode-A arena start, 111 / 111
+
+Integration of level-spawn-2 on `codex/playable-integration`. Counts only, same
+disc copy.
+
+What changed: a cold story start whose radius-12 snap has no floor, with no
+Player1 that took and with an `ArenaPlayerStart`, now uses the mode-A wave
+start (`level_flow::story_start_ground`; docs/LEVEL_FLOW.md, research
+`docs/level-flow.md` section 18): ring radius 180, slot 0, count 1,
+`findFreeSpot` spread 36 then 240 with an empty object list and seed 0, then
+`player_ctor_z` at radius 12. Levels that already had story ground keep it.
+
+| Measure | Wave 13 | Wave 14 |
+|---|---|---|
+| Scene levels loaded and played | 108 / 111 | **111 / 111** |
+| Refused (all reasons) | 3 (`library-load`: no ground at the story start) | **0** |
+| Story ground / marker taken | 108 / 95 | 111 / 98 |
+| Levels with water / water tiles shown | 45 / 9,308 | 48 / 9,451 |
+| Water entries / ticks in water (observed) | 2 / 126 (2,835) | 4 / 252 (3,024) |
+| Meshes / textured | 173,142 / 173,097 | 174,456 / 174,408 |
+| Level light record | 90 named, 18 default | 91 named, 20 default |
+| Level banks found | 108 | 111 |
+| Ready ticks / checks passed | 6,372 / 116 | 6,549 / 119 |
+
+Sweep: `work/run-slices-r14.sh`, four headless slices, 60 ready ticks per
+level, 0 failed checks, 3 min 52 s. Every deterministic count equals
+level-spawn-2's own sweep; only `time.*`, `audio.frames_pushed` (pumped once per
+process frame) and peak static memory differ. HUD 34 / 34, pieces 177 / 174
+claimed / 52 drawn claimed, unchanged.
+
+`champions-level-spawn-measure` on the paired archive directory prints the same
+lines as level-spawn-2's run: paired 111, cold 3, cold origin floor 0, start
+floor 3, ring floor 3, cold search snap 6 / 6, stand-in 6 / 6, lattice misses 0,
+cold story 3, decode and stand-in failures 0.
+
+Exported app (`build/exports/wave14-final`): the 12-level run matches wave 13
+except timing; the three arena indices load and play 3 / 3 with story ground and
+0 failures.
+
+Captures (gitignored `work/private/captures-r14/`, 1280×720, inspected): the
+three arena levels (indices 69–71). They are byte-identical to level-spawn-2's
+captures. Each overview shows the arena meshes; health is full at ready tick 59.
+Two figures start in a water patch (the scene's in-water label is set, 2 water
+entries) and one on rock. level-spawn-2's report described one in water and
+two on rock; the in-water count here is from the scene's own counter.
+
+Still refused or not done:
+- The live `Player1_ctor` seed, the `findFreeSpot` class radii, the
+  mode-A name table and `arena_pickSpawnPoint` with a0 = 0 stay refused; the
+  seed-0 empty-list search is one of the two seeds section 18 executed.
+- Light records only replace the sun, ambient and base; the special-chunk light
+  modes stay gated (docs/NATIVE_FX.md).
