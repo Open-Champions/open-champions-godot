@@ -219,17 +219,39 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
             old_colors = arrays[Mesh.ARRAY_COLOR]
         var colors := PackedColorArray()
         colors.resize(vertices.size())
+        # The same transform and normal matrix for every vertex, computed once.
+        var to_world: Transform3D = instance.global_transform
+        var normal_basis: Basis = to_world.basis.inverse().transposed()
+        # World chunks shade in one bridge call: shade_world per vertex, the
+        # same results, without a Dictionary per vertex.
+        var batch := PackedVector3Array()
+        if not model and bridge.has_method("shade_world_many"):
+            var points := PackedVector3Array()
+            var directions := PackedVector3Array()
+            points.resize(vertices.size())
+            directions.resize(vertices.size())
+            for i in vertices.size():
+                points[i] = to_native(to_world * vertices[i])
+                directions[i] = to_native((normal_basis * normals[i]).normalized())
+            var many: Dictionary = bridge.shade_world_many(points, directions)
+            if not many.get("ok", false):
+                return {"ok": false, "refusal": str(many.get("refusal", "lighting refused"))}
+            batch = many["rgb"]
         for i in vertices.size():
-            var world_pos: Vector3 = to_native(instance.global_transform * vertices[i])
-            var world_normal: Vector3 = to_native((instance.global_transform.basis.inverse().transposed() * normals[i]).normalized())
-            var shaded: Dictionary
-            if model:
-                shaded = bridge.shade_model(world_pos, world_normal)
+            var value: Vector3
+            if batch.size() == vertices.size():
+                value = batch[i]
             else:
-                shaded = bridge.shade_world(world_pos, world_normal)
-            if not shaded.get("ok", false):
-                return {"ok": false, "refusal": str(shaded.get("refusal", "lighting refused"))}
-            var value: Vector3 = shaded["rgb"]
+                var world_pos: Vector3 = to_native(to_world * vertices[i])
+                var world_normal: Vector3 = to_native((normal_basis * normals[i]).normalized())
+                var shaded: Dictionary
+                if model:
+                    shaded = bridge.shade_model(world_pos, world_normal)
+                else:
+                    shaded = bridge.shade_world(world_pos, world_normal)
+                if not shaded.get("ok", false):
+                    return {"ok": false, "refusal": str(shaded.get("refusal", "lighting refused"))}
+                value = shaded["rgb"]
             var original := Color.WHITE
             if old_colors.size() == vertices.size():
                 original = old_colors[i]

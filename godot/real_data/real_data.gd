@@ -152,13 +152,21 @@ func load_level(index: int) -> Dictionary:
 	scene.controller.set_terrain_start_objects(world_path, objects)
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
+	# The library first publishes the neutral session display, then the textured
+	# one replaces it. In play mode FX lighting would light the neutral one
+	# per vertex only to free it; it is held until the textured display is up.
+	var hold: bool = scene.fx != null and "world_lighting_held" in scene.fx
+	if hold: scene.fx.world_lighting_held = true
 	library._add_candidate(session_path)
 	library._load_selected()
 	if scene.level_textures.world_path != session_path:
+		if hold: scene.fx.world_lighting_held = false
 		return {"ok": false, "stage": "library-load", "error": library._native_error()}
 	scene.level_textures.session_worlds.clear()
 	scene.level_textures.stream_cells = stream_textures
-	if not scene.load_textured_terrain(world_path, level.tex):
+	var textured: bool = scene.load_textured_terrain(world_path, level.tex)
+	if hold: scene.fx.world_lighting_held = false
+	if not textured:
 		return {"ok": false, "stage": "textures", "error": scene.status_label.text}
 	current = index
 	# Per-level light record from the user's executable JSON (level-lights):
