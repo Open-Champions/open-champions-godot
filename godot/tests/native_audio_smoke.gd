@@ -67,11 +67,12 @@ func run() -> void:
 	check(audio.set_global_vat(vat_directory(["mx_maintheme_l.vag", "mx_ba_broon_l.vag"], true, 0x1000), vat, 0), "global VAT")
 	check(audio.play_menu_music(false), "menu music queued")
 	check(audio.get_observation().music_volume == 0x3f000000, "g_musicVolume starts at save_init's 0.5")
-	check(audio.set_options_file_music(0) and audio.get_observation().music_volume == 0 and not audio.play_boss_music("FatCyclops", "Broon") and audio.get_observation().streams[2].queued == 0, "an options-file 0 closes the music gate")
+	check(audio.set_options_file_music(0) and audio.get_observation().music_volume == 0 and not audio.get_observation().music_gate_open and not audio.play_boss_music("FatCyclops", "Broon") and not audio.play_menu_music(false) and audio.get_observation().streams[2].queued == 0, "an options-file 0 closes the music gate")
 	check(audio.set_options_file_music(0x3fc00000) and audio.get_observation().music_volume == 0x3fc00000, "the options-file word is copied with no clamp")
 	check(not audio.set_options_file_music(-1) and not audio.set_options_file_music(0x100000000), "the options-file word is a 32-bit pattern")
 	check(not audio.set_music_volume(1.5) and audio.set_music_volume(1.0) and audio.get_observation().music_volume == 0x3f800000, "slider-range values are 0..1")
 	check(audio.set_options_file_music(0x3d4ccccc) and audio.play_boss_music("FatCyclops", "Broon"), "boss music queued at the gate pattern")
+	check(audio.get_observation().music_gate_open and audio.play_menu_music(false), "menu music queues at the exact gate pattern")
 	check(audio.get_gated_flag_entries() == 0, "flags 0x40 and 0x100 are applied by their callers, not counted as gated")
 	check(audio.set_level_vat(vat_directory(["amb_x_l.vag"], false, 0x800), vat.slice(0, 0x800), 0, 100), "level VAT")
 	var pushed := 0

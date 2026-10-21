@@ -481,8 +481,8 @@ void test_routed_commands() {
   check(host.counts().inferred[at("setMonsterVal")] == 0, "an executed route is not inferred");
 }
 
-// Each routed command whose callee research did not execute for this state
-// is refused before the binder runs.
+// Unknown live charm handles refuse before the binder runs. The executable's
+// initial fade word is known, so a step before an explicit reset executes.
 void test_callee_refusals() {
   auto built = build_calls(
       {{"start",
@@ -501,17 +501,23 @@ void test_callee_refusals() {
   plant(host, built);
   host.run_prestart();
   check(host.run_start() == sc::Stop::Complete, "discarded refusals do not stop the entry");
-  for (const char *name : {"charmMonster", "followPlayer", "hudFadeScreen"})
+  for (const char *name : {"charmMonster", "followPlayer"})
     check(host.counts().refused[at(name)] == 1 && host.counts().executed[at(name)] == 0,
           std::string("callee refusal: ") + name);
-  check(host.counts().callee_refusals == 3 && host.counts().stub_refusals == 0, "callee refusals counted");
+  check(host.counts().callee_refusals == 2 && host.counts().stub_refusals == 0, "callee refusals counted");
   // 0x44 is not a node of the host's handle pool: handle_clear cannot run on
   // it, so the charm is still refused (text_host::test_charm_live_target runs
   // a real link).
+  check(host.counts().executed[at("hudFadeScreen")] == 1 && host.counts().refused[at("hudFadeScreen")] == 0,
+        "fade step executes from the initial word");
   check(memory.u16(imp->addr + 0x312) == 0 && memory.u32(imp->addr + 0x234) == 0x44,
         "a target word outside the handle pool is left alone");
   check((memory.u32(imp->addr + 0xa8) & (1u << 23)) == 0, "followPlayer stores nothing when refused");
-  check(memory.u32(se::G_FADE) == 0 && host.callees().calls.empty(), "nothing reached a callee");
+  check(host.fade_level() == 40 && memory.u32(se::G_FADE) == 40 && host.callees().calls.size() == 1 &&
+            host.callees().calls[0].name == "ui_drawRect", "initial fade zero steps to 40");
+  sc::Host next;
+  next.set_fade_level(host.fade_level());
+  check(next.fade_level() == 40, "a replacement host carries the presentation fade word");
 }
 
 // With an explicit caller volume, startMusic and the boss bit of setCFlag run.

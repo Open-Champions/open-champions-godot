@@ -233,6 +233,8 @@ Host::Host()
   variables_->memory.word(script_items::G_DIFFICULTY, static_cast<std::uint32_t>(script_items::DIFFICULTY_IMAGE));
   campaign_->set_difficulty(script_items::DIFFICULTY_IMAGE);
   variables_->memory.word(script_items::G_CM1_WORD, static_cast<std::uint32_t>(script_items::CM1_IMAGE));
+  // The executable image starts g_hudFade at zero (research-fade 197f52a).
+  variables_->memory.word(script_effects::G_FADE, 0);
 }
 Host::~Host() = default;
 
@@ -526,14 +528,12 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
     }
     return false;
   }
-  if (name == "hudFadeScreen")
-    // hud_stepFade adds to g_hudFade, which is kept between fades; this host
-    // knows it only after hudResetFadeScreen has set it.
-    return !fade_known_;
   return false;
 }
 
 void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
+void Host::set_fade_level(std::uint32_t level) { variables_->memory.word(script_effects::G_FADE, level); }
+std::uint32_t Host::fade_level() const { return variables_->memory.word(script_effects::G_FADE); }
 
 // The string arguments the binder will copy (params + 4 + 4k). A refused
 // address would make the binder reuse a remembered string slot, which the
@@ -694,7 +694,6 @@ std::uint32_t Host::scene(const std::string &name,
     if (args.empty())
       throw amx::HostFault("hud_setFade argument count");
     fx.set_fade(word_of(args[0]));
-    fade_known_ = true;
     return 0;
   }
   if (name == "hud_stepFade") {

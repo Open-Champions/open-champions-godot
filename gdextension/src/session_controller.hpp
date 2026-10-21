@@ -48,6 +48,9 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  // Presentation word retained when an opt-in level script host is replaced.
+  std::uint32_t script_fade_ = 0;
+  void remember_script_fade();
   void pump_scripts(std::size_t ready_ticks_before);
   // The level script's draws and the play session's World are one stream
   // (script_commands::SeedPolicy::OfflineSession, research
@@ -164,7 +167,8 @@ public:
   godot::Dictionary enable_level_script(const godot::PackedByteArray &script,
                                         const godot::PackedByteArray &objects,
                                         bool carry_campaign = false,
-                                        const godot::Dictionary &dialog = godot::Dictionary());
+                                        const godot::Dictionary &dialog = godot::Dictionary(),
+                                        std::int64_t music_volume_bits = -1);
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,

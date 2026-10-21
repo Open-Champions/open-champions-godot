@@ -38,7 +38,7 @@ func reset(play: bool, tick := 0, key := "") -> void:
 			bank_errors.append(bridge.get_last_error())
 	if play:
 		start_level(key)
-	elif not global_bank.is_empty() and not bridge.play_menu_music(false):
+	elif not global_bank.is_empty() and not bridge.play_menu_music(false) and bridge.get_observation().music_gate_open:
 		bank_errors.append(bridge.get_last_error())
 	player.play()
 	bridge.attach_playback(player.get_stream_playback())

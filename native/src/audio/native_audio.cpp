@@ -806,6 +806,10 @@ bool Playback::music_play_level(const std::string &name, std::uint32_t flags) {
 }
 
 bool Playback::play_menu_music(bool wait_for_current) {
+  // frontend_run's first request reaches music_playGlobal's volume gate
+  // (research-menus-layout 8f528ce); keep its original queue flags.
+  if (!music_gate_open(music_volume_))
+    return false;
   return queue_stream(2, "mx_maintheme_l.vag", wait_for_current ? 5 : 1,
                       StreamSource::global);
 }

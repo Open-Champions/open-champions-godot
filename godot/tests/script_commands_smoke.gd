@@ -49,6 +49,10 @@ func run() -> void:
 	var fresh = ClassDB.instantiate("ChampionsSessionController")
 	check(fresh.start_play_session().get("ok", false), "a second play session starts")
 	run_tick_counter(fresh)
+	var silent: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0)
+	check(silent.get("ok", false) and int(silent.get("music_volume", -1)) == 0, "options-file zero reaches the script host")
+	var loud: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0x3fc00000)
+	check(loud.get("ok", false) and int(loud.get("music_volume", -1)) == 0x3fc00000, "the unclamped options word reaches the script host")
 	print("script commands smoke ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
 
@@ -56,6 +60,7 @@ func run_tick_counter(controller) -> void:
 	var ticks_before := int(controller.get_observation().get("ready_ticks", -1))
 	var enabled: Dictionary = controller.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray())
 	check(enabled.get("ok", false), "the reference tick counter image is accepted")
+	check(int(enabled.get("music_volume", -1)) == 0x3f000000, "script host receives the documented default")
 	var calls := 0
 	for i in range(6):
 		controller.advance(0)

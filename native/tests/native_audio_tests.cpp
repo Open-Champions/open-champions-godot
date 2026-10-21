@@ -459,6 +459,14 @@ void music() {
   p.set_global_vat(zero_vat(0x1800), parse_vat_directory(view(gdir), 0x1800), 0);
   check(p.play_menu_music(true) && !p.play_boss_music("orc") && p.queued_count(2) == 1,
         "a creature with no boss name leaves stream 2 alone");
+  Playback silent_menu;
+  silent_menu.set_global_vat(zero_vat(0x1800), parse_vat_directory(view(gdir), 0x1800), 0);
+  silent_menu.set_music_volume(music_volume_gate - 1);
+  check(!silent_menu.play_menu_music(false) && silent_menu.queued_count(2) == 0,
+        "the first menu theme is gated below the documented music volume");
+  silent_menu.set_music_volume(music_volume_gate);
+  check(silent_menu.play_menu_music(false) && silent_menu.queued_count(2) == 1,
+        "the first menu theme queues at the gate value");
   check(p.play_boss_music("fatcyclops", "broon") && p.queued_count(2) == 1 &&
             p.streams()[2].file_offset == 0,
         "the stop clears the menu before the boss span is queued");
