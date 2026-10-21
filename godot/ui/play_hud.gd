@@ -71,6 +71,7 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 		elif not element in drawn:
 			drawn.append(element)
 	if not text_glyphs.is_empty(): drawn.append("level_text")
+	for element in drawn: refusals.erase(element)
 	queue_redraw()
 
 func _element(record: Dictionary) -> String:
