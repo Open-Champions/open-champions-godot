@@ -245,6 +245,10 @@ public:
   std::string use(int slot, const std::array<Raw, 3> &player);
   // Talk to one talker by address (tests and the census): Creature_interact.
   std::string interact(std::uint32_t address, int slot, const std::array<Raw, 3> &player);
+  // A position 30 units in front of a talker along its facing, where
+  // Creature_interact's facing test passes (tests, census and the scene's
+  // labelled "talk to" diagnostic; not an original routine).
+  std::array<Raw, 3> in_front_of(std::uint32_t address) const;
   // dialog_runTask once (priority 110, before the Script task at 125).
   void dialog_tick(const DialogInputs &);
   // dialog_drawTask once: the calls, for the presentation.

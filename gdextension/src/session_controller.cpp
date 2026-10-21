@@ -1,5 +1,8 @@
 #include "session_controller.hpp"
+#include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/ui_layout.hpp"
+#include "champions/ui_text_layout.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/arena_executable.hpp"
@@ -88,8 +91,14 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign"),
-                       &ChampionsSessionController::enable_level_script, DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()));
+  ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
+  ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
+  ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
+  ClassDB::bind_method(D_METHOD("dialog_leave"), &ChampionsSessionController::dialog_leave);
+  ClassDB::bind_method(D_METHOD("dialog_talk_to", "index"), &ChampionsSessionController::dialog_talk_to);
+  ClassDB::bind_method(D_METHOD("dialog_status"), &ChampionsSessionController::dialog_status);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -270,7 +279,7 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
     const auto before = active_observation().ready_ticks;
-    cache_state(active_advance(static_cast<uint32_t>(mask)), true);
+    cache_state(active_advance(dialog_gate(static_cast<uint32_t>(mask))), true);
     pump_scripts(before);
     return observation();
   } catch (const std::exception &e) {
@@ -317,7 +326,7 @@ Dictionary ChampionsSessionController::advance_time(int64_t usec,
       clock_.advance(usec, [&]() {
         const auto generation = level_ ? level_->flow().generation : 0;
         const auto before = active_observation().ready_ticks;
-        auto state = active_advance(static_cast<uint32_t>(mask));
+        auto state = active_advance(dialog_gate(static_cast<uint32_t>(mask)));
         cache_state(state, level_ && generation != level_->flow().generation);
         pump_scripts(before);
         return !current_.paused && !current_.stopped && !current_.failed;
@@ -501,12 +510,51 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
 void ChampionsSessionController::pump_scripts(std::size_t before) {
   if (!scripts_)
     return;
-  for (auto tick = before; tick < current_.ready_ticks; ++tick)
+  for (auto tick = before; tick < current_.ready_ticks; ++tick) {
+    if (scripts_->dialog_attached()) {
+      // Priority 10 runObjects (Player_interact), then the dialog run task
+      // at 110, before the Script task at 125 (research docs/script.md 2.6).
+      if (dialog_talk_pending_ >= 0) {
+        const auto talkers = scripts_->talkers();
+        const auto index = std::size_t(dialog_talk_pending_);
+        dialog_talk_pending_ = -1;
+        if (index < talkers.size())
+          dialog_last_use_ = String::utf8(
+              scripts_->interact(talkers[index], 0, scripts_->in_front_of(talkers[index])).c_str());
+      }
+      if (dialog_use_pending_) {
+        dialog_use_pending_ = false;
+        std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
+        dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+      }
+      rta::script_commands::DialogInputs in;
+      in.pad = dialog_pad_;
+      dialog_pad_ = 0;
+      scripts_->dialog_tick(in);
+    }
     scripts_->on_ready_tick();
+  }
 }
+// Player_run takes no input while a dialog is open and Player_move zeroes the
+// horizontal velocity (research docs/dialog.md 6.1).
+uint32_t ChampionsSessionController::dialog_gate(uint32_t mask) const {
+  return scripts_ && scripts_->dialog().is_open() ? 0u : mask;
+}
+namespace {
+std::vector<std::uint8_t> raw_bytes(const PackedByteArray &bytes) {
+  return std::vector<std::uint8_t>(bytes.ptr(), bytes.ptr() + bytes.size());
+}
+} // namespace
+// The text table and gamefontmed.fnt the dialog services read.
+struct ChampionsSessionController::DialogData {
+  std::optional<rta::dialog::TextTable> text;
+  std::optional<champions::ui_layout::FontMetrics> font;
+  std::vector<std::uint8_t> font_bytes;
+};
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
-                                                          bool carry_campaign) {
+                                                          bool carry_campaign,
+                                                          const Dictionary &dialog) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -525,7 +573,54 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       std::memcpy(raw.data(), objects.ptr(), raw.size());
       next->adopt_objects(raw.data(), raw.size());
     }
+    std::shared_ptr<DialogData> data;
+    if (!dialog.is_empty()) {
+      data = std::make_shared<DialogData>();
+      rta::script_commands::DialogLevel level;
+      level.level = String(dialog.get("level", String())).utf8().get_data();
+      const Dictionary files = dialog.get("dbin", Dictionary());
+      const Array keys = files.keys();
+      for (int64_t i = 0; i < keys.size(); ++i)
+        level.files[String(keys[i]).utf8().get_data()] = raw_bytes(PackedByteArray(files[keys[i]]));
+      const PackedByteArray directory = dialog.get("stream_directory", PackedByteArray());
+      const int64_t vat_size = dialog.get("vat_size", int64_t(0));
+      if (!directory.is_empty() && vat_size > 0) {
+        const auto dir = raw_bytes(directory);
+        for (const auto &entry : champions::audio::parse_vat_directory({dir.data(), dir.size()}, std::size_t(vat_size)))
+          level.stream[entry.name] = {entry.offset, entry.length};
+      }
+      const PackedByteArray text = dialog.get("text", PackedByteArray());
+      if (!text.is_empty()) {
+        const auto bytes = raw_bytes(text);
+        data->text = rta::dialog::TextTable::parse(bytes.data(), bytes.size());
+      }
+      const PackedByteArray font = dialog.get("font", PackedByteArray());
+      if (!font.is_empty()) {
+        data->font_bytes = raw_bytes(font);
+        data->font = champions::ui_layout::fontMetrics({data->font_bytes.data(), data->font_bytes.size()});
+      }
+      rta::script_commands::DialogServices services;
+      if (data->text)
+        services.text = [data](const std::string &key) { return data->text->lookup(key); };
+      if (data->font) {
+        namespace T = champions::ui_text_layout;
+        namespace D = rta::dialog;
+        services.layout_height = [data](const D::Wide &t) -> std::int64_t {
+          return T::drawWrapped(*data->font, D::BODY_X, 0, t, D::BODY_W, 0, 0, D::LINE).height;
+        };
+        services.shown = [data](const D::Wide &t, std::int64_t y, std::int64_t budget, int bottom) -> std::int64_t {
+          const auto w = T::drawWrapped(*data->font, D::BODY_X, int(y), t, D::BODY_W, D::BODY_TOP, bottom, D::LINE,
+                                        true, 0, budget < 0 ? std::size_t(-1) : std::size_t(budget));
+          return std::int64_t(w.shown.value_or(0));
+        };
+      }
+      next->attach_dialog(std::move(level), std::move(services));
+    }
     next->run_start();
+    dialog_data_ = data;
+    dialog_use_pending_ = false;
+    dialog_talk_pending_ = -1;
+    dialog_pad_ = 0;
     scripts_ = std::move(next);
     Dictionary result;
     result["ok"] = true;
@@ -537,9 +632,190 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
 }
 Dictionary ChampionsSessionController::disable_level_script() {
   scripts_.reset();
+  dialog_data_.reset();
   Dictionary result;
   result["ok"] = true;
   return result;
+}
+namespace {
+Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
+  Dictionary d;
+  d["uses"] = int64_t(c.uses);
+  d["use_no_candidate"] = int64_t(c.use_no_candidate);
+  d["use_ambiguous"] = int64_t(c.use_ambiguous);
+  d["use_blocked_open"] = int64_t(c.use_blocked_open);
+  d["start_messages"] = int64_t(c.start_messages);
+  d["opens"] = int64_t(c.opens);
+  d["open_gate_refused"] = int64_t(c.open_gate_refused);
+  d["nodes_shown"] = int64_t(c.nodes_shown);
+  d["choices_taken"] = int64_t(c.choices_taken);
+  d["scripts_run"] = int64_t(c.scripts_run);
+  d["missing_entries"] = int64_t(c.missing_entries);
+  d["ends"] = int64_t(c.ends);
+  d["pending_levels"] = int64_t(c.pending_levels);
+  d["post_actions"] = int64_t(c.post_actions);
+  d["deferred_shops"] = int64_t(c.deferred_shops);
+  d["shop_requests"] = int64_t(c.shop_requests);
+  d["stalls"] = int64_t(c.stalls);
+  d["client_leaves"] = int64_t(c.client_leaves);
+  d["ticks_open"] = int64_t(c.ticks_open);
+  d["voice_lines"] = int64_t(c.voice_lines);
+  d["silent_lines"] = int64_t(c.silent_lines);
+  d["anm_reads"] = int64_t(c.anm_reads);
+  int64_t refused = 0;
+  for (const auto &entry : c.refused)
+    refused += int64_t(entry.second);
+  d["refused"] = refused;
+  Dictionary interact;
+  for (const auto &entry : c.interact)
+    interact[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+  d["interact"] = interact;
+  return d;
+}
+} // namespace
+Dictionary ChampionsSessionController::dialog_use() {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && scripts_->dialog_attached());
+  if (out["ok"])
+    dialog_use_pending_ = true;
+  return out;
+}
+Dictionary ChampionsSessionController::dialog_talk_to(int64_t index) {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && scripts_->dialog_attached()) && index >= 0 &&
+              std::size_t(index) < scripts_->talkers().size();
+  if (out["ok"])
+    dialog_talk_pending_ = index;
+  return out;
+}
+Dictionary ChampionsSessionController::dialog_press(int64_t bits) {
+  Dictionary out;
+  // Only the three documented pad words (docs/dialog.md 8).
+  const uint32_t allowed = rta::dialog::UP_BITS | rta::dialog::DOWN_BITS | 0x40u;
+  out["ok"] = bool(scripts_ && scripts_->dialog_attached()) && bits >= 0 && (uint32_t(bits) & ~allowed) == 0;
+  if (out["ok"])
+    dialog_pad_ |= uint32_t(bits);
+  return out;
+}
+Dictionary ChampionsSessionController::dialog_leave() {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && scripts_->dialog_leave());
+  return out;
+}
+Dictionary ChampionsSessionController::dialog_status() const {
+  Dictionary out;
+  const bool attached = scripts_ && scripts_->dialog_attached();
+  out["ok"] = attached;
+  if (!attached)
+    return out;
+  const auto &d = scripts_->dialog();
+  out["open"] = d.is_open();
+  out["camera_moving"] = d.cam_move != 0;
+  out["stalled"] = scripts_->dialog_stalled();
+  out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
+  out["talkers"] = int64_t(scripts_->talkers().size());
+  out["last_use"] = dialog_last_use_;
+  out["counts"] = dialog_count_dict(scripts_->dialog_counts());
+  out["has_font"] = bool(dialog_data_ && dialog_data_->font);
+  out["has_text"] = bool(dialog_data_ && dialog_data_->text);
+  return out;
+}
+// dialog_drawTask's calls turned into the box sprite and gamefontmed glyphs
+// (research docs/dialog.md 7; layout from champions/ui_text_layout.hpp).
+Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
+  Dictionary out;
+  out["ok"] = false;
+  try {
+    if (!scripts_ || !scripts_->dialog_attached())
+      throw std::runtime_error("No dialog is attached to the level script.");
+    namespace T = champions::ui_text_layout;
+    namespace D = rta::dialog;
+    const auto &d = scripts_->dialog();
+    out["open"] = d.is_open();
+    out["stalled"] = scripts_->dialog_stalled();
+    out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
+    // g_uiFadeIn[0] is passed as 1.0 and the cursor glyph byte 0x41b978 as
+    // unknown (docs/DIALOG.md "Not modelled").
+    const auto ops = scripts_->dialog_draw(rta::ONE, int(text_option), -1, 0);
+    Array sprites, glyphs, refusals;
+    const auto *font = dialog_data_ && dialog_data_->font ? &*dialog_data_->font : nullptr;
+    if (!ops.empty() && !font)
+      refusals.push_back("gamefontmed.fnt was not supplied: no dialog text drawn");
+    std::uint32_t colour = 0x80808080u;
+    std::int64_t budget = -1;
+    std::array<std::int64_t, 4> clip{0, 0, 640, 448};
+    const auto num = [](const D::Arg &a) { return std::get<std::int64_t>(a); };
+    const auto lookup = [&](const std::string &key) -> D::Wide {
+      if (!dialog_data_ || !dialog_data_->text)
+        throw D::Refused("no text table");
+      return dialog_data_->text->lookup(key);
+    };
+    const auto emit = [&](int x, int y, const D::Wide &units, std::size_t count) {
+      if (!font)
+        return;
+      T::TextState state;
+      state.setColour(colour);
+      for (const auto &g : T::glyphRun(*font, x, y, units, count, &state).glyphs) {
+        Dictionary item;
+        item["x_half"] = g.x_half;
+        item["y"] = g.y;
+        item["source_x"] = g.source.x;
+        item["source_y"] = g.source.y;
+        item["source_width"] = g.source.width;
+        item["source_height"] = g.source.height;
+        item["tint"] = int64_t(g.tint);
+        item["clip"] = Rect2i(int(clip[0]), int(clip[1]), int(clip[2] - clip[0]), int(clip[3] - clip[1]));
+        glyphs.push_back(item);
+      }
+    };
+    for (const auto &e : ops) {
+      const auto &a = e.args;
+      if (e.kind == "text_begin") {
+        colour = std::uint32_t(num(a[1]));
+      } else if (e.kind == "colour") {
+        colour = std::uint32_t(num(a[0]));
+      } else if (e.kind == "budget") {
+        budget = num(a[0]);
+      } else if (e.kind == "clip") {
+        clip = {num(a[0]), num(a[1]), num(a[2]), num(a[3])};
+      } else if (e.kind == "wrapped" && font) {
+        const auto &key = std::get<std::string>(a[2]);
+        const auto units = key == "body" ? d.text : lookup(key);
+        const auto w = T::drawWrapped(*font, int(num(a[0])), int(num(a[1])), units, int(num(a[3])), int(num(a[4])),
+                                      int(num(a[5])), int(num(a[6])), true, 0,
+                                      budget < 0 ? std::size_t(-1) : std::size_t(budget));
+        for (const auto &run : w.runs)
+          emit(run.x, run.y, D::Wide(units.begin() + std::ptrdiff_t(run.start), units.end()), run.count);
+      } else if (e.kind == "wide") {
+        const auto units = lookup(std::get<std::string>(a[2]));
+        emit(int(num(a[0])), int(num(a[1])), units, std::size_t(num(a[3])));
+      } else if (e.kind == "wide_centered" && font) {
+        const auto &v = std::get<std::vector<std::int64_t>>(a[2]);
+        const D::Wide units(v.begin(), v.end());
+        emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])), units, std::size_t(num(a[3])));
+      } else if (e.kind == "ascii") {
+        refusals.push_back("cursor glyph: the byte at 0x41b978 is not documented");
+      } else if (e.kind == "sprite") {
+        Dictionary box;
+        box["x"] = num(a[0]);
+        box["y"] = num(a[1]);
+        box["layer"] = num(a[2]);
+        box["tint"] = num(a[3]);
+        box["width"] = D::BOX_TEXELS_W;
+        box["height"] = D::BOX_TEXELS_H;
+        sprites.push_back(box);
+      } else if (e.kind == "fit" || e.kind == "ascii_centered") {
+        refusals.push_back("remote player name: no remote players in this host");
+      }
+    }
+    out["sprites"] = sprites;
+    out["glyphs"] = glyphs;
+    out["refusals"] = refusals;
+    out["ok"] = true;
+  } catch (const std::exception &e) {
+    out["error"] = String::utf8(e.what());
+  }
+  return out;
 }
 Dictionary ChampionsSessionController::script_command_counts() const {
   Dictionary result;
@@ -601,6 +877,8 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   quest["boss_music"] = int64_t(events.boss_music);
   quest["exp_grants"] = int64_t(events.exp_grants);
   result["campaign"] = quest;
+  if (scripts_->dialog_attached())
+    result["dialog"] = dialog_count_dict(scripts_->dialog_counts());
   return result;
 }
 Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture,

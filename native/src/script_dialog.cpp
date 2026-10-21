@@ -4,6 +4,7 @@
 // step. Research: t3/research-dialog 334578d docs/dialog.md.
 #include "champions/script_commands.hpp"
 #include "champions/session.hpp"
+#include "champions/core_math.hpp"
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
@@ -414,6 +415,16 @@ std::string Host::interact(std::uint32_t address, int slot, const std::array<Raw
   dialog_drain_log();
   dialog_push();
   return result;
+}
+
+std::array<Raw, 3> Host::in_front_of(std::uint32_t address) const {
+  const auto *obj = variables_->obj_at(address);
+  if (!obj)
+    throw dialog::Refused("no such object");
+  const ScopedFpu fpu{Fpu{Fpu::Model::Ps2, false, false}};
+  const Raw thirty = 0x41f00000; // 30.0
+  return {add(obj->pos[0], mul(thirty, cos16(obj->angle & 0xffffu))),
+          add(obj->pos[1], mul(thirty, sin16(obj->angle & 0xffffu))), obj->pos[2]};
 }
 
 std::string Host::use(int slot, const std::array<Raw, 3> &player) {

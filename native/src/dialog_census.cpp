@@ -94,14 +94,7 @@ void talk(const std::vector<std::uint8_t> &script, const std::vector<std::uint8_
   if (which >= talkers.size())
     return;
   const auto address = talkers[which];
-  // A player 30 units in front of the talker, so Creature_interact's facing
-  // test passes; the session supplies the real position in play.
-  const auto *obj = host.variables().obj_at(address);
-  const rta::ScopedFpu fpu{rta::Fpu{rta::Fpu::Model::Ps2, false, false}};
-  const rta::Raw thirty = 0x41f00000;
-  const std::array<rta::Raw, 3> player{rta::add(obj->pos[0], rta::mul(thirty, rta::cos16(obj->angle & 0xffff))),
-                                       rta::add(obj->pos[1], rta::mul(thirty, rta::sin16(obj->angle & 0xffff))),
-                                       obj->pos[2]};
+  const auto player = host.in_front_of(address);
   const auto used = host.use(0, player);
   add("talk.use." + used);
   if (!host.dialog().is_open()) {
