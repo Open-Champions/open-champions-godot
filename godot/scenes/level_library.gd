@@ -186,18 +186,25 @@ func _load_selected() -> void:
 		_status.text = "The scene load callback is unavailable."
 		return
 	if bool(_load_level.call(_selected_path)):
-		_entries[index].state = "recent candidate"
-		_entries[index].recent = _next_recent()
-		_status.text = "Loaded: " + _selected_path
-		_save_history()
-		_refresh()
-		level_loaded.emit(_selected_path)
-		hide()
+		record_loaded(_selected_path)
 	else:
 		_entries[index].state = "refused"
 		var detail := _native_error()
 		_status.text = "Native loader refused this file; scene retained. %s  %s" % [detail, _selected_path]
 		_refresh()
+
+# The game-folder streamed path has already prepared and committed its native
+# session when it reaches here. Preserve the library history and signal once.
+func record_loaded(path: String) -> void:
+	var index := _find(path)
+	if index < 0: return
+	_entries[index].state = "recent candidate"
+	_entries[index].recent = _next_recent()
+	_status.text = "Loaded: " + path
+	_save_history()
+	_refresh()
+	level_loaded.emit(path)
+	hide()
 
 func _native_error() -> String:
 	var source: Object = _load_level.get_object()
