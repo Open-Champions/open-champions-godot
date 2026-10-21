@@ -80,9 +80,10 @@ public:
   // playerProjectile_run) at the player's position with the Thrown defaults
   // and zero velocity. The throw call site and its arc are not contracted.
   void drop_potion(unsigned kind);
-  // Holy Shield is not offered: SpellHolyShield_absorb needs the model
-  // sample-point services (no player model here), and give_skill(16) would
-  // rewrite the fixture's Holy Strike table.
+  // Holy Shield is armed on the Holy Strike skill already in the table
+  // (arm_fixture_holy_shield). give_skill(16) is not called again. The
+  // player's model at +0x544 has one sample point and +0x114 holds a
+  // one-joint pose, so absorb follows the round-5 sample points.
   // The World is the sole actor owner. Read access for observers; the
   // mutable reference exists only for explicit effect hooks (damage/queries).
   const combat_runtime::World &world() const;

@@ -12,7 +12,9 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  std::array<Raw, 4> handles{}; // slot 3: optional wave-12 own-machine creature
+  // Slots 4-6 are the Full fixture's AntQueen, Skeleton and Soul. Slot 3 stays
+  // the optional one-per-session creature.
+  std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
   session_control::Observation status;
@@ -223,6 +225,7 @@ struct Session::State {
     holy.stats[1] = {1, 30, 0};
     holy.stats[2] = {1, 10, 0};
     world->give_skill(HOLY_STRIKE, holy);
+    world->arm_fixture_holy_shield(player);
     for (unsigned k = 1; k < 3; ++k) {
       C::Spawn s;
       s.position[0] = from_int(k == 1 ? 80 : -40);
@@ -236,6 +239,19 @@ struct Session::State {
       for (Raw off : {0x1cu, 0x24u})
         clips[Raw(world->read(definition + off))] = Clip{30, {{10u, Raw(1)}}};
     }
+    auto place = [&](unsigned slot, const char *cls, int x, int y) {
+      C::Spawn s;
+      s.position[0] = from_int(x);
+      s.position[1] = from_int(y);
+      s.facing = 0xc000;
+      s.hp = 0x42f00000;
+      if (world_queries::terrain_height_below(terrain, from_int(4), s.position) != 0)
+        throw C::Unsupported("combat fixture actor has no flat ground");
+      handles[slot] = world->retain(world->spawn_class(cls, s));
+    };
+    place(4, "AntQueen", 0, 140);
+    place(5, "Skeleton", 70, 140);
+    place(6, "Soul", -70, 140);
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
     adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
@@ -346,7 +362,7 @@ session_control::Observation Session::advance(std::uint32_t command) {
 std::vector<Actor> Session::actors() const {
   std::vector<Actor> out;
   for (unsigned k = 0; k < s_->handles.size(); ++k) {
-    if (k == 3 && !s_->handles[k]) continue; // no wave-12 creature spawned
+    if (k >= 3 && !s_->handles[k]) continue; // empty optional or non-Full slot
     auto a = s_->world->target(s_->handles[k]);
     out.push_back({k, s_->handles[k], a != 0,
       a && bool(s_->world->read(a + 12) & 8), a ? s_->position(a) : Vec3{},

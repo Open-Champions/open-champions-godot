@@ -105,8 +105,26 @@ struct FullRun {
     trace += std::to_string(o.ready_ticks) + " f" + std::to_string(o.frame) + " s" + std::to_string(s.shared_seed()) +
              " hp" + std::to_string(o.hp);
     for (const auto &a : s.actors()) trace += " " + std::to_string(a.present) + ":" + std::to_string(a.hp);
-    trace += "\n";
+    // Round 5: the AntQueen, Skeleton and Soul state, position and the
+    // queen's bank angle, and this tick's demon tests and Holy Shield sample
+    // points, so the save/load comparison covers them.
+    for (const auto &a : s.actors()) {
+      if (a.slot < 4 || !a.present) continue;
+      const auto addr = s.world().target(a.handle);
+      trace += " s" + std::to_string(a.slot) + "=" + std::to_string(s.world().read(addr + 0x232, 2)) + "@" +
+               std::to_string(s.world().read(addr + 0x10)) + "," + std::to_string(s.world().read(addr + 0x14));
+      if (a.slot == 4) trace += "b" + std::to_string(s.world().read(addr + 0x3e4, 2));
+    }
+    int demon = 0, sample = 0;
+    for (const auto &e : s.tick_events()) {
+      demon += e.name == "Soul_isDemonNear";
+      sample += e.name == "model_getSamplePoint";
+    }
+    demon_tests += demon;
+    shield_samples += sample;
+    trace += " d" + std::to_string(demon) + " p" + std::to_string(sample) + "\n";
   }
+  int demon_tests = 0, shield_samples = 0;
   void step(int t) {
     std::uint32_t cmd = 0;
     if (t < 3) cmd = session_control::NEG_X;
@@ -188,6 +206,20 @@ void full_combat() {
       if (cut != std::string::npos) last = line.substr(cut);
     }
   }
+  bool queen = false, skeleton = false, soul = false;
+  for (const auto &a : whole.scene->actors()) {
+    queen = queen || a.slot == 4;
+    skeleton = skeleton || a.slot == 5;
+    soul = soul || a.slot == 6;
+  }
+  check(queen && skeleton && soul, "AntQueen, Skeleton and Soul stay in the Full fight");
+  std::cout << "full combat round 5: " << whole.demon_tests << " demon tests, " << whole.shield_samples
+            << " Holy Shield sample points\n";
+  check(whole.demon_tests > 0, "the Soul tests for a demon in the live fight");
+  check(whole.shield_samples > 0 && whole.shield_samples % 241 == 0,
+        "Holy Shield absorbs in the live fight, 241 sample points each time");
+  auto player = whole.scene->session().world().target(whole.scene->actors().at(0).handle);
+  check(whole.scene->session().world().read(player + 0x114) != 0, "Holy Shield pose stays planted");
   check(hp_changes >= 1, "creature health changes after the load (the bolt lands in the continued run)");
   std::cout << "full combat trace " << whole.trace.size() << " bytes, world " << digest(FX::sim::save_world(*whole.world))
             << '\n';
@@ -219,7 +251,7 @@ void wave12_extensions() {
   };
   FullRun whole = full_start();
   run(whole, 0, TICKS);
-  check(whole.scene->actors().size() == 4 && whole.scene->own_creature_class() == "Critter",
+  check(whole.scene->actors().size() == 7 && whole.scene->own_creature_class() == "Critter",
         "the own-machine creature is observed in slot 3");
   FullRun first = full_start();
   run(first, 0, SAVE_AT);
