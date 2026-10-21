@@ -34,6 +34,7 @@ bool knows(Raw fn) {
   case 0x267a0c:                         // Gnaw_setState (creature-ai)
   case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
   case 0x3c3b40:
+  case 0x2da610:                                         // MultiFireProjectile_onHit
   case 0x11a290: case 0x3c7ef8: case 0x3c3b10: case 0x3c3b08: // empty
   case 0x116638: case 0x11a418: case 0x11a260: case 0x11a3f0: // base
   case 0x11a448: case 0x11a868: case 0x119328: case 0x10ded0:
@@ -152,6 +153,9 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   switch (fn) {
+  case 0x2da610:
+    multifire_on_hit(self, ar(0));
+    return iv(0);
   case 0x152a18:
     missile_on_touch(self, ar(0));
     return iv(0);
@@ -931,6 +935,19 @@ void World::State::run(Address a) {
   if (fn == 0x2da2bc) {
     note("run", {a});
     multifire_run(a);
+    return;
+  }
+  // Round 6 object runs. StaticFire 0x2c595c stays refused above.
+  if (fn == 0x1fd0f0 || fn == 0x2ce4a4 || fn == 0x31c898 || fn == 0x30bde0) {
+    note("run", {a});
+    if (fn == 0x1fd0f0)
+      poison_gas_run(a);
+    else if (fn == 0x2ce4a4)
+      disease_corpse_run(a);
+    else if (fn == 0x31c898)
+      smoke_gen_run(a);
+    else
+      pustule_run(a);
     return;
   }
   if (fn == 0x15153c || fn == 0x1ba940) {

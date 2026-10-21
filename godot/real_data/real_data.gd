@@ -28,6 +28,9 @@ var fonts: Array[Dictionary] = [] # {path, row_index, fingerprint} FNT rows foun
 var creature: RefCounted = null # RealCreature texture of the current preview
 var arena_tables: Dictionary = {} # counts from the executable's arena tables, if read
 var last_error := ""
+# Level textures stream by cell around the camera focus, as the original does
+# (scenes/level_texture_stream.gd). False decodes every cell up front.
+var stream_textures := true
 
 func configure(owner: Control, cache: String) -> void:
 	scene = owner
@@ -157,12 +160,21 @@ func load_level(index: int) -> Dictionary:
 	scene.controller.set_terrain_start_objects(world_path, objects, str(level.stem))
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
+	# The library first publishes the neutral session display, then the textured
+	# one replaces it. In play mode FX lighting would light the neutral one
+	# per vertex only to free it; it is held until the textured display is up.
+	var hold: bool = scene.fx != null and "world_lighting_held" in scene.fx
+	if hold: scene.fx.world_lighting_held = true
 	library._add_candidate(session_path)
 	library._load_selected()
 	if scene.level_textures.world_path != session_path:
+		if hold: scene.fx.world_lighting_held = false
 		return {"ok": false, "stage": "library-load", "error": library._native_error()}
 	scene.level_textures.session_worlds.clear()
-	if not scene.load_textured_terrain(world_path, level.tex):
+	scene.level_textures.stream_cells = stream_textures
+	var textured: bool = scene.load_textured_terrain(world_path, level.tex)
+	if hold: scene.fx.world_lighting_held = false
+	if not textured:
 		return {"ok": false, "stage": "textures", "error": scene.status_label.text}
 	current = index
 	# Per-level light record from the user's executable JSON (level-lights):
@@ -176,10 +188,14 @@ func load_level(index: int) -> Dictionary:
 	if not parts.get("ok", false):
 		world = null
 		return {"ok": false, "stage": "world-parts", "error": str(parts.get("error", ""))}
+	# The level flag word is row +0x20 of the same level-lights record.
+	var flags_result := {}
+	if scene.fx != null and bool(scene.fx.get("level_light_active")) and scene.fx.level_light_record.has("flags"):
+		flags_result = world.set_level_flags(int(scene.fx.level_light_record.flags))
 	var water_image := read_entry(level.gob, "waterenv.lmp", ".tex")
 	var water_texture: Dictionary = world.set_water_texture(water_image)
 	var terrain: Dictionary = scene.controller.get_terrain()
-	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_tiles_refused": int(water_texture.get("tiles_refused", 0))}
+	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_lines": int(parts.get("water_lines", 0)), "water_lines_refused": int(parts.get("water_lines_refused", 0)), "water_negative_fix": bool(parts.get("water_negative_fix", false)), "level_flags_loaded": bool(flags_result.get("ok", false)), "level_flags_error": str(flags_result.get("error", "")), "water_tiles_refused": int(water_texture.get("tiles_refused", 0))}
 
 # Explicit model/clip choice from a chosen LMP. Returns the first model row and
 # clip row the native sampler accepts; this is a cosmetic user selection only.

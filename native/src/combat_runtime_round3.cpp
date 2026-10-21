@@ -42,8 +42,14 @@ Address World::State::diseasecloud_spawn(const Vec3 &pos, Raw level,
   auto obj = pool_new(DISEASE_CLOUD_SIZE);
   if (!obj)
     throw Unsupported("the pool refused a DiseaseCloud");
-  // GameObject_ctor (one shared draw), then the cloud fields. +0x28/+0x29 are
-  // the constructor's draw-size bytes; construct() leaves them clear.
+  diseasecloud_ctor(obj, pos, level, owner);
+  return obj;
+}
+void World::State::diseasecloud_ctor(Address obj, const Vec3 &pos, Raw level,
+                                     Address owner) {
+  // DiseaseCloud_ctor 0x2ce610 (round 3). GameObject_ctor (one shared draw),
+  // then the cloud fields. +0x28/+0x29 are the constructor's draw-size bytes;
+  // construct() leaves them clear. Round 6's corpse passes this the pool block.
   construct(obj, pos, Kind::Effect);
   // Slot words stay out of the image until a cloud exists. Other slots stay 0.
   w(VT_DISEASE_CLOUD + 4, 0x3cd4ec);
@@ -65,7 +71,6 @@ Address World::State::diseasecloud_spawn(const Vec3 &pos, Raw level,
   w(obj + 12, u(obj + 12) | 3);
   note("obj_runEveryFrame", {obj});
   schedule(obj, 1);
-  return obj;
 }
 void World::State::diseasecloud_run(Address obj) {
   actor(obj);

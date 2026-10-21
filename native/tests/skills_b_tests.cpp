@@ -5,6 +5,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+// Model::alloca is the port's method name; a platform alloca macro is
+// dropped in this translation unit only, as skills_b.cpp does.
+#ifdef alloca
+#undef alloca
+#endif
 using namespace champions::simulation::rta;
 namespace SB = champions::simulation::rta::skills_b;
 namespace {

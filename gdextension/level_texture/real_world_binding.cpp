@@ -93,6 +93,11 @@ Ref<ArrayMesh> water_mesh(const std::array<WD::DrawSurface, 2> &surfaces,
     info["layer"] = surface.layer;
     info["triangles"] = surface.triangles;
     info["second_set"] = set == 1;
+    info["additive"] = surface.fix < 0.f;
+    // The same colour, unclamped, for a shader uniform: a vertex colour
+    // channel saturates at 1.0 and the stored colour can reach 255/128.
+    info["tint"] = Vector3(channels[0] / 128.f, channels[1] / 128.f,
+                           channels[2] / 128.f);
     described.push_back(info);
   }
   return mesh;
@@ -101,6 +106,20 @@ RW::cw::Vec3 raw_position(const PackedInt64Array &p) {
   if (p.size() != 3)
     throw std::runtime_error("A raw position needs three words.");
   return {std::uint32_t(p[0]), std::uint32_t(p[1]), std::uint32_t(p[2])};
+}
+// world_objectFactory matches customVars as a case-insensitive full class name
+// and that constructor is levelSettings_parse. Other classes are not that parser.
+bool custom_vars(std::string_view cls) {
+  constexpr char name[] = "customvars";
+  if (cls.size() != sizeof(name) - 1)
+    return false;
+  for (std::size_t i = 0; i < cls.size(); ++i) {
+    const auto c = cls[i];
+    const auto lower = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+    if (lower != name[i])
+      return false;
+  }
+  return true;
 }
 } // namespace
 
@@ -124,6 +143,8 @@ protected:
     ClassDB::bind_method(
         D_METHOD("water_disturb", "strength_raw", "radius_raw", "position_raw"),
         &ChampionsRealWorld::water_disturb);
+    ClassDB::bind_method(D_METHOD("set_level_flags", "flags"),
+                         &ChampionsRealWorld::set_level_flags);
     ClassDB::bind_method(D_METHOD("set_door", "piece", "open"),
                          &ChampionsRealWorld::set_door);
     ClassDB::bind_method(D_METHOD("piece_draws"),
@@ -182,14 +203,18 @@ public:
           source.neighbours = w.neighbours;
           source.mask = w.mask;
           source.second_set = w.second_set;
-          source.min_x = c.bounds_bits[0];
-          source.min_y = c.bounds_bits[1];
-          source.max_x = c.bounds_bits[3];
+          source.bounds = c.bounds_bits;
+          source.origin = {c.translation[0], c.translation[1]};
           source.chunk_z = c.translation[2];
           source.flag_0x200 = (c.flags & 0x200u) != 0;
           sources.push_back(source);
         }
         waves_ = std::make_unique<WD::Field>(std::move(sources));
+        auto *image = water_.get();
+        waves_->set_chunk_query(
+            [image](std::uint32_t radius, const std::array<std::uint32_t, 3> &p) {
+              return image->disturb_chunks(radius, {p[0], p[1], p[2]});
+            });
       }
       std::vector<LF::Record> records;
       if (objects.size())
@@ -213,6 +238,23 @@ public:
         out["started_open"] = std::int64_t(pieces_->started_open());
       }
       out["pieces"] = pieces;
+      if (waves_) {
+        // customVars lines after reset and setup (research section 7 step 2).
+        // Whether the factory runs before setup was not executed.
+        std::vector<std::string> lines;
+        for (const auto &record : records) {
+          if (!custom_vars(record.cls))
+            continue;
+          for (const auto &prop : record.props)
+            lines.push_back(prop);
+        }
+        const auto parsed = WD::replacing(lines);
+        waves_->set_appearance(parsed.appearance);
+        out["water_lines"] = std::int64_t(parsed.applied);
+        out["water_lines_refused"] = std::int64_t(parsed.refused);
+        out["water_negative_fix"] =
+            parsed.appearance.fix[0] < 0 || parsed.appearance.fix[1] < 0;
+      }
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());
@@ -242,11 +284,37 @@ public:
     if (!water_)
       return 0;
     try {
-      return water_->disturb(std::uint32_t(strength), std::uint32_t(radius),
-                             raw_position(position));
+      const auto point = raw_position(position);
+      const auto count = water_->disturb(std::uint32_t(strength),
+                                         std::uint32_t(radius), point);
+      // The service grid pointer stays 0, so it writes nothing. The drawn
+      // field holds the grids and takes the same call through the same query.
+      if (count != 0 && waves_)
+        waves_->disturb(std::uint32_t(strength), std::uint32_t(radius), point);
+      return static_cast<std::int64_t>(count);
     } catch (const std::exception &) {
       return -1;
     }
+  }
+  // Level flag word 0x44fe08 from the level table row (level-lights JSON).
+  Dictionary set_level_flags(int64_t flags) {
+    Dictionary out;
+    out["ok"] = false;
+    if (flags < 0 || flags > 0xffffffffll) {
+      out["error"] = String("A level flag word does not fit an unsigned word.");
+      return out;
+    }
+    if (!waves_) {
+      out["ok"] = true;
+      return out;
+    }
+    try {
+      waves_->set_level_flags(static_cast<std::uint32_t>(flags));
+      out["ok"] = true;
+    } catch (const std::exception &e) {
+      out["error"] = String::utf8(e.what());
+    }
+    return out;
   }
   bool set_door(int64_t piece, bool open) {
     if (!pieces_ || piece < 0)
@@ -311,7 +379,7 @@ public:
       out["triangles"] = triangles;
       out["tiles"] = static_cast<std::int64_t>(waves_->tile_count());
       out["live"] = static_cast<std::int64_t>(waves_->live_blocks());
-      out["claim_seed"] = String("refused");
+      out["level_flags"] = static_cast<std::int64_t>(waves_->level_flags());
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());

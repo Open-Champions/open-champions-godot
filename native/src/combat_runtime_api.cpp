@@ -363,4 +363,57 @@ Address World::arm_fixture_holy_shield(Address player) {
   require_full(*s_);
   return s_->arm_fixture_holy_shield(player);
 }
+Address World::spell_block() {
+  require_full(*s_);
+  return s_->spell_block();
+}
+Address World::spawn_effect_fixture(Raw run, Raw size, const Vec3 &pos,
+                                    Address owner) {
+  require_full(*s_);
+  return s_->spawn_effect_fixture(run, size, pos, owner);
+}
+void World::poison_gas_run(Address obj) {
+  require_full(*s_);
+  s_->poison_gas_run(obj);
+}
+void World::disease_corpse_run(Address obj) {
+  require_full(*s_);
+  s_->disease_corpse_run(obj);
+}
+void World::multifire_on_hit(Address obj, Address other) {
+  require_full(*s_);
+  s_->multifire_on_hit(obj, other);
+}
+void World::multifire_end(Address obj, Raw reason) {
+  require_full(*s_);
+  s_->multifire_end(obj, reason);
+}
+void World::smoke_gen_run(Address obj) {
+  require_full(*s_);
+  s_->smoke_gen_run(obj);
+}
+void World::pustule_run(Address obj) {
+  require_full(*s_);
+  s_->pustule_run(obj);
+}
+void World::arena_run(Address spell, const Vec3 &pos) {
+  require_full(*s_);
+  s_->arena_run(spell, pos);
+}
+Address World::hornomen_ctor(Raw kind, Address owner, Raw extra) {
+  require_full(*s_);
+  return s_->hornomen_ctor(kind, owner, extra);
+}
+void World::hornomen_run(Address spell, const Vec3 &pos) {
+  require_full(*s_);
+  s_->hornomen_run(spell, pos);
+}
+Address World::planarsteel_ctor(Raw kind, Address owner, Raw extra) {
+  require_full(*s_);
+  return s_->planarsteel_ctor(kind, owner, extra);
+}
+void World::planarsteel_run(Address spell, const Vec3 &pos) {
+  require_full(*s_);
+  s_->planarsteel_run(spell, pos);
+}
 } // namespace champions::simulation::rta::combat_runtime

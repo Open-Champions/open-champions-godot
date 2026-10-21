@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <map>
 #include <memory>
@@ -67,6 +68,8 @@ public:
     godot::Dictionary model_light(const godot::Vector3 &position) const;
     godot::Dictionary shade_model(const godot::Vector3 &position, const godot::Vector3 &normal) const;
     godot::Dictionary shade_world(const godot::Vector3 &position, const godot::Vector3 &normal) const;
+    // shade_world for many vertices: the same per-vertex result, one light-node list.
+    godot::Dictionary shade_world_many(const godot::PackedVector3Array &positions, const godot::PackedVector3Array &normals) const;
     godot::Dictionary decal_tint(const godot::Vector3 &position) const;
     // Authored glow texture sizes for synthetic sheets (load_effect_textures sets
     // them from the user's files): name is a glow texture of fx_simulation.hpp.

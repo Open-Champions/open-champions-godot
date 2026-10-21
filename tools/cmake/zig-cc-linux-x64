@@ -1,0 +1,4 @@
+#!/bin/bash
+# Zig C driver for a glibc 2.28 x86_64 Linux target. Godot 4.5.2's official
+# Linux export template requires GLIBC_2.28 and no newer symbol.
+exec "$(dirname "$0")/zig-driver" cc x86_64-linux-gnu.2.28 "$@"

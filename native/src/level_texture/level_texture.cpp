@@ -4,6 +4,7 @@
 #include <cstring>
 #include <limits>
 #include <tuple>
+#include <unordered_set>
 
 // Authored from the pinned level-texture and model-row-registers contracts.
 // Only synthetic fixtures are part of this source tree.
@@ -352,15 +353,19 @@ Cell File::load_cell(std::int32_t id) const {
   return Cell(std::vector<std::uint8_t>(
       bytes_.begin() + it->offset, bytes_.begin() + it->offset + it->size));
 }
-std::vector<Surface> bind_world(const world_geometry::Geometry &world,
-                                const File &textures,
-                                const std::vector<std::uint8_t> &world_bytes) {
+namespace {
+std::vector<Surface>
+bind_filtered(const world_geometry::Geometry &world, const File &textures,
+              const std::vector<std::uint8_t> &world_bytes,
+              const std::unordered_set<std::int32_t> *only) {
   std::map<std::int32_t, Cell> cells;
   std::map<std::pair<std::int32_t, std::size_t>, std::shared_ptr<const Image>>
       images;
   std::vector<Surface> out;
   for (const auto &chunk : world.chunks) {
     if (!chunk.cell || !chunk.packet_index)
+      continue;
+    if (only != nullptr && only->find(std::int32_t(chunk.cell)) == only->end())
       continue;
     auto ci = cells.find(chunk.cell);
     if (ci == cells.end())
@@ -431,6 +436,85 @@ std::vector<Surface> bind_world(const world_geometry::Geometry &world,
       sorted.push_back(std::move(out[index]));
     }
   return sorted;
+}
+} // namespace
+std::vector<Surface> bind_world(const world_geometry::Geometry &world,
+                                const File &textures,
+                                const std::vector<std::uint8_t> &world_bytes) {
+  return bind_filtered(world, textures, world_bytes, nullptr);
+}
+double texture_cell_size(const world_geometry::Geometry &world) {
+  const auto bits = world.header_words[0x68 / 4];
+  float value = 0.f;
+  std::memcpy(&value, &bits, sizeof value);
+  if (value == 0.f)
+    return 960.0;
+  need(std::isfinite(value) && value > 0.f, "invalid WORLD texture cell size");
+  return double(value);
+}
+int cell_id_of(double x, double y, double cell_size) {
+  need(std::isfinite(x) && std::isfinite(y) && std::isfinite(cell_size) &&
+           cell_size > 0.0,
+       "invalid texture cell query");
+  const float size = float(cell_size);
+  const int column = static_cast<int>(std::floor(float(x) / size)) + 50;
+  const int row = static_cast<int>(std::floor(float(y) / size)) + 50;
+  return row * 100 + column;
+}
+std::array<int, 9> cells_around(int cell_id) {
+  const int row = cell_id / 100;
+  const int column = cell_id % 100;
+  std::array<int, 9> out{};
+  std::size_t n = 0;
+  for (const int dr : {-1, 0, 1})
+    for (const int dc : {-1, 0, 1})
+      out[n++] = (row + dr) * 100 + column + dc;
+  return out;
+}
+std::vector<DrawSlot> draw_slots(const world_geometry::Geometry &world,
+                                 const std::vector<std::uint8_t> &world_bytes,
+                                 const std::vector<std::int32_t> *cells) {
+  std::unordered_set<std::int32_t> only;
+  if (cells != nullptr)
+    only.insert(cells->begin(), cells->end());
+  std::vector<DrawSlot> slots;
+  std::map<std::pair<std::int32_t, std::uint32_t>, std::int64_t> texture_ids;
+  std::int64_t next_texture = 1;
+  std::vector<std::tuple<int, bool, std::int64_t, std::uint32_t, std::size_t>>
+      items;
+  for (const auto &chunk : world.chunks) {
+    if (!chunk.cell || !chunk.packet_index)
+      continue;
+    if (cells != nullptr && only.find(std::int32_t(chunk.cell)) == only.end())
+      continue;
+    const auto &packet = world.packets.at(*chunk.packet_index);
+    const auto materials = packet_materials(world_bytes, packet, chunk.flags);
+    const auto key = std::make_pair(std::int32_t(chunk.cell),
+                                    std::uint32_t(chunk.texture_offset));
+    for (std::size_t b = 0; b < packet.batches.size(); ++b) {
+      if (packet.batches[b].triangles.empty())
+        continue;
+      const auto inserted = texture_ids.emplace(key, next_texture);
+      if (inserted.second)
+        ++next_texture;
+      items.emplace_back(int(materials.at(b).sort_layer), true,
+                         inserted.first->second, 0u, slots.size());
+      slots.push_back({chunk.index, b, 0});
+    }
+  }
+  const auto order = sorted_draw_order(items);
+  int next = 0;
+  for (const auto &layer : order)
+    for (const std::size_t index : layer)
+      slots[index].draw_order = next++;
+  return slots;
+}
+std::vector<Surface> bind_cells(const world_geometry::Geometry &world,
+                                const File &textures,
+                                const std::vector<std::uint8_t> &world_bytes,
+                                const std::vector<std::int32_t> &cells) {
+  const std::unordered_set<std::int32_t> only(cells.begin(), cells.end());
+  return bind_filtered(world, textures, world_bytes, &only);
 }
 std::array<std::int32_t, 4>
 model_rows(ModelRows choice,

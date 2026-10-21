@@ -1,0 +1,15 @@
+# Cross-compile x86_64 Windows from macOS with Zig's MinGW/UCRT target.
+# The existing MinGW GCC file remains tools/cmake/windows-x64-mingw.cmake.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(_CHAMPIONS_ZIG "${CMAKE_CURRENT_LIST_DIR}")
+set(CMAKE_C_COMPILER "${_CHAMPIONS_ZIG}/zig-cc-windows-x64")
+set(CMAKE_CXX_COMPILER "${_CHAMPIONS_ZIG}/zig-cxx-windows-x64")
+set(CMAKE_AR "${_CHAMPIONS_ZIG}/zig-ar" CACHE FILEPATH "Zig archiver" FORCE)
+set(CMAKE_RANLIB "${_CHAMPIONS_ZIG}/zig-ranlib" CACHE FILEPATH "Zig ranlib" FORCE)
+set(CMAKE_RC_COMPILER "zig")
+set(CMAKE_RC_COMPILER_ARG1 "rc")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
