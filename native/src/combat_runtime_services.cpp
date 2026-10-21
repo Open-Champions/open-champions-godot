@@ -148,11 +148,8 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     projectile_destroy(self, ar(0));
     return iv(0);
   }
-  if (slot == 1 && fn == DISEASE_CLOUD_DTOR) {
-    note("destroy", {self});
-    effect_dtor(fn, self, ar(0));
-    return iv(0);
-  }
+  if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   switch (fn) {
   case 0x152a18:
     missile_on_touch(self, ar(0));
@@ -229,8 +226,10 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
                           " has no body (unbounded re-dispatch)");
     return full_vcall(self, slot, std::move(args));
   }
+  if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
-                    fn == 0x3c6888 || fn == DISEASE_CLOUD_DTOR)) {
+                    fn == 0x3c6888)) {
     note("destroy", {self});
     effect_dtor(fn, self, number(args.at(0)));
     return iv(0);

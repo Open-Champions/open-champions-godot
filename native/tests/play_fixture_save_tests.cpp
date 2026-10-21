@@ -233,9 +233,9 @@ void wave12_extensions() {
   auto ops = [](FS::CombatScene &scene, int t) {
     if (t == 5) scene.spawn_creature(0); // Critter
     if (t == 6) check(refuses([&] { scene.spawn_creature(8); }), "one own-machine creature per session");
-    if (t == 20) scene.drop_potion(1);
+    // Potions 1 and 2 end in LooseFire_ctor / poisonGasSpell_ctor, which the
+    // World refuses (audit CR4-1); they are checked apart below.
     if (t == 60) scene.drop_potion(3);
-    if (t == 120) scene.drop_potion(2);
     if (t >= 95 && t % 12 == 0) scene.press_attack(true);
   };
   auto run = [&](FullRun &r, int from, int to) {
@@ -249,6 +249,20 @@ void wave12_extensions() {
       r.line();
     }
   };
+  for (unsigned kind : {1u, 2u}) {
+    // The research constructors are stubbed call-outs (ref_combat_round4); the
+    // session stops with the World's refusal instead of dropping them.
+    FullRun r = full_start();
+    r.scene->drop_potion(kind);
+    std::string error;
+    for (int t = 0; t < TICKS && error.empty(); ++t) {
+      const auto o = r.scene->advance(0);
+      if (o.failed) error = o.error;
+    }
+    const char *want = kind == 1 ? "LooseFire_ctor 0x202b70" : "poisonGasSpell_ctor 0x202de8";
+    check(error.find(want) != std::string::npos,
+          "potion " + std::to_string(kind) + " stops at its refused constructor: '" + error + "'");
+  }
   FullRun whole = full_start();
   run(whole, 0, TICKS);
   check(whole.scene->actors().size() == 7 && whole.scene->own_creature_class() == "Critter",

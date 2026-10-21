@@ -279,16 +279,10 @@ Address World::State::arm_fixture_holy_shield(Address player) {
   auto skill = u(G_SKILL_TABLE + 4 * 16);
   if (!skill)
     throw Error("give_skill first");
+  // attach_holy_shield points the spell at table 0x519ce0 with slots 0-2
+  // planted: the live fight calls slot 2 (run) every tick and slot 1 (the
+  // destructor) when the shield ends. Slots 3 and 4 stay 0 and refuse.
   auto spell = attach_holy_shield(player, skill, 1);
-  // The round-4 plant's table holds only the typeinfo. The live fight also
-  // calls slot 2 (run) every tick and slot 1 (destructor) when the shield
-  // ends, so plant those words of table 0x519ce0. Slots 3 and 4 stay 0 and
-  // are refused if called.
-  auto table = alloc_fixture(5 * 8);
-  w(table + 4, u(u(spell + 0x14) + 4));
-  w(table + 8 * 1 + 4, 0x3cf0c4);
-  w(table + 8 * 2 + 4, 0x2e8428);
-  w(spell + 0x14, table);
   // SpellHolyShield_run reads the clock at +0x18 and the duration at +0x20.
   // A zero duration ends the spell on the first creature slot-17 tick.
   w(spell + 0x18, 0);

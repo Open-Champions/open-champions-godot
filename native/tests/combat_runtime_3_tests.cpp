@@ -78,11 +78,22 @@ const C::Event *find_event(const C::World &w, const std::string &name) {
       return &e;
   return nullptr;
 }
+bool refused_self(C::World &w, C::Address cloud) {
+  try {
+    w.run_actor(cloud);
+  } catch (const C::Unsupported &e) {
+    return std::string(e.what()).find("DiseaseCloud damage_apply on itself") !=
+           std::string::npos;
+  }
+  return false;
+}
 void host() {
   {
+    // The victim and owner sit one cell column below the cloud, so the box walk
+    // meets them before the cloud, which is in its own box and refuses.
     Host h;
-    auto victim = h.creature({0, 0, 0});
-    auto owner = h.creature({0, 0, 0});
+    auto victim = h.creature({from_int(-5), 0, 0});
+    auto owner = h.creature({from_int(-5), 0, 0});
     h.w->write(C::FRAME, 4, 60);
     h.w->write(0x41b1e4, 4, 0x41b000);
     auto cloud = h.w->spawn_disease_cloud({0, 0, 0}, 3, owner);
@@ -90,7 +101,7 @@ void host() {
     h.w->write(cloud + 0x5c, 4, 0x41200000);
     h.w->write(cloud + 0x60, 4, 20);
     h.w->clear_history();
-    h.w->run_actor(cloud);
+    check(refused_self(*h.w, cloud), "the cloud's damage_apply on itself is refused");
     check(h.w->read(cloud + 0x5c) == add(0x41200000, HALF), "cloud radius grows by 1/2");
     check(count_event(*h.w, "presentation:particle_spawn") == 12,
           "four particles on each of three streams");
@@ -108,23 +119,23 @@ void host() {
     check(h.w->read(spell + 8) == 0, "spell base skill word is null");
     auto pools = count_event(*h.w, "pool_new");
     h.w->clear_history();
-    h.w->run_actor(cloud);
+    check(refused_self(*h.w, cloud), "the second tick refuses at the cloud again");
     check(h.w->attached_spells(victim).size() == 1, "a second hit does not allocate");
     check(!has_event(*h.w, "creature_addSpell"), "no second disease allocation");
     (void)pools;
   }
   {
     Host h;
-    auto owner = h.creature({0, 0, 0});
+    auto owner = h.creature({from_int(-5), 0, 0});
     h.w->write(owner + 12, 4, h.w->read(owner + 12) | 0x40);
-    auto victim = h.creature({0, 0, 0});
+    auto victim = h.creature({from_int(-5), 0, 0});
     h.w->write(victim + 12, 4, h.w->read(victim + 12) | 0x40);
     h.w->write(C::FRAME, 4, 60);
     auto cloud = h.w->spawn_disease_cloud({0, 0, 0}, 1, owner);
     h.w->write(cloud + 0x58, 4, 10);
     h.w->write(cloud + 0x5c, 4, 0x41200000);
     h.w->clear_history();
-    h.w->run_actor(cloud);
+    check(refused_self(*h.w, cloud), "the cloud itself is not a player and is refused");
     check(!has_event(*h.w, "damage_apply"), "two players are skipped");
   }
   {
@@ -145,8 +156,17 @@ void host() {
     h.w->write(C::FRAME, 4, 60);
     auto cloud = h.w->spawn_disease_cloud({0, 0, 0}, 1, owner);
     h.w->write(cloud + 0x54, 4, 60);
-    h.w->run_actor(cloud);
-    check(!h.w->contains(cloud), "the cloud destroys itself at its end frame");
+    // Slot 1 with 3 reaches DiseaseCloud_dtor 0x3cd480: only the symbol is
+    // in the research (runtime.tsv), so ending the cloud is refused.
+    std::string refusal;
+    try {
+      h.w->run_actor(cloud);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("DiseaseCloud_dtor 0x3cd480") != std::string::npos,
+          "the cloud's end-frame destructor is refused: '" + refusal + "'");
+    check(!has_event(*h.w, "destroy"), "the cloud is not destroyed by a guessed body");
   }
   {
     Host h;
@@ -159,30 +179,20 @@ void host() {
     check(h.w->read(made + 0x1a4) == 0, "full resistance is zero seconds");
   }
   {
+    // GutChunk_ctor 0x201958 starts with PhProp_ctor 0x155a0c, whose chain
+    // (0x153e54, GameObject_ctor: one shared draw, grid B link) is not read
+    // (skills-01-34.md FrostShard "Draws"). The constructor refuses there.
     Host h;
-    h.w->write(0x44fdc0, 4, 0);
-    h.w->write(0x4f86a0 + 0x58, 4, 0x111);
-    h.w->write(0x4f86a0 + 0x60, 4, 0x222);
     Vec3 pos{0x3f800000, 0x40000000, 0x40400000};
-    auto chunk = h.w->spawn_gut_chunk(pos, 2, 0);
-    check(h.w->read(chunk + 0x248) == 1, "gore below 2 sets the blood bit");
-    check(h.w->read(chunk + 0x48) == 0x50f3b8, "GutChunk table");
-    check(h.w->read(chunk + 0x25c) == 2 && h.w->read(chunk + 0x260, 1) == 0,
-          "GutChunk timer and flag");
-    check(h.w->read(chunk + 0x250) == pos[0], "PhProp position is copied");
-    auto call = find_event(*h.w, "PhProp_ctor");
-    check(call && call->args.size() > 6 && call->args[6] == 0x111, "name at +0x58");
-    h.w->write(0x44fdc0, 4, 2);
-    auto chunk2 = h.w->spawn_gut_chunk({0, 0, 0}, 1, 2);
-    check(h.w->read(chunk2 + 0x248) == 2, "gore at 2 keeps the bits");
-    auto call2 = find_event(*h.w, "PhProp_ctor");
-    // The second call is the later one; scan from the end.
-    const C::Event *last = nullptr;
-    for (auto &e : h.w->events())
-      if (e.name == "PhProp_ctor")
-        last = &e;
-    check(last && last->args.size() > 6 && last->args[6] == 0x222, "bit 1 selects +0x60");
-    (void)call2;
+    std::string refusal;
+    try {
+      h.w->spawn_gut_chunk(pos, 2, 0);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("PhProp_ctor 0x155a0c") != std::string::npos,
+          "GutChunk's PhProp_ctor is refused: '" + refusal + "'");
+    check(!has_event(*h.w, "PhProp_ctor"), "PhProp_ctor is not a silent note");
   }
   {
     Host h;
@@ -190,27 +200,19 @@ void host() {
     h.w->write(target + 0x2e0, 2, 0x20);
     h.w->write(target + 0x24, 4, 0x1000);
     h.w->write(0x1000, 4, 0x2000);
-    auto phantom = h.w->spawn_phantom(target, "knockdown1_a.anm", 4, 1);
-    check(h.w->read(phantom + 0x3cc) == 0x43700000 && h.w->read(phantom + 0x3d0) == 0x43700000,
-          "flag 1 lasts 240");
-    check(h.w->read(phantom + 0x3d4) == 1, "phantom flag");
-    check(h.w->read(phantom + 0x1c) == 0x41c00000, "phantom radius 24");
-    check(h.w->read(phantom + 0x48) == 0x50f448, "phantom table");
-    check(h.w->read(phantom + 0x2e0, 2) == 0x20, "facing word copied");
-    check(h.w->target(phantom + 0x3c8) == target, "target linked");
-    auto brief = h.w->spawn_phantom(target, "knockdown1_a.anm", 0, 0);
-    check(h.w->read(brief + 0x3cc) == 0x42960000, "flag 0 lasts 75");
-    h.w->write(phantom + 0x3cc, 4, 0x3f800000);
-    h.w->clear_history();
-    h.w->run_actor(phantom);
-    check(h.w->read(phantom + 0x3cc) == 0 || !h.w->contains(phantom), "timer 1 deletes");
-    check(has_event(*h.w, "obj_delete"), "obj_delete at the end");
-    h.w->write(brief + 0x3cc, 4, 0x40000000);
-    h.w->clear_history();
-    h.w->run_actor(brief);
-    check(h.w->contains(brief) && h.w->read(brief + 0x3cc) == 0x3f800000,
-          "timer 2 becomes 1 and stays");
-    check(!has_event(*h.w, "obj_delete"), "no delete while the timer remains");
+    // StrongStancePhantom_ctor 0x1618d4 calls Creature_ctor 0x109d68 with the
+    // target's class definition. The research Creature_ctor body
+    // (ref_arena_monsters.creature_ctor) calls GameObject_ctor with that
+    // definition, which the combat World does not compose; refuse there.
+    std::string refusal;
+    try {
+      h.w->spawn_phantom(target, "knockdown1_a.anm", 4, 1);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("Creature_ctor 0x109d68") != std::string::npos,
+          "the phantom's Creature_ctor is refused: '" + refusal + "'");
+    check(!has_event(*h.w, "obj_runEveryFrame"), "no half-built phantom is scheduled");
   }
   {
     Host h;
@@ -262,14 +264,41 @@ void host() {
     auto fx = find_event(*h.w, "presentation:fx_spawn");
     check(fx && !fx->args.empty() && fx->args[0] == 10, "kind 5 spawns effect 10");
     check(!has_event(*h.w, "presentation:fx_ringBurst"), "kind 5 has no radius burst");
-    auto kind1 = hit_kind(1);
-    check(!h.w->contains(kind1), "kind 1 hit destroys the arrow");
-    auto fx1 = find_event(*h.w, "presentation:fx_spawn");
-    check(fx1 && !fx1->args.empty() && fx1->args[0] == 5, "kind 1 spawns effect 5");
-    check(count_event(*h.w, "ParticleProp_ctor") >= 3 &&
-              count_event(*h.w, "ParticleProp_ctor") <= 6,
-          "kind 1 builds 3 to 6 props");
-    check(count_event(*h.w, "presentation:particle_spawn") == 48, "kind 1 emits 24 pairs");
+    // Kind 1 on the ground (result 1): fx_spawn 5 builds Fire objects that
+    // draw the shared seed (research-fx effects.md row 5); not executed.
+    bool fire = false;
+    try {
+      hit_kind(1);
+    } catch (const C::Unsupported &e) {
+      fire = std::string(e.what()).find("fx_spawn id 5") != std::string::npos;
+    }
+    check(fire, "a kind-1 ground hit refuses at fx_spawn 5");
+    check(!has_event(*h.w, "presentation:fx_spawn"), "effect 5 is not noted as presentation");
+    {
+      // Kind 1 into a creature (result 2, no ground): no effect 5, but the
+      // (draw & 3) + 3 ParticleProp blocks; ParticleProp_ctor 0x1549e8 is a
+      // Prop (GameObject_ctor, one shared draw) whose body is not read.
+      Host t;
+      auto shooter = t.creature({from_int(2000), 0, 0});
+      C::Spawn enemy;
+      enemy.team = 1; // the shooter's slot 20 must call it an enemy
+      t.w->spawn_skelight(enemy);
+      C::Missile m;
+      m.kind = 1;
+      m.position = {0, 0, from_int(36)};
+      m.velocity = {0, 0, 0};
+      auto arrow = t.w->spawn_missile(shooter, m);
+      t.w->clear_history();
+      std::string refusal;
+      try {
+        t.w->run_actor(arrow);
+      } catch (const C::Unsupported &e) {
+        refusal = e.what();
+      }
+      check(refusal.find("ParticleProp_ctor") != std::string::npos,
+            "a kind-1 creature hit refuses at ParticleProp_ctor: '" + refusal + "'");
+      check(!has_event(*t.w, "presentation:fx_spawn"), "a creature hit has no effect 5");
+    }
     auto kind6 = hit_kind(6);
     check(!h.w->contains(kind6), "kind 6 hit destroys the arrow");
     check(count_event(*h.w, "presentation:particle_spawn") == 100, "kind 6 emits 100");
@@ -371,6 +400,10 @@ struct Exact {
   std::vector<std::array<Raw, 7>> particles;
   std::vector<Raw> fx, samples;
   std::optional<std::array<Raw, 4>> ring, light;
+  // (role, attacker, attack, flags, descriptor slot 0) per damage_apply call.
+  std::vector<std::pair<std::string, std::vector<Raw>>> damage;
+  std::optional<Raw> seed;
+  std::vector<Raw> spell, swarm;
 };
 Raw hexword(const std::string &s) {
   return Raw(std::stoul(s, nullptr, 16));
@@ -424,6 +457,22 @@ std::vector<Exact> load_vectors(const char *path) {
         w = hexword(t);
       }
       (tag == "RING" ? cur.ring : cur.light) = row;
+    } else if (tag == "DAMAGE") {
+      std::string role, t;
+      ss >> role;
+      std::vector<Raw> row;
+      while (ss >> t)
+        row.push_back(hexword(t));
+      cur.damage.emplace_back(role, row);
+    } else if (tag == "SEED") {
+      std::string t;
+      ss >> t;
+      cur.seed = hexword(t);
+    } else if (tag == "SPELL" || tag == "SWARM") {
+      std::string t;
+      auto &out = tag == "SPELL" ? cur.spell : cur.swarm;
+      while (ss >> t)
+        out.push_back(hexword(t));
     } else
       throw Mismatch("unknown vector tag " + tag);
   }
@@ -467,10 +516,84 @@ void replay(const Exact &c) {
     expect_particles(*h.w, c);
     return;
   }
+  if (c.name == "disease-attach") {
+    Host h;
+    auto victim = h.creature({0, 0, 0});
+    h.w->write(victim + 0x1c, 4, 0x41c00000);  // 24.0
+    h.w->write(victim + 0x68, 4, 0x3e800000);  // disease resistance 0.25
+    h.w->write(C::FRAME, 4, 77);
+    h.w->write(C::SHARED_SEED, 4, 0x2468ace1);
+    h.w->write(0x41b1e4, 4, 0x41b000);
+    h.w->clear_history();
+    auto block = h.w->attach_disease(victim, 0);
+    check(block != 0, "disease-attach block");
+    check(c.seed && h.w->read(C::SHARED_SEED) == *c.seed, "disease-attach shared seed");
+    const unsigned offs[] = {0x10, 0x14, 0x1a0, 0x1a4, 0x1a8, 0x1ac};
+    check(c.spell.size() == 6, "disease-attach spell words");
+    for (unsigned k = 0; k < 6; ++k)
+      check(h.w->read(block + offs[k]) == c.spell[k],
+            "disease-attach word +" + std::to_string(offs[k]));
+    check(c.swarm.size() == 96, "disease-attach swarm width");
+    for (unsigned k = 0; k < 96; ++k)
+      check(h.w->read(block + 0x1c + 4 * k) == c.swarm[k],
+            "disease-attach swarm word " + std::to_string(k));
+    check(h.w->attached_spells(victim).size() == 1, "disease-attach is linked");
+    return;
+  }
+  if (c.name == "cloud-tick") {
+    // The victim sits one cell column below the cloud, so the grid walk meets
+    // it first, as the research box callback lists it first. The cloud is in
+    // its own box (GameObject_ctor links it into grid A, radius 24).
+    Host h;
+    auto owner = far_owner(h);
+    auto victim = h.creature({from_int(-5), 0x40000000, 0});
+    h.w->write(C::FRAME, 4, 60);
+    auto cloud = h.w->spawn_disease_cloud({0x3f800000, 0x40000000, 0x40400000}, 1, owner);
+    h.w->write(cloud + 0x44, 4, 0x12345678);
+    h.w->write(cloud + 0x54, 4, 1000);
+    h.w->write(cloud + 0x58, 4, 10);
+    h.w->write(cloud + 0x5c, 4, 0x41200000);
+    h.w->write(cloud + 0x60, 4, 20);
+    h.w->clear_history();
+    std::string refusal;
+    try {
+      h.w->run_actor(cloud);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(c.radius && h.w->read(cloud + 0x5c) == *c.radius, "cloud-tick radius word");
+    expect_particles(*h.w, c);
+    std::vector<const C::Event *> hits;
+    for (auto &e : h.w->events())
+      if (e.name == "damage_apply")
+        hits.push_back(&e);
+    // Every research damage_apply on a creature is matched; the one on the
+    // cloud itself is where the native World refuses (slot 2 of 0x5186f0).
+    std::size_t matched = 0;
+    for (auto &row : c.damage) {
+      if (row.first == "self") {
+        check(refusal.find("DiseaseCloud damage_apply on itself") != std::string::npos,
+              "cloud-tick: the cloud's own damage_apply is refused: '" + refusal + "'");
+        break;
+      }
+      check(matched < hits.size(), "cloud-tick damage call " + std::to_string(matched));
+      auto &e = *hits[matched++];
+      check(e.args.size() >= 4 && Raw(e.args[0]) == victim && Raw(e.args[1]) == row.second.at(0) &&
+                Raw(e.args[2]) == row.second.at(1) && Raw(e.args[3]) == row.second.at(2),
+            "cloud-tick damage arguments");
+    }
+    check(matched == hits.size(), "cloud-tick damage count");
+    auto spells = h.w->attached_spells(victim);
+    check(spells.size() == 1, "cloud-tick: the creature took the 0x26 disease entry");
+    return;
+  }
   int kind = 0;
   bool hit = true;
   if (c.name == "arrow5") {
     kind = 5;
+    hit = false;
+  } else if (c.name == "arrow1-flight") {
+    kind = 1;
     hit = false;
   } else if (c.name == "arrow1")
     kind = 1;
@@ -493,6 +616,23 @@ void replay(const Exact &c) {
   h.w->write(arrow + 0xd8, 4, 40);
   h.w->write(arrow + 0xec, 4, 1000);
   h.w->clear_history();
+  if (c.name == "arrow1") {
+    // The research hit calls fx_spawn 5 (3 or 4 Fire objects drawing the
+    // shared seed, research-fx effects.md section 6) and ParticleProp_ctor;
+    // neither body is executed, so the native World refuses at fx_spawn 5.
+    check(c.fx.size() == 1 && c.fx[0] == 5, "arrow1: the research hit spawns effect 5");
+    std::string refusal;
+    try {
+      h.w->run_actor(arrow);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("fx_spawn id 5") != std::string::npos,
+          "arrow1: the hit refuses at fx_spawn 5: '" + refusal + "'");
+    check(!has_event(*h.w, "presentation:fx_spawn") && !has_event(*h.w, "ParticleProp_ctor"),
+          "arrow1: no silent effect 5 or prop");
+    return;
+  }
   h.w->run_actor(arrow);
   if (c.expiry)
     check(h.w->read(arrow + 0xec) == *c.expiry, c.name + " expiry");

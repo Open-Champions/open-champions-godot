@@ -187,9 +187,11 @@ continues byte-identically (`fixture-save`, `wave12_extensions`).
 - **Thrown potions 1–3** (`combat_drop_potion(kind)`, buttons Potion 1/2/3).
   `World::spawn_thrown` at the player with the `Thrown` defaults and zero
   velocity, since the throw call site and its arc are not contracted. The
-  combat-runtime-4 `playerProjectile_run` bodies then run: kind 1 makes five
-  LooseFire call-outs and five decals, kind 2 one poison-gas spell, kind 3 the
-  ring's LightEffect and floor decal. The sessions keep running.
+  combat-runtime-4 `playerProjectile_run` bodies then run. Kind 3 lays the
+  ring's LightEffect and floor decal and the session keeps running. Kinds 1
+  and 2 stop the session when the potion ends: `LooseFire_ctor` `0x202b70` and
+  `poisonGasSpell_ctor` `0x202de8` are stubbed call-outs of the research
+  (each draws the shared seed), so the World refuses them (audit CR4-1).
 - **Holy Shield.** The Full fixture plants the sample model and the pose, then
   `arm_fixture_holy_shield` attaches a shield on skill 16. A player hit with
   mana and a pose follows `model_getSamplePoint` at scale 1 (241 particles).

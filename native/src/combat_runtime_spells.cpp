@@ -297,9 +297,8 @@ void World::State::effect_dtor(Raw fn, Address self, Raw flags) {
   case 0x3c6888: // LightEffect_dtor
     parts = {{VT_LIGHTEFFECT, {{false, 0x88}, {true, 0x4c}}}};
     break;
-  case DISEASE_CLOUD_DTOR: // DiseaseCloud_dtor 0x3cd480: the owner head the ctor linked
-    parts = {{VT_DISEASE_CLOUD, {{false, 0x4c}}}};
-    break;
+  case DISEASE_CLOUD_DTOR:
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   case HOLY_SHIELD_DTOR: // SpellHolyShield_dtor 0x3cf0c4 = the base Spell
     // destructor (skills-35-68 section 54). Its steps are the base tail of the
     // executed SpellWaveOfFlame_dtor (combat-spells 6.1).
