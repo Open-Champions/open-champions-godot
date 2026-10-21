@@ -90,7 +90,16 @@ its own launch and rendering evidence.
    The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports 44
    RTA quest/profile, campaign-state and player-record commands with complete synthetic state tests;
    the remaining 147 built-ins and scene integration remain unsupported.
-   The [level-script command host](SCRIPT_COMMANDS.md) runs the documented binder and executed callees for monster values, stat scales, charm with a null target, fades, supplied-volume music, stream-2 stop and the inferred boss-music bit of `setCFlag`. The five text setters and unknown callee states refuse. The play session binds an offline seed stream, starts one player at difficulty 1 and uses the documented object factory with the owner-selected executable. The [item commands](SCRIPT_ITEMS.md) run their researched has, count, remove, give and generate handlers; gives need item tables and a bound seed. The arena monster builder is a separate library call.
+   The [level-script command host](SCRIPT_COMMANDS.md) runs the documented
+   binder and executed callees for monster values, stat scales, charm with a
+   null target, fades, supplied-volume music, stream-2 stop and the inferred
+   boss-music bit of `setCFlag`. The five text setters and unknown callee
+   states refuse. The play session binds an offline seed stream, starts one
+   player at difficulty 1 and uses the documented object factory with the
+   owner-selected executable. The [item commands](SCRIPT_ITEMS.md) run their
+   researched has, count, remove, give and generate handlers; gives need item
+   tables and a bound seed. The arena monster builder is a separate library
+   call.
 
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. The [lockstep session](NETPLAY.md)

@@ -3411,3 +3411,78 @@ belongs in `native_fx_renderer.gd`). The five text setters, `startMusic` and
 boss music stay refused in play (no string table port, no supplied music
 volume). Netplay is an offline co-op simulation over the lockstep transport;
 no Godot net scene.
+
+## Playable integration wave 20 — script session, items, play HUD — 2026-10-21
+
+Start `63c40ab`. Merged the three requested finished branches in order, one at a
+time, with a local commit after each verified merge:
+
+| Branch | Tip | Merge | Conflict resolution |
+|---|---|---|---|
+| `codex/script-session` | `b6b735b` | `3a3b261` | Kept wave-19 executed callee routing and refusal accounting alongside the offline seed, classified objects and one-player setup. |
+| `codex/items` | `290b951` | `919b6e4` | Kept both host sets; one difficulty source is `script_items::DIFFICULTY_IMAGE` at host construction. |
+| `codex/hud-overlay` | `fbffecb` | `ded5aab` | Kept PS2 import and the new play HUD in `play_flow.gd`. |
+
+No other branch was merged. All commits are local. `~/champions-re` was not
+touched. The owner’s disc copy was read only and contributed counts only.
+
+### Script and presentation contracts
+
+A refused answer still stops the script entry. `setCFlag` /
+`selectSetCFlag` still refuse on placeholder objects, and item-command
+partial refusals also stop. The offline play session opts into
+`SeedPolicy::OfflineSession` for `getRand`; the host’s default is strict
+`Exact`. Netplay has no script-host binding and keeps its own kill plane in its
+own world. The one process audio mixer and the per-process `user://` fixture
+folders remain. AntQueen, Skeleton and Soul constructors stay refused.
+
+The HUD draws the documented status frame and health bar on all tested real
+levels. Mana and pending overlays draw when supplied by a synthetic
+observation; missing real-level state still refuses the other elements.
+A rendered authored-texture view was inspected. No private-disc screenshot was
+saved.
+
+### Real data and Godot verification
+
+- The four-slice 60-tick sweep passed **111 / 111** with scripts on and
+  **111 / 111** with scripts off; zero failed checks and empty refusal lists.
+  Scripted executed calls progress 4,208 → 8,472 → 17,128, `getRand`
+  0 → 367 → 1,457, and refusal stops 39 → 35 → 16 as script-session then
+  items let entries advance. HUD adds 111 checks (119 → 230), 111 health bars
+  and 111 status frames. The exact key-by-key attribution is in the
+  [wave-20 report](../work/loop-playable-integration-r20-report.md) and
+  [REAL_DATA.md](REAL_DATA.md).
+- The four universal GDExtension builds pass. Godot dev matrix **51 / 51**
+  (wave 19’s 50 plus `play_hud_smoke`). The Full combat headless run passes
+  2,621 checks with zero failures.
+- **FULL_TRACE** remains
+  `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035`
+  (21,990 bytes) in the dev Full combat run and the exported headless run.
+- Export `--export-release 'macOS universal'` produced
+  `build/exports/wave20/OpenChampions.zip` and `Open Champions.app`, with
+  arm64 and x86_64 executable and extension slices. The ZIP has no `.gob`,
+  `.lmp` or `.iso` members and the app has no private-validation path string.
+  Headless exported-app real-data checks pass 12 / 12, 12 / 12 with scripts,
+  and 3 / 3 arena levels with scripts. HUD health bar and frame draw on every
+  tested level. BLEND-7 remains the wave-19 mixed-pass FX refusal, with no
+  failed level checks.
+- Export matrix **19 / 19**, including `play_hud_smoke`; the graphical
+  36,000-tick Full flow passed **108,827 checks, zero failures**, with 63
+  captures. All four exported `FULL_TRACE` records equal `374e40c9…2035`.
+  ZIP SHA-256 is `e9f96e47…` and the packaged extensions match the release
+  dylibs byte-for-byte.
+- Native arm64 Release and x86_64 Release builds pass. Arm64 CTest
+  finished **215/216** on the first full `-j 3` run; `player-exact` hit its
+  240 s timeout during concurrent work and passed alone in 148.31 s, so all
+  216 tests are verified with that retry recorded separately. x86_64 CTest
+  under Rosetta passed **216/216** on the first `-j 3` run, 1,398.01 s,
+  with no timeouts or failures. No compiler warnings were emitted; the
+  linker’s existing duplicate-library notes remain.
+
+### Remaining limits
+
+The offline script generator has 15,577 unmodelled object-load draws, which
+it counts; it does not claim the original clock seed. The real-level session
+has no item tables for gives, and the HUD lacks observed mana, XP, level,
+gold and other producers. BLEND-7 and the wave-18 refusals remain. Netplay is
+an in-process offline co-op simulation, without a Godot net scene or sockets.
