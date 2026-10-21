@@ -24,6 +24,14 @@ inline constexpr int QUEST_FIELD = 32;
 inline constexpr int QUEST_STRIDE = 0x40;
 inline constexpr int MISSIONS = 13;
 inline constexpr int DIFFICULTIES = 5;
+// The mission rows are difficulties 1..5: +0x4bbf + d * 13 + m, that is
+// +0x4bcc..+0x4c0c, and the medal bytes start at +0x4c0d. Row 0 would lie on
+// the skill pairs and the countdown bytes. player_initNewCharacter marks rows
+// 1..5, and g_difficultyIdx is 1 in the executable image (research-items
+// 49bc578 docs/script-items.md section 3).
+inline constexpr int FIRST_DIFFICULTY = 1;
+inline constexpr int LAST_DIFFICULTY = FIRST_DIFFICULTY + DIFFICULTIES - 1;
+inline constexpr int IMAGE_DIFFICULTY = FIRST_DIFFICULTY;
 inline constexpr int BAGS = 3;
 inline constexpr int XP_LEVELS = 81;
 inline constexpr int MENU_ROWS = 12;
@@ -61,6 +69,7 @@ struct Item {
 struct Record {
   std::array<QuestLine, QUEST_SLOTS> quests{};
   std::int32_t quest_count = 0;
+  // missions[mission_index(d, m)]: difficulty d 1..5, record +0x4bcc onward.
   std::array<std::uint8_t, DIFFICULTIES * MISSIONS> missions{};
   std::array<std::uint8_t, MISSIONS> medals{};
   std::uint8_t evil = 0;
@@ -141,6 +150,11 @@ struct Events {
   std::uint64_t exp_grants = 0;
   std::uint64_t menu_launches = 0;
 };
+
+// The index of difficulty d's mission m in Record::missions. A difficulty
+// outside 1..5 or a mission outside 0..12 is refused: the campaign does not
+// hold row 0 or the bytes after row 5.
+int mission_index(int difficulty, int mission);
 
 std::string field_text(const Field &);
 Field field_from(const std::string &);
@@ -243,6 +257,8 @@ public:
   const Events &events() const { return events_; }
 
   // Typed campaign image. Not the PS2 card image: save_build was not re-run.
+  // Version 2 holds mission rows 1..5. Version 1 held rows 0..4 and is
+  // refused: it did not keep row 5.
   std::vector<std::uint8_t> save() const;
   static Campaign load(const std::vector<std::uint8_t> &);
 
@@ -252,7 +268,7 @@ private:
   int choice_get(std::uint8_t Record::*field) const;
 
   int num_players_ = 0;
-  int difficulty_ = 0;
+  int difficulty_ = IMAGE_DIFFICULTY;
   int act_ = -1;
   bool network_ = false;
   bool xp_ready_ = false;

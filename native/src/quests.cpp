@@ -100,6 +100,14 @@ bool listed(const std::vector<int> &values, int mission) {
 }
 } // namespace
 
+int mission_index(int difficulty, int mission) {
+  if (difficulty < FIRST_DIFFICULTY || difficulty > LAST_DIFFICULTY)
+    throw Error("difficulty is outside mission rows 1..5");
+  if (mission < 0 || mission >= MISSIONS)
+    throw Error("mission is outside the 13 of a row");
+  return (difficulty - FIRST_DIFFICULTY) * MISSIONS + mission;
+}
+
 std::string field_text(const Field &field) {
   std::string text;
   for (auto byte : field) {
@@ -401,9 +409,10 @@ void Campaign::set_record(int slot, Record record) {
 void Campaign::seed_new_character(int slot) {
   check_slot(slot);
   auto &missions = players_[static_cast<std::size_t>(slot)].missions;
-  for (int difficulty = 0; difficulty < DIFFICULTIES; ++difficulty)
-    missions[static_cast<std::size_t>(difficulty * MISSIONS)] =
-        static_cast<std::uint8_t>(missions[static_cast<std::size_t>(difficulty * MISSIONS)] | 3u);
+  for (int difficulty = FIRST_DIFFICULTY; difficulty <= LAST_DIFFICULTY; ++difficulty) {
+    auto &byte = missions[static_cast<std::size_t>(mission_index(difficulty, 0))];
+    byte = static_cast<std::uint8_t>(byte | 3u);
+  }
 }
 void Campaign::quest_add(const std::string &title, const std::string &text) {
   for (int slot = 0; slot < num_players_; ++slot) {
@@ -467,23 +476,21 @@ int Campaign::mission_available(int mission) const {
   need_mission(mission);
   if (mission >= MISSIONS)
     return 0;
-  return players_[0].missions[static_cast<std::size_t>(difficulty_ * MISSIONS + mission)] & 1;
+  return players_[0].missions[static_cast<std::size_t>(mission_index(difficulty_, mission))] & 1;
 }
 int Campaign::mission_complete(int mission) const {
   need_mission(mission);
   if (mission >= MISSIONS)
     return 0;
-  return (players_[0].missions[static_cast<std::size_t>(difficulty_ * MISSIONS + mission)] >> 1) & 1;
+  return (players_[0].missions[static_cast<std::size_t>(mission_index(difficulty_, mission))] >> 1) & 1;
 }
 void Campaign::mission_set_available(int mission, int on) {
   need_mission(mission);
   if (mission >= MISSIONS)
     return;
-  if (difficulty_ < 0 || difficulty_ >= DIFFICULTIES)
-    throw Error("difficulty is outside the five mission rows");
+  const auto index = static_cast<std::size_t>(mission_index(difficulty_, mission));
   for (int slot = 0; slot < num_players_; ++slot) {
-    auto &byte = players_[static_cast<std::size_t>(slot)]
-                     .missions[static_cast<std::size_t>(difficulty_ * MISSIONS + mission)];
+    auto &byte = players_[static_cast<std::size_t>(slot)].missions[index];
     byte = static_cast<std::uint8_t>((byte & 0xFEu) | (static_cast<unsigned>(on) & 1u));
   }
 }
@@ -491,11 +498,9 @@ void Campaign::mission_set_complete(int mission, int value) {
   need_mission(mission);
   if (mission >= MISSIONS)
     return;
-  if (difficulty_ < 0 || difficulty_ >= DIFFICULTIES)
-    throw Error("difficulty is outside the five mission rows");
+  const auto index = static_cast<std::size_t>(mission_index(difficulty_, mission));
   for (int slot = 0; slot < PLAYERS; ++slot) {
-    auto &byte = players_[static_cast<std::size_t>(slot)]
-                     .missions[static_cast<std::size_t>(difficulty_ * MISSIONS + mission)];
+    auto &byte = players_[static_cast<std::size_t>(slot)].missions[index];
     if (value == -1)
       byte = static_cast<std::uint8_t>(byte | 2u);
     else
@@ -657,15 +662,12 @@ bool Campaign::tick_menu(int button, const MenuInputs &inputs) {
   world.pause = inputs.pause;
   world.slot_active = inputs.slot_active;
   world.fade = inputs.fade;
-  if (difficulty_ >= 0 && difficulty_ < DIFFICULTIES) {
-    for (int mission = 0; mission < MISSIONS; ++mission) {
-      const auto byte =
-          players_[0].missions[static_cast<std::size_t>(difficulty_ * MISSIONS + mission)];
-      if (byte & 1u)
-        world.available.push_back(mission);
-      if (byte & 2u)
-        world.complete.push_back(mission);
-    }
+  for (int mission = 0; mission < MISSIONS; ++mission) {
+    const auto byte = players_[0].missions[static_cast<std::size_t>(mission_index(difficulty_, mission))];
+    if (byte & 1u)
+      world.available.push_back(mission);
+    if (byte & 2u)
+      world.complete.push_back(mission);
   }
   for (int mission = 0; mission < MISSIONS; ++mission) {
     const auto byte = players_[0].medals[static_cast<std::size_t>(mission)];
@@ -688,9 +690,7 @@ std::pair<int, int> Campaign::act_changed(const std::string &name) {
   return {0, act_};
 }
 std::string Campaign::hub() const {
-  int mission = 0;
-  if (difficulty_ >= 0 && difficulty_ < DIFFICULTIES)
-    mission = players_[0].missions[static_cast<std::size_t>(difficulty_ * MISSIONS + 1)];
+  const int mission = players_[0].missions[static_cast<std::size_t>(mission_index(difficulty_, 1))];
   return hub_name(players_[0].evil, players_[0].decision, mission, difficulty_);
 }
 void Campaign::note_cflag(int bit, bool) {
@@ -707,6 +707,8 @@ namespace {
 void put_field(std::vector<std::uint8_t> &out, const Field &field) {
   out.insert(out.end(), field.begin(), field.end());
 }
+// Version 2: Record::missions holds rows 1..5 (version 1 held rows 0..4).
+constexpr std::uint32_t SAVE_VERSION = 2;
 void put_float(std::vector<std::uint8_t> &out, float value) {
   std::uint32_t bits = 0;
   static_assert(sizeof(float) == 4, "float is 32 bits");
@@ -718,7 +720,7 @@ std::vector<std::uint8_t> Campaign::save() const {
   std::vector<std::uint8_t> out;
   const char magic[] = {'O', 'C', 'Q', 'U', 'E', 'S', 'T', '1'};
   out.insert(out.end(), magic, magic + 8);
-  put_u32(out, 1);
+  put_u32(out, SAVE_VERSION);
   put_i32(out, num_players_);
   put_i32(out, difficulty_);
   put_i32(out, act_);
@@ -797,7 +799,10 @@ Campaign Campaign::load(const std::vector<std::uint8_t> &bytes) {
   if (!std::equal(magic, magic + 8, bytes.begin()))
     throw Error("campaign save magic");
   in.at = 8;
-  if (in.u32() != 1)
+  const auto version = in.u32();
+  if (version == 1)
+    throw Error("campaign save version 1 holds mission rows 0..4 and not row 5");
+  if (version != SAVE_VERSION)
     throw Error("campaign save version");
   Campaign out;
   out.num_players_ = in.i32();

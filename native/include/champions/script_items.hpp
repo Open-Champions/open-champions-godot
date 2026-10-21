@@ -13,6 +13,7 @@
 // (image_tables) or from authored test data.
 #include "champions/core_arithmetic.hpp"
 #include "champions/items.hpp"
+#include "champions/quests.hpp"
 #include "champions/script_builtins.hpp"
 #include <array>
 #include <cstdint>
@@ -35,7 +36,7 @@ inline constexpr std::uint32_t G_RAND_SEED = 0x404464;
 inline constexpr std::uint32_t G_MEDAL_MISSION = 0x4f713c, G_MEDAL_PLAYER = 0x4f7148;
 inline constexpr std::uint32_t G_ALIVE_LIST = 0x4f8440;
 inline constexpr std::uint32_t G_DIFFICULTY = 0x4f719c;   // g_difficultyIdx, 1..5; the image holds 1
-inline constexpr std::int32_t DIFFICULTY_IMAGE = 1;
+inline constexpr std::int32_t DIFFICULTY_IMAGE = quests::IMAGE_DIFFICULTY;
 inline constexpr std::uint32_t G_CM1_WORD = 0x4f7110;     // -1 in the executable image
 inline constexpr std::int32_t CM1_IMAGE = -1;
 inline constexpr std::uint32_t G_CLASS_SKILLS = 0x4ef538, CLASS_SKILLS_SIZE = 0xa88, CLASS_SKILL_ROW = 0x38;
