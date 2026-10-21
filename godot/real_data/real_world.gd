@@ -27,6 +27,7 @@ var water_shader: Shader
 var water_materials: Array = []
 var water_texture: Texture2D
 var water_texture_refused := false
+var water_tiles_refused := 0 # tiles not drawn because waterenv did not decode
 var wave_frame := -1
 var piece_instances: Dictionary = {} # chunk -> Array of MeshInstance3D
 var ticks_observed := 0
@@ -54,15 +55,21 @@ func set_water_texture(bytes: PackedByteArray) -> Dictionary:
 			image = decoded.image
 	water_texture_refused = image == null
 	if image == null:
-		# Neutral modulate texel 128 leaves the documented vertex colour.
-		image = Image.create(1, 1, false, Image.FORMAT_RGBA8)
-		image.set_pixel(0, 0, Color(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0))
+		# The texture is the waterenv image water_setup was given (water-draw.md
+		# sections 1 and 7.1 at research-textures a9486c7). No substitute texel
+		# is documented, so water whose image does not decode is not drawn.
+		water_texture = null
+		water_tiles_refused = info.get("water", []).size()
+		if water_instance != null: water_instance.visible = false
 		if not "water texture refused" in errors:
 			errors.append("water texture refused")
+		return {"ok": false, "width": 0, "height": 0, "tiles_refused": water_tiles_refused}
 	water_texture = ImageTexture.create_from_image(image)
+	water_tiles_refused = 0
 	for material in water_materials:
 		material.set_shader_parameter("water_tex", water_texture)
-	return {"ok": not water_texture_refused, "width": image.get_width(), "height": image.get_height()}
+	if water_instance != null: water_instance.visible = true
+	return {"ok": true, "width": image.get_width(), "height": image.get_height(), "tiles_refused": 0}
 
 func _water_material(fix: float) -> ShaderMaterial:
 	if water_shader == null:
@@ -92,6 +99,8 @@ func _build_water(terrain_root: Node3D) -> void:
 	for i in surfaces.size():
 		instance.set_surface_override_material(i, _water_material(float(surfaces[i].fix)))
 	water_instance = instance
+	# Hidden until set_water_texture decodes the level's waterenv image.
+	instance.visible = water_texture != null
 	# A child of the terrain root, inserted before the first layer-4 surface.
 	# render_priority 3 is the documented layer: after opaque WORLD, before
 	# flag 0x200. Water does not write or test depth.
@@ -196,7 +205,7 @@ func observe(raw: Dictionary) -> void:
 func label() -> String:
 	var parts: Array[String] = []
 	if not info.get("water", []).is_empty():
-		var texture := "texture refused" if water_texture_refused else "textured"
+		var texture := "texture refused, not drawn" if water_texture_refused else "textured"
 		parts.append("%d water tiles (layer 3, %s, wave on the simulation tick)%s" % [info.water.size(), texture, " · in water" if in_water else ""])
 	if not info.get("pieces", []).is_empty():
 		parts.append("%d moving pieces, %d claimed (level-flow poses)" % [info.pieces.size(), int(info.get("claimed", 0))])

@@ -163,6 +163,7 @@ func run() -> void:
 		add("water.tiles_shown", int(result.get("water_tiles", 0)))
 		if int(result.get("water_tiles", 0)) > 0:
 			add("water.texture_ok" if result.get("water_texture_ok", false) else "water.texture_refused")
+			add("water.tiles_not_drawn", int(result.get("water_tiles_refused", 0)))
 			peak("water.texture_width", int(result.get("water_texture_width", 0)))
 			peak("water.texture_height", int(result.get("water_texture_height", 0)))
 		add("pieces.total", int(result.get("pieces", 0)))
