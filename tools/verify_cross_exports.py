@@ -8,7 +8,10 @@ from windows_pack import embedded_resources, verify_windows_pack
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FORBIDDEN_GAME_SUFFIXES = {'.gob', '.lmp', '.world', '.iso', '.cso', '.elf'}
+FORBIDDEN_GAME_SUFFIXES = {
+    '.gob', '.lmp', '.world', '.tex', '.etex', '.bnk', '.iso', '.cso', '.elf',
+}
+ALLOWED_BIN_RESOURCES = {'.godot/uid_cache.bin', 'tests/fixtures/level_texture_synthetic.bin'}
 
 
 def check(platform, player, extension_suffix):
@@ -43,7 +46,8 @@ def check(platform, player, extension_suffix):
                             'x86_64')
 
     bad_names = [name for name in resources
-                 if Path(name).suffix.lower() in FORBIDDEN_GAME_SUFFIXES]
+                 if Path(name).suffix.lower() in FORBIDDEN_GAME_SUFFIXES
+                 or (Path(name).suffix.lower() == '.bin' and name not in ALLOWED_BIN_RESOURCES)]
     if bad_names:
         raise ValueError(f'{platform}: game data in embedded pack: {len(bad_names)} entries')
 

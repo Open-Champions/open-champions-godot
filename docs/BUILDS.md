@@ -172,7 +172,13 @@ mkdir -p build/exports/macos-universal build/exports/windows-x64 build/exports/l
   "$PWD/build/exports/windows-x64/OpenChampions.exe"
 "$GODOT" --headless --path godot --export-release "Linux x64" \
   "$PWD/build/exports/linux-x64/OpenChampions.x86_64"
+python3 tools/verify_cross_exports.py
 ```
+
+The verifier checks both embedded packs, their release-library descriptors,
+checksums, exact copied libraries, expected three-file layouts, and absence of
+game-data file types and local private paths. It does not execute either
+target binary.
 
 Keep every file the exporter writes in that directory. On Windows the two
 release DLLs sit beside `OpenChampions.exe`. On Linux the two release `.so`
