@@ -3,7 +3,11 @@
 `champions-script-commands` is the opt-in host for a level's script. It does
 not replace the script machine or the binder. A documented command runs the
 existing binder. Where that command's whole effect is a call the binder
-already makes, the host answers the call with a subsystem that already exists:
+already makes, the host answers the call with a subsystem that already exists.
+
+Research `t3/research-script` `52984db` executed a second set of callees. Those
+commands also run the binder. The composition census is unchanged: a row stays
+partly documented when its callee is what this host now runs.
 
 | Command | Route |
 |---|---|
@@ -12,19 +16,54 @@ already makes, the host answers the call with a subsystem that already exists:
 | `getRand` | the shared generator at memory word `0x404464` |
 | `setEntrance` | `level_flow::State::entrance` |
 | `addParticleOnObject` | `fx::sim::EffectWorld::particle_spawn` |
+| `setMonsterVal`, `selectSetMonsterVal` | field halves, or base slot 34 `from_int` at `+0x3c0` |
+| `setMonsterRange` | the same slot 34 when the range is above 0 |
+| `setCreatureParams`, `initScriptSetParams` | `Creature_scaleStats` |
+| `charmMonster`, `followPlayer` | `Creature_setCharm` |
+| `setInfo` | `hud_showMessage` |
+| `addHelpMessage`, `addHelpMessageF` | `hud_showHelpMessage` |
+| `showBust` | `hud_setBust` |
+| `showCompass` | `hud_setCompassTarget` |
+| `hudResetFadeScreen`, `hudFadeScreen` | `hud_setFade`, `hud_stepFade` |
+| `startMusic` | `music_playLevel` |
+| `endMusic` | `stream_queueStop` on stream 2 |
+| `setCFlag`, `selectSetCFlag` | `audio::Playback::play_boss_music` |
 
 `getRand` copies the shared seed into the binder's word, lets the binder draw
 once, and copies the word back. It does not draw a second time. The combat
 fixture keeps its own seed word; this host does not rewrite it. With no bound
-seed, the draw uses the binder world's shared generator.
+seed, the draw uses the binder world's shared generator. None of the commands
+added above draw that seed.
 
 A particle whose definition is not in the caller's JSON increments
 `missing_definitions` and spawns nothing else. The headless effect world does
-not draw. The Godot effect presenter is unchanged.
+not draw. The Godot effect presenter is unchanged. The host's `Playback` is
+the same: `startMusic`, `endMusic` and `setCFlag` update it, and the Godot
+audio presenter is a separate object.
 
-Combat runtime, creature AI, audio and HUD have no command whose whole effect
-is documented. Those commands, and every partly documented or unknown command,
-return 0 and increment that command's refusal count. The binder does not run.
+Creature commands act only when object flag `0x20` is already set. An adopted
+object file has no flag word. The constructors that set the bit were not
+entered, so adoption leaves the bit clear and stores the file's class string
+at `+0x34` for the boss-name lookup. A synthetic length prefix is removed only
+when its integer equals the remainder length, so `10GameObject` is looked up
+as `GameObject`. `text_lookup`'s string table was not entered: the host widens
+the key to UTF-16 and the setter copies that. `wstr_format` was not entered:
+`addHelpMessageF` replaces the first `%d`, `%i` or `%u` with the first float
+truncated toward zero, and leaves every other percent sequence as text.
+`sound_playOnObject` was not entered, so the help chime handle stays -1 and
+the frozen-flag body stores nothing. The help box still opens.
+
+A follow camera with mode 1 is installed at `0x4f8450`. A null camera faults
+`showBust` and `showCompass`. The other HUD gates are the words research
+measured.
+
+Every command that is still partial or unknown returns 0 and increments that
+command's refusal. The binder does not run. That includes the bag walks, 
+`generateMonster` (`world_createObject` is not the combat spawn factory),
+`deleteMonster`, the slot-27 commands (`rootMonster`, `killMonster`,
+`stopFollowingPath`), `followPath` (`obj_runEveryFrame` was not entered),
+`sound`, `soundSequence`, `hitPlayers`, `setWeaponType`, the medal boxes and
+`cutScene`.
 
 ## Level entry
 
@@ -54,6 +93,11 @@ and writes `native/tests/vectors/script_commands.tsv` and
 documented, 70 partly documented, 40 unknown, 5660 published calls, 122 used
 and 69 never called. The C++ test compares the compiled table to the TSV and
 runs synthetic scripts for the routes, the refusals, and the deferred wait.
+
+`tools/generate_script_effects_vectors.py` reads `tools/ref_script_effects.py`
+from the same research line at `52984db`, without the executable, and writes
+`native/tests/vectors/script_effects.tsv`. The C++ test replays those stores,
+returns and calls.
 
 ## Play session
 

@@ -1,7 +1,9 @@
 #include "champions/amx.hpp"
 #include "champions/core_arithmetic.hpp"
 #include "champions/core_state.hpp"
+#include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/script_effects.hpp"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -12,7 +14,10 @@
 #include <vector>
 
 namespace sc = champions::simulation::rta::script_commands;
+namespace se = champions::simulation::rta::script_effects;
+namespace builtins = champions::simulation::rta::builtins;
 namespace a = champions::simulation::rta::amx;
+namespace audio = champions::audio;
 using champions::simulation::rta::Fpu;
 using champions::simulation::rta::SharedRandom;
 using champions::simulation::rta::Lcg;
@@ -251,8 +256,101 @@ void test_entrance_grid_and_particle() {
   check(host.counts().faults == 0, "routed commands do not fault");
 }
 
+std::string wide_at(const builtins::Memory &memory, std::uint32_t address) {
+  std::string out;
+  for (std::uint32_t i = 0; i < 64; ++i) {
+    const auto unit = memory.u16(address + i * 2u);
+    if (unit == 0)
+      return out;
+    out.push_back(static_cast<char>(unit));
+  }
+  return out;
+}
+
+void test_routed_commands() {
+  auto built = build_calls(
+      {{"start",
+        {{"setMonsterVal", {2000, 1, 0x1abcd}},
+         {"setMonsterVal", {2000, 4, 0x1abcd}},
+         {"setMonsterVal", {2200, 1, 99}},
+         {"setInfo", {2400}},
+         {"showBust", {2600, 2800, 3, 4}},
+         {"addHelpMessage", {3000, 3200}},
+         {"hudFadeScreen", {40}},
+         {"endMusic", {}},
+         {"setCFlag", {3400, 0, 1}},
+         {"getRand", {}}}}},
+      {{2000, "ogre"},
+       {2200, "prop"},
+       {2400, "hello"},
+       {2600, "face"},
+       {2800, "hi"},
+       {3000, "title"},
+       {3200, "body"},
+       {3400, "broon"}});
+  sc::Host host;
+  host.add_object("ogre", 0x20, {}, 0);
+  host.add_object("prop", 0, {}, 0);
+  host.add_object("broon", 0x20, {}, 0);
+  auto *ogre = host.variables().find_first("ogre");
+  auto *prop = host.variables().find_first("prop");
+  auto *broon = host.variables().find_first("broon");
+  check(ogre && prop && broon, "routed objects exist");
+  if (!ogre || !prop || !broon)
+    return;
+  host.variables().memory.string(0x720000, "FatCyclops");
+  host.variables().memory.word(broon->addr + 0x34, 0x720000);
+  host.variables().memory.word(se::G_MUSIC_VOLUME, audio::music_volume_image);
+  audio::VatEntry row;
+  row.name = "mx_ba_broon_l.vag";
+  row.length = 16;
+  row.declared_rate = 48000;
+  host.audio().set_global_vat(std::vector<std::uint8_t>(16, 0), {row}, 0);
+  SharedRandom live(20973);
+  Lcg expected(20973);
+  const auto drawn = expected.draw();
+  host.bind_seed(&live);
+  const auto seed_before = live.state;
+  plant(host, built);
+  check(host.begin_level() == sc::Stop::Complete, "routed script completes");
+  check(host.counts().faults == 0, "routed script does not fault");
+  check(host.variables().memory.u16(ogre->addr + 0x3ac) == 0xabcd, "which 1 stores the low half");
+  check(host.variables().memory.u32(ogre->addr + 0x3c0) == 0x472bcd00u, "which 4 stores from_int of the low half");
+  check(host.variables().memory.u16(prop->addr + 0x3ac) == 0, "a non-creature stores nothing");
+  check(host.counts().executed[static_cast<std::size_t>(index_of("setMonsterVal"))] == 3, "setMonsterVal executed");
+  check(host.counts().refused[static_cast<std::size_t>(index_of("setMonsterVal"))] == 0, "setMonsterVal is not refused");
+  check(host.variables().memory.u16(se::G_MESSAGE_FRAMES) == 180, "setInfo stores 180 frames");
+  check(wide_at(host.variables().memory, se::G_MESSAGE_TEXT) == "hello", "setInfo copies the widened key");
+  check(host.variables().memory.cstr(se::G_BUST_TEXTURE) == "face", "showBust copies the texture name");
+  check(wide_at(host.variables().memory, se::G_BUST_TEXT) == "hi", "showBust copies the widened key");
+  check(host.variables().memory.u8(se::G_BUST_COUNTER) == 5, "showBust stores counter 5");
+  check(host.variables().memory.u32(se::G_BUST_A) == 3 && host.variables().memory.u32(se::G_BUST_B) == 4,
+        "showBust stores both integers");
+  check(host.variables().memory.u8(se::G_HELP_OPEN) == 1, "addHelpMessage opens the help box");
+  check(host.variables().memory.u32(se::G_HELP_DELAY) == 90, "addHelpMessage stores the 90-frame delay");
+  check(wide_at(host.variables().memory, host.variables().memory.u32(se::G_HELP_TITLE)) == "title",
+        "help title is the widened key");
+  check(host.variables().memory.u32(se::G_FADE) == 40, "hudFadeScreen adds the delta");
+  check(host.callees().rects.size() == 1 && host.callees().rects[0].colour == (40u << 24),
+        "a nonzero fade draws the 640 by 448 rect");
+  check(host.variables().memory.u32(0x877158) == 1, "endMusic appends one stop marker");
+  check(host.audio().queued_count(2) == 1, "setCFlag queues the boss track");
+  check(host.variables().memory.u8(broon->addr + 0xa8) & 1u, "setCFlag sets bit 0");
+  check(live.state == expected.state && live.state != seed_before, "only getRand draws the shared seed");
+  check(static_cast<std::uint32_t>(host.last_value()) == drawn, "getRand is the script return");
+  check(host.variables().memory.u32(0x404464) == live.state, "the seed word matches the one draw");
+
+  sc::Host blind;
+  blind.variables().memory.word(se::G_CAMERA, 0);
+  auto faulted = build_calls({{"start", {{"showBust", {2000, 2200, 1, 2}}}}}, {{2000, "face"}, {2200, "hi"}});
+  plant(blind, faulted);
+  check(blind.begin_level() == sc::Stop::Fault, "a null camera faults showBust");
+  check(blind.counts().faults == 1, "the null camera is a fault");
+}
+
 void test_refusals() {
-  const char *names[] = {"newWorld", "removePlayerItem", "setInfo", "generateMonster", "setMonsterVal", "sound"};
+  const char *names[] = {"newWorld", "removePlayerItem", "onePlayerHasItem", "generateMonster",
+                         "rootMonster", "followPath", "cutScene", "sound"};
   std::vector<Call> calls;
   for (const char *name : names)
     calls.push_back({name, {2000}});
@@ -321,6 +419,7 @@ int main(int argc, char **argv) {
   test_table(argv[1]);
   test_variables_and_seed();
   test_entrance_grid_and_particle();
+  test_routed_commands();
   test_refusals();
   test_wait_then_complete();
   test_missing_and_bad_image();
