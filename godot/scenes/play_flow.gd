@@ -51,6 +51,10 @@ var cosmetic_label: Label
 var frame_settings: Window
 var scene_scroll: ScrollContainer
 var hud_round3: Control
+var game_menus: Control
+# Boot screens, front end, character creation, options, load/save and the game
+# pause menu (ui/frontend_menus.gd over the native ChampionsFrontendService).
+var frontend: Control
 # PS2 memory-card character import (native ps2_save). Held apart from the
 # movement session: the import fills the native player record, inventory
 # words and quest table that the script and item natives read.
@@ -71,9 +75,11 @@ func _ready() -> void:
 	_attach_fx()
 	_attach_play_hud()
 	_attach_hud_round3()
+	_attach_game_menus()
 	_attach_level_textures()
 	_attach_audio()
 	_attach_ps2_import()
+	_attach_frontend()
 	refresh_capabilities()
 	var frame_rate := get_node_or_null("/root/FrameRate")
 	if frame_rate != null:
@@ -422,6 +428,17 @@ func _full_key(event: InputEvent) -> bool:
 	return true
 
 func handle_input_event(event: InputEvent) -> bool:
+	if frontend != null and frontend.handle_key(event):
+		held_commands = 0
+		pending_damage = false
+		return true
+	if game_menus != null and game_menus.open and event is InputEventKey:
+		held_commands = 0
+		pending_damage = false
+		game_menus.handle_host_key(event)
+		return true
+	if game_menus != null and game_menus.handle_host_key(event):
+		return true
 	if _full_key(event): return true
 	if event is InputEventKey and event.pressed and not event.echo and (event.physical_keycode == KEY_ESCAPE or event.keycode == KEY_ESCAPE):
 		if _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible:
@@ -464,6 +481,8 @@ func load_session_file(path: String) -> bool:
 		if audio != null: audio.reset(play_mode,int(raw_observation.ready_ticks))
 		session_started = true
 		set_paused(true)
+		if game_menus != null:
+			game_menus.load_companion(path)
 	else:
 		status_label.text = "Load refused: %s. Current session retained; choose a valid native save." % status_label.text
 	return ok
@@ -490,6 +509,10 @@ func _observe(result: Dictionary) -> void:
 		play_hud.observe_play(raw_observation, play_mode)
 	if hud_round3 != null:
 		hud_round3.observe(raw_observation, play_mode)
+	if game_menus != null and components.has("art"):
+		game_menus.sync_font(components.art)
+	if frontend != null and components.has("art"):
+		frontend.sync_font(components.art)
 	if fx != null:
 		fx.observe(raw_observation)
 		fx_status.visible = fx.enabled
@@ -525,6 +548,14 @@ func _attach_hud_round3() -> void:
 	hud_round3.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hud_round3.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	viewport.add_child(hud_round3)
+
+func _attach_game_menus() -> void:
+	if viewport == null:
+		return
+	game_menus = load("res://ui/game_menus.gd").new()
+	game_menus.set_anchors_preset(Control.PRESET_FULL_RECT)
+	game_menus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	viewport.add_child(game_menus)
 
 func _attach_components() -> void:
 	for id in COMPONENTS:
@@ -590,6 +621,7 @@ func _component_visibility_changed(component: Control) -> void:
 		_show_menu(flow)
 
 func _component_modal_open() -> bool:
+	if frontend != null and frontend.active(): return true
 	if level_tex_dialog != null and level_tex_dialog.visible: return true
 	if fx_definitions != null and fx_definitions.visible: return true
 	if frame_settings != null and frame_settings.visible:
@@ -758,6 +790,8 @@ func save_session_file(path: String) -> bool:
 	var result: Dictionary = controller.call(save_methods[save_format.selected], path)
 	status_label.text = "Saved native scene." if result.get("ok", false) else "Save refused: %s. Current session retained; check the selected path and native state." % str(result.get("error", "Save failed."))
 	if result.get("ok", false) and level_textures != null: level_textures.remember_save(path)
+	if result.get("ok", false) and game_menus != null:
+		game_menus.save_companion(path)
 	return result.get("ok", false)
 
 func _focus_menu() -> void:
@@ -934,7 +968,7 @@ func _attach_audio() -> void:
 	audio.configure(self,status)
 	controller.play_audio_tick.connect(audio.ready_tick)
 	_add_action("audio_boss", "Synthetic boss music (Broon)", func():
-		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / no music volume option / override gated)")
+		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / override gated)")
 	_add_action("audio_boss_stop", "Stop boss music", func(): audio.boss_leave())
 
 func _attach_ps2_import() -> void:
@@ -981,3 +1015,17 @@ func _show_ps2_import(result: Dictionary) -> Dictionary:
 		ps2_status.text += " · not applied: " + "; ".join(PackedStringArray(result.refusals))
 	_show_menu(flow)
 	return result
+
+func _attach_frontend() -> void:
+	frontend = load("res://ui/frontend_menus.gd").new()
+	frontend.configure(self)
+	add_child(frontend)
+	_add_action("frontend", "Title / front end", func(): frontend.boot())
+	if not frontend.available():
+		actions.frontend.disabled = true
+		actions.frontend.tooltip_text = "Install the native extension with ChampionsFrontendService."
+		return
+	actions.frontend.tooltip_text = "Boot card check, logo, film, main menu, character creation, options and load. Layouts are host-drawn: the research documents the flow, not the screens' positions. In play, P is the start button (pause menu)."
+	for argument in OS.get_cmdline_user_args():
+		if argument == "--frontend":
+			frontend.call_deferred("boot")

@@ -996,6 +996,7 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/ui_font_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/ui_layout_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/menus_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_recovery_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_facing_targets.cmake")
@@ -1095,3 +1096,4 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/real_data_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/script_commands_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/ps2_save_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/frontend_targets.cmake")
