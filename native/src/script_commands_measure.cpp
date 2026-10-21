@@ -120,18 +120,30 @@ int main(int argc, char **argv) {
   // below with SeedPolicy::OfflineSession, and the directory's SLUS_209.73 for
   // the object factory when there is one.
   bool bare = false;
+  // Leave one part of the session binding out, to attribute count changes.
+  bool no_seed = false, no_players = false, no_objects = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--game" && i + 1 < argc)
       game = argv[++i];
     else if (arg == "--bare")
       bare = true;
+    else if (arg == "--no-seed")
+      no_seed = true;
+    else if (arg == "--no-players")
+      no_players = true;
+    else if (arg == "--no-objects")
+      no_objects = true;
     else if (!arg.empty() && arg[0] != '-')
       root = arg;
     else {
       std::cerr << "usage: champions-script-commands-measure --game rta [--bare] DIR\n";
       return 2;
     }
+  }
+  if (bare && (no_seed || no_players || no_objects)) {
+    std::cerr << "--bare already leaves every part out\n";
+    return 2;
   }
   if (game != "rta" || root.empty() || !fs::is_directory(root)) {
     std::cerr << "usage: champions-script-commands-measure --game rta [--bare] DIR\n";
@@ -143,7 +155,7 @@ int main(int argc, char **argv) {
   // fixture: an offline session's seed is a clock reading.
   constexpr std::uint32_t SESSION_SEED = 17;
   std::shared_ptr<champions::simulation::rta::arena_modes::Executable> exe;
-  if (!bare && files.count("slus_209.73")) {
+  if (!bare && !no_objects && files.count("slus_209.73")) {
     auto bytes = read_file(files["slus_209.73"]);
     auto next = std::make_shared<champions::simulation::rta::arena_modes::Executable>();
     if (next->load(std::move(bytes)))
@@ -203,8 +215,10 @@ int main(int argc, char **argv) {
     sc::Host host;
     champions::simulation::rta::SharedRandom seed(SESSION_SEED);
     if (!bare) {
-      host.bind_seed(&seed, sc::SeedPolicy::OfflineSession);
-      host.start_single_player();
+      if (!no_seed)
+        host.bind_seed(&seed, sc::SeedPolicy::OfflineSession);
+      if (!no_players)
+        host.start_single_player();
       if (exe)
         host.set_executable(sc::executable_view(exe));
     }
@@ -249,7 +263,8 @@ int main(int argc, char **argv) {
   std::cout << "objects_registered " << total.objects_registered << '\n';
   std::cout << "objects_refused " << total.objects_refused << '\n';
   std::cout << "stub_refusals " << total.stub_refusals << '\n';
-  std::cout << "mode " << (bare ? "bare" : "session") << '\n';
+  std::cout << "mode " << (bare ? "bare" : "session") << (no_seed ? " no-seed" : "")
+            << (no_players ? " no-players" : "") << (no_objects ? " no-objects" : "") << '\n';
   std::cout << "executable_used " << (exe ? 1 : 0) << '\n';
   std::cout << "objects_built " << total.objects_built << '\n';
   std::cout << "objects_unbuilt " << total.objects_unbuilt << '\n';

@@ -225,4 +225,5 @@ level runs as the play session runs it: one player, difficulty 1, a session
 seed fixture of 17 (the control session's default) with
 `SeedPolicy::OfflineSession`, and the directory's `SLUS_209.73` for the object
 factory when there is one. `--bare` runs the host as wave 17 left it (no
-executable, seed or player count).
+executable, seed or player count); `--no-seed`, `--no-players` and
+`--no-objects` leave one of the three out, to attribute a count change.
