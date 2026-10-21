@@ -282,14 +282,29 @@ int main() try {
   skill_input.weapon_class = 6;
   refuses([&] { player_action("roar", skill_input, skill); },
           "weapon class 6 shout admitted");
+  // CAI-7: the seven state-6 constructors ran only on a weapon-class-0 player
+  // whose object flag word was 0x40 (player-animation-dispatch.md section 6).
+  for (const char *action : {"cyclone", "bash", "shield_bash", "ancestral_call",
+                             "roar", "battle_cry", "blood_lust"}) {
+    for (Raw cls : {4u, 6u}) {
+      skill_input.weapon_class = cls;
+      skill_input.object_flags = 0x40;
+      refuses([&] { player_action(action, skill_input, skill); },
+              "state-6 constructor admitted for an unexecuted weapon class");
+    }
+    skill_input.weapon_class = 0;
+    for (Raw flags : {0u, 0x60u, 0x41u}) {
+      skill_input.object_flags = flags;
+      refuses([&] { player_action(action, skill_input, skill); },
+              "state-6 constructor admitted for unexecuted object flags");
+    }
+  }
   skill_input.weapon_class = 0;
-  skill_input.object_flags = 0x41;
+  // Executed inputs only (ref_skill_anim.charge_state: 0x40 and 0); the
+  // generated skill vectors in creature_dispatch.json.gz cover the rest.
+  skill_input.object_flags = 0x40;
   auto charged = player_action("charge", skill_input, skill);
   check(charged.stored == 9 && charged.ops.empty(), "charge with flag 0x40");
-  skill_input.object_flags = 0x20;
-  check(player_action("charge", skill_input, skill).stored == 0 &&
-            player_action("charge", skill_input, skill).ops.empty(),
-        "charge without flag 0x40");
   skill_input.object_flags = 0;
   check(player_action("charge", skill_input, skill).stored == 0,
         "charge with clear flags");

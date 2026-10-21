@@ -1,4 +1,5 @@
 #include "combat_runtime_internal.hpp"
+#include "champions/fx_trig.hpp"
 // Round-2 player defence (research ref_combat_ptick.DefenceModel, executed by
 // difftest_combat_ptick): Player_takeDamage 0x1b5330 with the block branch,
 // Player_blockSparks 0x1b9658 (silent 0), Player_processDamage 0x1b2cc0 with
@@ -118,7 +119,9 @@ void World::State::take_damage_full(Address p, Address attacker, Raw flags,
       // refusal, so that replay does not enter it.
       if (!round4)
         throw Unsupported("SpellHolyShield_absorb");
-      auto frac = holy_shield_absorb(spell);
+      // A pose word at the caster's animation state selects the round-5 sample
+      // body. Round-4 pins leave that word zero and keep the stubbed service.
+      auto frac = u(p + 0x114) ? holy_shield_sample(spell) : holy_shield_absorb(spell);
       auto paid = mul(amount, frac);
       amount = sub(amount, paid);
       auto mana = sub(u(r + 0xc0), paid);
@@ -175,11 +178,10 @@ void World::State::block_sparks(Address p, Raw silent) {
   Vec3 mid;
   for (unsigned i = 0; i < 3; ++i)
     mid[i] = mul(add(hands[0][i], hands[1][i]), HALF);
-  // The silent-0 body is the earlier executed defence model. The trig contract
-  // did not recover the angle at 0x1b97dc / 0x1b9800; trig::refuse_block_sparks_angle
-  // is that refusal. This multiply is not a new reading of that gap.
-  auto f = Raw(s16m(p + 0x38));
-  Vec3 vel{mul(cos16(f), F10), mul(sin16(f), F10), F10};
+  // Silent 0 passes the sign-extended facing at +0x38 (0x1b97dc / 0x1b9800).
+  auto f = champions::rta::fx::trig::process_damage_facing_angle(h(p + 0x38));
+  Vec3 vel{mul(champions::rta::fx::trig::cos16(f), F10),
+           mul(champions::rta::fx::trig::sin16(f), F10), F10};
   for (unsigned spark = 0; spark < 50; ++spark) {
     Vec3 v;
     unsigned attempts = 0;

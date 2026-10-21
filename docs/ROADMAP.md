@@ -90,7 +90,7 @@ its own launch and rendering evidence.
    The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports 44
    RTA quest/profile, campaign-state and player-record commands with complete synthetic state tests;
    the remaining 147 built-ins and scene integration remain unsupported.
-   The [level-script command host](SCRIPT_COMMANDS.md) runs the 81 documented commands through that binder and routes hide, show, move, the shared seed, the level entrance and particle spawn into the subsystems that already exist. Every other command is a counted host refusal. The play session installs it only when asked.
+   The [level-script command host](SCRIPT_COMMANDS.md) runs the 81 documented commands through that binder. Hide, show, move, the level entrance and particle spawn reach host-private instances of the existing subsystems, not the play session; `getRand` is refused until a session seed is bound, and the play session binds none. Every other command is a counted host refusal. The play session installs it only when asked.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. Engine commands and socket integration
    remain separate work.
@@ -218,3 +218,5 @@ Its round-3 bodies add the disease cloud and the DiseaseEffect object it
 attaches, the GutChunk constructor, the Strong Stance phantom, and arrow kinds
 1, 2, 5 and 6. Potions, deflection, the bow release, the Holy Shield light,
 silent block sparks and the remaining skill paths stay refused.
+Round 4 adds thrown potions 1–3, the Holy Shield absorb stub and silent block sparks.
+Round 5 follows the sample-point absorb, the processDamage and silent-0 block-spark angles, AntQueen states 0 and 1, Skeleton states 0 and 1, Soul's demon gate and MultiFireProjectile_run. PlanarSteel, HornOmen, SpellArena, Pustule, SmokeGen and DiseaseCorpse stay unexecuted.

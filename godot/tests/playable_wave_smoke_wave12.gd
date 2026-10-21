@@ -1,8 +1,10 @@
 extends SceneTree
 
 # Wave 12: the Full combat fixture extensions that reach merged executed
-# bodies. One own-machine creature (creature-ai World::spawn_class) per run,
-# and thrown potions 1..3 (combat-runtime-4 playerProjectile_run). Each case
+# bodies. One own-machine creature (creature-ai World::spawn_class) per run
+# (Gnaw and Skelight build; the other eight classes refuse),
+# and thrown potions 1..3 (combat-runtime-4 playerProjectile_run; 1 and 2 stop
+# at their refused constructors). Each case
 # starts a fresh Full session on the default synthetic flat terrain with the
 # labelled synthetic recipe constants, then runs 300 ready ticks with the
 # player holding attack. A refusal is a result, not a failure: it is printed
@@ -37,8 +39,14 @@ func run_ticks(controller: Object, attack: bool) -> Dictionary:
 			result.error = str(o.get("error", "stopped"))
 			break
 		result.ticks = int(o.get("ready_ticks", 0))
+		# Holy Shield's absorb light follows its particleGroup_end (with only the
+		# light's pool_new between); count it apart so the potions' own lights
+		# stay comparable.
+		var previous := ""
 		for name in o.get("combat_tick_events", []):
-			result.events[name] = int(result.events.get(name, 0)) + 1
+			var key: String = "HolyShield:" + name if name == "LightEffect_ctor" and previous == "particleGroup_end" else name
+			result.events[key] = int(result.events.get(key, 0)) + 1
+			if name != "pool_new": previous = name
 	result["observation"] = o
 	return result
 
@@ -86,20 +94,24 @@ func run() -> void:
 			row.events = notable
 		out.potions[str(kind)] = row
 	# Observed on the merged runtime (a change here is a behaviour change).
-	for name in ["Critter", "Gnaw", "GnomeNavigator", "Mermaid", "NPC", "Natasla", "Skelight"]:
+	# Only Skelight and Gnaw have executed constructors; the other eight
+	# classes refuse to spawn (audit CAI-4) and leave the session untouched.
+	for name in ["Gnaw", "Skelight"]:
 		var row: Dictionary = out.classes.get(name, {})
 		check(row.get("spawn", "") == "ok" and int(row.get("ticks", 0)) == TICKS - 1 and str(row.get("error", "x")).is_empty() and row.get("present", false), "%s runs %d ready ticks beside the fight" % [name, TICKS - 1])
-	for refused in [["AntQueen", "aq_ground"], ["Skeleton", "slot 25 force"], ["Soul", "demon"]]:
-		var row: Dictionary = out.classes.get(refused[0], {})
-		check(str(row.get("error", "")).contains(refused[1]), "%s stops on its documented refusal (%s)" % refused)
+	for name in ["Critter", "GnomeNavigator", "Mermaid", "NPC", "Natasla", "AntQueen", "Skeleton", "Soul"]:
+		var row: Dictionary = out.classes.get(name, {})
+		check("constructor is not executed" in str(row.get("spawn", "")), "%s spawn is refused" % name)
 	var p1: Dictionary = out.potions.get("1", {}).get("events", {})
 	var p2: Dictionary = out.potions.get("2", {}).get("events", {})
 	var p3: Dictionary = out.potions.get("3", {}).get("events", {})
-	check(int(p1.get("LooseFire_ctor", 0)) == 5 and int(p1.get("presentation:decal_add", 0)) == 5, "potion 1: five LooseFire call-outs and five decals")
-	check(int(p2.get("poisonGasSpell_ctor", 0)) == 1, "potion 2: one poison-gas spell")
+	# Potions 1 and 2 end in LooseFire_ctor / poisonGasSpell_ctor, stubbed
+	# call-outs of the research (ref_combat_round4); the World refuses them
+	# (audit CR4-1, 2026-10-21) and the session stops with that reason.
+	check(str(out.potions["1"].get("error", "")).contains("LooseFire_ctor 0x202b70") and int(p1.get("LooseFire_ctor", 0)) == 0, "potion 1 stops at the refused LooseFire_ctor")
+	check(str(out.potions["2"].get("error", "")).contains("poisonGasSpell_ctor 0x202de8") and int(p2.get("poisonGasSpell_ctor", 0)) == 0, "potion 2 stops at the refused poisonGasSpell_ctor")
 	check(int(p3.get("LightEffect_ctor", 0)) == 1 and int(p3.get("presentation:decal_add", 0)) == 1, "potion 3: the ring's light and floor decal")
-	for kind in ["1", "2", "3"]:
-		check(str(out.potions[kind].get("error", "x")).is_empty() and int(out.potions[kind].get("ticks", 0)) == TICKS - 1, "potion %s session keeps running" % kind)
+	check(str(out.potions["3"].get("error", "x")).is_empty() and int(out.potions["3"].get("ticks", 0)) == TICKS - 1, "potion 3 session keeps running")
 	check(controller.combat_drop_potion(4).get("ok", true) == false, "potion kind 4 is refused by the client")
 	controller.start_play_session()
 	check(controller.combat_spawn_creature(0).get("ok", true) == false, "creatures need the Full fixture")

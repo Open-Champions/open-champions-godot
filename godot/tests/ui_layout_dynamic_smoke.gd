@@ -77,5 +77,49 @@ func _run() -> void:
 		check(round3.refused("arena_point").get("ok", false) == false, "arena point refused")
 		check(round3.refused("tex_flag").get("ok", false) == false, "tex flag refused")
 		check(round3.refused("font_header").get("ok", false) == false, "font header refused")
+		# Audit HUD-1: damage numbers come from damage_apply, never from an HP drop.
+		check(not round3.has_method("hp_drop_text"), "HUD-1 no HP-drop damage-number trigger in the service")
+		# Audit HUD-6: the maximum branch's second wrap is undocumented.
+		check(round3.bust_panel(true, 1, 2, 8, 0, 128, 128, 32, 32, 64, 80, "A", "1").get("ok", true) == false, "HUD-6 bust panel with a maximum is refused")
+		# Audit HUD-7: only the sprite alpha is documented, not its RGB.
+		var rgb_free: bool = bust.get("ok", false)
+		for record in bust.get("submissions", []):
+			if record.kind == "sprite":
+				rgb_free = rgb_free and not record.has("tint") and int(record.get("alpha", -1)) == 128
+		check(rgb_free, "HUD-7 bust sprites carry only the documented alpha")
+		_check_round3_overlay()
 	print("UI dynamic layout GDExtension smoke: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
+
+# Audit HUD-1..HUD-5: the play overlay must not invent HUD elements. Feed it
+# every input it used to turn into a drawing and require that nothing is kept
+# for drawing and that each element names its refusal.
+func _check_round3_overlay() -> void:
+	var overlay: Control = load("res://ui/hud_round3.gd").new()
+	root.add_child(overlay)
+	var base := {"ready_ticks": 10, "hp_raw": 0x42c80000, "terrain_name": "practice ground",
+		"hud_help": {"wrap_height": 40, "label_width": 60, "title": "T", "body": "B"},
+		"hud_notice": {"word": 0, "wrap_height": 40},
+		"hud_medal": {"armed": true, "mission_menu": true},
+		"hud_net_cam": {"network": true, "other_slot": true, "name": "N", "prompt": "P"},
+		"hud_bust": {"value": 1, "maximum": 1, "meter_width": 8, "text_alpha": 110, "sprite_alpha": 128, "body": "A", "value_text": "1"}}
+	overlay.observe(base, true)
+	var hit := base.duplicate(true)
+	hit.ready_ticks = 11
+	hit.hp_raw = 0x42b40000
+	overlay.observe(hit, true)
+	var kept := func(key: String) -> bool:
+		var value = overlay.get(key)
+		return value != null and not value.is_empty()
+	check(not kept.call("numbers"), "HUD-1 no flying number spawned from the player's HP drop")
+	var refusals = overlay.get("refusals")
+	var has_refusal := func(key: String) -> bool:
+		return refusals is Dictionary and not str(refusals.get(key, "")).is_empty()
+	check(has_refusal.call("flying_numbers"), "HUD-1/HUD-2 flying numbers refused (no damage_apply event, no g_viewProj)")
+	check(not kept.call("compass_text") and has_refusal.call("compass_label"), "HUD-3 compass label not drawn from the level name")
+	check(not kept.call("blips") and has_refusal.call("minimap"), "HUD-4 no minimap swatch row")
+	var boxes_clear := true
+	for key in ["help", "notice", "medal", "net_cam", "bust"]:
+		boxes_clear = boxes_clear and not kept.call(key) and has_refusal.call(key)
+	check(boxes_clear, "HUD-5 help, notice, medal, net-cam and bust overlays refused")
+	overlay.queue_free()

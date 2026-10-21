@@ -61,10 +61,16 @@ def main():
                     system=A.AnimSystem(8,3); system.sim_frame=17
                     st=A.AnimState();clips={i:A.Clip(A.encode_clip([((0,0,0),(4096,0,0,0))],120)) for i in range(64)}
                     A.anim_push(st,clips[0],1)
-                    calls=[];unsupported=any(x[0] not in ('start','blend','push','push_w','push_chained','stop','sync','jump_end','snap_end','randomize','clear','drop','vslot','holder') or (len(x)>1 and x[1] is None) for x in o)
+                    calls=[]
+                    kinds=('start','blend','push','push_w','push_chained','stop','sync','jump_end','snap_end','randomize','clear','drop','vslot','holder')
+                    for x in o:
+                        if x[0] not in kinds:raise ValueError('unknown dispatch op %r in %s %d'%(x[0],name,state))
                     # A None entry is a runtime clip pointer (Critter species
-                    # table). The row is emitted; apply has nothing to resolve.
-                    if unsupported:continue
+                    # table, Skeleton). The row is emitted in dispatch_data;
+                    # applying it is an explicit refusal, and that is the vector.
+                    if any(len(x)>1 and x[1] is None for x in o):
+                        cases.append({'input':'select %s %d %d %d %d %d'%(name,state,r,kind,field,value),'expected':'REFUSED dispatch uses an unresolved dynamic resource'})
+                        continue
                     D.apply_ops(system,st,clips,o,on_vslot=lambda *a:calls.append(a))
                     flat=[stored,len(o)]
                     for op in o:
@@ -95,8 +101,11 @@ def main():
                 sy=A.AnimSystem();st=A.AnimState();A.anim_push(st,cl,1)
                 words=[A.anim_advance(sy,C.ONE,st,sound=False)[0] for _ in range(185)]
                 cases.append({'input':'events %s %d'%(name,entry),'expected':' '.join(map(str,words))})
-        from creature_dispatch_player_vectors import vectors
+        from creature_dispatch_player_vectors import vectors, skill_vectors, precedence_vectors
         cases += vectors(C,A,D)
+        # Skill states and two-field precedence, from the pinned modules.
+        cases += skill_vectors(importlib.import_module('ref_skill_anim'))
+        cases += precedence_vectors(importlib.import_module('ref_field_precedence'))
         payload=json.dumps(cases,separators=(',',':')).encode();out=ROOT/'native/tests/vectors/creature_dispatch.json.gz';write_if_changed(out,gzip.compress(payload,mtime=0))
         write_if_changed(ROOT/'native/tests/vectors/creature_dispatch.json',json.dumps({'commit':pins['commit'],'groups':groups,'cases':len(cases),'generator_sha256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in ['tools/generate_creature_dispatch.py','tools/creature_dispatch_player_vectors.py']},'sources_sha256':hashlib.sha256(PINS.read_bytes()).hexdigest(),'payload_sha256':hashlib.sha256(payload).hexdigest(),'data_sha256':hashlib.sha256((ROOT/'native/src/creature_anim/dispatch_data.inc').read_bytes()).hexdigest()},indent=2)+'\n')
         print(groups,'cases',len(cases))

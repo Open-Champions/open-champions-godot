@@ -400,8 +400,9 @@ void World::State::destroy(Address a) {
   auto fn = u(u(a + 0x48) + 12);
   if (fn == 0x151454 || fn == 0x3c6468)
     return projectile_destroy(a, 3);
-  if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888 ||
-      fn == DISEASE_CLOUD_DTOR) {
+  if (fn == DISEASE_CLOUD_DTOR)
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);
   }

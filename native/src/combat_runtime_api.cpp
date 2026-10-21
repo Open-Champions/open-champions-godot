@@ -260,6 +260,11 @@ std::vector<Address> World::damage_in_radius(Address a, const Vec3 &c,
   require_full(*s_);
   return s_->damage_in_radius(a, c, most, flags, least, skip, inner, outer);
 }
+std::pair<Vec3, int> World::find_free_spot(const Vec3 &c, Raw spread,
+                                           Raw radius, Raw any_height) {
+  require_full(*s_);
+  return s_->find_free_spot(c, spread, radius, any_height);
+}
 std::vector<Address> World::attached_spells(Address c) const {
   return s_->attached(c);
 }
@@ -333,5 +338,29 @@ Raw World::holy_shield_absorb(Address spell) {
 Address World::attach_holy_shield(Address caster, Address skill, Raw level) {
   require_full(*s_);
   return s_->attach_holy_shield(caster, skill, level);
+}
+void World::fade_bank_tracks(Address creature) {
+  require_full(*s_);
+  s_->fade_bank_tracks(creature);
+}
+void World::update_bank(Address creature) {
+  require_full(*s_);
+  s_->update_bank(creature);
+}
+int World::is_demon_near(Address creature) {
+  require_full(*s_);
+  return s_->is_demon_near(creature);
+}
+Raw World::holy_shield_sample(Address spell) {
+  require_full(*s_);
+  return s_->holy_shield_sample(spell);
+}
+void World::multifire_run(Address obj) {
+  require_full(*s_);
+  s_->multifire_run(obj);
+}
+Address World::arm_fixture_holy_shield(Address player) {
+  require_full(*s_);
+  return s_->arm_fixture_holy_shield(player);
 }
 } // namespace champions::simulation::rta::combat_runtime

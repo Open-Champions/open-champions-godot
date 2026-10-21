@@ -99,11 +99,6 @@ std::uint32_t pack_trunc(std::uint32_t sign, std::uint64_t mag, int e2) {
     return sign << 31;
   return (sign << 31) | (std::uint32_t(exp) << 23) | (std::uint32_t(mag) & 0x7fffffu);
 }
-float bits_to_float(std::uint32_t bits) {
-  float value = 0;
-  std::memcpy(&value, &bits, sizeof value);
-  return value;
-}
 std::size_t samples_at(std::uint32_t bytes, bool stereo) {
   if (bytes % 16)
     return std::size_t(-1);
@@ -792,8 +787,15 @@ void Playback::step_stream_volumes() {
 
 // --- music policy -----------------------------------------------------------
 
+namespace {
+const char *const no_music_volume =
+    "g_musicVolume 0x4f8944 has no documented stored value; call set_music_volume first";
+}
+
 bool Playback::queue_music(const std::string &name, std::uint32_t flags, StreamSource source) {
-  if (!music_gate_open(music_volume_))
+  if (!music_volume_)
+    throw Unsupported(no_music_volume);
+  if (!music_gate_open(*music_volume_))
     return false;
   const auto &vat = source == StreamSource::level ? level_ : global_;
   const auto entry = find_vat_entry(vat.entries, name, vat.language);
@@ -852,13 +854,15 @@ bool Playback::play_boss_music(const std::string &type, const std::string &objec
   const auto name = boss_music_name(type, object);
   if (!name)
     return false;
+  if (!music_volume_)
+    throw Unsupported(no_music_volume);
   // audio_streamStop clears the queue and the active name, then one new span
   // is queued. A second boss therefore replaces the first. The volume word is
   // left alone, so the fade bit inside 0x123 waits until that word reads 0.
   stream_stop(2);
   const auto entry = find_vat_entry(global_.entries, *name, global_.language);
   const auto length = entry ? entry->length : 0u;
-  if (boss_action(true, music_volume_, length) != BossAction::replace)
+  if (boss_action(true, *music_volume_, length) != BossAction::replace)
     return false;
   return music_play_global(*name, 0x103);
 }
@@ -876,14 +880,16 @@ std::uint32_t Playback::set_duck(std::uint32_t argument) {
 
 DuckStep Playback::step_duck() {
   const auto step = duck_step(duck_current_, duck_target_, stream_status(1), stream_status(2),
-                              level_name_ == "actintro" && language_ != 0, music_volume_);
+                              level_name_ == "actintro" && language_ != 0,
+                              music_volume_.value_or(0));
+  // The easing does not read g_musicVolume; the channel argument of a send does.
+  if (step.sent && !music_volume_)
+    throw Unsupported(no_music_volume);
   duck_current_ = step.current;
   duck_target_ = step.target;
   duck_sent_ = step.sent;
-  if (step.sent) {
+  if (step.sent)
     music_channel_ = step.channel;
-    music_channel_set_ = true;
-  }
   return step;
 }
 
@@ -959,7 +965,12 @@ bool Playback::poll_level(std::uint32_t draw) {
       for (const auto &e : level_.entries)
         if (e.name.find("_env_") != std::string::npos ||
             e.name.find("mx_theme") != std::string::npos) {
-          queued = music_play_level(e.name, 0x102) || queued;
+          // music_playLevel reads g_musicVolume; with no supplied value the
+          // call is refused. The countdown store above does not read it.
+          if (!music_volume_)
+            ++refused_music_polls_;
+          else
+            queued = music_play_level(e.name, 0x102) || queued;
           break;
         }
   }
@@ -1006,9 +1017,10 @@ void Playback::mix(std::array<float, 2> &out) {
     const auto index = std::size_t(s.phase >> 12);
     if (!s.audible || index >= s.pcm.left.size())
       continue;
-    double gain = double((std::uint32_t(s.volume) * s.scale) >> 8) / full_volume;
-    if (i == 2 && music_channel_set_)
-      gain *= bits_to_float(music_channel_);
+    // The duck's audio_setChannelVolume(2, ...) word is recorded, not applied:
+    // how the driver's volume RPC 0x80 maps it onto the output is not
+    // documented (docs/audio-playback.md 222-224, docs/formats/anim-audio.md).
+    const double gain = double((std::uint32_t(s.volume) * s.scale) >> 8) / full_volume;
     const double l = s.pcm.left[index] / 32768.0;
     const double r = s.pcm.stereo() ? s.pcm.right[index] / 32768.0 : l;
     if (!s.pcm.stereo() || two_channel_) {
@@ -1076,13 +1088,15 @@ void Playback::tick() {
   // sound_update reads the counters before it increments g_soundFrame.
   // Queue service: low two bits clear. End flags: low three bits clear.
   // audio_sendVolumes runs after the increment, when the new value's low four
-  // bits are clear. g_drawFrame is a separate counter.
+  // bits are clear. g_drawFrame is a separate counter. music_updateDucking is
+  // not run here: one call is executed, but its call site, cadence and order
+  // against the queue service are not documented (docs/audio-playback.md 210),
+  // so the owner calls step_duck() explicitly.
   const auto entering = sound_frame_;
   if ((entering & 3u) == 0)
     service_streams();
   if ((entering & 7u) == 0)
     reclaim_ended();
-  step_duck();
   sound_frame_ = (sound_frame_ + 1u) & 0xffffffffu;
   if ((sound_frame_ & 0xfu) == 0)
     ++volume_sends_;
@@ -1099,6 +1113,20 @@ void Playback::tick() {
     fifo_.pop_front();
     ++dropped_frames_;
   }
+}
+
+void Playback::end_session() {
+  for (std::size_t i = 0; i < stream_limit; ++i)
+    stream_stop(i);
+  for (auto &v : voices_)
+    v = Voice{};
+  for (auto &s : sequences_) {
+    s.active = false;
+    s.voice = -1;
+  }
+  level_ = Vat{};
+  level_active_ = false;
+  fifo_.clear();
 }
 
 std::vector<std::array<float, 2>> Playback::drain(std::size_t max_frames) {

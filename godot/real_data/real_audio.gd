@@ -12,10 +12,14 @@ var bank_errors: Array[String] = []
 func _vat(bank: Dictionary) -> PackedByteArray:
 	return FileAccess.get_file_as_bytes(bank.vat) if bank.has("vat") else PackedByteArray()
 
+func install_banks() -> void:
+	pass # the user's banks are installed per session below
+
 func reset(play: bool, tick := 0, key := "") -> void:
-	if bridge != null: bridge.attach_playback(null)
+	if bridge == null: return
+	bridge.attach_playback(null)
 	player.stop()
-	bridge = ClassDB.instantiate("ChampionsNativeAudio")
+	bridge.end_session()
 	playing = play
 	last_tick = tick
 	level_key = key

@@ -12,7 +12,9 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  std::array<Raw, 4> handles{}; // slot 3: optional wave-12 own-machine creature
+  // Slot 3 is the optional one-per-session creature. Slots 4-6 were the Full
+  // fixture's AntQueen, Skeleton and Soul; they stay empty (full_setup).
+  std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
   session_control::Observation status;
@@ -78,6 +80,13 @@ struct Session::State {
     out.dialog_is_open = [this] { return status.paused; };
     out.height_below = [this](const Vec3 &p, Raw r) {
       return world_queries::terrain_height_below(terrain, r, p);
+    };
+    // world_findFreeSpot's two terrain tests on the same ground.
+    out.terrain_blocked = [this](const Vec3 &p, Raw r) {
+      return world_queries::terrain_test_flag1(terrain, r, p);
+    };
+    out.terrain_height = [this](const Vec3 &p, Raw r) {
+      return world_queries::terrain_height(terrain, r, p);
     };
     out.animation_start = [this](Raw a, Raw clip, Raw flags, Raw, Raw) { full_start(a, clip, flags); };
     out.animation_advance = [this](Raw a, Raw) { return full_advance(a); };
@@ -223,6 +232,7 @@ struct Session::State {
     holy.stats[1] = {1, 30, 0};
     holy.stats[2] = {1, 10, 0};
     world->give_skill(HOLY_STRIKE, holy);
+    world->arm_fixture_holy_shield(player);
     for (unsigned k = 1; k < 3; ++k) {
       C::Spawn s;
       s.position[0] = from_int(k == 1 ? 80 : -40);
@@ -236,6 +246,11 @@ struct Session::State {
       for (Raw off : {0x1cu, 0x24u})
         clips[Raw(world->read(definition + off))] = Clip{30, {{10u, Raw(1)}}};
     }
+    // Slots 4-6 (AntQueen, Skeleton, Soul) stay empty: World::spawn_class
+    // refuses those classes because their constructors, run prologues and
+    // setState side effects were not executed (audit CAI-1, CAI-2, CAI-4;
+    // research-anim own-state-machines.md section 1). The round-5 bodies they
+    // used (bank fade/spring, isDemonNear) stay callable on the World.
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
     adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
@@ -346,7 +361,7 @@ session_control::Observation Session::advance(std::uint32_t command) {
 std::vector<Actor> Session::actors() const {
   std::vector<Actor> out;
   for (unsigned k = 0; k < s_->handles.size(); ++k) {
-    if (k == 3 && !s_->handles[k]) continue; // no wave-12 creature spawned
+    if (k >= 3 && !s_->handles[k]) continue; // empty optional or non-Full slot
     auto a = s_->world->target(s_->handles[k]);
     out.push_back({k, s_->handles[k], a != 0,
       a && bool(s_->world->read(a + 12) & 8), a ? s_->position(a) : Vec3{},
@@ -411,8 +426,12 @@ void Session::spawn_creature(const std::string &own_class) {
   s_->handles[3] = s_->world->retain(a);
   s_->own_class = own_class;
   auto definition = Raw(s_->world->read(a + 0x24));
+  // The session's authored clip timeline on the two swing words, and for
+  // Gnaw on its third bite clip too (Gnaw_ctor marks entries 3, 4 and 5).
+  std::vector<Raw> offsets{0x1c, 0x24};
+  if (own_class == "Gnaw") offsets.push_back(0x2c);
   if (definition)
-    for (Raw off : {0x1cu, 0x24u}) {
+    for (Raw off : offsets) {
       const auto clip = Raw(s_->world->read(definition + off));
       if (clip && !s_->clips.count(clip)) s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
     }

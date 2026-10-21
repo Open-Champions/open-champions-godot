@@ -13,9 +13,14 @@ struct Sprite {
   std::string resource;
   int x{}, y{}, layer{};
   std::uint32_t tint{};
-  // Clipped sprites (0x17fb88). clipped is false for a plain sprite.
+  // Clipped sprites (0x17fb88). clipped is false for a plain sprite. An edge
+  // the research does not give stays empty rather than 0.
   bool clipped = false;
-  int clip_left = 0, clip_top = 0, clip_right = 0, clip_bottom = 0;
+  std::optional<int> clip_left{}, clip_top{};
+  int clip_right = 0;
+  std::optional<int> clip_bottom{};
+  // False when only the alpha byte of tint is documented (RGB unknown).
+  bool tint_rgb_known = true;
 };
 struct Rect {
   int x0{}, y0{}, x1{}, y1{}, layer{};
@@ -140,7 +145,8 @@ BustMeter bustMeter(int value, int maximum, int width, int tick);
 // Submission order of hud_drawBust. portrait/frame sizes are the caller's
 // texture sizes. Text content is caller-owned; an empty string is a placeholder.
 // The two text records share one batch. Sprite RGB is not named by 0x1dfb6c,
-// so the tint word carries only the documented alpha.
+// so the tint word carries only the documented alpha (tint_rgb_known false).
+// has_maximum throws: that batch has a second wrap with undocumented arguments.
 Records bustPanel(bool has_maximum, int value, int maximum, int meter_width,
                   int tick, std::uint32_t text_alpha, std::uint32_t sprite_alpha,
                   int portrait_w, int portrait_h, int frame_w, int frame_h,

@@ -77,8 +77,10 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.reached_complete += one.reached_complete;
   total.faults += one.faults;
   total.missing_entries += one.missing_entries;
+  total.refusal_stops += one.refusal_stops;
   total.objects_registered += one.objects_registered;
   total.objects_refused += one.objects_refused;
+  total.stub_refusals += one.stub_refusals;
   for (std::size_t i = 0; i < sc::COMMANDS; ++i) {
     total.executed[i] += one.executed[i];
     total.refused[i] += one.refused[i];
@@ -176,17 +178,19 @@ int main(int argc, char **argv) {
       continue;
     }
     ++scripts_loaded;
-    if (const auto *objects = find_entry(inner, "objects.ob")) {
-      try {
-        const auto bytes = champions::payload(lump_bytes, *objects);
-        host.adopt_objects(bytes.data, bytes.size);
-      } catch (const std::exception &) {
-        // adopt_objects counts its own refusal.
-      }
-    }
     sc::Stop stop = sc::Stop::Fault;
     try {
-      stop = host.begin_level();
+      // Loader order: preStart, the objects, then start (docs/SCRIPT_COMMANDS.md).
+      host.run_prestart();
+      if (const auto *objects = find_entry(inner, "objects.ob")) {
+        try {
+          const auto bytes = champions::payload(lump_bytes, *objects);
+          host.adopt_objects(bytes.data, bytes.size);
+        } catch (const std::exception &) {
+          // adopt_objects counts its own refusal.
+        }
+      }
+      stop = host.run_start();
       drain(host);
     } catch (const std::exception &) {
       // The host counts faults itself. A throw past that is still a fault.
@@ -205,8 +209,10 @@ int main(int argc, char **argv) {
   std::cout << "scripts_reached_wait " << total.reached_wait << '\n';
   std::cout << "scripts_reached_complete " << total.reached_complete << '\n';
   std::cout << "script_faults " << total.faults << '\n';
+  std::cout << "scripts_stopped_on_refusal " << total.refusal_stops << '\n';
   std::cout << "objects_registered " << total.objects_registered << '\n';
   std::cout << "objects_refused " << total.objects_refused << '\n';
+  std::cout << "stub_refusals " << total.stub_refusals << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     std::cout << "executed " << sc::row(i).name << ' ' << total.executed[i] << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)

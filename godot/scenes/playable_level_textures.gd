@@ -75,5 +75,5 @@ func label() -> String:
 	var pair: Dictionary = scene.terrain_root.get_meta("level_texture_pair")
 	var special := false
 	for surface in pair.decoded.surfaces: special = special or not surface.get("dynamic_light", true)
-	var note := " · constant chunk light is the native-fx base plus the documented constant" if special else ""
+	var note := " · constant chunk light is the documented constant on the level's base level (gated, base texture only, without a level light record)" if special else ""
 	return ("%s + %s · decoded textures · native FX lighting · environment rows, layer order and automap tiles" % [str(pair.world).get_file(), str(pair.tex).get_file()]) + note

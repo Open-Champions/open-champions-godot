@@ -2807,7 +2807,11 @@ uses host `cos` / `sin`. New refusals: `draw_haze`,
 `trig::refuse_block_sparks_angle` and
 `trig::refuse_creature_process_damage_angles`. Comments mark the existing
 block-spark and `process_damage` bodies that these refusals cover; the bodies
-themselves are unchanged. See [NATIVE_FX.md](NATIVE_FX.md).
+themselves are unchanged. Combat runtime round 5 replaces those two refusals
+with the executed registers (the sign-extended hit halfword plus `0x7fff`, the
+sign-extended facing, and the gib heading) and calls `fx::trig::cos16` /
+`sin16` there. Haze kind 3 and the haze screen axis stay refused. See
+[NATIVE_FX.md](NATIVE_FX.md) and [COMBAT_RUNTIME.md](COMBAT_RUNTIME.md).
 
 Changed vectors: only `fx_exact.tsv`, with 900 `emitter` rows and all 16
 `trig` rows (every 16-bit angle). No combat, session or other vector file

@@ -233,4 +233,62 @@ void World::apply_knockback(Address a, Raw f) { s_->knockback(a, f); }
 void World::dead_update(Address a, Raw e, Raw h, Raw z, const Vec3 &off) {
   s_->dead_update(a, e, h, z, off);
 }
+// world_findFreeSpot 0x14acf8 (research t3/research-levels 13fafa4:
+// ref_objects.World.find_free_spot; docs/level-flow.md 17.2 and 18.3).
+// A try draws a shared-seed point in the unit ball and offsets the centre by
+// its x and y times the spread. It fails on terrain_testFlag1, on a floor not
+// below centre z + 6 (unless anyHeight), or on a box hit by an object
+// without flag 0x1 (dx*dx + dy*dy <= radius*radius + r*r). After 50 failures
+// ok is 0 and the point is the last one that passed the terrain tests, or
+// the centre.
+std::pair<Vec3, int> World::State::find_free_spot(const Vec3 &centre,
+                                                  Raw spread, Raw radius,
+                                                  Raw any_height) {
+  if (!services.terrain_blocked || !services.terrain_height)
+    throw Unsupported("world_findFreeSpot terrain service missing");
+  constexpr Raw F_6 = 0x40c00000, F_100000 = 0x47c35000;
+  const auto fs = from_int(spread), fr = from_int(radius);
+  const auto radius_sq =
+      from_int(Raw(std::int64_t(s32(radius)) * std::int64_t(s32(radius))));
+  auto blocked = services.terrain_blocked;
+  auto height = services.terrain_height;
+  auto result = centre;
+  unsigned tries = 0;
+  while (tries < 50) {
+    auto ball = shared_ball_round4();
+    auto ox = mul(ball[0], fs), oy = mul(ball[1], fs);
+    Vec3 cand{add(ox, centre[0]), add(oy, centre[1]), centre[2]};
+    if (!eq(blocked(cand, fr), 0)) {
+      ++tries;
+      continue;
+    }
+    Vec3 probe{add(ox, centre[0]), add(oy, centre[1]), add(0, centre[2])};
+    auto h = height(probe, fr);
+    if (!lt(sub(h, centre[2]), F_6) && !any_height) {
+      ++tries;
+      continue;
+    }
+    result = {add(centre[0], ox), add(centre[1], oy), h};
+    Vec3 lo{sub(result[0], fr), sub(result[1], fr), sub(h, F_100000)},
+        hi{add(result[0], fr), add(result[1], fr), add(h, F_100000)};
+    bool hit = false;
+    for (auto o : box(lo, hi, 0x80)) {
+      if (u(o + 12) & 1)
+        continue;
+      auto dy = sub(u(o + 20), result[1]), dx = sub(u(o + 16), result[0]);
+      auto reach = add(radius_sq, mul(u(o + 0x1c), u(o + 0x1c)));
+      if (le(add(mul(dx, dx), mul(dy, dy)), reach)) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit)
+      break;
+    ++tries;
+  }
+  const int ok = tries != 50 ? 1 : 0;
+  note("findFreeSpot", {centre[0], centre[1], centre[2], spread, radius,
+                        any_height, result[0], result[1], result[2], Raw(ok)});
+  return {result, ok};
+}
 } // namespace champions::simulation::rta::combat_runtime

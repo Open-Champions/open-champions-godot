@@ -33,9 +33,11 @@ The play shader uses that blend (`blend_mix`, `ALPHA = FIX/128`), modulate
 (`ALBEDO = texel.rgb × COLOR.rgb` with the vertex colour already divided by
 128), `depth_draw_never` and `depth_test_disabled`. `render_priority` is 3.
 The texture is the first `.tex` of `waterenv.lmp`. UV is in texels; the
-shader divides by the texture size. A decode failure draws a 1×1 texel of
-128 so the multiply leaves the vertex colour, and the scene says the texture
-was refused.
+shader divides by the texture size. The texture is the `waterenv` image
+`water_setup` was given (water-draw.md sections 1 and 7.1); no substitute is
+documented. When it does not decode, that level's water is not drawn, the
+scene says "texture refused, not drawn" and the real-data run counts the tiles
+under `water.tiles_not_drawn`.
 
 ## Grid, wave and vertices
 

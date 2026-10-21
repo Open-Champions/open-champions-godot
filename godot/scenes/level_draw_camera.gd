@@ -60,15 +60,17 @@ func _sim_frame() -> int:
 	return 0
 
 func _camera_components(camera: Camera3D) -> PackedFloat64Array:
-	# Native world is (x, z, -y) from this scene. Camera axes are right, down,
-	# forward, each as three native components. The z of each axis is unread.
+	# Native world is (x, z, -y) from this scene. g_cameraMatrix (0x44f110) is
+	# three rows that are the camera-space images of the world x, y, z axes
+	# (render-pipeline.md section 3, research-textures 391cf6b): row i is
+	# (right[i], down[i], forward[i]). axis_xy reads x and y of each row.
 	var right := _to_native(camera.global_transform.basis.x)
 	var down := _to_native(-camera.global_transform.basis.y)
 	var forward := _to_native(-camera.global_transform.basis.z)
 	return PackedFloat64Array([
-		right.x, right.y, right.z,
-		down.x, down.y, down.z,
-		forward.x, forward.y, forward.z])
+		right.x, down.x, forward.x,
+		right.y, down.y, forward.y,
+		right.z, down.z, forward.z])
 
 func _to_native(value: Vector3) -> Vector3:
 	return Vector3(value.x, -value.z, value.y)

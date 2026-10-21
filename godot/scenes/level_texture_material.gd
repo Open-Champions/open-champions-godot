@@ -7,16 +7,25 @@ static var _shaders: Dictionary = {}
 # 9 is src + dst × As, 0x48 is dst + src × As, and 0x2a (context 2) is src.
 # Flag 0x400 discards a fragment whose alpha byte is at or above 0x2f.
 # World chunks keep the frame depth test and depth write. Automap tiles do not.
-const PLAY_LIGHT_BASE := 128
+# Level chunks are modulate: final = texel x colour / 128 (render-pipeline
+# section 9 item 3). Constant-light chunks store the channel byte / 255 and set
+# modulate_scale = 255 / 128; dynamic chunks keep native-fx's existing / 255
+# presentation (scale 1).
 
 static func create(source: Texture2D, surface: Dictionary, native_lighting := false) -> ShaderMaterial:
 	var alpha1 := int(surface.alpha1)
 	var cutout := int(surface.test1) == 0x582f5
 	var blend := bool(surface.blend_enabled)
-	var env := bool(surface.get("environment", false)) and bool(surface.get("env_ready", false))
+	var env_surface := bool(surface.get("environment", false))
+	var env := env_surface and bool(surface.get("env_ready", false))
 	var mode := "replace"
 	if env:
 		mode = "env"
+	elif env_surface and alpha1 == 9:
+		# ALPHA_1 9 is the second pass over the context-2 environment pass
+		# (level-draw.md sections 1 and 3). Without the environment image the
+		# second pass alone is not documented, so the base pass stays opaque.
+		mode = "replace"
 	elif blend and alpha1 == 1:
 		mode = "mix"
 	elif blend and alpha1 == 0x48:
@@ -48,21 +57,34 @@ static func create(source: Texture2D, surface: Dictionary, native_lighting := fa
 	code += "uniform sampler2D env_texture : source_color, filter_linear, repeat_enable;\n"
 	code += "uniform vec4 env_row4 = vec4(0.0);\n"
 	code += "uniform vec4 env_row5 = vec4(192.0, 192.0, 192.0, 192.0);\n"
+	code += "uniform float modulate_scale = 1.0;\n"
 	if mode == "env":
-		code += "varying vec3 stored_normal;\n"
-		code += "void vertex() {\n stored_normal = CUSTOM0.xyz;\n}\n"
+		# Program 0x48 computes the second coordinate per vertex (render-pipeline
+		# 4.6): n' = stored normal / 16 plus 0.07 x (sx, sy), where (sx, sy) are
+		# pixels of the 1280 x 448 buffer from its centre, y down:
+		# sx = F cam.x / cam.z, sy = F 0.4666667 cam.y / cam.z, F = 477.5 /
+		# tan(fov / 2) (section 3). Camera space is x right, y down, z forward;
+		# the fov is this camera's vertical field of view.
+		code += "varying vec2 env_uv;\n"
+		code += "void vertex() {\n vec3 n = CUSTOM0.xyz / 16.0;\n"
+		code += " vec4 view = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);\n"
+		code += " vec3 cam = vec3(view.x, -view.y, -view.z);\n"
+		# abs: the render-target projection may carry a y flip.
+		code += " float f = 477.5 * abs(PROJECTION_MATRIX[1][1]);\n"
+		code += " vec2 screen = vec2(f * cam.x / cam.z, f * 0.4666667 * cam.y / cam.z);\n"
+		code += " env_uv.x = env_row5.z + n.x * env_row4.x + n.y * env_row4.z + n.z * env_row5.x + 0.07 * screen.x;\n"
+		code += " env_uv.y = env_row5.w + n.x * env_row4.y + n.y * env_row4.w + n.z * env_row5.y + 0.07 * screen.y;\n"
+		code += "}\n"
 	code += "void fragment() {\n vec4 texel = texture(base_texture, UV);\n"
 	code += " float gs = clamp(texel.a * (255.0 / 128.0), 0.0, 1.0);\n"
 	code += " bool keep = !(cutout && texel.a * 255.0 >= 47.0);\n"
-	code += " vec3 lit = texel.rgb * COLOR.rgb;\n" if native_lighting else " vec3 lit = texel.rgb;\n"
+	code += " vec3 lit = min(texel.rgb * COLOR.rgb * modulate_scale, vec3(1.0));\n" if native_lighting else " vec3 lit = texel.rgb;\n"
 	code += " vec3 rgb = lit;\n"
 	if mode == "env":
-		code += " vec3 n = stored_normal / 16.0;\n"
-		code += " vec2 centre = VIEWPORT_SIZE * 0.5;\n"
-		code += " vec2 screen = vec2(FRAGCOORD.x - centre.x, centre.y - FRAGCOORD.y);\n"
-		code += " float u = env_row5.z + n.x * env_row4.x + n.y * env_row4.z + n.z * env_row5.x + 0.07 * screen.x;\n"
-		code += " float v = env_row5.w + n.x * env_row4.y + n.y * env_row4.w + n.z * env_row5.y + 0.07 * screen.y;\n"
-		code += " vec3 env_lit = texture(env_texture, vec2(u, v) / vec2(textureSize(env_texture, 0))).rgb;\n"
+		# The environment pass is modulated by the same vertex colour
+		# (render-pipeline section 9 item 6).
+		code += " vec3 env_texel = texture(env_texture, env_uv / vec2(textureSize(env_texture, 0))).rgb;\n"
+		code += " vec3 env_lit = min(env_texel * COLOR.rgb * modulate_scale, vec3(1.0));\n" if native_lighting else " vec3 env_lit = env_texel;\n"
 		code += " if (use_env) {\n"
 		code += "  vec3 src = lit;\n  vec3 dest = env_lit;\n"
 		code += "  if (alpha_mode == 2) rgb = src * (1.0 - gs);\n"

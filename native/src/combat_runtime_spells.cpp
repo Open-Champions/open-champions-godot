@@ -8,7 +8,8 @@ namespace {
 constexpr Raw F_100 = 0x42c80000, F_DEG = 0x43360b60, F_THIRD = 0x3eaa7ef9,
               F_2M16 = 0x37800000, F_02 = 0x3e4ccccc, F_12 = 0x41400000,
               F_36 = 0x42100000, F_60 = 0x42700000, DT = 0x3c888888,
-              VT_SPELL_BASE = 0x515ba0, WAVE_GETTER = 0x3d1c4c;
+              VT_SPELL_BASE = 0x515ba0, WAVE_GETTER = 0x3d1c4c,
+              HOLY_SHIELD_DTOR = 0x3cf0c4, HOLY_SHIELD_RUN = 0x2e8428;
 // Object bodies of the composed skill modules.
 constexpr Raw HOLYSTRIKE_RUN = 0x2ebc50, HOLYSTRIKE_HIT = 0x2ecae8,
               SPARKS_RUN = 0x28fa3c, SPARKS_TOUCH = 0x2900c8,
@@ -296,8 +297,14 @@ void World::State::effect_dtor(Raw fn, Address self, Raw flags) {
   case 0x3c6888: // LightEffect_dtor
     parts = {{VT_LIGHTEFFECT, {{false, 0x88}, {true, 0x4c}}}};
     break;
-  case DISEASE_CLOUD_DTOR: // DiseaseCloud_dtor 0x3cd480: the owner head the ctor linked
-    parts = {{VT_DISEASE_CLOUD, {{false, 0x4c}}}};
+  case DISEASE_CLOUD_DTOR:
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  case HOLY_SHIELD_DTOR: // SpellHolyShield_dtor 0x3cf0c4 = the base Spell
+    // destructor (skills-35-68 section 54). Its steps are the base tail of the
+    // executed SpellWaveOfFlame_dtor (combat-spells 6.1).
+    table_off = 0x14;
+    parts = {{VT_SPELL_BASE, {{false, 4}}}};
+    gameobject = false;
     break;
   case WAVE_DTOR: // SpellWaveOfFlame_dtor
     table_off = 0x14;
@@ -500,6 +507,18 @@ Value World::State::spell_virtual(Address spell, unsigned slot,
   }
   if (fn == DISEASE_RUN)
     throw Unsupported("SpellDiseaseEffect_run (remaining skill path)");
+  // SpellHolyShield (skills-35-68 section 54, table 0x519ce0): slot 1 is the
+  // base Spell destructor 0x3cf0c4, slot 2 the executed run 0x2e8428
+  // (ref_skills_b.holyshield_run).
+  if (slot == 1 && fn == HOLY_SHIELD_DTOR) {
+    note("destroy_spell", {spell});
+    effect_dtor(fn, spell, number(args.at(0)));
+    return iv(0);
+  }
+  if (fn == HOLY_SHIELD_RUN) {
+    holy_shield_run(self);
+    return iv(0);
+  }
   throw Unsupported("Spell slot " + std::to_string(slot) + " reaches " +
                     std::to_string(fn) + ", which has no model");
 }

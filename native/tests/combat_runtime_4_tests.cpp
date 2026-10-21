@@ -129,16 +129,18 @@ void host() {
     Host live, splash;
     live.ground = splash.ground = 0x42c80000;
     auto a = potion(live, 1, GRAV, 1000);
-    live.w->run_actor(a);
+    // The kind-1 ending refuses at the first LooseFire_ctor block (CR4-1);
+    // the stone sound and the fire sound come before it.
+    check(refused([&] { live.w->run_actor(a); }, "LooseFire_ctor"), "kind 1 refuses at LooseFire_ctor");
     auto b = potion(splash, 1, GRAV, 1000);
     splash.w->write(b + 0xcc, 1, 1);
     splash.w->write(C::SHARED_SEED, 4, 1);
     splash.w->clear_history();
-    splash.w->run_actor(b);
+    check(refused([&] { splash.w->run_actor(b); }, "LooseFire_ctor"), "a splashed kind 1 refuses too");
     auto sounds = [](const C::World &w) { return count_event(w, "presentation:sound_playOnObject"); };
     check(sounds(*live.w) == sounds(*splash.w) && sounds(*live.w) >= 2,
           "a ground hit sounds whether or not the splash byte is set");
-    check(!live.w->contains(a) && !splash.w->contains(b), "a ground hit ends the potion");
+    check(!has_event(*live.w, "LooseFire_ctor"), "LooseFire_ctor is not a silent note");
   }
   {
     Host hit, far;
@@ -179,6 +181,25 @@ void host() {
     auto spell = h.w->attach_holy_shield(player, h.w->give_skill(16, setup), 1);
     check(refused([&] { h.w->holy_shield_absorb(spell); }, "sample count of 0"),
           "a shield with no samples stays refused");
+  }
+  {
+    // skills-35-68 section 54: SpellHolyShield is 0x28 bytes on table
+    // 0x519ce0 (slot 0 getter 0x3cf124, slot 1 0x3cf0c4, slot 2 0x2e8428).
+    Host h;
+    auto player = h.player_at({0, 0, 0});
+    C::SkillSetup setup;
+    setup.stats[0] = {1, 1, 0};
+    auto skill = h.w->give_skill(16, setup);
+    h.w->clear_history();
+    auto spell = h.w->attach_holy_shield(player, skill, 1);
+    auto pool = find_event(*h.w, "pool_new");
+    check(pool && !pool->args.empty() && pool->args[0] == 0x28, "the Holy Shield block is 0x28 bytes");
+    check(h.w->read(spell + 0x14) == 0x519ce0, "the shield uses table 0x519ce0");
+    check(h.w->read(0x519ce0 + 4) == 0x3cf124 && h.w->read(0x519ce0 + 12) == 0x3cf0c4 &&
+              h.w->read(0x519ce0 + 20) == 0x2e8428,
+          "table 0x519ce0 slots 0, 1 and 2");
+    check(h.w->read(0x519ce0 + 28) == 0 && h.w->read(0x519ce0 + 36) == 0,
+          "slots 3 and 4 (base, address not documented) stay 0");
   }
   {
     Host h;
@@ -227,17 +248,14 @@ void host() {
     m.position = {0, 0, 0x40400000};
     auto arrow = h.w->spawn_missile(owner, m);
     h.w->clear_history();
-    h.w->run_actor(arrow);
-    auto fx = find_event(*h.w, "presentation:fx_spawn");
-    check(fx && !fx->args.empty() && fx->args[0] == 5, "kind 1 still notes fx_spawn 5");
-    check(!has_event(*h.w, "Fire_ctor") && !has_event(*h.w, "LooseFire_ctor"),
+    check(refused([&] { h.w->run_actor(arrow); }, "fx_spawn id 5"),
           "Fire construction from fx_spawn 5 stays refused");
+    check(!has_event(*h.w, "presentation:fx_spawn"), "kind 1 does not note fx_spawn 5");
   }
   {
     Host h;
-    auto chunk = h.w->spawn_gut_chunk({0, 0, 0}, 1, 0);
-    check(refused([&] { h.w->run_actor(chunk); }, "unimplemented actor run table"),
-          "GutChunk's run stays refused");
+    check(refused([&] { h.w->spawn_gut_chunk({0, 0, 0}, 1, 0); }, "PhProp_ctor"),
+          "GutChunk construction stays refused at PhProp_ctor");
   }
   std::cout << checks << " round-4 host checks passed\n";
 }
@@ -346,6 +364,29 @@ void replay(const Exact &c) {
     }
     auto obj = potion(h, kind, c.name == "potion-flight" ? V40 : GRAV,
                       c.name == "potion-flight" ? 180 : 0);
+    if (!c.fires.empty() || !c.gas.empty()) {
+      // The research reaches LooseFire_ctor 0x202b70 / poisonGasSpell_ctor
+      // 0x202de8 with a pool block. Neither constructor is executed (stubbed
+      // call-outs of ref_combat_round4; each draws the shared seed), so the
+      // native World refuses at that call. Everything the vector records
+      // before the first call-out is compared.
+      const char *callout = c.fires.empty() ? "poisonGasSpell_ctor 0x202de8" : "LooseFire_ctor 0x202b70";
+      std::string refusal;
+      try {
+        h.w->run_actor(obj);
+      } catch (const C::Unsupported &e) {
+        refusal = e.what();
+      }
+      check(refusal.find(callout) != std::string::npos, c.name + " refuses at " + callout + ": '" + refusal + "'");
+      std::vector<std::vector<Raw>> particles;
+      for (auto e : named(*h.w, "presentation:particle_spawn"))
+        particles.push_back(span(*e, 0, 8));
+      expect_rows(particles, c.particles, c.name + " particle");
+      check(!has_event(*h.w, "presentation:decal_add") && !has_event(*h.w, "LooseFire_ctor") &&
+                !has_event(*h.w, "poisonGasSpell_ctor"),
+            c.name + " stops before its first call-out");
+      return;
+    }
     h.w->run_actor(obj);
     if (c.vz)
       check(h.w->read(obj + 0x1b8) == *c.vz, c.name + " vz");

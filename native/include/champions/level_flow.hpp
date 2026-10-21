@@ -225,16 +225,18 @@ StartResult resolve_start(const SpawnState &incoming,
 // Cold story start the real-data job can call. Identity search: the file
 // position, or the incoming slot when no marker takes. z is player_ctor_z at
 // PLACEMENT_RADIUS. ground is that z other than the sentinel. One player.
-// When that snap has no floor and no Player1 took, and the records contain
-// an ArenaPlayerStart, the result is arena_mode_a_wave_ground for slot 0
-// and count 1: an empty object list and the executed seed 0. The live seed
-// and the class-constructor radii stay refused.
+// A taken marker sets pre_search: the xy is before findFreeSpot, whose live
+// seed and class-constructor radii are not documented, and facing is left
+// unset. There is no arena fallback: a level reached only through the mode-A
+// table (section 18.1) is not a story start, and its caller must say so by
+// calling arena_mode_a_start_ground.
 struct StoryGround {
   Vec3 position{};
   Raw spawn_z = 0, object_z = 0;
-  std::uint16_t facing = 0;
+  std::optional<std::uint16_t> facing;
   int rank = 0;
   bool marker_taken = false, ground = false, recall_cleared = false;
+  bool pre_search = false;
 };
 // Mode-A wave start. arena_init plants the origin at entry 0 with count 1.
 // Each ArenaPlayerStart then overwrites entry 0; each ArenaPlayerAlternate
@@ -245,12 +247,23 @@ struct StoryGround {
 StoryGround arena_mode_a_wave_ground(const std::vector<Record> &, int slot,
                                      int active_count, const ArenaSearch &,
                                      const Height &);
+// The caller asserts the level was loaded in mode A (g_pvpModeA and
+// g_pvpModeB set, 0x4f7124 clear: the executed case of 18.2); this module
+// cannot see the mode-A table. The same mode-A wave start for slot 0 and
+// count 1 before the search: the
+// ring centre, then player_ctor_z there. pre_search is set and facing is
+// unset (the original's point and facing depend on g_randSeed and the object
+// list). Empty (ground false) when no ArenaPlayerStart is registered.
+StoryGround arena_mode_a_start_ground(const std::vector<Record> &,
+                                      world_queries::Level &);
 StoryGround story_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &,
                                world_queries::Level &);
 // Same snap for an explicit entry (previous level, entrance, recall flag,
-// gate, owner-supplied restore xy). The gate plan uses the gate's own xy.
-// It does not apply the anyHeight move; that disc re-run is refused.
+// gate, owner-supplied restore xy). A gate entry that takes a Portal or
+// PortalHurt would run JumpGate_ctor's anyHeight search, which was not re-run
+// on the disc: it throws Unsupported (OpenItem::GateAnyHeightOnDisc). A gate
+// flag with no portal takes nothing and is the plain marker snap.
 StoryGround entry_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &, const StartEntry &,
                                const Placement &, world_queries::Level &);

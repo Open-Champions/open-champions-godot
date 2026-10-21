@@ -266,8 +266,9 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
+    const auto before = active_observation().ready_ticks;
     cache_state(active_advance(static_cast<uint32_t>(mask)), true);
-    pump_scripts();
+    pump_scripts(before);
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -312,9 +313,10 @@ Dictionary ChampionsSessionController::advance_time(int64_t usec,
     } else {
       clock_.advance(usec, [&]() {
         const auto generation = level_ ? level_->flow().generation : 0;
+        const auto before = active_observation().ready_ticks;
         auto state = active_advance(static_cast<uint32_t>(mask));
         cache_state(state, level_ && generation != level_->flow().generation);
-        pump_scripts();
+        pump_scripts(before);
         return !current_.paused && !current_.stopped && !current_.failed;
       });
     }
@@ -490,10 +492,14 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["level_script_policy"] = rta::script_commands::POLICY;
   return result;
 }
-void ChampionsSessionController::pump_scripts() {
-  if (!scripts_ || current_.paused || current_.stopped || current_.failed)
+// The Script task runs once per simulated frame, also while paused (research
+// 9649e6b docs/script.md 2.4 and 2.6). A submission simulates 0 or 1 ready
+// ticks, so the task follows the ready-tick count, not the submissions.
+void ChampionsSessionController::pump_scripts(std::size_t before) {
+  if (!scripts_)
     return;
-  scripts_->on_ready_tick();
+  for (auto tick = before; tick < current_.ready_ticks; ++tick)
+    scripts_->on_ready_tick();
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects) {
@@ -505,12 +511,14 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
+    next->run_prestart();
     if (!objects.is_empty()) {
       std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
       std::memcpy(raw.data(), objects.ptr(), raw.size());
       next->adopt_objects(raw.data(), raw.size());
     }
-    next->begin_level();
+    next->run_start();
     scripts_ = std::move(next);
     Dictionary result;
     result["ok"] = true;
@@ -538,8 +546,10 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["reached_complete"] = static_cast<int64_t>(counts.reached_complete);
   result["faults"] = static_cast<int64_t>(counts.faults);
   result["missing_entries"] = static_cast<int64_t>(counts.missing_entries);
+  result["refusal_stops"] = static_cast<int64_t>(counts.refusal_stops);
   result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
+  result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
   Dictionary executed, refused;
   for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i) {
     const auto name = String::utf8(rta::script_commands::row(i).name);
@@ -941,8 +951,11 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     rta::world_queries::Level query(data);
     // With the level's objects.ob supplied for this exact path, the start is
     // level-spawn's cold story start (docs/LEVEL_FLOW.md section 17): marker
-    // identity search, then player_ctor_z at radius 12. Otherwise the
-    // historical origin start and its two floor probes are unchanged.
+    // identity search, then player_ctor_z at radius 12. When a marker took,
+    // that xy is the marker before Player1_ctor's findFreeSpot (pre_search)
+    // and the original facing is unknown, so no facing is published.
+    // Otherwise the historical origin start and its two floor probes are
+    // unchanged.
     std::optional<rta::world_queries::Vec3> start;
     Dictionary start_info;
     if (!start_objects_path_.is_empty() && start_objects_path_ == path) {
@@ -951,12 +964,16 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
       const auto story = rta::level_flow::story_start_ground({}, records, query);
       if (!story.ground)
         throw std::runtime_error(
-            "This WORLD has no ground at its story start (radius 12 snap).");
+            "This WORLD has no ground at its story start (radius 12 snap). "
+            "A mode-A arena start needs the arena mode, which this session "
+            "does not select.");
       start = rta::world_queries::Vec3{story.position[0], story.position[1],
                                        story.object_z};
       start_info["marker_taken"] = story.marker_taken;
       start_info["rank"] = int64_t(story.rank);
-      start_info["facing"] = int64_t(story.facing);
+      start_info["pre_search"] = story.pre_search;
+      if (story.facing)
+        start_info["facing"] = int64_t(*story.facing);
       start_info["records"] = int64_t(records.size());
     } else {
       const rta::world_queries::Vec3 origin{};
@@ -1233,8 +1250,18 @@ Dictionary ChampionsSessionController::combat_observation() const {
     Dictionary value;
     value["slot"] = a.slot;
     value["handle"] = int64_t(a.handle);
-    value["kind"] = a.slot == 3 ? String::utf8(combat_->own_creature_class().c_str())
-                    : a.slot ? (combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight") : "Player";
+    String kind = "Player";
+    if (a.slot == 3)
+      kind = String::utf8(combat_->own_creature_class().c_str());
+    else if (a.slot == 4)
+      kind = "AntQueen";
+    else if (a.slot == 5)
+      kind = "Skeleton";
+    else if (a.slot == 6)
+      kind = "Soul";
+    else if (a.slot)
+      kind = combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight";
+    value["kind"] = kind;
     if (combat_->full() && a.present) {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));

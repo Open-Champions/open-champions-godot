@@ -187,6 +187,7 @@ struct ColdTally {
   unsigned n = 0, origin_floor = 0, start_floor = 0, ring_floor = 0;
   unsigned search_ok = 0, search_n = 0, stand_ok = 0, stand_n = 0;
   unsigned lattice = 0, decode_failures = 0, stand_failures = 0, story = 0;
+  unsigned arena_pre_search = 0;
   std::vector<unsigned> water, alts, index;
 };
 // A geometry-skipped archive is cold when radius 12 at the origin is the
@@ -277,6 +278,13 @@ void consider_cold(ColdTally &tally, unsigned index,
   try {
     if (story_start_ground({}, records, level).ground)
       ++tally.story;
+  } catch (const std::exception &) {
+  }
+  // Measurement only: the tool selects these by structure to count them;
+  // runtime start code does not infer mode A (docs/LEVEL_FLOW.md).
+  try {
+    if (arena_mode_a_start_ground(records, level).ground)
+      ++tally.arena_pre_search;
   } catch (const std::exception &) {
   }
 }
@@ -515,6 +523,7 @@ int main(int argc, char **argv) {
             << "cold_stand_in " << cold.stand_ok << '/' << cold.stand_n << '\n'
             << "cold_lattice_misses " << cold.lattice << '\n'
             << "cold_story " << cold.story << '\n'
+            << "cold_arena_pre_search " << cold.arena_pre_search << '\n'
             << "cold_decode_failures " << cold.decode_failures << '\n'
             << "cold_stand_failures " << cold.stand_failures << '\n'
             << "cold_water";

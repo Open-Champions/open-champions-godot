@@ -144,7 +144,9 @@ What changed in the real-data scene:
   starts at `level_flow::story_start_ground` (cold story, one player, marker
   identity search, `player_ctor_z` at radius 12; docs/LEVEL_FLOW.md section
   17) instead of the origin, and refuses a level only when that snap has no
-  ground. `session_control::Config::start` carries the position; saves keep it
+  ground. When a marker took, that start is the marker before
+  `Player1_ctor`'s `findFreeSpot` (`start.pre_search` is true, up to 36 units
+  from the original) and no `start.facing` is published. `session_control::Config::start` carries the position; saves keep it
   (terrain marker byte 2). Terrain loaded without objects keeps the historical
   origin start and probes.
 - **Session mesh cap.** `present_geometry` merges each chunk's batches into
@@ -429,3 +431,37 @@ Still refused or not done:
   disturbs the drawn grid.
 - Water draws without a depth test, as documented, so a pool can draw over
   nearer rock.
+
+## Audit fixes, level spawn (2026-10-21): 108 / 111
+
+Audit findings LS-1, LS-2, LS2-1..3 (docs/LEVEL_FLOW.md). Counts only, same
+disc copy.
+
+What changed:
+- A story start whose `Player1` took is the marker before `Player1_ctor`'s
+  `findFreeSpot` (`start.pre_search`), and no `start.facing` is published:
+  the live `g_randSeed` there is not documented.
+- `story_start_ground` no longer infers the mode-A arena start from the
+  records (no floor, no Player1, an `ArenaPlayerStart`). The original reaches
+  those three archives only through the mode-A table, which the session does
+  not read and does not select, so they are refused again. The explicit
+  `level_flow::arena_mode_a_start_ground` (pre-search ring centre) is not
+  called by the session.
+
+Sweep: four headless slices, no level script (the wave-16 control recipe),
+60 ready ticks. Compared with wave 16's control sweep:
+
+| Measure | Wave 16 control | Audit fixes |
+|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **108 / 111** |
+| Refused (all reasons) | 0 | 3 (`library-load`: no ground at the story start) |
+| Story ground / marker taken / pre-search | 111 / 98 / — | 108 / 95 / 95 |
+| Levels with water / water tiles shown | 48 / 9,451 | 45 / 9,308 |
+| Checks passed / failed | 119 / 0 | 116 / 0 |
+
+Every other difference is the three refused levels' meshes, lights, water
+and ticks; the wave-13 108-level counts are back.
+
+`champions-level-spawn-measure`: paired 111, origin-test 18 with story
+ground 18, cold 3, cold story 0 (was 3), cold mode-A pre-search ground 3;
+every other line unchanged.

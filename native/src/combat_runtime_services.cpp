@@ -31,6 +31,7 @@ bool knows(Raw fn) {
   case 0x27236c: case 0x272f4c: case 0x2a8b84: case 0x2a91b8: // classes
   case 0x2c2440: case 0x2c382c: case 0x2c34e4: case 0x2c3c54:
   case 0x10e658: case 0x10beb8: case 0x3c2708:
+  case 0x267a0c:                         // Gnaw_setState (creature-ai)
   case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
   case 0x3c3b40:
   case 0x11a290: case 0x3c7ef8: case 0x3c3b10: case 0x3c3b08: // empty
@@ -148,11 +149,8 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     projectile_destroy(self, ar(0));
     return iv(0);
   }
-  if (slot == 1 && fn == DISEASE_CLOUD_DTOR) {
-    note("destroy", {self});
-    effect_dtor(fn, self, ar(0));
-    return iv(0);
-  }
+  if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   switch (fn) {
   case 0x152a18:
     missile_on_touch(self, ar(0));
@@ -229,8 +227,10 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
                           " has no body (unbounded re-dispatch)");
     return full_vcall(self, slot, std::move(args));
   }
+  if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
+    throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
-                    fn == 0x3c6888 || fn == DISEASE_CLOUD_DTOR)) {
+                    fn == 0x3c6888)) {
     note("destroy", {self});
     effect_dtor(fn, self, number(args.at(0)));
     return iv(0);
@@ -321,6 +321,7 @@ void World::State::install_services() {
                          "world_collectObjectsInArc",
                          "world_collectInSphere",
                          "world_damageInRadius",
+                         "world_findFreeSpot",
                          "damage_apply",
                          "pool_new",
                          "pool_free",
@@ -764,6 +765,10 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     if (n == "world_damageInRadius")
       return A::Objects{damage_in_radius(ar(0), v(1), ar(2), ar(3), ar(4),
                                          ar(5), ar(6), ar(7))};
+    if (n == "world_findFreeSpot") {
+      auto spot = find_free_spot(v(0), ar(1), ar(2), ar(3));
+      return A::FreeSpot{spot.first, Raw(spot.second)};
+    }
     if (n == "pool_new")
       return iv(pool_new(ar(0)));
     if (n == "pool_free") {
@@ -921,6 +926,11 @@ void World::State::run(Address a) {
   if (fn == PHANTOM_RUN) {
     note("run", {a});
     phantom_run(a);
+    return;
+  }
+  if (fn == 0x2da2bc) {
+    note("run", {a});
+    multifire_run(a);
     return;
   }
   if (fn == 0x15153c || fn == 0x1ba940) {

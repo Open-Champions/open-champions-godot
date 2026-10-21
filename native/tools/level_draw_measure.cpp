@@ -173,33 +173,10 @@ void harvest(const std::vector<std::uint8_t> &container, int depth,
   }
 }
 
-int try_atlas(const std::vector<std::uint8_t> &world, const fs::path &out_dir) {
-  if (world.size() < 0x70)
-    return 0;
-  const auto offset = static_cast<std::size_t>(u32_at(world, 0x6c));
-  if (offset > world.size() || world.size() - offset < 0x80)
-    return 0;
-  const auto qwords = static_cast<std::size_t>(u16_at(world, offset + 6));
-  if (qwords == 0)
-    return 0;
-  const auto packet = 0x80 + qwords * 16;
-  if (packet > world.size() - offset)
-    return 0;
-  try {
-    const auto image = decodeRtaTexture(
-        Bytes{world.data() + offset, packet});
-    std::ofstream out(out_dir / "atlas.rgba", std::ios::binary);
-    if (!out)
-      return 0;
-    write_u32(out, image.width);
-    write_u32(out, image.height);
-    out.write(reinterpret_cast<const char *>(image.rgba.data()),
-              static_cast<std::streamsize>(image.rgba.size()));
-    return out ? 1 : 0;
-  } catch (const std::exception &) {
-    return 0;
-  }
-}
+// WORLD header +0x6c (the automap tile texture) is "a 0x40-byte header +
+// pixel data" whose pixel format was not decoded (research-textures 391cf6b
+// docs/formats/world.md, header +0x6c: U). Nothing here decodes it; the
+// count line reports atlas=undocumented.
 } // namespace
 
 int main(int argc, char **argv) {
@@ -247,7 +224,6 @@ int main(int argc, char **argv) {
   int automap_h = 0;
   int automap_cells = 0;
   int automap_quads = 0;
-  int atlas = 0;
   int omitted_models = 0;
   int omitted_emitters = 0;
   int omitted_lights = 0;
@@ -413,7 +389,6 @@ int main(int argc, char **argv) {
           automap_cells = 0;
           automap_quads = 0;
         }
-        atlas = try_atlas(item.second.world, out_dir);
         have_level = true;
         have_env = env_count > 0;
         if (have_env)
@@ -441,7 +416,7 @@ int main(int argc, char **argv) {
             << " cutout=" << cutout << " automap_ok=" << automap_ok
             << " automap_w=" << automap_w << " automap_h=" << automap_h
             << " automap_cells=" << automap_cells
-            << " automap_quads=" << automap_quads << " atlas=" << atlas
+            << " automap_quads=" << automap_quads << " atlas=undocumented"
             << " etex_lumps=" << etex.lumps << " etex_decoded=" << etex.decoded
             << " etex_failed=" << etex.failed << " etex_w=" << etex.width
             << " etex_h=" << etex.height << " omitted_models=" << omitted_models

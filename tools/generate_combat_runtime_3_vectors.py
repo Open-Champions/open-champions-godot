@@ -86,6 +86,97 @@ def cloud_case():
     return lines
 
 
+def cloud_tick_case():
+    """DiseaseCloud_run on a frame divisible by 30. The box callback returns a
+    creature and then the cloud itself: research ref_combat_round3.diseasecloud_run
+    skips neither (only the owner and two players are skipped), so damage_apply is
+    called on the cloud too. DAMAGE rows are (victim role, attacker, attack, flags,
+    descriptor slot 0)."""
+    import ref_core as C
+    import ref_creature as RC
+    import ref_skills_a as SA
+    import ref_combat_round3 as R3
+    C.set_fpu('ps2')
+    cloud, node, owner, victim = 0x2000, 0x3000, 0x4000, 0x5000
+    mem = RC.Memory()
+    mem.store(SA.G_SIM_FRAME, 4, 60)
+    calls = []
+
+    class CB:
+        def get(self, name):
+            def answer(*args):
+                calls.append((name, args))
+                if name == 'world_collectObjectsInBox':
+                    return (victim, cloud)
+                return 0
+            return answer
+
+    model = R3.Model(mem, CB())
+    mem.store(cloud + 0x48, 4, 0x7000)
+    mem.store(0x7000 + 12, 4, 0)
+    mem.store(cloud + 0x44, 4, 0x12345678)
+    mem.store(cloud + 0x4C, 4, node)
+    mem.store(node + 0xC, 4, owner)
+    mem.store(cloud + 0x54, 4, 1000)
+    mem.store(cloud + 0x58, 4, 10)
+    mem.store(cloud + 0x5C, 4, C.f32(10.0))
+    mem.store(cloud + 0x60, 4, 20)
+    for i, word in enumerate((C.f32(1.0), C.f32(2.0), C.f32(3.0))):
+        mem.store(cloud + 0x10 + 4 * i, 4, word)
+    model.diseasecloud_run(cloud)
+    lines = ['CASE cloud-tick', f'RADIUS {mem.load(cloud + 0x5C, 4):08x}']
+    for row in particles(calls):
+        lines.append('P ' + ' '.join(f'{w & 0xffffffff:08x}' for w in row))
+    roles = {victim: 'victim', cloud: 'self'}
+    for name, args in calls:
+        if name == 'damage_apply':
+            target, attacker, attack, _lo, _hi, flags, desc = args[:7]
+            slot = desc[1]
+            lines.append(f'DAMAGE {roles[target]} ' + ' '.join(
+                f'{w & 0xffffffff:08x}' for w in (attacker, attack, flags, *slot)))
+    return lines
+
+
+def disease_attach_case():
+    """The disease branch of damage_apply composed onto SpellDiseaseEffect_ctor
+    (ref_combat_round3.disease_attach): the shared draw, the stored words and the
+    16-point swarm of 32 spell_ball draws."""
+    import ref_core as C
+    import ref_creature as RC
+    import ref_skills_a as SA
+    import ref_combat_round3 as R3
+    C.set_fpu('ps2')
+    victim, block = 0x5000, 0x6000
+    mem = RC.Memory()
+    mem.store(SA.G_SIM_FRAME, 4, 77)
+    mem.store(SA.G_RAND_SEED, 4, 0x2468ACE1)
+    mem.store(R3.G_SKILL_DISEASE, 4, 0x41B000)
+    mem.store(victim + 0x1C, 4, C.f32(24.0))
+    mem.store(victim + 0x68, 4, C.f32(0.25))
+    calls = []
+
+    class CB:
+        def get(self, name):
+            def answer(*args):
+                calls.append((name, args))
+                if name == 'pool_new':
+                    return block
+                return 0
+            return answer
+
+    model = R3.Model(mem, CB())
+    got = model.disease_attach(victim, 0)
+    assert got == block
+    added = [args for name, args in calls if name == 'creature_addSpell']
+    assert added == [(victim, block)], added
+    lines = ['CASE disease-attach', f'SEED {mem.load(SA.G_RAND_SEED, 4):08x}',
+             'SPELL ' + ' '.join(f'{mem.load(block + off, 4):08x}'
+                                 for off in (0x10, 0x14, 0x1A0, 0x1A4, 0x1A8, 0x1AC))]
+    swarm = [mem.load(block + 0x1C + 4 * k, 4) for k in range(96)]
+    lines.append('SWARM ' + ' '.join(f'{w:08x}' for w in swarm))
+    return lines
+
+
 def arrow_case(name, kind, collide):
     import ref_core as C
     import ref_creature as RC
@@ -145,10 +236,17 @@ def main():
     lines += arrow_case('arrow1', 1, 1)
     lines += arrow_case('arrow2', 2, 1)
     lines += arrow_case('arrow6', 6, 1)
+    # Audit fix CR3-1 (2026-10-21): a damage tick whose box holds the cloud.
+    lines += cloud_tick_case()
+    # Audit fixes CR3-2/CR3-6: kind 1 in flight. Its 24 particle pairs are not
+    # behind the hit, which now refuses at fx_spawn 5 (arrow1 keeps its FX row).
+    lines += arrow_case('arrow1-flight', 1, 0)
+    # Audit fix CR3-7: the disease branch (stored words, the 16-point swarm).
+    lines += disease_attach_case()
     text = ('\n'.join(lines) + '\n').encode()
     out = Path(__file__).resolve().parents[1] / 'native/tests/vectors'
     out.mkdir(parents=True, exist_ok=True)
-    blob = gzip.compress(text)
+    blob = gzip.compress(text, mtime=0)
     (out / 'combat_runtime_3.txt.gz').write_bytes(blob)
     meta = {
         'schema': 'combat-runtime-3-v1',

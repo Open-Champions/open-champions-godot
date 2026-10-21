@@ -44,6 +44,8 @@ public:
   void set_two_channel_output(bool enabled);
   void set_frozen(bool frozen);
   void set_sfx_volume(double volume);
+  bool set_music_volume(double volume);
+  void end_session();
   bool play_menu_music(bool wait_for_current);
   bool play_boss_music(const String &creature_type, const String &object_name);
   bool stop_boss_music();

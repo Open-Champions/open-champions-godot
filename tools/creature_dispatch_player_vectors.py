@@ -114,3 +114,52 @@ def vectors(C,A,D):
         out.append({'input':'combo %d %d %d %d'%(m,c,v,frame),'expected':str(result(m,c,v,h))})
     C.set_fpu()
     return out
+
+
+def skill_vectors(S):
+    """Skill-driven player states from ref_skill_anim (player-animation-dispatch
+    section 6). Only a weapon-class-0 player with object flag word 0x40 was
+    executed; classes 4 and 6 and the flag word 0 are refusals."""
+    out=[]
+    actions={'SkillCyclone_cast':'cyclone','SpellBash_ctor':'bash','SpellAncestralCall_ctor':'ancestral_call',
+             'SpellShieldBash_ctor':'shield_bash','SpellRoar_ctor':'roar','SpellBattleCry_ctor':'battle_cry',
+             'SpellBloodLust_ctor':'blood_lust'}
+    refused='REFUSED skill constructor not executed for this weapon class/flags'
+    def ops(anim,clip):
+        kind,_,flags,bin_,bout=anim
+        if kind=='push':return ['named_push',2,clip,flags]
+        return ['named_blend',4,clip,bin_,bout,flags]
+    for row in S.STATE6:
+        action=actions[row['name']]
+        names=sorted(row['names'])
+        clip=row['anim'][1]
+        want=[row['state'],'-',1]+ops(row['anim'],clip)+[len(names)]+names
+        out.append({'input':'skill %s 0 %d'%(action,0x40),'expected':' '.join(map(str,want))})
+        for cls,flags in ((4,0x40),(6,0x40),(0,0)):
+            out.append({'input':'skill %s %d %d'%(action,cls,flags),'expected':refused})
+    for flags in (0x40,0):
+        out.append({'input':'skill charge 0 %d'%flags,'expected':'%d - 0 0'%S.charge_state(flags)})
+    want=[S.SHADOW_STATE,S.SHADOW_FLAGS_AFTER_CTOR,1,'named_push',2,S.SHADOW_CLIP,S.SHADOW_ANIM[2],1,S.SHADOW_CLIP]
+    out.append({'input':'skill shadow_step 0 %d'%0x40,'expected':' '.join(map(str,want))})
+    want=[S.SHADOW_END_STATE,S.SHADOW_FLAGS_AFTER_DTOR,0,0]
+    out.append({'input':'skill shadow_step_end 0 %d'%S.SHADOW_FLAGS_AFTER_CTOR,'expected':' '.join(map(str,want))})
+    return out
+
+
+def precedence_vectors(F):
+    """Two-field setState results and the single-field helpers from
+    ref_field_precedence (creature-animation-dispatch section 7)."""
+    out=[]
+    for row in F.COMBINED:
+        (f0,v0),(f1,v1)=row['fields']
+        want=[row['stored'],len(row['ops'])]
+        for fn,entry,flags in row['ops']:
+            args=[a for a in (entry,flags) if a is not None]
+            want+=[fn,len(args)]+args
+        out.append({'input':'combined %s %d %d %d %d %d'%(row['cls'],row['state'],f0,v0,f1,v1),'expected':' '.join(map(str,want))})
+    for flags in (0,0x40000,0x40001,0x80000,0x100000,0x200000,0x380000,0xffffffff):
+        out.append({'input':'agony %d'%flags,'expected':str(F.agony_hit_entry(flags))})
+    for form in range(7):  # executed for 0..6
+        e=F.clockwork_idle_entry(form)
+        out.append({'input':'clockwork %d'%form,'expected':'none' if e is None else str(e)})
+    return out

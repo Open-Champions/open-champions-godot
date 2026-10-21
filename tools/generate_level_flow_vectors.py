@@ -285,9 +285,61 @@ for ix in range(-limit, limit + 1):
         if W.terrain_height(solid, F(11.25), pos) == W.NO_FLOOR:
             misses += 1
 out.append('CHECK(round4_lattice()==std::make_pair(%d,%d));' % (misses, tested))
+# Mode-A arena start on a synthetic field at height 3 (radius 12 at the origin is
+# the sentinel; floor under the slot-0 centre). Composed only from the pinned
+# reference: arena_register_spawn (18.2) -> arena_ring_centre / arena_initial_place
+# (17.3) with ref_objects.World.find_free_spot -> player_ctor_z (17.1).
+bare = flat_level(-20, -20, 60, 60, 3, 0, (180, 0))
+if W.terrain_height(bare, L.PLACEMENT_RADIUS, origin) != W.NO_FLOOR:
+    raise SystemExit('bare field has a floor at the origin')
+def bare_height(r, p):
+    return W.terrain_height(bare, r, p)
+def arena_entry0(records):
+    entries, count = L.arena_register_spawn([], 1, 0, origin, 0)
+    seen = False
+    for cls, angle, pos in records:
+        if cls == 'ArenaPlayerStart':
+            entries, count = L.arena_register_spawn(entries, count, 0, pos, angle)
+            seen = True
+        elif cls == 'ArenaPlayerAlternate':
+            entries, count = L.arena_register_spawn(entries, count, -1, pos, angle)
+    return entries[0][0] if seen else None
+def rec_list(records):
+    return '{'+','.join('record(%s,{},Vec3%s,%d)' % (cstr(c), words(p), a) for c, a, p in records)+'}'
+def fp(x, y, z):
+    return (F(float(x)), F(float(y)), F(float(z)))
+arena_sets = (
+    (('ArenaPlayerStart', 0, origin),),
+    (('ArenaPlayerStart', 90, fp(8, 0, 0)), ('ArenaPlayerAlternate', 4, fp(1, 2, 3)),
+     ('ArenaPlayerStart', 0, origin)),
+    (('ArenaPlayerAlternate', 4, fp(1, 2, 3)), ('ArenaPlayerStart', 0x1234, fp(150, 20, 7))),
+)
+for records in arena_sets:
+    entry0 = arena_entry0(records)
+    centre = L.arena_ring_centre(entry0, 0, 1, True)
+    z = L.player_ctor_z(centre, L.PLACEMENT_RADIUS, bare_height)
+    if z == W.NO_FLOOR:
+        raise SystemExit('bare field lost the floor at the ring centre')
+    out.append('{ auto g=round4_arena_pre_search(%s); CHECK(g.position==Vec3%s && g.spawn_z==%su && '
+               'g.object_z==%su && g.ground && g.marker_taken && g.pre_search && g.rank==0 && '
+               '!g.facing.has_value()); }' % (
+                   rec_list(records), words((centre[0], centre[1], z)), pat(centre[2]), pat(z)))
+    for seed in (0, 20973):
+        world = Obj.World()
+        world.shared = C.SharedRandom(seed)
+        def search(c, spread, radius, any_height, world=world):
+            return world.find_free_spot(c, spread, radius, any_height,
+                                        lambda r, p: W.terrain_test_flag1(bare, r, p), bare_height)
+        pos, facing, ok = L.arena_initial_place(entry0, 0, 1, True, search, table_facing=False, table_angle=0)
+        snap = L.player_ctor_z(tuple(pos), L.PLACEMENT_RADIUS, bare_height)
+        out.append('{ auto g=round4_arena_wave(%s,%d); CHECK(g.position==Vec3%s && g.spawn_z==%su && '
+                   'g.object_z==%su && g.ground==%s && g.marker_taken && !g.pre_search && '
+                   'g.facing.has_value() && *g.facing==%d); }' % (
+                       rec_list(records), seed, words((pos[0], pos[1], snap)), pat(pos[2]), pat(snap),
+                       str(snap != W.NO_FLOOR).lower(), facing & 0xFFFF))
 a.output.write_text('\n'.join(out)+'\n')
 print('Generated 192 piece, 90 marker, 24 complete spawn cases and one object fixture;')
 print('round 2: %d light, %d chunk light, 900 WORLD pick, 100 manifest WORLD, %d recall calls, 6 request ticks, 401 move_piece' % (len(flags), len(cflags), calls))
 print('round 3: 4 ring angles and %d arena plans' % len(plans))
-print('round 4: mode-A steps, record offsets, ring centre, %d solid searches, 32 hole searches, lattice %d/%d' % (
-    17 * 2, misses, tested))
+print('round 4: mode-A steps, record offsets, ring centre, %d solid searches, 32 hole searches, lattice %d/%d, %d arena starts' % (
+    17 * 2, misses, tested, len(arena_sets) * 3))

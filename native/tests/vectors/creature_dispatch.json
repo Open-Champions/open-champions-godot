@@ -1,17 +1,17 @@
 {
-  "commit": "4f9b05746250c403eb16edbc1f578aefbebf2a2f",
+  "commit": "5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b",
   "groups": {
     "root": 47,
     "steered": 10,
     "special": 10,
     "none": 6
   },
-  "cases": 28530,
+  "cases": 28633,
   "generator_sha256": {
-    "tools/generate_creature_dispatch.py": "7fa683b53d566f7f83b48ed8b06de45511bba9999861503e232a94ee4f9a8af0",
-    "tools/creature_dispatch_player_vectors.py": "b187bc06a40975873b209d91f329fe93c5baf30804b7e9f10510fbc66f3be5c1"
+    "tools/generate_creature_dispatch.py": "f30f055840fb091a82ee1be4dc635e9f03318015144aeabf02883fb8b8132fe7",
+    "tools/creature_dispatch_player_vectors.py": "2cace879d7f945467cc4329466437be09bde90471c7d3c51bda886bb3de39d89"
   },
-  "sources_sha256": "072ebc98d3d007d0a8b3c15f3b2af5be3ac3fb19c1c6b139913f9299c5ce6a81",
-  "payload_sha256": "53fce902dbb8e96bba5e0ad39bb640b4e7319d8e1e857ec6a397d6305502f9e7",
-  "data_sha256": "2232b7b0cbd8fa579658cc6339e750c3de053030721c02ba16d6e9e5e4893c7c"
+  "sources_sha256": "c3778b8e77124082d6419ea127a876333560d154eae63d38a6ce296941bcf5a5",
+  "payload_sha256": "374ab81a1989180a02dd3e5c1a117279ed24c1b0db7142efc3409c9fc9ca99fc",
+  "data_sha256": "20dea7752d1e1a77b4239af2ac40fac334a9187fd939f85eda03000d2e1ddbf3"
 }

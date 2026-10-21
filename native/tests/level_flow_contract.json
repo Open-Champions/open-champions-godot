@@ -9,7 +9,8 @@
     "tools/difftest_levels_r4.py": "c43eb793baba8945af9e3657f39e1df2bbbfff3d56fbc78cb38bc36c43603e39",
     "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8",
     "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
-    "tools/world_info.py": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
+    "tools/world_info.py": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
   },
   "water_adapter": {
     "commit": "23699af22ffa7af237e27165e0285fb692607fd8",

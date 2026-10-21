@@ -62,5 +62,43 @@ func _run() -> void:
 	verify(not page.get("ok", true), "short font page refused")
 	var glyphs: Dictionary = service.hud_text_glyphs(fnt, PackedByteArray(), 73, 17, 0x80808080)
 	verify(glyphs.get("ok", false) and glyphs.glyphs.is_empty(), "empty HUD text draws nothing")
+	# Audit FONT-1: no default tint, and the HUD view does not guess one.
+	# Two-glyph synthetic font: '3' and 'A' map to a drawn glyph 1.
+	var hud_fnt := PackedByteArray()
+	hud_fnt.resize(0x274)
+	hud_fnt.encode_u16(0, 2)
+	hud_fnt.encode_u32(8, 0x214)
+	hud_fnt.encode_u32(12, 0x234)
+	hud_fnt.encode_u32(16, 0x234)
+	for i in range(256):
+		hud_fnt.encode_u16(0x14 + i * 2, 0xffff)
+	hud_fnt.encode_u16(0x14 + 45 * 2, 0)
+	hud_fnt.encode_u16(0x14 + 0x33 * 2, 1)
+	hud_fnt.encode_u16(0x14 + 0x41 * 2, 1)
+	for glyph in [[0x214, 0], [0x224, 0x33]]:
+		hud_fnt.encode_u16(glyph[0], glyph[1])
+		hud_fnt.encode_u16(glyph[0] + 12, 3)
+		hud_fnt.encode_u16(glyph[0] + 14, 0xffff)
+	var explicit: Dictionary = service.hud_text_glyphs(hud_fnt, PackedByteArray([0x33]), 73, 17, 0x80323c3c)
+	verify(explicit.get("ok", false) and explicit.glyphs.size() == 1 and explicit.glyphs[0].tint == 0x80323c3c, "HUD text uses the caller tint")
+	var defaulted = service.callv("hud_text_glyphs", [hud_fnt, PackedByteArray([0x33]), 73, 17])
+	verify(not (defaulted is Dictionary and defaulted.get("ok", false)), "FONT-1 HUD text tint is a required argument")
+	var view: Control = load("res://ui/original_art/hud_view.gd").new()
+	root.add_child(view)
+	view.font_bytes = hud_fnt
+	var observed := {"ready_ticks": 16, "hp": 1.0, "max_hp": 1.0, "name": "A", "level": 3}
+	view.observe(observed)
+	var refusals = view.get("text_refusals")
+	verify(view.text_glyphs.is_empty() and refusals is Dictionary and refusals.has("name") and refusals.has("level"), "FONT-1 name refused; level refused without the acknowledged level")
+	# hud-dynamic.md section 3: base colour 0x80323c3c; a pending level uses
+	# R=G=p/2+60, B=p/2+50, alpha 0x80, with p = 25 at sim tick 16.
+	for case in [[3, 0x80323c3c], [2, 0x803e4848]]:
+		observed["acknowledged_level"] = case[0]
+		view.observe(observed)
+		var tinted: bool = not view.text_glyphs.is_empty()
+		for glyph in view.text_glyphs:
+			tinted = tinted and int(glyph.tint) == case[1]
+		verify(tinted, "FONT-1 level colour %08x from hud-dynamic.md section 3" % case[1])
+	view.queue_free()
 	print("UI layout GDExtension smoke: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
