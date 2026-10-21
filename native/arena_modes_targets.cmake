@@ -16,3 +16,12 @@ if(BUILD_TESTING)
   target_link_libraries(champions-arena-modes-tests PRIVATE champions-arena-modes)
   add_test(NAME arena-modes-exact COMMAND champions-arena-modes-tests)
 endif()
+
+# Counts only. Not a CTest: it reads a private disc and prints no names.
+add_executable(champions-arena-measure "${CHAMPIONS_ARENA_MODES_ROOT}/tools/arena_measure.cpp")
+target_link_libraries(champions-arena-measure PRIVATE champions-arena-modes champions-level-flow champions-objects champions-terrain-file)
+if(MSVC)
+  target_compile_options(champions-arena-measure PRIVATE /W4 /utf-8 /fp:strict)
+else()
+  target_compile_options(champions-arena-measure PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
