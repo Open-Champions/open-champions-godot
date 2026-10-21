@@ -31,6 +31,7 @@ bool knows(Raw fn) {
   case 0x27236c: case 0x272f4c: case 0x2a8b84: case 0x2a91b8: // classes
   case 0x2c2440: case 0x2c382c: case 0x2c34e4: case 0x2c3c54:
   case 0x10e658: case 0x10beb8: case 0x3c2708:
+  case 0x267a0c:                         // Gnaw_setState (creature-ai)
   case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
   case 0x3c3b40:
   case 0x11a290: case 0x3c7ef8: case 0x3c3b10: case 0x3c3b08: // empty

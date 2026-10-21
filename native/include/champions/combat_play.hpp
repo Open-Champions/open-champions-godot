@@ -72,8 +72,10 @@ public:
   // fixture's own authored ones, not original spawn data. A refusal leaves
   // the session unchanged when it happens before the World is touched.
   // spawn_creature: one World::spawn_class own-machine creature (creature-ai)
-  // in slot 3, at (0, 80) facing the player, with the fixture's 120-HP
-  // Skelight spawn values. Once per session.
+  // in slot 3, at (0, 80) facing the player, on the fixture's 120-HP authored
+  // placement. Once per session. Only Skelight and Gnaw (Gnaw_ctor's class
+  // words) can be built; the other eight classes refuse because their
+  // constructors were not executed.
   void spawn_creature(const std::string &own_class);
   const std::string &own_creature_class() const; // empty until spawned
   // drop_potion: a thrown potion of kind 1..3 (combat-runtime-4

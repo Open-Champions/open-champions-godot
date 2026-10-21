@@ -63,14 +63,28 @@ advances the frame and rebuilds alive players. It is a bounded composition, not
 all original main-loop tasks. Pool-pressure reaping refuses.
 
 Skelight executes pending damage, base creature tick, activity, animation,
-knock-back, target pick, then its supported state switch. The other nine
-own-machine classes (Critter, Soul, NPC, Natasla, Mermaid, GnomeNavigator,
-Skeleton, Gnaw, AntQueen) run the decision switch from the own-state-machine
-contract when spawned with `spawn_class`. Their vtables are allocated on first
-spawn, so a world that never spawns them keeps the Skelight image. Sight cones,
-`GameObject_rand`, rear-cone and ally tests, Critter species clips and
-`deadUpdate` hold/size stay explicit refusals except Gnaw's recorded slot-25
-force 0 and its two sight arcs. Round-1 `moveToTarget` is still the walking-chase
+knock-back, target pick, then its supported state switch. Of the other nine
+own-machine classes only Gnaw can be built: `spawn_class("Gnaw")` is the
+authored creature placement (the one Skelight uses, standing in for
+`Creature_ctor`; `Creature_init` stays a recorded call-out) plus
+`Gnaw_ctor`'s class words (research-anim `5694ae3` `ref_monsters_1.gnaw_ctor`,
+`docs/spec/monsters-1.md` 4.2: table `0x515038` with run, draw and setState
+over the base slots, kind 1, turn rate 1.2, radius 6, speed 0, the timers and
+creature flags, the one-own-draw scale). `Gnaw_run` runs the executed prologue
+(pending damage and `Creature_run` with the slot-16 model, `updateActive`
+whose 0 ends the tick, `stepAnim(1.0)`, knock-back 1.0, slot 23) and feeds the
+step's event word to the own-machine switch, so state 6 bites on bit 0.
+`Gnaw_setState` is `ref_monsters_1.gnaw_set_state`: `Creature_filterState`
+first, then the clip as a class-definition word (`+0x1c + 8k`) and its side
+effects (path clear, wander pick, the cooldown 60, the bite draws). Its death
+refuses at `PhProp_initPhysics` for the first GutChunk, and a hit with flags
+`& 0xd` refuses at `GutChunk_ctor` (a Gnaw bleeds). Flee, and walking home,
+wander or chase outside the Full composition, refuse as Skelight's do. The
+Critter, Soul, NPC, Natasla, Mermaid, GnomeNavigator, Skeleton and AntQueen
+constructors, run prologues and setState side effects were not executed
+(`own-state-machines.md` section 1 runs only the switch, with the prologue
+stubbed), so `spawn_class` refuses them ("constructor is not executed"); the
+round-3 dispatch rows are not used as a stand-in setState. Round-1 `moveToTarget` is still the walking-chase
 refusal. Skelight's existing run is unchanged. Inactive animation
 never advances or delivers a hit event. Hits call victim slot 2 synchronously.
 Creature HP changes then; player damage accumulates. Reaction belongs to the
@@ -368,9 +382,9 @@ The four `Creature_processDamage` pairs and the silent-0 `Player_blockSparks` an
 - **Holy Shield sample points.** `holy_shield_sample` follows `model_getSamplePoint` at scale 1: the caster's position and facing, the pose already stored at `+0x114`, and `Spell_rand` modulo the sample count. A count of 0 still refuses. A missing pose, or a pose with no joints, refuses; building a pose is not this body. The player's slot 16 (`0x3c3b38`) is the model at `+0x544`. The light, the group and the slot-10 result stay the round-4 absorb. `SpellHolyShield_ctor` stays refused. Creature slot 17 calls spell slot 2 every tick, so the live shield uses the skills-b `SpellHolyShield_run` body `0x2e8428`: the clock at `+0x18` and the flash at `+0x1c` step by `0x3c888888`, and a duration at `+0x20` below the clock ends through slot 1 with argument 3. Otherwise the run notes `particleGroup_setMatrix` and tints the owner's eight halfwords. The fixture plants the clock at 0 and the duration from skill stat index 1 after `attach_holy_shield`, and relies on the round-4 plant, which points the spell at table `0x519ce0` with its first three slots written: the getter `0x3cf124`, the destructor `0x3cf0c4` and the run. skills-35-68 section 54 records `0x3cf0c4` as the base Spell destructor; its steps are the base tail of the executed `SpellWaveOfFlame_dtor` (table `0x515ba0`, clear the back list at `+4`, `pool_free` on bit 0). Slots 3 and 4 stay 0 and refuse.
 - **MultiFireProjectile_run** (`0x2da2bc`). Once `+0x60` is set the run returns. Otherwise it records one trail point, adds 1 to the age at `+0x6c`, and moves with the velocity at `+0x54`. Bit 0 of that result ends with reason 1. A signed age of 601 or more ends with reason 0. Otherwise ten particles of definition `0x8e5910` are drawn from the object's own generator. `MultiFireProjectile_end`'s body and `onHit` are not re-executed.
 
-`native/tests/vectors/combat_runtime_5.txt.gz` holds eighteen synthetic cases: the angle registers, five bank springs, three fades, the zero sample count, two shield samples (identity, and two joints with two points under a turned facing), the demon box with six entry lists, nine Soul phase rows, and four volley runs. The native replay compares the stored words and the particle rows with the research model at `2980af1`; the demon lists and phase rows run through the live world.
+`native/tests/vectors/combat_runtime_5.txt.gz` holds eighteen synthetic cases: the angle registers, five bank springs, three fades, the zero sample count, two shield samples (identity, and two joints with two points under a turned facing), the demon box with six entry lists, nine Soul phase rows, and four volley runs. The native replay compares the stored words and the particle rows with the research model at `2980af1`; the demon lists run through the live world (Gnaw objects carry the planted Demon getter), and the phase rows run through the own-machine decision module.
 
-The Full fixture adds an AntQueen at (0, 100), a Skeleton at (60, 100) and a Soul at (−60, 100), each facing `0xc000` with 120 HP, and arms Holy Shield on the Holy Strike skill already in the table. `give_skill(16)` is not called again. The shield's model is one sample point and its pose is one joint. Those actors and the absorb change the Full trace hash; the reason is recorded with the hash in the round report. A mid-fight save still replays the journal, so the continued run matches the uninterrupted run of the same binary. `fixture-save` now also traces the three creatures' state, position and bank angle and each tick's demon tests and sample points: over its 300 ticks the shield absorbs 9 hits (2,169 sample points) and the Soul makes 19 demon tests, identically after the load.
+Audit 2026-10-21 (CAI-4): `spawn_class` now refuses AntQueen, Skeleton and Soul because their constructors are not executed, so the AntQueen, Skeleton and Soul runs above no longer run in the World. `fade_bank_tracks`, `update_bank` and `is_demon_near` stay callable on a creature object, and the round-5 replay uses an authored Skelight placement as that object; the nine Soul phase rows replay against the own-machine decision module. The Full fixture's slots 4-6 stay empty. Before that audit, the Full fixture added an AntQueen at (0, 100), a Skeleton at (60, 100) and a Soul at (−60, 100), each facing `0xc000` with 120 HP. It still arms Holy Shield on the Holy Strike skill already in the table. `give_skill(16)` is not called again. The shield's model is one sample point and its pose is one joint. Those actors and the absorb change the Full trace hash; the reason is recorded with the hash in the round report. A mid-fight save still replays the journal, so the continued run matches the uninterrupted run of the same binary. `fixture-save` traces each tick's demon tests and sample points: over its 300 ticks the shield absorbs 9 hits (2,169 sample points), identically after the load. With slots 4-6 empty there are no demon tests (the round-5 fixture had 19).
 
 These stay refused because round 5 does not execute them: `DiseaseCorpse_run`, `SpellPlanarSteelEffect_run`, `SpellHornOmenEffect_run`, `SpellArena_run`, `Pustule_run`, `SmokeGen_run`, deflection, the bow release composed into the player tick, monster death states beyond the bodies already composed, a nonzero silent passed to block sparks, haze kind 3 and the haze screen axis.
 

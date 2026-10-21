@@ -229,10 +229,21 @@ animation dispatch and produces poses for a host that already owns the filtered 
 state or player action. The original `ChampionsCreatureAnimation` SmallSpider
 constructor/run/touch route above remains unchanged.
 
-Research is pinned separately to **4f9b05746250c403eb16edbc1f578aefbebf2a2f** in
-[`creature_dispatch_sources.json`](../native/tests/vectors/creature_dispatch_sources.json).
-That manifest hashes all three new dispatch documents, the generated numeric table,
-reference model/tests, and the movement/player contracts needed for exact constants.
+Research is pinned separately to **5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b** in
+[`creature_dispatch_sources.json`](../native/tests/vectors/creature_dispatch_sources.json)
+(audit CAI-8; it was 4f9b057, and between the two only documents and a
+`ref_creature_dispatch.py` docstring changed, so the numeric table is
+identical). That manifest hashes all three new dispatch documents, the generated numeric table,
+reference model/tests, the movement/player contracts needed for exact constants,
+and `ref_skill_anim.py`, `ref_field_precedence.py`, `ref_own_machines.py`,
+`test_ref_own_machines.py` and `own-state-machines.md`. The exact dispatch
+vectors now include the skill states (`ref_skill_anim`: the seven state-6
+constructors, charge, shadow step, and the class-4/6 and flag-0 refusals),
+the two-field rows and helpers (`ref_field_precedence`), and one explicit
+refusal for every row whose entry is a runtime clip pointer (`None`; Critter,
+Skeleton) instead of skipping it; an unknown op kind stops the generator.
+`tools/generate_own_machine_vectors.py` reads the two own-machine files from
+the same pin and records the commit and hashes in `own_machines.txt`.
 The previous round's source pins and vectors remain unchanged. The numeric C++ data
 is reproducibly compiled from the pinned table by `tools/generate_creature_dispatch.py`.
 No executable/decompiler/retail data is part of this process.
@@ -333,7 +344,9 @@ direct store of it was recorded. State **6** is Cyclone (`cyclone1.anm`, and a
 lookup of `spel_bw_cyclone.anm` that is not a second player clip), Bash and
 Shield Bash (`bash.anm`), and the class-0 shouts Ancestral Call, roar, battle
 cry and blood lust. Ancestral Call stores 6 on the selection the host applies
-after the blend. Weapon classes 4 and 6 have no recorded shout names. State
+after the blend. All seven ran only on a weapon-class-0 player whose object
+flag word was 0x40, so any other weapon class or flag word refuses ("skill
+constructor not executed for this weapon class/flags"). State
 **9** is Charge: it stores 9 only when object flag 0x40 is set and starts no
 clip. State **0xe** is Shadow Step (`spel_de_shadowstep.anm`); its destructor
 returns the player to state 2 and restores flag 0x40. Only the flag pair

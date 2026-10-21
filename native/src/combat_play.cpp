@@ -12,8 +12,8 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  // Slots 4-6 are the Full fixture's AntQueen, Skeleton and Soul. Slot 3 stays
-  // the optional one-per-session creature.
+  // Slot 3 is the optional one-per-session creature. Slots 4-6 were the Full
+  // fixture's AntQueen, Skeleton and Soul; they stay empty (full_setup).
   std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
@@ -246,19 +246,11 @@ struct Session::State {
       for (Raw off : {0x1cu, 0x24u})
         clips[Raw(world->read(definition + off))] = Clip{30, {{10u, Raw(1)}}};
     }
-    auto place = [&](unsigned slot, const char *cls, int x, int y) {
-      C::Spawn s;
-      s.position[0] = from_int(x);
-      s.position[1] = from_int(y);
-      s.facing = 0xc000;
-      s.hp = 0x42f00000;
-      if (world_queries::terrain_height_below(terrain, from_int(4), s.position) != 0)
-        throw C::Unsupported("combat fixture actor has no flat ground");
-      handles[slot] = world->retain(world->spawn_class(cls, s));
-    };
-    place(4, "AntQueen", 0, 100);
-    place(5, "Skeleton", 60, 100);
-    place(6, "Soul", -60, 100);
+    // Slots 4-6 (AntQueen, Skeleton, Soul) stay empty: World::spawn_class
+    // refuses those classes because their constructors, run prologues and
+    // setState side effects were not executed (audit CAI-1, CAI-2, CAI-4;
+    // research-anim own-state-machines.md section 1). The round-5 bodies they
+    // used (bank fade/spring, isDemonNear) stay callable on the World.
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
     adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
@@ -434,8 +426,12 @@ void Session::spawn_creature(const std::string &own_class) {
   s_->handles[3] = s_->world->retain(a);
   s_->own_class = own_class;
   auto definition = Raw(s_->world->read(a + 0x24));
+  // The session's authored clip timeline on the two swing words, and for
+  // Gnaw on its third bite clip too (Gnaw_ctor marks entries 3, 4 and 5).
+  std::vector<Raw> offsets{0x1c, 0x24};
+  if (own_class == "Gnaw") offsets.push_back(0x2c);
   if (definition)
-    for (Raw off : {0x1cu, 0x24u}) {
+    for (Raw off : offsets) {
       const auto clip = Raw(s_->world->read(definition + off));
       if (clip && !s_->clips.count(clip)) s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
     }

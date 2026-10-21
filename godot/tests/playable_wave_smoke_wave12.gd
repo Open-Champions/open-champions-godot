@@ -1,7 +1,8 @@
 extends SceneTree
 
 # Wave 12: the Full combat fixture extensions that reach merged executed
-# bodies. One own-machine creature (creature-ai World::spawn_class) per run,
+# bodies. One own-machine creature (creature-ai World::spawn_class) per run
+# (Gnaw and Skelight build; the other eight classes refuse),
 # and thrown potions 1..3 (combat-runtime-4 playerProjectile_run; 1 and 2 stop
 # at their refused constructors). Each case
 # starts a fresh Full session on the default synthetic flat terrain with the
@@ -66,7 +67,7 @@ func run() -> void:
 		row.spawn = "ok" if spawned.get("ok", true) != false else "refused: " + str(spawned.get("error", ""))
 		if spawned.get("ok", true) != false:
 			var actors: Array = spawned.get("combat_actors", [])
-			check(actors.size() == 7 and str(actors[3].kind) == classes[i], "%s is observed in slot 3" % classes[i])
+			check(actors.size() == 4 and str(actors[3].kind) == classes[i], "%s is observed in slot 3" % classes[i])
 			var again: Dictionary = controller.combat_spawn_creature(i)
 			check(again.get("ok", true) == false, "a second creature is refused")
 			var ran := run_ticks(controller, true)
@@ -93,9 +94,14 @@ func run() -> void:
 			row.events = notable
 		out.potions[str(kind)] = row
 	# Observed on the merged runtime (a change here is a behaviour change).
-	for name in ["Critter", "Gnaw", "GnomeNavigator", "Mermaid", "NPC", "Natasla", "Skelight", "AntQueen", "Skeleton", "Soul"]:
+	# Only Skelight and Gnaw have executed constructors; the other eight
+	# classes refuse to spawn (audit CAI-4) and leave the session untouched.
+	for name in ["Gnaw", "Skelight"]:
 		var row: Dictionary = out.classes.get(name, {})
 		check(row.get("spawn", "") == "ok" and int(row.get("ticks", 0)) == TICKS - 1 and str(row.get("error", "x")).is_empty() and row.get("present", false), "%s runs %d ready ticks beside the fight" % [name, TICKS - 1])
+	for name in ["Critter", "GnomeNavigator", "Mermaid", "NPC", "Natasla", "AntQueen", "Skeleton", "Soul"]:
+		var row: Dictionary = out.classes.get(name, {})
+		check("constructor is not executed" in str(row.get("spawn", "")), "%s spawn is refused" % name)
 	var p1: Dictionary = out.potions.get("1", {}).get("events", {})
 	var p2: Dictionary = out.potions.get("2", {}).get("events", {})
 	var p3: Dictionary = out.potions.get("3", {}).get("events", {})
