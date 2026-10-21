@@ -293,3 +293,14 @@ target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines cha
 
 target_sources(champions-combat-play PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/play_animation.cpp")
 target_link_libraries(champions-combat-play PUBLIC champions-creature-anim)
+
+# Lockstep session over the ported wire model. Loopback only.
+add_library(champions-netplay "${CHAMPIONS_SIMULATION_ROOT}/src/netplay.cpp")
+target_include_directories(champions-netplay PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-netplay PUBLIC champions-combat-runtime champions-netwire champions-world-queries)
+if(MSVC)
+    target_compile_options(champions-netplay PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-netplay PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-netplay)
