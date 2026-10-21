@@ -45,6 +45,9 @@ public:
   };
   Test test(Raw radius, const cw::Vec3 &position);
   std::uint32_t disturb(Raw strength, Raw radius, const cw::Vec3 &position);
+  // Chunk-table indices of the water chunks water_disturb's query admits, in
+  // query order (water-draw section 6). Empty when the cut byte is set.
+  std::vector<std::uint32_t> disturb_chunks(Raw radius, const cw::Vec3 &position);
 
 private:
   std::vector<std::uint8_t> image_;

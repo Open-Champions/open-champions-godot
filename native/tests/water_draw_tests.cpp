@@ -223,6 +223,7 @@ int main() {
     rejects([] { W::refuse_property_order(); }, "the factory order versus setup stays unexecuted");
     rejects([] { W::refuse_player_move_disturb(); }, "Player_move disturb immediates stay unpublished");
     rejects([] { W::refuse_splash_particles(); }, "zero particle definitions stay refused");
+    rejects([] { W::refuse_splash_start_seed(); }, "the retail splash seed start stays refused");
 
     check(W::colour_word(10, 20, 30) == 0x001e140au, "waterColor packs three bytes");
     check(W::wavyness_scale(0x3f800000u) == W::SET1_SCALE, "wavyness 1 stores the set-1 scale");
@@ -233,9 +234,12 @@ int main() {
               loaded.radius == raw_f(10.0) && loaded.timer == 4 && loaded.fix[1] == 0 &&
               loaded.colour[1] == 0 && loaded.scale[1] == 0,
           "reset zeros set 1, then setup replaces set 0 only");
-    const auto replaced = W::replacing(
+    const auto parsed = W::replacing(
         {"waterColor2=1,2,3,4", "waterColor=10,20,30,40", "waterWavyness2=0.5",
-         "waterWavyness=1", "waterBumpAmount=12.5", "waterBumpRadius=3", "waterBumpTimer=7"});
+         "waterWavyness=1", "waterBumpAmount=12.5", "waterBumpRadius=3", "waterBumpTimer=7",
+         "runSpeed=2"});
+    check(parsed.applied == 7 && parsed.refused == 0, "seven water lines apply, others are not water");
+    const auto replaced = parsed.appearance;
     check(replaced.colour[1] == W::colour_word(1, 2, 3) && replaced.fix[1] == 4 &&
               replaced.colour[0] == 0x001e140au && replaced.fix[0] == 40 &&
               replaced.scale[1] == 0x3c400000u && replaced.scale[0] == W::SET1_SCALE &&
@@ -243,12 +247,32 @@ int main() {
               replaced.timer == 7,
           "level lines replace colour, fix, wavyness, bump and the timer word");
     const auto earlier = W::before_setup({"waterColor2=1,2,3,4", "waterColor=10,20,30,40",
-                                           "waterBumpTimer=7"});
+                                           "waterBumpTimer=7"}).appearance;
     check(earlier.colour[1] == W::colour_word(1, 2, 3) && earlier.fix[1] == 4 &&
               earlier.colour[0] == W::SET0_COLOUR && earlier.fix[0] == 102 &&
               earlier.timer == 4,
           "a set-1 line before setup survives and a set-0 line is replaced");
 
+    {
+      const auto refused = W::replacing({"waterColor=1,2,3", "waterColor=1, 2,3,4",
+                                         "waterBumpTimer=7.5", "waterWavyness=1e2",
+                                         "waterWavyness=", "waterBumpRadius=+3",
+                                         "waterColor=1,2,3,256", "waterColor2=1,2,3,-300"});
+      check(refused.applied == 0 && refused.refused == 8 &&
+                refused.appearance.colour == W::load_appearance().colour &&
+                refused.appearance.scale == W::load_appearance().scale &&
+                refused.appearance.timer == 4,
+            "a water line outside the executed shapes is refused and stores nothing");
+      const auto shapes = W::replacing({"waterWavyness=.5", "waterColor2=255,0,9,-100"});
+      check(shapes.applied == 2 && shapes.appearance.scale[0] == 0x3c400000u &&
+                shapes.appearance.fix[1] == -100 &&
+                shapes.appearance.colour[1] == W::colour_word(255, 0, 9),
+            "a leading point decimal and a negative fix are the executed shapes");
+      check(W::colour_word(-1, -2, 3) == 0x0003feffu,
+            "colour_word keeps the low byte of each part, as the reference does");
+      check(W::alpha_words(-100) == std::array<std::uint32_t, 2>{W::ALPHA_ADD, 100u},
+            "a negative level fix selects the additive blend");
+    }
     using Heights = std::array<std::array<std::int16_t, 32>, 33>;
     Heights claim_edge{};
     claim_edge[1][31] = 1001;
@@ -318,15 +342,6 @@ int main() {
     W::disturb_cells(neg_strength, raw_f(-100.0), raw_f(6.0), {0, 0},
                      {raw_f(-60.0), raw_f(60.0)}, {raw_f(0.0), raw_f(0.0)});
     check(neg_strength[16][16] == -100, "a negative strength keeps the low 16 bits");
-    const auto entered = W::creature_standing_disturb(1, true, false);
-    const auto wading = W::creature_standing_disturb(1, false, true);
-    const auto still = W::creature_standing_disturb(1, false, false);
-    const auto still_beat = W::creature_standing_disturb(16, false, false);
-    check(entered.fire && entered.strength == W::CREATURE_ENTRY_STRENGTH &&
-              entered.radius == W::CREATURE_ENTRY_RADIUS && wading.fire &&
-              wading.strength == W::CREATURE_WADE_STRENGTH &&
-              wading.radius == W::CREATURE_WADE_RADIUS && !still.fire && still_beat.fire,
-          "the creature water body splashes on entry, while moving, and every 16th frame");
 
     W::TileSource a;
     a.chunk = 0;
@@ -363,6 +378,10 @@ int main() {
     check(drawn[0].uv_texels[0][0] == 32.f && drawn[0].uv_texels[0][1] == 32.f,
           "a flat tile samples 32 texels");
     field.set_appearance(replaced);
+    rejects([&] {
+      W::Field unseeded({a});
+      unseeded.set_level_flags(W::LEVEL_OPTION_SPLASH);
+    }, "the drawer splash needs a supplied seed");
     const auto painted = field.surfaces();
     check(painted[1].fix == 4.f / 128.f && painted[1].colour == W::colour_word(1, 2, 3),
           "a level colour replaces the drawn second set");
@@ -371,6 +390,13 @@ int main() {
     solo.bounds = {raw_f(-60), raw_f(-60), raw_f(0), raw_f(60), raw_f(60), raw_f(1)};
     W::Field ripples({solo});
     ripples.on_tick(0, false);
+    rejects([&] { ripples.disturb(raw_f(1500.0), raw_f(6.0), {0, 0, 0}); },
+            "water_disturb needs the WORLD chunk query");
+    std::vector<std::uint32_t> asked;
+    ripples.set_chunk_query([&](std::uint32_t radius, const std::array<std::uint32_t, 3> &) {
+      asked.push_back(radius);
+      return std::vector<std::uint32_t>{solo.chunk};
+    });
     check(ripples.disturb(raw_f(1500.0), raw_f(6.0), {raw_f(0), raw_f(0), raw_f(0)}) == 1 &&
               ripples.grid(0).velocity[16][16] == 1500 && ripples.grid(0).velocity[16][15] == 914 &&
               ripples.grid(0).velocity[15][15] == 328 &&
@@ -385,13 +411,17 @@ int main() {
     ripples.set_level_flags(W::LEVEL_OPTION_SPLASH);
     const auto expected = W::splash_point(seed, solo.bounds);
     ripples.on_tick(2, false);
-    check(expected.hit && ripples.splash_seed() == expected.seed,
+    check(expected.hit && ripples.splash_seed() == expected.seed &&
+              asked.back() == raw_f(6.0),
           "the drawer splash rolls once per live tile when the option is set");
     ripples.set_splash_seed(seed);
     ripples.on_tick(3, true);
     check(ripples.splash_seed() == seed, "a frozen frame does not roll the splash generator");
     W::Field quiet({solo});
     quiet.set_splash_seed(seed);
+    quiet.set_chunk_query([](std::uint32_t, const std::array<std::uint32_t, 3> &) {
+      return std::vector<std::uint32_t>{};
+    });
     quiet.on_tick(0, false);
     check(quiet.splash_seed() == seed, "the splash option has to be set before the generator rolls");
 

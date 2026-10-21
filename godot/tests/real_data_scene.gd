@@ -11,6 +11,13 @@ extends SceneTree
 #   [--scripts]   opt into the level script after load and before play
 #   [--water]     capture only levels that have water tiles
 #   [--wade]      walk the player toward the nearest water and capture that view
+#   [--wade-probe] with --wade: once in water, one harness water_disturb with
+#                 the Player jump-state strength and radius (ref_player.py
+#                 state_jump, 0x453b8000 and 0x41c00000) at the player
+#                 position, then 24 ticks and a capture. A test stimulus: the
+#                 scene does not run that state, and the jump's 12-unit drop
+#                 in z is not applied.
+#   [--level-lights=FILE] level-lights JSON; also supplies the level flag word
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
@@ -166,8 +173,12 @@ func run() -> void:
 			add("water.texture_ok" if result.get("water_texture_ok", false) else "water.texture_refused")
 			peak("water.texture_width", int(result.get("water_texture_width", 0)))
 			peak("water.texture_height", int(result.get("water_texture_height", 0)))
-			add("water.colour_lines", int(result.get("water_colour_lines", 0)))
-			if int(result.get("water_colour_lines", 0)) > 0: add("water.levels_with_colour")
+			add("water.lines_applied", int(result.get("water_lines", 0)))
+			add("water.lines_refused", int(result.get("water_lines_refused", 0)))
+			if int(result.get("water_lines", 0)) > 0: add("water.levels_with_lines")
+			if result.get("water_negative_fix", false): add("water.levels_additive")
+			add("water.level_flags_loaded" if result.get("level_flags_loaded", false) else "water.level_flags_absent")
+			if not str(result.get("level_flags_error", "")).is_empty(): refuse("water.level_flags", str(result.level_flags_error))
 		add("pieces.total", int(result.get("pieces", 0)))
 		add("pieces.claimed", int(result.get("claimed", 0)))
 		add("pieces.drawn_claimed", int(result.get("drawn_claimed", 0)))
@@ -246,6 +257,7 @@ func run() -> void:
 				scene.camera.position = look + Vector3(24, 16, 28)
 				scene.camera.look_at(look, Vector3.UP)
 				await capture("level-%d-wade" % shown)
+				if args.has("wade-probe"): await probe(shown)
 			await capture("level-%d-play" % shown)
 			if creature.ok:
 				var shape: MeshInstance3D = scene.components.animation.mesh_instance
@@ -320,6 +332,23 @@ func wade(max_ticks: int) -> void:
 	scene.held_commands = 0
 	add("water.wade_ticks_in", int(world.ticks_in_water) - before)
 	add("water.wade_reached" if world.in_water else "water.wade_missed")
+
+const PROBE_STRENGTH := 0x453B8000 # 3000, Player state 7 (ref_player.py state_jump)
+const PROBE_RADIUS := 0x41C00000 # 24
+func probe(shown: int) -> void:
+	var world = scene.real.world
+	if world == null or not world.in_water or not scene.raw_observation.has("position_raw"):
+		add("water.probe_skipped")
+		return
+	var position := PackedInt64Array()
+	for word in scene.raw_observation.position_raw: position.push_back(int(word))
+	var count := int(world.native.water_disturb(PROBE_STRENGTH, PROBE_RADIUS, position))
+	add("water.probe_chunks", maxi(count, 0))
+	for _t in range(24): scene.advance_step()
+	var look: Vector3 = scene.actor.position
+	scene.camera.position = look + Vector3(24, 16, 28)
+	scene.camera.look_at(look, Vector3.UP)
+	await capture("level-%d-probe" % shown)
 
 func take_script_counts() -> void:
 	var counts: Dictionary = scene.controller.script_command_counts()

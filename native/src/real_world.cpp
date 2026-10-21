@@ -93,6 +93,29 @@ std::uint32_t WaterImage::disturb(Raw strength, Raw radius, const cw::Vec3 &p) {
   service_.clear_writes();
   return service_.water_disturb(strength, radius, BASE, p);
 }
+std::vector<std::uint32_t> WaterImage::disturb_chunks(Raw radius,
+                                                      const cw::Vec3 &p) {
+  // The box and capacity of Service::water_disturb: x and y within the
+  // radius, z from one below to 60 above, at most 15 chunks.
+  constexpr Raw ONE = 0x3f800000, F60 = 0x42700000;
+  constexpr cw::Address CUT_SKIP = 0x44fcec;
+  if (memory_.load(CUT_SKIP, 1))
+    return {};
+  if (!simulation::rta::lt(0, radius))
+    throw cw::Unsupported("water disturbance radius must be positive");
+  namespace sr = simulation::rta;
+  const cw::Vec3 lo{sr::sub(p[0], radius), sr::sub(p[1], radius), sr::sub(p[2], ONE)};
+  const cw::Vec3 hi{sr::add(p[0], radius), sr::add(p[1], radius), sr::add(p[2], F60)};
+  service_.clear_writes();
+  const auto table = static_cast<std::uint32_t>(memory_.load(BASE + 0x24, 4));
+  std::vector<std::uint32_t> out;
+  for (const auto chunk : service_.query(BASE, lo, hi, 16)) {
+    if (chunk < table || (chunk - table) % 0x3c != 0)
+      throw Error("water query returned an address outside the chunk table");
+    out.push_back((chunk - table) / 0x3c);
+  }
+  return out;
+}
 
 std::vector<lf::Piece> pieces(const wg::Geometry &g) {
   std::vector<lf::Piece> out;

@@ -168,10 +168,14 @@ func load_level(index: int) -> Dictionary:
 	if not parts.get("ok", false):
 		world = null
 		return {"ok": false, "stage": "world-parts", "error": str(parts.get("error", ""))}
+	# The level flag word is row +0x20 of the same level-lights record.
+	var flags_result := {}
+	if scene.fx != null and bool(scene.fx.get("level_light_active")) and scene.fx.level_light_record.has("flags"):
+		flags_result = world.set_level_flags(int(scene.fx.level_light_record.flags))
 	var water_image := read_entry(level.gob, "waterenv.lmp", ".tex")
 	var water_texture: Dictionary = world.set_water_texture(water_image)
 	var terrain: Dictionary = scene.controller.get_terrain()
-	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_colour_lines": int(parts.get("water_colour_lines", 0))}
+	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_lines": int(parts.get("water_lines", 0)), "water_lines_refused": int(parts.get("water_lines_refused", 0)), "water_negative_fix": bool(parts.get("water_negative_fix", false)), "level_flags_loaded": bool(flags_result.get("ok", false)), "level_flags_error": str(flags_result.get("error", ""))}
 
 # Explicit model/clip choice from a chosen LMP. Returns the first model row and
 # clip row the native sampler accepts; this is a cosmetic user selection only.
