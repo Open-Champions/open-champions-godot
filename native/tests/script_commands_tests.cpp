@@ -205,6 +205,28 @@ void test_variables_and_seed() {
   check(host.counts().faults == 0, "documented variable commands do not fault");
 }
 
+void test_seed_refused_without_session_seed() {
+  const auto rand = static_cast<std::size_t>(index_of("getRand"));
+  auto built = build_calls({{"start", {{"getRand", {}}}}}, {});
+  sc::Host host;
+  plant(host, built);
+  host.run("start");
+  check(host.counts().executed[rand] == 0 && host.counts().refused[rand] == 1,
+        "getRand is refused while no session seed is bound");
+  check(host.variables().world->shared.state == SharedRandom{}.state,
+        "no host-private generator is drawn");
+  sc::Host stubbed;
+  SharedRandom live(20973);
+  stubbed.bind_seed(&live);
+  plant(stubbed, built);
+  const auto blob = gate_objects();
+  stubbed.adopt_objects(blob.data(), blob.size());
+  stubbed.run("start");
+  check(stubbed.counts().executed[rand] == 0 && stubbed.counts().refused[rand] == 1,
+        "getRand is refused once an unconstructed object is adopted");
+  check(live.state == 20973u, "the refused draw leaves the session seed alone");
+}
+
 void test_entrance_grid_and_particle() {
   const auto entrance = index_of("setEntrance");
   const auto hide = index_of("hideMonster");
@@ -336,6 +358,7 @@ int main(int argc, char **argv) {
   }
   test_table(argv[1]);
   test_variables_and_seed();
+  test_seed_refused_without_session_seed();
   test_entrance_grid_and_particle();
   test_refusals();
   test_wait_then_complete();

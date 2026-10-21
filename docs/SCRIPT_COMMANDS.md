@@ -3,20 +3,28 @@
 `champions-script-commands` is the opt-in host for a level's script. It does
 not replace the script machine or the binder. A documented command runs the
 existing binder. Where that command's whole effect is a call the binder
-already makes, the host answers the call with a subsystem that already exists:
+already makes, the host answers the call with an instance of a subsystem that
+already exists. These instances are private to the host. Nothing in the play
+session reads them yet:
 
 | Command | Route |
 |---|---|
-| `hideMonster` | `objects::World::move_off_grid` |
-| `showMonster`, `moveMonster` | `objects::World::update_grid_cell` |
-| `getRand` | the shared generator at memory word `0x404464` |
-| `setEntrance` | `level_flow::State::entrance` |
-| `addParticleOnObject` | `fx::sim::EffectWorld::particle_spawn` |
+| `hideMonster` | the host's own `objects::World::move_off_grid` |
+| `showMonster`, `moveMonster` | the host's own `objects::World::update_grid_cell` |
+| `getRand` | a bound session `SharedRandom`, through memory word `0x404464`; refused without one |
+| `setEntrance` | the host's own `level_flow::State::entrance` |
+| `addParticleOnObject` | the host's own `fx::sim::EffectWorld::particle_spawn` |
 
-`getRand` copies the shared seed into the binder's word, lets the binder draw
-once, and copies the word back. It does not draw a second time. The combat
-fixture keeps its own seed word; this host does not rewrite it. With no bound
-seed, the draw uses the binder world's shared generator.
+`getRand` must advance the session seed (research `9649e6b`,
+`docs/script-composition.md`, "The seam"). With a seed bound by `bind_seed`,
+it copies that seed into the binder's word, lets the binder draw once, and
+copies the word back. Without a bound seed it is a counted refusal; there is
+no host-private fallback generator. It is also refused once an `objects.ob`
+record has been adopted: the original constructs each record and every
+constructed object draws once from the shared seed during the load
+(`docs/issues/arena-entry.md` 1.4), and the host's records are not
+constructed. The play session binds no seed: its combat seed belongs to the
+journaled combat scene. So in play `getRand` is always refused.
 
 A particle whose definition is not in the caller's JSON increments
 `missing_definitions` and spawns nothing else. The headless effect world does

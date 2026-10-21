@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -75,8 +76,9 @@ public:
   bool adopt_objects(const std::uint8_t *data, std::size_t size);
   void add_object(const std::string &name, std::uint32_t flags,
                   const std::array<std::uint32_t, 3> &pos, std::uint32_t angle);
-  // Null uses the binder world's shared generator. The combat fixture's seed
-  // word is a different object and is not rewritten.
+  // The play session's shared generator. Without one getRand is refused. It
+  // is also refused once an objects.ob record is adopted: records are not
+  // constructed, and construction draws from the shared seed.
   void bind_seed(SharedRandom *seed);
 
   // Level entry in the loader's order (research docs/script.md 2.1):
@@ -121,12 +123,14 @@ private:
   Stop classify();
   Stop enter(const std::string &name, bool optional);
   Stop enter_level(const char *name);
-  SharedRandom &seed();
+  bool seed_refused() const;
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;
   level_flow::State flow_;
   SharedRandom *external_seed_ = nullptr;
+  // Addresses of adopted objects.ob records: unconstructed stubs.
+  std::set<std::uint32_t> stubs_;
   Counts counts_;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;

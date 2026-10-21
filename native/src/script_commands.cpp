@@ -100,6 +100,10 @@ amx::NativeMap Host::command_map() {
     out.emplace(kRows[i].name, [this, i, function, sync_seed, entrance](
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
+      if (sync_seed && seed_refused()) {
+        counts_.refused[i] += 1;
+        return 0;
+      }
       counts_.executed[i] += 1;
       if (sync_seed)
         sync_seed_in();
@@ -114,11 +118,15 @@ amx::NativeMap Host::command_map() {
   return out;
 }
 
-SharedRandom &Host::seed() {
-  return external_seed_ ? *external_seed_ : variables_->world->shared;
-}
-void Host::sync_seed_in() { variables_->memory.word(SEED_WORD, seed().state); }
-void Host::sync_seed_out() { seed().state = variables_->memory.word(SEED_WORD); }
+// getRand must advance the session seed (research 9649e6b
+// docs/script-composition.md, "The seam"); a host-private generator would
+// desynchronise combat and FX. Without a bound seed the draw is refused. An
+// adopted stub was never constructed, and each constructed object draws once
+// from the shared seed during the objects.ob load (docs/issues/arena-entry.md
+// 1.4), so after a stub the bound seed's state is not the original's either.
+bool Host::seed_refused() const { return !external_seed_ || !stubs_.empty(); }
+void Host::sync_seed_in() { variables_->memory.word(SEED_WORD, external_seed_->state); }
+void Host::sync_seed_out() { external_seed_->state = variables_->memory.word(SEED_WORD); }
 void Host::apply_entrance() { flow_.entrance = variables_->memory.cstr(ENTRANCE_WORD); }
 void Host::bind_seed(SharedRandom *next) { external_seed_ = next; }
 
@@ -161,7 +169,8 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
     for (const auto &record : records) {
       auto props = std::make_shared<std::vector<std::string>>(record.props);
       const std::string type = record.cls.empty() ? "10GameObject" : record.cls;
-      variables_->new_object({}, 0, record.position, record.angle, type, props);
+      const auto obj = variables_->new_object({}, 0, record.position, record.angle, type, props);
+      stubs_.insert(obj->addr);
       counts_.objects_registered += 1;
     }
     return true;
