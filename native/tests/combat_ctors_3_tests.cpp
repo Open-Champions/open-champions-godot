@@ -335,6 +335,54 @@ void attach_matrix_round4_cases() {
   check(owned[9]!=0&&owned[10]!=0,"held Soul owner matrix uses creature fields");
   check(m.draws==0,"attach matrices consume no shared draws");
 }
+void antwave_round4_cases() {
+  // Replay test_ref_antwave.py's run exits, strict hit radius, lifetime and
+  // draw period, with the already executed Creature base bodies as recorders.
+  constexpr A::Address wave=0x180000,target=0x190000,node=0x1a0000;
+  constexpr A::Address wave_table=0x50d298,target_table=0x1b0000;
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  auto get=[&](A::Address a,unsigned n){return mem.load(a,n);};
+  put(wave+0x48,4,wave_table);put(target+0x48,4,target_table);
+  put(wave_table+8*1+4,4,0x238750);
+  put(target_table+8*2+4,4,0x00dead00);
+  put(node+0xc,4,target);
+  m.external.insert("Creature.v1");m.external.insert("Creature.v2");
+  for (const char *name:{"Creature.v1","Creature.v2","AntWave_Creature_moveTo",
+                         "particle_spawn"})
+    m.callbacks[name]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+      return std::int64_t(0);
+    };
+  m.callbacks["AntWave_Creature_run"]=[&](A::Model &a,const std::vector<A::Value> &)->A::Value {
+    a.store(wave+0x300,4,Raw(get(wave+0x300,4)+1));return std::int64_t(0);
+  };
+  put(wave+0x300,4,10);put(wave+0x3cc,4,600);put(wave+0x3d0,4,0);
+  CT::antwave_run(m,wave);
+  check(m.calls.size()==2&&m.calls[0].name=="AntWave_Creature_run"&&
+        m.calls[1].name=="Creature.v1","AntWave lost target destroys before move");
+  m.calls.clear();put(wave+0x300,4,59);put(wave+0x3d0,4,node);
+  put(wave+0x1c,4,0x41a00000);put(target+0x10,4,0x41200000);
+  put(wave+0x10,4,0);put(wave+0x14,4,0);put(wave+0x18,4,0);
+  CT::antwave_run(m,wave);
+  check(m.calls.size()==3&&m.calls[1].name=="AntWave_Creature_moveTo"&&
+        m.calls[2].name=="Creature.v2","AntWave hits at clock 60 inside radius");
+  m.calls.clear();put(wave+0x300,4,119);put(target+0x10,4,0x41400000);
+  put(target+0x14,4,0x41800000);
+  CT::antwave_run(m,wave);
+  check(m.calls.size()==2,"AntWave radius comparison is strict");
+  m.calls.clear();put(wave+0x300,4,600);put(wave+0x3cc,4,600);
+  CT::antwave_run(m,wave);
+  check(m.calls.back().name=="Creature.v1","AntWave expires on clock 601");
+  m.calls.clear();put(wave+0x300,4,4);put(wave+0x44,4,0x1234);
+  CT::antwave_draw(m,wave);
+  check(m.calls.empty(),"AntWave draw period gate");
+  put(wave+0x300,4,6);
+  CT::antwave_draw(m,wave);
+  check(m.calls.size()==1&&m.calls[0].name=="particle_spawn"&&
+        std::get<std::int64_t>(m.calls[0].args[0])==0x4febe0,
+        "AntWave draws its particle from own seed");
+  check(m.draws==0,"AntWave draw consumes no shared seed");
+}
 }
 int main() {
   try {
@@ -347,6 +395,7 @@ int main() {
     gold_round4_cases();
     prop_dtor_round4_cases();
     attach_matrix_round4_cases();
+    antwave_round4_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

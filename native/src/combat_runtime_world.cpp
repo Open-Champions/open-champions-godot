@@ -411,6 +411,11 @@ void World::State::destroy(Address a) {
     combat_ctors::prop_dtor(model,fn,a,3);
     return;
   }
+  if (fn == 0x238750) {
+    note("destroy",{a});
+    combat_ctors::antwave_dtor(model,a,3);
+    return;
+  }
   if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);
@@ -637,6 +642,11 @@ Raw World::State::skill_rank(Raw slot, Raw id) const {
 }
 void World::State::full_fixtures() {
   // research ref_combat_full.FullRuntime.__init__, in order.
+  // AntWave's table is the Creature base plus the four slots observed in
+  // antwave.md section 4. Its clone slot stays refused if called.
+  const std::map<unsigned,Raw> antwave_slots{{1,0x238750},{4,0x238938},
+                                              {5,0x2387d0},{15,0x11fcd0}};
+  write_table(0x50d298,&antwave_slots);
   // Gold's executed run, touch and destructor slots: research-combat-ctors-4
   // gold-run.md and symbols/runtime.tsv at 6baf4cd.
   for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},

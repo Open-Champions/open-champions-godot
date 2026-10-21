@@ -189,4 +189,9 @@ Mat34 model_get_attach_world_matrix(A::Model &, Raw scale, Address model,
                                     const Vec3 &position, Raw facing,
                                     Address state, Raw index);
 Mat34 creature_get_attach_matrix0(A::Model &, Address creature);
+void antwave_ctor(A::Model &, Address wave, Address target,
+                  const Vec3 &position, Raw facing, Raw lifetime);
+void antwave_run(A::Model &, Address wave);
+void antwave_draw(A::Model &, Address wave);
+void antwave_dtor(A::Model &, Address wave, Raw flags);
 } // namespace champions::simulation::rta::combat_ctors

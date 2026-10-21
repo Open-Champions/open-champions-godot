@@ -212,6 +212,15 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     combat_ctors::prop_dtor(model,fn,self,ar(0));
     return iv(0);
   }
+  if (slot == 1 && fn == 0x238750) {
+    note("destroy",{self});
+    combat_ctors::antwave_dtor(model,self,ar(0));
+    return iv(0);
+  }
+  if (slot == 5 && fn == 0x2387d0) {
+    combat_ctors::antwave_draw(model,self);
+    return iv(0);
+  }
   if (slot == 6 && fn == LOOSEFIRE_TOUCH) {
     loosefire_on_touch(self, ar(0));
     return iv(0);
@@ -410,6 +419,8 @@ void World::State::install_services() {
                          "anim_buildPose",
                          "anim_advanceUnitSpeed",
                          "AnimState_dtor",
+                         "sub_202500",
+                         "objNames_remove",
                          "rigidbody_init",
                          "quat_fromMat3",
                          "quat_normalize",
@@ -658,9 +669,10 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
                       "0x21, Soul_takeDamage with sample points) is not a World "
                       "service");
-  if (n == "AntWave_ctor")
-    throw Unsupported("AntWave_ctor 0x238654 is not executed (antqueen-run.md "
-                      "section 7; state 0x19 has no requester)");
+  if (n == "AntWave_ctor") {
+    combat_ctors::antwave_ctor(model,ar(0),ar(1),v(2),ar(3),ar(4));
+    return iv(0);
+  }
   if (n == "cxx_throwBadTypeid")
     return iv(0);
   if (n == "handle_clear") {
@@ -859,6 +871,12 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     note(n,{ar(0),ar(1)});
     return iv(0);
   }
+  if (n == "sub_202500") {
+    note(n,{ar(0),ar(1)});
+    return iv(0);
+  }
+  if (n == "objNames_remove")
+    throw Unsupported("objNames_remove: the World keeps no object names");
   if (n == "isNearView")
     return iv(is_near_view(ar(0), ar(2)));
   if (n == "model_getAttachPoint") {
@@ -1215,6 +1233,11 @@ void World::State::run(Address a) {
   if (fn == 0x157b58) {
     note("run",{a});
     combat_ctors::gold_run(model,a);
+    return;
+  }
+  if (fn == 0x238938) {
+    note("run",{a});
+    combat_ctors::antwave_run(model,a);
     return;
   }
   if (fn == FIRE_RUN || fn == LOOSEFIRE_RUN) {
