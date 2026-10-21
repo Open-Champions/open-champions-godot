@@ -337,7 +337,7 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
+        "Skeleton_shatter", "GutChunk_ctor", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
         "MissileWeapon_ctor",
         "model_getSamplePoint", "AntWave_ctor",
         "creature_getAttachMatrix0", "model_getAttachMatrix",
@@ -656,6 +656,12 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "Skeleton_shatter")
     { combat_ctors::skeleton_shatter(model,ar(0),ar(1));return iv(0); }
+  if (n == "GutChunk_ctor") {
+    if (a.size()!=5 || ar(4)!=ONE)
+      throw Unsupported("GutChunk_ctor outside the executed unit-scale chain");
+    combat_ctors::gutchunk_ctor(model,ar(0),v(1),ar(2),ar(3));
+    return iv(0);
+  }
   if (n == "PhProp_ctor") {
     auto parts=std::uint64_t(std::get<std::int64_t>(a.at(6)));
     combat_ctors::phprop_ctor(model,ar(1),v(2),ar(3),ar(4),ar(5),parts,ar(7),ar(8),ar(0));
@@ -1250,6 +1256,8 @@ void World::State::run(Address a) {
     combat_ctors::gold_run(model,a);
     return;
   }
+  if (fn == 0x1edb18 || fn == 0x155fcc)
+    throw Unsupported("PhProp_run needs the unmodelled rigidbody_init output and terrain sweep");
   if (fn == 0x238938) {
     note("run",{a});
     combat_ctors::antwave_run(model,a);

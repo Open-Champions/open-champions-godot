@@ -69,8 +69,8 @@ func run() -> void:
 		row.spawn = "ok" if spawned.get("ok", true) != false else "refused: " + str(spawned.get("error", ""))
 		if spawned.get("ok", true) != false:
 			var actors: Array = spawned.get("combat_actors", [])
-			# The Full fixture's AntQueen (slot 4) and Soul (slot 6) follow the creature.
-			check(actors.size() == 6 and str(actors[3].kind) == classes[i] and int(actors[3].slot) == 3 and str(actors[4].kind) == "AntQueen" and str(actors[5].kind) == "Soul", "%s is observed in slot 3" % classes[i])
+			# The Full fixture's AntQueen, Skeleton and Soul occupy slots 4-6.
+			check(actors.size() == 7 and str(actors[3].kind) == classes[i] and int(actors[3].slot) == 3 and str(actors[4].kind) == "AntQueen" and str(actors[5].kind) == "Skeleton" and str(actors[6].kind) == "Soul", "%s is observed in slot 3" % classes[i])
 			var again: Dictionary = controller.combat_spawn_creature(i)
 			check(again.get("ok", true) == false, "a second creature is refused")
 			var ran := run_ticks(controller, true)
@@ -111,15 +111,14 @@ func run() -> void:
 	# Demon (combat-ctors-2.md section 5), so the session runs on.
 	var skelight: Dictionary = out.classes.get("Skelight", {})
 	check(skelight.get("spawn", "") == "ok" and int(skelight.get("ticks", 0)) == TICKS - 1 and str(skelight.get("error", "x")).is_empty(), "Skelight builds and its hits on the Soul do nothing")
-	# The AntQueen at (0, 80) chases in state 3 until the attacking player's hit
-	# bleeds her, and the blood call GutChunk_ctor has no World handler (as for
-	# a Gnaw).
+	# The AntQueen at (0, 80) bleeds when hit. GutChunk_ctor now builds the
+	# chunk; its run waits for the unmodelled rigid-body initialization output.
 	var queen: Dictionary = out.classes.get("AntQueen", {})
-	check(queen.get("spawn", "") == "ok" and "GutChunk_ctor" in str(queen.get("error", "")), "AntQueen builds and runs until the player's hit stops at GutChunk_ctor")
-	# The Skeleton gets past Skeleton_isEnemy and stops at its first sighting of
-	# the player, in Skeleton_run state 3 (not executed; full-placement.md).
+	check(queen.get("spawn", "") == "ok" and "PhProp_run needs" in str(queen.get("error", "")), "AntQueen builds a blood chunk and stops at its physics frame")
+	# Skeleton_run and the line-of-fire body are executed in round 3. The
+	# spawned Skeleton continues for the whole authored 300-tick case.
 	var skeleton: Dictionary = out.classes.get("Skeleton", {})
-	check(skeleton.get("spawn", "") == "ok" and "Skeleton_run state 3" in str(skeleton.get("error", "")), "Skeleton builds, then stops at Skeleton_run state 3")
+	check(skeleton.get("spawn", "") == "ok" and int(skeleton.get("ticks", 0)) == TICKS - 1 and str(skeleton.get("error", "x")).is_empty() and skeleton.get("present", false), "Skeleton builds and runs 299 ready ticks")
 	for name in ["Critter", "GnomeNavigator", "Mermaid", "NPC", "Natasla"]:
 		var row: Dictionary = out.classes.get(name, {})
 		check("constructor is not executed" in str(row.get("spawn", "")), "%s spawn is refused" % name)

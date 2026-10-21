@@ -649,6 +649,15 @@ void World::State::full_fixtures() {
   const std::map<unsigned,Raw> antwave_slots{{1,0x238750},{4,0x238938},
                                               {5,0x2387d0},{15,0x11fcd0}};
   write_table(0x50d298,&antwave_slots);
+  // Physics props made by the executed GutChunk and shatter constructors.
+  // The run bodies need rigidbody_init's output and are refused explicitly.
+  for (const auto &row:std::array<std::array<Raw,3>,2>{{
+           {0x50f3b8,0x3c4d48,0x1edb18},
+           {0x511ba8,0x3c2fc8,0x155fcc}}})
+    for (auto pair:{std::pair<unsigned,Raw>{1,row[1]},{4,row[2]}}) {
+      w(row[0]+8*pair.first,2,0);
+      w(row[0]+8*pair.first+4,pair.second);
+    }
   // Gold's executed run, touch and destructor slots: research-combat-ctors-4
   // gold-run.md and symbols/runtime.tsv at 6baf4cd.
   for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},
