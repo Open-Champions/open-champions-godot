@@ -48,3 +48,13 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_runtime_5.txt.gz")
     set_tests_properties(combat-runtime-5-exact PROPERTIES TIMEOUT 600)
 endif()
+if(BUILD_TESTING)
+    add_executable(champions-combat-runtime-6-tests tests/combat_runtime_6_tests.cpp)
+    target_link_libraries(champions-combat-runtime-6-tests PRIVATE champions-combat-runtime)
+    add_test(NAME combat-runtime-6-host COMMAND champions-combat-runtime-6-tests)
+    add_test(NAME combat-runtime-6-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_runtime_6_vectors.py"
+        "$<TARGET_FILE:champions-combat-runtime-6-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_runtime_6.txt.gz")
+    set_tests_properties(combat-runtime-6-exact PROPERTIES TIMEOUT 600)
+endif()

@@ -226,3 +226,4 @@ attaches, the GutChunk constructor, the Strong Stance phantom, and arrow kinds
 silent block sparks and the remaining skill paths stay refused.
 Round 4 adds thrown potions 1–3, the Holy Shield absorb stub and silent block sparks.
 Round 5 follows the sample-point absorb, the processDamage and silent-0 block-spark angles, AntQueen states 0 and 1, Skeleton states 0 and 1, Soul's demon gate and MultiFireProjectile_run. PlanarSteel, HornOmen, SpellArena, Pustule, SmokeGen and DiseaseCorpse stay unexecuted.
+Round 6 executes poison gas, disease corpses, the multi-fire hit and end, SmokeGen, Pustule, SpellArena, and the HornOmen and PlanarSteel constructors and runs. Their destructors are not in the research and refuse.
