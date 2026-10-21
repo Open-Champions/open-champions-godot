@@ -772,3 +772,122 @@ scripts, **12 / 12** with scripts and **3 / 3** arena levels with scripts.
 The HUD frame and health bar drew on all 12, 12 and 3 respectively. BLEND-7
 remains the mixed-pass creature FX refusal already recorded in wave 19; no
 level failed. The exported app contains no game-data files.
+
+## Wave 21 (2026-10-21): dialog opens after items, 111 / 111
+
+Both final four-slice counts-only sweeps run 60 ready ticks on the same
+read-only disc copy. `w21on --scripts` and `w21off` each tried, loaded and
+played **111 / 111 / 111** levels, passed **230** checks, and had zero failed
+checks and empty refusal lists. The scripts-off aggregate matches wave 20 on
+every deterministic key.
+
+The scripted aggregate's complete set of changed deterministic keys is:
+
+| Key or group | Wave 20 | Wave 21 | Branch |
+|---|---:|---:|---|
+| `executed.getv` | 979 | 980 | dialog |
+| `executed.startDialog`; `levels_executed.startDialog` | 0; 0 | 1; 1 | dialog |
+| `refused.startDialog`; `levels_refused.startDialog` | 1; 1 | 0; 0 | dialog |
+| `dialog.levels_attached`; `levels_with_text`; `levels_with_font` | absent | 111 each | dialog |
+| `dialog.talkers` | absent | 24 | dialog |
+| `dialog.opens`; `start_messages`; `scripts_run`; `nodes_shown`; `open_at_end_of_play`; `voice_lines`; `anm_reads` | absent | 1 each | dialog |
+| `dialog.ticks_open` | absent | 58 | dialog |
+
+Dialog also emits these zero-valued keys, absent in wave 20: `choices_taken`,
+`client_leaves`, `client_mutex_releases`, `deferred_shops`, `ends`,
+`missing_entries`, `open_gate_refused`, `pending_levels`, `post_actions`,
+`refused`, `shop_requests`, `silent_lines`, `stalls`, `use_ambiguous`,
+`use_blocked_open`, `use_no_candidate`, and `uses`. No other deterministic
+count changed. Combat-walk, combat-ctors and menus did not change a count the
+60-tick level sweep reaches.
+
+The runtime-measure keys changed with machine load and the larger client:
+
+| Measure | Wave 20 scripts on | Wave 21 scripts on | Wave 20 off | Wave 21 off |
+|---|---:|---:|---:|---:|
+| `audio.frames_pushed` | 2,464,369 | 2,011,377 | 2,628,049 | 1,818,193 |
+| `time.load_ms` | 61,328 | 40,749 | 65,535 | 34,705 |
+| `time.play_ms` | 74,620 | 51,042 | 81,278 | 42,350 |
+| `memory.static_peak_bytes` (four process sum) | 2,187,675,620 | 2,198,041,428 | 2,187,577,460 | 2,195,821,332 |
+
+Frames and times depend on the load during each run. Added dialog and menu
+code, plus dialog level state in the scripted sweep, contribute to the larger
+peak, but this run does not isolate their exact shares.
+
+Native dialog census: 26 talkers, 52 attempted talks, **48 opened and
+ended**, zero stalls, four refused by the documented missing quoted text
+key. The six item-condition talks that refused on the dialog branch now
+open. Windowed scene: 24 talkers on 19 levels, **24 opened and closed**,
+133 checks, zero failures; three more openings than dialog round 1. It
+drew dialog box/text on 992 frames and queued 47 voice lines. No private
+screenshots were saved.
+
+The wave-21 exported app passed 12/12 real levels without scripts, 12/12
+with scripts and 3/3 arena levels with scripts at 60 ticks, with one creature
+preview and HUD draw per level. Checks were 26, 26 and 8, all passing.
+BLEND-7 caused nine mixed-pass material refusals among each 12-level preview
+run, but no level failed. The package contains no game data.
+
+## Wave 22 (2026-10-21): mission rows, text, FX, streaming, and cross exports, 111 / 111
+
+The four-slice, 60-ready-tick `w22on --scripts` and `w22off` runs each tried,
+loaded and played **111 / 111 / 111** levels, with 230 passed checks, zero
+failed checks and an empty refusal list. With scripts off, every deterministic
+count matches wave 21. Both runs use the same read-only disc copy and
+per-run `user://` cache folders.
+
+With scripts on, `codex/small-fixes` changes only the two mission-bit counts:
+available **32 → 23**, complete **13 → 4**. The nine bits removed from each
+count were row-0 skill bytes written by `clearAllSkills`; the documented
+mission rows are 1..5. The integrated host already starts difficulty 1.
+`champions-quests-measure` independently reports 23 / 4 after its level runs.
+The researched spell getter correction has no count change in this sweep.
+
+`codex/strings` answers eight `addHelpMessage` calls on seven levels and
+384 `showBust` calls on seven levels, replacing 8 and 307 refusals. The sweep
+harness confirms all eight help boxes after the 90-frame opening delay (713
+additional `help_frame` calls in aggregate); all eight run their post action
+and release the offline pause. Each of the four slice maxima is 89 or 90
+calls because one displayed frame may have run before the harness notices the
+box. The new text table attaches on 111 levels; the headless sweep draws 30
+bust frames and zero help frames because it does not run a displayed-frame
+render loop. Two previously stopped scripts continue: refusal stops
+**16 → 14**. Their later calls explain all further deterministic changes,
+including executed calls **17,130 → 19,841**, refused calls **694 → 382**,
+quest variables **183 → 184**, waits **29 → 30** and stub refusals
+**265 → 266**. The exact changed-key list and attribution are in the
+[wave-22 report](../work/loop-playable-integration-r22-report.md).
+
+`audio.frames_pushed`, `time.load_ms`, `time.play_ms` and summed process peak
+vary with load and the larger text state; their measured wave-21 and wave-22
+values are recorded in that report. No other deterministic count changed.
+
+The final five-branch rerun again tried, loaded, and played **111/111** levels
+in each mode, with **230 passed checks**, zero failed checks, and empty refusal
+lists. Every gameplay, quest, script, help, and dialog count matches the
+two-branch sweep above. `blend-fx` changes rendered creature materials, and
+`win-linux` changes build/export paths; neither changes the sweep simulation.
+`perf-2` preserves all stable counts and the Full trace. The scripted sweep's
+`text.frames_drawn.bust` changed **30 → 34** because the HUD's `_process(delta)`
+counts displayed frames while the scene advances under different scheduling;
+this is a draw-time observation, not a fixed-tick script count. `help_frame`
+still totals **713** and all eight help boxes are confirmed. The exact
+changed-key attribution against wave 21 is in the
+[wave-22 report](../work/loop-playable-integration-r22-report.md).
+
+| Runtime measure (four process sum) | Two-branch on | Final on | Two-branch off | Final off |
+|---|---:|---:|---:|---:|
+| `memory.static_peak_bytes` | 2,201,931,956 | 1,531,496,240 | 2,199,602,500 | 1,529,047,064 |
+| `time.load_ms` | 48,140 | 39,958 | 45,263 | 39,898 |
+| `time.play_ms` | 59,466 | 79,226 | 54,337 | 78,462 |
+| `audio.frames_pushed` | 2,181,265 | 2,691,153 | 2,046,001 | 2,646,961 |
+
+The memory reduction is attributable to `perf-2`'s single streamed terrain
+and retained global VAT. Timings and audio delivery depend on concurrent
+machine load and frame scheduling; these aggregates do not isolate a speedup.
+The exported wave-22 app passes the real-data 60-tick smoke **12/12** without
+scripts, **12/12** with scripts, and **3/3** arena levels with scripts, with
+26, 26, and 8 checks respectively and no failures or refusal list. All 12
+creature previews draw in each main run; the nine BLEND-7 mixed-pass material
+refusals of wave 21 are gone after `blend-fx`. No private level imagery is
+stored in the repository or export.

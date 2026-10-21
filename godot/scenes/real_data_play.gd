@@ -4,7 +4,12 @@ extends "res://scenes/play_flow.gd"
 # read-only RTA folder; levels, textures, banks, effect sheets and creature
 # archives are read from it at run time and never become project resources.
 const RealData = preload("res://real_data/real_data.gd")
+const RealText = preload("res://real_data/real_text.gd")
+const TextHud = preload("res://ui/text_hud.gd")
 var real: Node
+# The level script's setInfo, help box and bust panel (docs/STRINGS.md).
+var text_hud: Control
+var text_sources := {}
 var real_folder: FileDialog
 var real_recipes: FileDialog
 var real_lights: FileDialog
@@ -25,6 +30,10 @@ func _ready() -> void:
 	real = RealData.new()
 	add_child(real)
 	real.configure(self, "user://real-data-cache")
+	if viewport != null:
+		text_hud = TextHud.new()
+		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+		viewport.add_child(text_hud)
 	real_folder = FileDialog.new()
 	real_folder.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	real_folder.access = FileDialog.ACCESS_FILESYSTEM
@@ -71,6 +80,10 @@ func _ready() -> void:
 	npc_dialog.audio_owner = self
 	if viewport != null: viewport.add_child(npc_dialog)
 	else: add_child(npc_dialog)
+	# The help box takes input until confirmation; keep it visible above a
+	# dialog that happened to be open when the script requested help.
+	if viewport != null and text_hud != null:
+		viewport.move_child(text_hud, viewport.get_child_count() - 1)
 	level_script = CheckButton.new()
 	level_script.text = "Level script (opt in)"
 	level_script.toggled.connect(_level_script_toggled)
@@ -103,6 +116,9 @@ func open_game_folder(path: String) -> bool:
 	real_font_choice.disabled = found.is_empty()
 	hud_art_counts = real.load_hud_art()
 	hud_font_loaded = play_hud != null and play_hud.set_font(real.hud_font_bytes())
+	# The string tables and help chime from the folder, for the level script.
+	text_sources = RealText.install(real, controller)
+	if text_hud != null: text_hud.configure(real, controller, inspector)
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	if npc_dialog != null:
 		npc_dialog.set_font(real.dialog_font())
@@ -145,6 +161,7 @@ func attach_level_script() -> bool:
 	var level: Dictionary = real.levels[real.current]
 	var script: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "script.scr")
 	var objects: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+	controller.set_level_text(RealText.level_tables(real, level))
 	# The NPC dialog is attached before the level entry runs (docs/DIALOG.md).
 	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current))
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
@@ -152,6 +169,10 @@ func attach_level_script() -> bool:
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
+	# The offline help box owns confirmation while it holds the session. A
+	# simultaneous dialog or game-menu handler must not consume that key.
+	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:
+		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
 		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
@@ -169,6 +190,9 @@ func start_play() -> void:
 		if not controller.get_play_capabilities().get("level_script_enabled", false):
 			attach_level_script()
 	super.start_play()
+	# A help box the level entry opened pauses the offline game at once.
+	if controller != null and controller.get_play_capabilities().get("level_script_enabled", false):
+		controller.help_frame(false)
 
 func _observe(result: Dictionary) -> void:
 	super._observe(result)

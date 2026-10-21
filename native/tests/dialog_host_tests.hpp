@@ -272,7 +272,7 @@ inline void run(Check check, std::string &where) {
   }
   check(step == 7 && posted == 1, "host: the action's setv and the post action's setv");
   check(campaign.record(0).quest_count == 1, "host: addQuest from a choice action");
-  check((campaign.record(0).missions[std::size_t(champions::simulation::rta::quests::MISSIONS + 1)] & 1) == 1,
+  check((campaign.record(0).missions[std::size_t(champions::simulation::rta::quests::mission_index(1, 1))] & 1) == 1,
         "host: setMissionAvailable from a choice action");
   check(campaign.events().menu_opens == 0, "host: activateMissionMenu is refused while a dialog is open");
   // The silent line: v0 has a .vag, the others have none.

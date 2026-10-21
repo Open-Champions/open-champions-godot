@@ -38,7 +38,9 @@ func load_pair(world: String, tex: String) -> bool:
 	if candidate == null:
 		scene.status_label.text = "Textured ground could not be prepared."
 		return false
-	var prepared: Dictionary = scene.controller.prepare_terrain_file(str(session_worlds.get(world, world)))
+	# The streamed display owns the visible meshes. Its session prepare still
+	# validates every chunk and keeps the same collision and summary counts.
+	var prepared: Dictionary = scene.controller.prepare_terrain_file(str(session_worlds.get(world, world)), not stream_cells)
 	if not prepared.get("ok", false):
 		candidate.free()
 		scene.status_label.text = str(prepared.get("error", "WORLD refused."))

@@ -1,6 +1,7 @@
 #include "champions/amx.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/quests.hpp"
+#include "champions/quests_bridge.hpp"
 #include "champions/script_commands.hpp"
 #include <algorithm>
 #include <array>
@@ -239,7 +240,7 @@ void replay(const std::string &path) {
       fixture.campaign.mission_set_complete(i32(fields.at(1)), i32(fields.at(2)));
     } else if (op == "expect_mission") {
       const int slot = i32(fields.at(1));
-      const int index = i32(fields.at(2)) * q::MISSIONS + i32(fields.at(3));
+      const int index = q::mission_index(i32(fields.at(2)), i32(fields.at(3)));
       check(fixture.campaign.record(slot).missions[static_cast<std::size_t>(index)] ==
                 static_cast<std::uint8_t>(i32(fields.at(4))),
             "mission byte");
@@ -483,6 +484,91 @@ void plant_bag(sc::Host &host, std::vector<q::Item> items) {
   host.campaign().set_record(0, std::move(record));
 }
 
+// Mission rows 1..5 (research-items 49bc578 docs/script-items.md 3): row 0
+// is not held, row 5 is, and a difficulty outside 1..5 is refused.
+void test_mission_rows() {
+  line_no = 0;
+  auto refused = [](auto &&run) {
+    try {
+      run();
+    } catch (const q::Error &) {
+      return true;
+    }
+    return false;
+  };
+  check(q::mission_index(1, 0) == 0 && q::mission_index(5, 12) == 64, "rows 1..5 fill the 65 bytes");
+  check(refused([] { q::mission_index(0, 0); }) && refused([] { q::mission_index(6, 0); }) &&
+            refused([] { q::mission_index(1, 13); }),
+        "row 0, row 6 and mission 13 have no index");
+
+  q::Campaign campaign;
+  check(campaign.difficulty() == q::IMAGE_DIFFICULTY && q::IMAGE_DIFFICULTY == 1,
+        "a campaign starts at the image's difficulty 1");
+  campaign.set_num_players(1);
+  campaign.seed_new_character(0);
+  for (int d = 1; d <= 5; ++d) {
+    campaign.set_difficulty(d);
+    check(campaign.mission_available(0) == 1 && campaign.mission_complete(0) == 1,
+          "a new character has mission 0 on difficulty " + std::to_string(d));
+  }
+  int marked = 0;
+  for (auto byte : campaign.record(0).missions)
+    marked += byte ? 1 : 0;
+  check(marked == 5, "a new character marks five bytes");
+  campaign.set_difficulty(5);
+  campaign.mission_set_available(12, 1);
+  campaign.mission_set_complete(12, -1);
+  check(campaign.record(0).missions[64] == 3, "row 5 mission 12 is the last byte");
+  for (int d : {0, 6, -1}) {
+    campaign.set_difficulty(d);
+    check(refused([&] { campaign.mission_set_available(1, 1); }) &&
+              refused([&] { campaign.mission_set_complete(1, -1); }) &&
+              refused([&] { campaign.mission_available(1); }) && refused([&] { campaign.mission_complete(1); }) &&
+              refused([&] { campaign.hub(); }),
+          "difficulty " + std::to_string(d) + " has no mission row");
+  }
+  campaign.set_difficulty(0);
+  campaign.open_menu(0);
+  check(refused([&] { campaign.tick_menu(0); }) && campaign.menu().state == 0,
+        "the menu does not read a row the campaign does not hold");
+
+  campaign.set_difficulty(5);
+  auto image = campaign.save();
+  check(image.size() > 12 && image[8] == 2 && image[9] == 0 && image[10] == 0 && image[11] == 0,
+        "the campaign image is version 2");
+  const auto loaded = q::Campaign::load(image);
+  check(loaded.record(0).missions == campaign.record(0).missions && loaded.difficulty() == 5,
+        "rows 1..5 and the difficulty survive a save and load");
+  image[8] = 1;
+  check(refused([&] { q::Campaign::load(image); }), "a version-1 image (rows 0..4) is refused");
+
+  // The binder record: clearAllSkills' pairs end at +0x4bc7, inside row 0.
+  sc::Host host;
+  auto &memory = host.variables().memory;
+  memory.word(NUM_PLAYERS, 1u);
+  memory.word(0x4f719cu, 1u);
+  for (std::uint32_t at = 0x4b08u; at <= 0x4bc7u; ++at)
+    memory.byte(PLAYERS_AT + at, 0xffu);
+  memory.byte(PLAYERS_AT + 0x4bc8u, 0x21u);
+  memory.byte(PLAYERS_AT + 0x4c0cu, 2u);
+  memory.byte(PLAYERS_AT + 0x4c0du, 3u);
+  q::mirror_from_variables(host.campaign(), host.variables());
+  const auto &missions = host.campaign().record(0).missions;
+  check(std::count(missions.begin(), missions.end(), std::uint8_t(0)) == 64 && missions[64] == 2,
+        "the mirror reads +0x4bcc..+0x4c0c and not the skill pairs");
+  check(host.campaign().difficulty() == 1 && host.campaign().mission_available(0) == 0 &&
+            host.campaign().mission_complete(8) == 0,
+        "cleared skill pairs are not missions at difficulty 1");
+  host.campaign().mission_set_available(0, 1);
+  host.campaign().set_difficulty(5);
+  host.campaign().mission_set_complete(12, 0);
+  q::mirror_to_variables(host.campaign(), host.variables());
+  check(memory.read(PLAYERS_AT + 0x4bccu) == 1u && memory.read(PLAYERS_AT + 0x4c0cu) == 0u &&
+            memory.read(PLAYERS_AT + 0x4c0du) == 3u && memory.read(PLAYERS_AT + 0x4bc7u) == 0xffu &&
+            memory.read(PLAYERS_AT + 0x4bc8u) == 0x21u && memory.read(PLAYERS_AT + 0x4bcbu) == 0u,
+        "the write-back covers rows 1..5 and leaves row 0 and the medals");
+}
+
 void test_level_change() {
   line_no = 0;
   // Level flow makes the one act decision. Its prefix rule matches an empty
@@ -680,7 +766,7 @@ void test_host() {
         "quest text mirrored");
   check(campaign.vars().size() == 1 && campaign.vars()[0].name == "step" && campaign.vars()[0].value == 7,
         "setv mirrored");
-  check(campaign.record(0).missions[static_cast<std::size_t>(q::MISSIONS + 1)] == 3,
+  check(campaign.record(0).missions[static_cast<std::size_t>(q::mission_index(1, 1))] == 3,
         "mission 1 is available and complete");
   check(campaign.record(0).evil == 2 && campaign.record(0).decision == 2, "difficulty bit 1 is set");
   check(campaign.record(0).script_flags == 1 && campaign.record(0).gold == 5, "flag and gold mirrored");
@@ -753,6 +839,7 @@ int main(int argc, char **argv) {
   replay(argv[1]);
   test_contract(argv[2]);
   test_refusals_and_save();
+  test_mission_rows();
   test_level_change();
   test_menu_and_save();
   test_host();

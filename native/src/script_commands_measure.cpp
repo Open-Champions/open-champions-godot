@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -169,6 +170,34 @@ int main(int argc, char **argv) {
     if (next->load(std::move(bytes)))
       exe = std::move(next);
   }
+  // The string table: every .uni entry of GTEXT.LMP (docs/STRINGS.md), and the
+  // help chime's sound group, byte +0x3c of fx.lmp/butn_message.anm.
+  std::vector<std::vector<std::uint8_t>> gtext;
+  std::optional<std::uint8_t> chime;
+  const auto lump_entries = [&](const std::string &file) {
+    std::vector<std::pair<std::string, std::vector<std::uint8_t>>> out;
+    const auto found = files.find(file);
+    if (found == files.end())
+      return out;
+    const auto bytes = read_file(found->second);
+    try {
+      const champions::Bytes b{bytes.data(), bytes.size()};
+      for (const auto &entry : champions::readLmp(b)) {
+        const auto p = champions::payload(b, entry);
+        out.emplace_back(lower(entry.name), std::vector<std::uint8_t>(p.data, p.data + p.size));
+      }
+    } catch (const std::exception &) {
+    }
+    return out;
+  };
+  for (auto &entry : lump_entries("gtext.lmp"))
+    if (champions::simulation::rta::strings::is_uni_name(entry.first))
+      gtext.push_back(std::move(entry.second));
+  for (const auto &entry : lump_entries("fx.lmp"))
+    if (entry.first == champions::simulation::rta::strings::HELP_CHIME_ENTRY && entry.second.size() > 0x3c)
+      chime = entry.second[0x3c];
+  std::map<std::string, std::uint64_t> text_refusals;
+  std::uint64_t level_tables = 0;
   sc::Counts total;
   std::uint64_t levels_with_tex = 0, scripts_found = 0, scripts_loaded = 0;
   std::uint64_t scripts_no_level_entry = 0, scripts_load_refused = 0;
@@ -230,6 +259,27 @@ int main(int argc, char **argv) {
       if (exe)
         host.set_executable(sc::executable_view(exe));
     }
+    // The text sources are not session state; bare reproduces the earlier host.
+    for (const auto &table : gtext)
+      if (!bare)
+        host.register_text(table);
+    // A level lump's .uni joins the table while the lump is loaded (1.1).
+    for (const auto &entry : inner)
+      if (!bare && champions::simulation::rta::strings::is_uni_name(entry.name)) {
+        try {
+          const auto bytes = champions::payload(lump_bytes, entry);
+          if (host.register_text(std::vector<std::uint8_t>(bytes.data, bytes.data + bytes.size)))
+            ++level_tables;
+        } catch (const std::exception &) {
+        }
+      }
+    if (chime && !bare)
+      host.set_help_chime(*chime);
+    // Camera_setMode writes 0 only while this machine's inventory, shop,
+    // dialog camera or a cutscene is up (research-ui docs/monsters-2.md 7.1
+    // M6); none runs in this pass, so the local camera is in mode 1.
+    if (!bare)
+      host.hud().inputs.camera_mode = 1;
     champions::simulation::rta::amx::ByteVector image(script_bytes.data, script_bytes.data + script_bytes.size);
     if (!host.load(image)) {
       ++scripts_load_refused;
@@ -256,6 +306,8 @@ int main(int argc, char **argv) {
     if (stop == sc::Stop::Missing)
       ++scripts_no_level_entry;
     add(total, host.counts());
+    for (const auto &[reason, n] : host.counts().text_refusals)
+      text_refusals[reason] += n;
   }
   std::cout << "levels_with_tex " << levels_with_tex << '\n';
   std::cout << "levels_unreadable " << levels_unreadable << '\n';
@@ -287,6 +339,10 @@ int main(int argc, char **argv) {
   for (const auto &kv : total.build_refusals)
     std::cout << "build_refused " << kv.first << ' ' << kv.second << '\n';
 
+  std::cout << "text_tables " << gtext.size() << " level_text_tables " << level_tables << " help_chime "
+            << (chime ? 1 : 0) << '\n';
+  for (const auto &[reason, n] : text_refusals)
+    std::cout << "text_refusal " << reason << ' ' << n << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     std::cout << "executed " << sc::row(i).name << ' ' << total.executed[i] << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)

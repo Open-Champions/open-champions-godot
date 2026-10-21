@@ -4,6 +4,11 @@
 Reads ref_quests.py and the campaign operations in ref_natives.py from
 t3/research-quests at 7efd3ce. No disc and no executable. The retail
 experience table and the retail act and mission names are not copied.
+
+The mission rows are difficulties 1..5 (+0x4bcc..+0x4c0c) and g_difficultyIdx
+starts at 1, the executable image's value (t3/research-items 49bc578
+docs/script-items.md section 3). Row 0 lies on the skill pairs, so no case
+here runs at difficulty 0, and record dumps start at row 1.
 """
 import argparse
 import hashlib
@@ -13,6 +18,9 @@ import sys
 from pathlib import Path
 
 COMMIT = "7efd3ce"
+# Mission row 1, the first of the five rows (research-items 49bc578).
+FIRST_DIFFICULTY = 1
+IMAGE_DIFFICULTY = 1
 FILES = (
     "docs/quests.md",
     "tools/ref_quests.py",
@@ -80,7 +88,7 @@ def main():
     out = Script()
     out.emit("commit", COMMIT)
 
-    def players(count, difficulty=0):
+    def players(count, difficulty=IMAGE_DIFFICULTY):
         game = natives.Game()
         game.num_players = count
         game.difficulty = difficulty
@@ -295,6 +303,20 @@ def main():
     out.emit("expect_medal", 0, 4, game.mem.u8(game.rec(0) + natives.P_MEDALS + 4))
     out.emit("expect_medal", 1, 4, game.mem.u8(game.rec(1) + natives.P_MEDALS + 4))
 
+    # Row 5, the last row: mission 12 is +0x4c0c, the byte before the medals.
+    game = players(2, 5)
+    for mission, on in ((0, 1), (12, 1), (12, 3)):
+        game.mission_set_available(5, mission, on)
+        out.emit("mission_on", mission, on)
+    game.mission_set_complete(5, 12, -1)
+    out.emit("mission_done", 12, -1)
+    game.mission_set_complete(5, 0, 2)
+    out.emit("mission_done", 0, 2)
+    for slot in range(4):
+        for mission in (0, 12):
+            out.emit("expect_mission", slot, 5, mission, game.mem.u8(game.mission_byte(slot, 5, mission)))
+        out.emit("expect_medal", slot, 0, game.mem.u8(game.rec(slot) + natives.P_MEDALS))
+
     game = players(2, 1)
     game.n_setEvil(None, [0])
     out.emit("evil", 0)
@@ -310,7 +332,7 @@ def main():
         game.mem.u8(game.rec(1) + natives.P_DECISION),
     )
 
-    game = players(2, 0)
+    game = players(2)
     game.player_set_flag(-1, 0, 1)
     out.emit("flag", -1, 0, 1)
     game.player_set_flag(0, 8, 1)
@@ -320,7 +342,7 @@ def main():
     out.emit("expect_flag", 0, game.mem.u8(game.rec(0) + natives.P_FLAGS))
     out.emit("expect_flag", 1, game.mem.u8(game.rec(1) + natives.P_FLAGS))
 
-    game = players(2, 0)
+    game = players(2)
     game.n_givePlayerGold(None, [5])
     out.emit("gold", 5)
     game.n_givePlayerGold(None, [-5])
@@ -328,7 +350,7 @@ def main():
     out.emit("expect_gold", 0, game.mem.s32(game.rec(0) + natives.P_GOLD))
     out.emit("expect_gold", 1, game.mem.s32(game.rec(1) + natives.P_GOLD))
 
-    game = players(1, 0)
+    game = players(1)
     game.var_set(b"CurrentMission", 3)
     out.emit("var_set", "CurrentMission", 3)
     game.var_get(b"UnknownName")
@@ -341,10 +363,11 @@ def main():
     out.emit("expect_var", "currentmission", 0)
     out.emit("expect_var", "unknownname", 0)
 
-    game = players(1, 0)
-    # docs/quests.md: a new character has mission 0 available and complete.
+    game = players(1)
+    # player_initNewCharacter marks mission 0 available and complete for
+    # d = 1..5 (research-items 49bc578 docs/script-items.md section 3).
     out.emit("seed", 0)
-    for difficulty in range(5):
+    for difficulty in range(FIRST_DIFFICULTY, FIRST_DIFFICULTY + 5):
         out.emit("expect_mission", 0, difficulty, 0, 1 | 2)
 
     rows = []
@@ -546,7 +569,7 @@ def round2(out, natives, quests):
             slot,
             game.mem.read(rec + natives.P_QUESTS, 0x200).hex(),
             game.mem.s32(rec + natives.P_QUEST_COUNT),
-            game.mem.read(rec + natives.P_MISSIONS, 65).hex(),
+            game.mem.read(rec + natives.P_MISSIONS + FIRST_DIFFICULTY * 13, 65).hex(),
             game.mem.read(rec + natives.P_MEDALS, 13).hex(),
             game.mem.u8(rec + natives.P_EVIL),
             game.mem.u8(rec + natives.P_DECISION),
@@ -554,7 +577,7 @@ def round2(out, natives, quests):
             game.mem.s32(rec + natives.P_GOLD),
         )
 
-    def players(count, difficulty=0):
+    def players(count, difficulty=IMAGE_DIFFICULTY):
         game = natives.Game()
         game.num_players = count
         game.difficulty = difficulty
@@ -569,7 +592,7 @@ def round2(out, natives, quests):
     texts = ["", "b", "Body text", "A body of exactly thirty-one ch", "x" * 12]
     for _scenario in range(48):
         count = rng.randint(1, 4)
-        game = players(count, rng.randint(0, 4))
+        game = players(count, rng.randint(FIRST_DIFFICULTY, FIRST_DIFFICULTY + 4))
         for slot in range(4):
             if rng.random() < 0.15:
                 planted = rng.choice((7, 8))
@@ -592,7 +615,7 @@ def round2(out, natives, quests):
     # ---- missions, medals, evil, decision, flags, gold (ref_natives) --------
     for _scenario in range(48):
         count = rng.randint(0, 4)
-        game = players(count, rng.randint(0, 4))
+        game = players(count, rng.randint(FIRST_DIFFICULTY, FIRST_DIFFICULTY + 4))
         names = []
         game.run_script = lambda name: names.append(ascii(name)) or 0
         for _step in range(rng.randint(6, 18)):
@@ -638,7 +661,7 @@ def round2(out, natives, quests):
     # ---- quest variables (ref_natives vars_*) -------------------------------
     pool = ["Step", "step", "STEP", "currentMission", "whichAct", "finishedQuest", "a", "Z9_x"]
     for _scenario in range(16):
-        game = players(1, 0)
+        game = players(1)
         for _step in range(rng.randint(3, 16)):
             kind = rng.randrange(5)
             name = rng.choice(pool)

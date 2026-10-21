@@ -167,8 +167,8 @@ func _material(base_blend: int, env_blend: int, env_mesh: bool) -> ShaderMateria
 
 # The preview builds one surface per default-visible mesh with corners, in
 # model order. Rebuild its current mesh with the bound UVs. One blend state
-# for every surface becomes the instance override, which native FX lighting
-# accepts; mixed states use per-surface materials (lighting then refuses).
+# for every surface becomes the instance override; mixed states use per-surface
+# materials. Both paths consume the native FX vertex colours.
 func apply(instance: MeshInstance3D) -> bool:
 	_instance = instance
 	if texture == null or instance == null or instance.mesh == null: return false

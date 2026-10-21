@@ -41,7 +41,8 @@ constexpr const char *ELF_SHA = "292f6f48e3609c0026def2307d76c222cd5b389303d53b8
 constexpr std::uint32_t MISSION_TABLE = 0x4fe540u, MISSION_STRIDE = 0x34u, MISSION_ROWS = 13u;
 constexpr std::uint32_t ACT_LISTS = 0x4f8e48u, ACT_COUNTS = 0x4f8e10u, ACT_COUNT = 0x4f8e7cu;
 constexpr std::uint32_t XP_TABLE = 0x41b558u;
-constexpr std::uint32_t PLAYERS_AT = 0x4d8af0u, QUEST_COUNT = 0x43d0u, MISSION_AT = 0x4bbfu, MEDAL_AT = 0x4c0du;
+// MISSION_AT is mission row 1 (+0x4bbf + 13): the rows are difficulties 1..5.
+constexpr std::uint32_t PLAYERS_AT = 0x4d8af0u, QUEST_COUNT = 0x43d0u, MISSION_AT = 0x4bccu, MEDAL_AT = 0x4c0du;
 constexpr std::uint32_t EVIL_AT = 0x4c1au, DECISION_AT = 0x4c1bu, QUEST_VARS = 0x86da80u;
 
 // FIPS 180-4 SHA-256, used only to confirm the executable's revision.
@@ -548,7 +549,7 @@ int main(int argc, char **argv) {
       for (int col = 0; col < 3; ++col) {
         q::Campaign campaign;
         campaign.set_num_players(1);
-        campaign.set_difficulty(0);
+        campaign.set_difficulty(q::IMAGE_DIFFICULTY);
         campaign.set_rows(tables.rows);
         for (int mission = 0; mission < q::MISSIONS; ++mission) {
           campaign.mission_set_available(mission, 1);

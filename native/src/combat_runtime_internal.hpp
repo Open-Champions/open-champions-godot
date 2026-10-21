@@ -51,6 +51,16 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          LOOSEFIRE_TOUCH = 0x1fcb70, FIRE_DTOR = 0x3c5050,
                          FIRE_RUN = 0x1f34e0, POISON_GAS_DTOR = 0x3c7878,
                          POISON_GAS_RUN = 0x1fd0f0;
+// Spell type-info getters. A spell lookup compares the getter's address, as
+// with HolyShield's 0x3cf124 (slot 0 of table 0x519ce0). Research
+// t3/research-combat faa7033: tools/ref_player.py:184 (AncestralCall
+// 0x3ce9bc) and :186 (BattleCry 0x3d08dc); tools/difftest_combat_runtime.py:58
+// and :275 (HarmTouch 0x3cdb08). That branch's ref_combat_runtime.py svc stubs
+// (lines 2041-2045, 2151) answer 0x3d0001..0x3d0003, which are not getter
+// addresses; codex/combat-runtime 188bd74 had copied them.
+inline constexpr Raw SPELL_ANCESTRAL_CALL_GETTER = 0x3ce9bc,
+                     SPELL_BATTLE_CRY_GETTER = 0x3d08dc,
+                     SPELL_HARM_TOUCH_GETTER = 0x3cdb08;
 // DiseaseCloud_dtor 0x3cd480: research symbols/runtime.tsv names it (slot 1 of
 // 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
 inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =

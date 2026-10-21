@@ -105,6 +105,7 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
+  bind_text_methods();
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
@@ -141,8 +142,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
                        &ChampionsSessionController::load_terrain_file);
-  ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path"),
-                       &ChampionsSessionController::prepare_terrain_file);
+  ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path", "build_display"),
+                       &ChampionsSessionController::prepare_terrain_file, DEFVAL(true));
   ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name"),
                        &ChampionsSessionController::set_terrain_start_objects, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("load_arena_tables", "executable_path"),
@@ -561,12 +562,13 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       scripts_->dialog_tick(in);
     }
     scripts_->on_ready_tick();
+    note_help_box();
   }
 }
 // Player_run takes no input while a dialog is open and Player_move zeroes the
 // horizontal velocity (research docs/dialog.md 6.1).
 uint32_t ChampionsSessionController::dialog_gate(uint32_t mask) const {
-  return scripts_ && scripts_->dialog().is_open() ? 0u : mask;
+  return scripts_ && (scripts_->dialog().is_open() || scripts_->hud().help_open) ? 0u : mask;
 }
 namespace {
 std::vector<std::uint8_t> raw_bytes(const PackedByteArray &bytes) {
@@ -587,6 +589,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
     auto next = std::make_unique<rta::script_commands::Host>();
+    apply_text(*next);
     rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
@@ -656,6 +659,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->attach_dialog(std::move(level), std::move(services));
     }
     next->run_start();
+    release_help_pause();
     dialog_data_ = data;
     dialog_voice_.reset();
     dialog_last_use_ = String();
@@ -666,6 +670,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
     script_world_.reset();
     script_seed_unpaired_ = false;
+    note_help_box();
     Dictionary result;
     result["ok"] = true;
     result["campaign_carried"] = carried;
@@ -676,6 +681,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   }
 }
 Dictionary ChampionsSessionController::disable_level_script() {
+  release_help_pause();
   scripts_.reset();
   script_seed_.reset();
   script_world_.reset();
@@ -727,7 +733,7 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
 } // namespace
 Dictionary ChampionsSessionController::dialog_use() {
   Dictionary out;
-  out["ok"] = bool(scripts_ && scripts_->dialog_attached());
+  out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open);
   if (out["ok"])
     dialog_use_pending_ = true;
   return out;
@@ -765,7 +771,7 @@ Dictionary ChampionsSessionController::dialog_voice_state(const Dictionary &voic
 }
 Dictionary ChampionsSessionController::dialog_talk_to(int64_t index) {
   Dictionary out;
-  out["ok"] = bool(scripts_ && scripts_->dialog_attached()) && index >= 0 &&
+  out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open) && index >= 0 &&
               std::size_t(index) < scripts_->talkers().size();
   if (out["ok"])
     dialog_talk_pending_ = index;
@@ -775,7 +781,7 @@ Dictionary ChampionsSessionController::dialog_press(int64_t bits) {
   Dictionary out;
   // Only the three documented pad words (docs/dialog.md 8).
   const uint32_t allowed = rta::dialog::UP_BITS | rta::dialog::DOWN_BITS | 0x40u;
-  out["ok"] = bool(scripts_ && scripts_->dialog_attached()) && bits >= 0 && (uint32_t(bits) & ~allowed) == 0;
+  out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open) && bits >= 0 && (uint32_t(bits) & ~allowed) == 0;
   if (out["ok"])
     dialog_pad_ |= uint32_t(bits);
   return out;
@@ -1077,6 +1083,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
 Dictionary ChampionsSessionController::reset_session() {
   try {
     scripts_.reset();
+    help_paused_ = false;
     loaded_presentation_.reset();
     pending_.reset();
     if (combat_) {
@@ -1117,6 +1124,7 @@ Dictionary ChampionsSessionController::release_input() {
 Dictionary ChampionsSessionController::stop_session() {
   try {
     scripts_.reset();
+    help_paused_ = false;
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap();
     return observation();
@@ -1280,7 +1288,8 @@ void ChampionsSessionController::prepare_meshes(Dictionary &terrain) {
 constexpr std::size_t MAX_STATIC_SURFACES = 16384;
 constexpr std::size_t MAX_STATIC_TRIANGLES = 4000000;
 Dictionary ChampionsSessionController::present_geometry(
-    const champions::presentation::rta::world_geometry::Geometry &geometry) {
+    const champions::presentation::rta::world_geometry::Geometry &geometry,
+    bool build_display) {
   Array surfaces;
   std::size_t triangles = 0, batches = 0;
   for (const auto &chunk : geometry.chunks) {
@@ -1298,7 +1307,8 @@ Dictionary ChampionsSessionController::present_geometry(
           "This WORLD exceeds the scene's static mesh limit.");
     triangles += chunk_triangles;
     PackedVector3Array positions;
-    positions.resize(int64_t(chunk_triangles * 3));
+    if (build_display)
+      positions.resize(int64_t(chunk_triangles * 3));
     int64_t at = 0;
     int64_t first_batch = -1, chunk_batches = 0;
     for (std::size_t b = 0; b < packet.batches.size(); ++b) {
@@ -1317,12 +1327,17 @@ Dictionary ChampionsSessionController::present_geometry(
                 std::abs(coordinate) > std::numeric_limits<float>::max())
               throw std::runtime_error(
                   "This WORLD exceeds the display coordinate range.");
-          positions.set(at++, Vector3(p[0], p[1], p[2]));
+          if (build_display)
+            positions.set(at, Vector3(p[0], p[1], p[2]));
+          ++at;
         }
     }
     batches += std::size_t(chunk_batches);
     Dictionary surface;
-    surface["positions"] = positions;
+    // A streamed display needs the same validation and summary counts, but
+    // never publishes this neutral mesh. Keep the authority in the Scene.
+    if (build_display)
+      surface["positions"] = positions;
     surface["chunk"] = int64_t(chunk.index);
     surface["batch"] = first_batch;
     surface["batches"] = chunk_batches;
@@ -1345,7 +1360,8 @@ Dictionary ChampionsSessionController::present_geometry(
   return out;
 }
 Dictionary
-ChampionsSessionController::prepare_terrain_file(const String &path) {
+ChampionsSessionController::prepare_terrain_file(const String &path,
+                                                 bool build_display) {
   try {
     if (next_candidate_ == std::numeric_limits<int64_t>::max())
       throw std::runtime_error(
@@ -1437,9 +1453,10 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     }
     auto prepared = std::make_unique<PendingTerrain>();
     const Dictionary terrain =
-        illustration ? present_terrain(data) : present_geometry(geometry);
+        illustration ? present_terrain(data) : present_geometry(geometry, build_display);
     prepared->terrain = terrain;
-    prepare_meshes(prepared->terrain);
+    if (build_display || illustration)
+      prepare_meshes(prepared->terrain);
     const auto current_config = active_setup().config;
     // Preserve the historical scene policy when recovery is off. An active
     // opt-in descriptor must survive terrain replacement, including its cap.

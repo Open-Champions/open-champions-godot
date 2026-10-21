@@ -71,32 +71,33 @@ for that state it would reach a callee research did not execute. Each such
 refusal counts in `callee_refusals` and in the command's `refused`:
 
 - `charmMonster`, `followPlayer`: a creature past `Creature_setCharm`'s gates
-  (flag 0x20, not a player, charm timer not -1) whose target handle at
-  `+0x234` is live. `handle_clear` of a live handle is research's Unknown.
-- `startMusic`: no music volume. `music_playLevel` reads `g_musicVolume`,
-  which has no default (audit AUD-1). The caller supplies the player's
-  option with `Host::set_music_volume`; the gate and the channel word then
-  use that volume and `Playback`'s duck scalar. The play session supplies
-  none, so in play `startMusic` is refused.
-- `setCFlag`, `selectSetCFlag` with bit 0: no music volume and a creature
-  whose type name at `+0x34` and `name` property select a boss track.
+  (flag 0x20, not a player, charm timer not -1) whose target word at `+0x234`
+  is not a node of the host's handle pool. Research `d4987fd` executed
+  `handle_clear` of a live target (`docs/strings.md` 5): a target linked
+  through the host's pool (`Host::link_target`) is cleared there, and only
+  this creature's nodes and their partners go ([STRINGS.md](STRINGS.md)).
 - `hudFadeScreen`: `hud_stepFade` adds to `g_hudFade`, which the game keeps
   between fades. The host knows that word only after `hudResetFadeScreen`
   has set it.
 
-The host answers the callees these bodies make only where no handler reads
-the answer: `handle_clear`, `ui_drawRect`, `audio_setChannelVolume` and
-`stream_playLevel` (each handler returns 0, or `hud_stepFade`'s own value).
-Any other unanswered callee throws. Calls are recorded, not run: no string is
-copied and no draw is made.
+Since combat-ctors, `Playback` starts at the researched `save_init` music
+volume 0.5 (`0x3f000000`), and `Host::set_music_volume` can replace it with
+the owner's option. `startMusic` and the boss-music bit of `setCFlag` use that
+value through the existing gate. A placeholder object still refuses before
+`setCFlag` reaches its binder.
 
-These executed setters stay refused because each takes the result of
-`text_lookup`, whose string table the host does not have (research
-`docs/data-tables.md`: the text comes from the game's string files):
-`setInfo`, `addHelpMessage`,
-`addHelpMessageF` (also `wstr_format`, which was not entered), `showBust`
-and `showCompass`. No camera is installed and nothing is written into the
-binder's address space for them.
+The host executes `handle_clear` only for a live target in its handle pool.
+Other unanswered callees still refuse; recorded audio and draw calls are not
+claims of original-client presentation.
+
+`setInfo`, `addHelpMessage`, `addHelpMessageF`, `showBust` and
+`showCompass` run on research `d4987fd`'s string table, `wstr_format` and HUD
+state ([STRINGS.md](STRINGS.md)) with the game's own `GTEXT.LMP` table, which
+the caller registers (`Host::register_text`). They are callee refusals, with a
+reason in `Counts::text_refusals`, without a table, without the help chime's
+sound group (`set_help_chime`), without a camera mode (`hud().inputs`), for a
+text over its buffer, a format that reads past its terminator or a missing
+compass object.
 
 Every command that is still partly documented or unknown is refused, as
 below. That includes the bag walks, `generateMonster` (`world_createObject`

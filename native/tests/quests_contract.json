@@ -1,7 +1,7 @@
 {
   "commit": "7efd3cec7677c199159bd2d72b3c5dbd79bd4711",
   "policy": "rta-quests-v1",
-  "lines": 11304,
+  "lines": 11324,
   "sha256": {
     "docs/quests.md": "0af07de2690e3ce4e666db80b32e4d4876202465f169c751bbe949a7c7e61ff8",
     "tools/ref_quests.py": "d01f950111e237bde13809743b4ff5d8ca407f5d625eab4c468efee47f5ff087",

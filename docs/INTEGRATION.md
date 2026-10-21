@@ -3486,3 +3486,117 @@ it counts; it does not claim the original clock seed. The real-level session
 has no item tables for gives, and the HUD lacks observed mana, XP, level,
 gold and other producers. BLEND-7 and the wave-18 refusals remain. Netplay is
 an in-process offline co-op simulation, without a Godot net scene or sockets.
+
+## Playable integration wave 21 — combat walk, constructors, dialog, menus — 2026-10-21
+
+From `8bdd705`, merge commits `362c9c4` (combat-walk `07f2479`), `7371245`
+(combat-ctors **`a0d7118` exactly**), `b1640a7` (dialog `01b6e8a`) and
+`0548440` (menus **`815a8f3`**) were made in that order. No other branch was
+merged. The combat-walk netplay ancestor was already in wave 19; the
+chosen combat-ctors commit includes combat-runtime-6. Combat-ctors and menus share the
+same early music-volume ancestor `04d2f1a`, so one researched implementation
+is linked into each distinct native and extension target. Its `save_init`
+default is 0.5. The script host was adjusted from an optional volume to that
+raw default; existing refusals for placeholders, live charm and unsupported
+callee states remain.
+
+The Full fixture now builds the AntQueen in slot 4 at (-110, 110) and the
+Soul in slot 6. The Skeleton remains outside slot 5 because its state 3 is
+not executed in the pinned research. The Full trace is
+**`4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`**,
+**31,622 bytes**, in dev headless and all four exported Full runs. It differs
+from wave 20 because the Soul and AntQueen add actors, shared draws and state
+changes, as the combat-ctors reports isolate. Combat-walk, dialog and menus
+do not change it.
+
+Dialog composes with wave-20 items and the offline script seed. A refused
+command still stops its script; `setCFlag` on a placeholder still refuses.
+The real-data dialog census now opens and ends **48/52** talks instead of
+42/52: all six item-condition talks open, while four remain refused for a
+missing quoted text key. The windowed scene opens and closes **24/24** talks
+instead of 21/24, with 133 passed checks and zero failures. One real-level
+script opens a talk in the 60-tick sweep.
+
+Both 111-level sweeps pass **111/111**, zero failed checks. With scripts off,
+all deterministic counts equal wave 20. With scripts on, dialog adds 111
+attached text/font levels, 24 talkers, one open, one executed `startDialog`
+instead of a refusal, and one extra `getv`; all other deterministic counts
+match. The count-by-count and runtime-measure differences are in
+[REAL_DATA.md](REAL_DATA.md) and the
+[wave-21 report](../work/loop-playable-integration-r21-report.md).
+
+Four universal GDExtension builds and the Godot dev matrix **53/53** pass.
+Full headless has 2,620 checks, zero failures; its one-check drop from wave 20
+is the researched music-default assertion replacing two refusal assertions.
+The exported universal app has arm64 and x86_64 executable and extension
+slices, no packaged game data, and matching release dylibs. Export matrix
+**21/21** passes. The 1280×720 graphical Full flow reaches **36,000 ticks**,
+passes **108,826 checks** with zero failures, saves and continues, and has
+63 synthetic captures; the boot, main menu, inventory, and Full combat
+captures were inspected. Exported real-data smoke passes 12/12
+without scripts, 12/12 with scripts and 3/3 arena levels with scripts; the
+HUD and one creature preview are present on each tested level. BLEND-7's
+mixed-pass material refusal remains on nine of the 12 preview levels, with
+zero failed checks.
+
+The final native CTest suites passed **225/225 on arm64** and **225/225 under
+Rosetta x86_64**. The host free-spot test was adjusted after the AntQueen's
+new Full-fight search and a Skelight hit interrupted its player-only timing
+check; the corrected test passed on both architectures. The disc was read only
+and contributed counts, not committed content.
+All commits are local; there was no push or PR. Original-client raster parity,
+Windows/Linux exports, manual play and Internet netplay remain unverified.
+
+## Playable integration wave 22 — text, FX, streaming, and portable exports — 2026-10-21
+
+From wave 21 `ed63ccd`, the local merge commits are `99e53e3` (small-fixes
+`b56bf10`), `c7d5107` (strings `6fdb048`), `5d7de5b` (audited blend-fx
+`b297c44`), `b0d3322` (audited perf-2 `8ec62d5`), and `afc087f`
+(audited win-linux `adf701c`), in that order. No other branch was merged;
+creature-stats remains excluded after two MEDIUM audit findings. The BFX-1
+nonzero lighting assertion, canonical build path mapping (WL-2), and accurate
+private-marker verification wording (WL-1) were included.
+
+Quest mission rows are the researched 1..5, with one difficulty source shared
+by the quest and item code. The researched spell getters replace the invented
+type values. Text commands install GTEXT and draw the help and bust overlays;
+the help box owns confirm/use input while open, pauses the session, closes
+after its 90-frame delay, records the 60-frame menu lockout, and allows the
+script to continue. A refused command still stops its script, including
+`setCFlag` on a placeholder. The Full fight still omits the unresearched
+Skeleton state. Audio keeps one process-lifetime mixer and global VAT.
+
+The final scripted and unscripted real-data sweeps each pass **111/111** levels,
+**230 checks**, zero failures. The scripted stable counts equal the verified
+two-branch baseline. Against wave 21, small-fixes removes nine row-0 bits
+from both mission-available and mission-complete counts; strings resolves
+eight help and 384 bust calls and lets two scripts continue. The only final
+draw-counter variation is bust frames **30 → 34**, which follows display-frame
+scheduling rather than fixed ready ticks. `perf-2` lowers the four-process
+summed peak memory from about 2.20 GB to 1.53 GB in both modes; load/play
+timings and audio delivery vary with concurrent load. The full per-key
+attribution is in [REAL_DATA.md](REAL_DATA.md) and the
+[wave-22 report](../work/loop-playable-integration-r22-report.md).
+
+Four universal macOS GDExtension builds and Godot dev **53/53** pass. The
+export matrix is **21/21**; 36,000 rendered Full ticks pass **108,826 checks**
+with 63 synthetic captures. The dev and all exported Full runs keep
+**FULL_TRACE `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`**, **31,622 bytes**. The universal macOS ZIP at
+`build/exports/wave22/OpenChampions.zip` has SHA-256
+`38d2109f513dd55f502d620c7c854022e6b6ba83d606473dc28d2a28bfc3e8f2`;
+both packaged release libraries match their builds byte for byte, and no
+game data is packaged. Exported real-data smoke passes 12/12 without scripts,
+12/12 with scripts, and 3/3 arena levels with scripts. All creature previews
+draw; the nine prior BLEND-7 material refusals are gone. The windowed text
+smoke passes 17 checks, including help/dialog input and pause/resume behavior.
+
+Windows x64 and Linux x64 exports each contain exactly the player and two
+matching libraries. Static checks pass for 273 embedded resources per package,
+expected native entry symbols, no game-data suffix, and no checked private
+marker. Target Windows/Linux execution remains unverified. Native arm64 CTest
+passes **226/226**. The initial Rosetta x86_64 suite passed **225/226**;
+`player-exact` hit its 240 s timeout during concurrent CTest work and passed
+alone unchanged in 172.35 s, verifying all 226 tests with the initial timeout
+recorded separately. `strings-exact` is the new test over wave 21. Synthetic
+output was inspected, and private disc data was read only. All commits are
+local; no push or PR.

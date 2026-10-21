@@ -23,7 +23,13 @@ and drops the count by one. A string that would run past its 32-byte field,
 or a stored field with no terminator, is refused. On the console those would
 write or read into the neighbouring field.
 
-Mission bytes are five difficulties of thirteen missions. Bit 0 is available
+Mission bytes are five rows of thirteen missions, one row per difficulty
+1..5: `+0x4bbf + d × 13 + m`, that is +0x4bcc..+0x4c0c, ending where the
+medal bytes start (research-items `49bc578` `docs/script-items.md` section 3).
+`g_difficultyIdx` is 1 in the executable image, and a new campaign starts
+there. Row 0 would lie on the skill pairs and the countdown bytes, so a
+difficulty outside 1..5 is refused for every mission read and write, the hub
+name and the menu. Bit 0 is available
 and is written on the first `g_numPlayers` records. Bit 1 is complete and is
 written on all four records. Value −1 sets that bit. Any other value stores
 its bit 0. Mission 13 and above is not written. A negative mission index is
@@ -49,8 +55,8 @@ run that case.
 Quest variables are a lower-case name and a signed value byte. A name byte
 of 0x80 or more is refused (`ref_natives._lower`). `vars_get` appends an
 unknown name with 0. `vars_clearAll` zeros the values and keeps the names.
-A new character has mission 0 available and complete on all five
-difficulties.
+A new character has mission 0 available and complete on difficulties 1..5
+(`player_initNewCharacter`, research-items section 3).
 
 An item with flag bit 39 is removed on an act change unless its name
 contains `bloodstone` or `shardof`, or is exactly `spiritrunes`, `emptybag`,
@@ -122,7 +128,9 @@ These stay refused. Their bodies are not in the pinned quest contract:
 
 ## Saves
 
-`Campaign::save` writes a typed image, magic `OCQUEST1`, version 1. It is
+`Campaign::save` writes a typed image, magic `OCQUEST1`, version 2: its
+mission bytes are rows 1..5. A version-1 image held rows 0..4 and no row 5,
+so it is refused. No saved file carries this image yet (see below). It is
 not the PS2 card image. `save_build` was not re-run. `Host::save_campaign`
 copies the binder record and quest variables into the campaign first and
 returns that image. `Host::load_campaign` replaces the campaign and writes
@@ -138,8 +146,10 @@ capacities.
 
 `tools/generate_quests_vectors.py --research-dir R --tsv T --contract C`
 checks the research HEAD and imports the reference. Expected values come only
-from `ref_quests.py` and `ref_natives.py`. The first 241 lines are the round-1
-cases. Round 2 appends:
+from `ref_quests.py` and `ref_natives.py`. Every campaign case runs at difficulty 1,
+the image value, unless it names another of 1..5; record dumps are rows 1..5
+(+0x4bcc). The first 261 lines are the round-1 cases, including a row-5 case
+(mission 12 is +0x4c0c, the byte before the medals). Round 2 appends:
 
 - `difftest_quests.py`'s case structure on authored data: 37 helper cases of
   12 helpers, every menu path and launch chain (story, medal, bonus, evil,
@@ -154,7 +164,7 @@ cases. Round 2 appends:
   16 quest-variable runs; 200 random helper rows; 720 hub bit patterns;
   60 experience cases on two authored tables; 40 menu runs on random rows.
 
-11,304 lines. The test fails when the line count differs from the contract.
+11,324 lines. The test fails when the line count differs from the contract.
 
 ## Measure
 
@@ -202,20 +212,56 @@ host runs the level entry points and deferred calls only, and those calls
 were not reached from them. The research places them inside conversation
 branches and medal blocks (docs/quests.md sections 2 and 7).
 
-Two levels make 9 mission bytes read as available and complete without a
-mission command. The binder's `clearAllSkills` (exactly `ref_natives`) writes
-0xffff into 48 skill slots of 4 bytes from +0x4b08. The last 9 of those bytes
-are +0x4bbf–+0x4bc7, the first 9 mission bytes of difficulty 0. Either the
-slot count or the mission offset in the research is wrong, or the original
-does this. That needs a research answer. This port follows the reference.
+The earlier measure counted nine `clearAllSkills` bytes as mission bits.
+Research-items `49bc578` established that these bytes lie in row 0, outside
+the mission rows 1..5. The current bridge does not count or mirror them.
 
-Answered since (research-items `docs/script-items.md` section 3): no mission
-row 0 is ever used, because every writer of `g_difficultyIdx` stores 1..5 and
-the executable image holds 1. The host now starts a single-player game with
-`g_numPlayers` 1 and `g_difficultyIdx` 1 (`start_single_player`,
-docs/SCRIPT_COMMANDS.md), so the binder reads row 1. Still open here: the
-campaign's mission array holds rows 0..4 (`DIFFICULTIES` 5), so difficulty 5
-has no row in it.
+## Mission rows 1..5 (2026-10-21)
+
+`codex/small-fixes` moves the campaign's 65 mission bytes from rows 0..4
+(+0x4bbf) to rows 1..5 (+0x4bcc..+0x4c0c), as research-items `49bc578`
+section 3 documents. `codex/items` starts the host's binder word
+`g_difficultyIdx` (0x4f719c) and the campaign at 1. The two changes are
+independent: this one changes only the quests module, its bridge, measure,
+vectors and tests; items changes the host. Merged together, the mission
+commands write row 1 and the campaign mirrors it.
+
+Wave 22 measures this combined implementation on the owner-selected disc:
+`champions-quests-measure` counts 23 available and 4 complete bits after the
+level runs. The `w22on` scene sweep counts the same 23 and 4; its wave-21
+baseline counted 32 and 13 because nine `clearAllSkills` bytes from row 0
+were included. `quests::IMAGE_DIFFICULTY` is the code's image value;
+`script_items::DIFFICULTY_IMAGE` aliases it, and `Host` writes it once at
+construction.
+
+`champions-quests-measure`, same disc copy, wave 19 (`63c40ab`) → this
+change alone → this change merged with `codex/items` (trial merge on
+wave 18 `0f3cafc`; items does not yet merge cleanly into wave 19, for
+reasons unrelated to this change):
+
+| Measure | Wave 19 | Rows 1..5 | Rows 1..5 + items |
+|---|---|---|---|
+| After the runs: available / complete bits | 41 / 22 | 0 / 0 | 23 / 4 |
+| Chain: quest lines cleared | 6 | 7 | 7 |
+| Chain end: quest lines, available / complete bits | 0, 17 / 14 | 1, 17 / 6 | 1, 17 / 6 |
+
+- Wave 19's 41 / 22 counted row 0: the 23 `setMissionAvailable` and 4
+  `grantMission` calls ran at binder difficulty 0 and landed there, and
+  `clearAllSkills`' 0xff pairs added 9 / 9 on each of two levels. Row 0 is
+  no longer counted.
+- Without items, the per-level hosts still run at binder difficulty 0, so
+  those commands write row 0 and the campaign shows none of them. With
+  items they land in row 1: 23 / 4, exactly the executed calls.
+- The chain starts from a fresh campaign, which now holds difficulty 1, and
+  `load_campaign` writes it to the binder. At difficulty 0 the chain's
+  `getMissionComplete` read the cleared skill pairs as complete missions, so
+  scripts took other branches.
+- This change alone leaves every executed and refused command count, every table count and every menu
+  count is unchanged.
+
+The integrated host starts a single-player game with `g_numPlayers` 1 and
+`g_difficultyIdx` 1 (`start_single_player`, docs/SCRIPT_COMMANDS.md). The
+campaign holds exactly rows 1..5, including the last row beside the medals.
 
 ## After the audit's script-host fixes (wave 17, 2026-10-21)
 
@@ -277,13 +323,10 @@ supersedes the "stay refused" table above for the item commands:
 - `givePlayerRandom` stays refused.
 - The host starts `g_difficultyIdx` (`0x4f719c`) and the campaign at 1, the
   executable image's value. `clearAllSkills` still writes 0xff into
-  `+0x4bbf..+0x4bc7`, but that is mission row 0, and nothing reads it at
-  difficulty 1. The mission commands read and write row 1 (`+0x4bcc`). The
-  quests measure counts bits over all 65 bytes of the campaign array, rows
-  0..4, so its "available / complete bits" totals still include those nine
-  row-0 bytes. Row 5 (`+0x4c00..+0x4c0c`) is outside the campaign's 65-byte
-  array, and `seed_new_character` marks rows 0..4, not 1..5. Both are open for
-  the quests port.
+  `+0x4bbf..+0x4bc7`, outside the mission rows. Mission commands read and
+  write row 1 (`+0x4bcc`). The quests measure and campaign array hold rows
+  1..5, including row 5 (`+0x4c00..+0x4c0c`); `seed_new_character` marks
+  those same rows.
 
 `champions-quests-measure` on the same disc copy, wave 17 → items:
 

@@ -6,8 +6,7 @@ namespace champions::simulation::rta::combat_runtime {
 int damage_with_descriptor(World::State &, Address, Address, Raw, Raw,
                            const combat::Descriptor &, Raw, Raw);
 namespace {
-constexpr Raw F36 = 0x42100000, F60 = 0x42700000,
-              HARM_TOUCH = 0x3d0003, AUTOPROP_DESC = 0x9089f0;
+constexpr Raw F36 = 0x42100000, F60 = 0x42700000, AUTOPROP_DESC = 0x9089f0;
 constexpr Address G_CLASS_SKILLS = 0x4ef538;
 constexpr std::uint64_t PASSIVE_DUAL_WIELD = 0x40000, PASSIVE_HEAVY = 0x20000;
 Raw frame_hash(Raw frame) { return (frame * 0x19660dU + 0x3c6ef35fU) & 0xffff; }
@@ -264,7 +263,7 @@ void World::State::melee_hit_full(Address p, Address target, Raw, Raw extra,
     w(r + 0xd4, Raw(round_half(mul(from_int(s32m(r + 0xd4)), scale))));
   }
   auto dmin = s32m(r + 0xd0), dmax = s32m(r + 0xd4);
-  if (find_spell_by_type(p, HARM_TOUCH))
+  if (find_spell_by_type(p, SPELL_HARM_TOUCH_GETTER))
     throw Unsupported("SpellHarmTouch_applyToHit");
   auto result = damage_full(target, p, u(r + 0xcc), a3, a4, flags | extra,
                             weapon, from_int(dmin), from_int(dmax));

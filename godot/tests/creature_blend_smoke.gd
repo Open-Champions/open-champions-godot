@@ -1,6 +1,7 @@
 extends SceneTree
 
 const Creature = preload("res://real_data/real_creature.gd")
+const Renderer = preload("res://fx/native_fx_renderer.gd")
 var checks := 0
 
 func check(ok: bool, message: String) -> void:
@@ -137,6 +138,38 @@ func run() -> void:
 	var partial := _creature(0x64, 127, 1, env, 1, 64)
 	var partial_material := partial._material(1, 1, true)
 	check(partial_material.shader.code.contains("hint_screen_texture") and partial_material.shader.code.contains("src * fix_w + pass1 * (1.0 - fix_w)"), "a partial environment weight reads the framebuffer and uses the 0x64 weight")
+	# One synthetic model with an environment pass on only its first mesh.
+	# Its two material states force real_creature.apply() to assign per-surface
+	# ShaderMaterials instead of an instance override.
+	var mixed := _creature(9, 255, 1, env, 1, 128)
+	mixed.meshes.append({"visible_by_default": true, "uv": PackedVector2Array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO]), "blend": 1, "environment": false, "environment_blend": -1})
+	var mixed_arrays: Array = []
+	mixed_arrays.resize(Mesh.ARRAY_MAX)
+	mixed_arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.RIGHT, Vector3.UP])
+	mixed_arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array([Vector3.BACK, Vector3.BACK, Vector3.BACK])
+	mixed_arrays[Mesh.ARRAY_COLOR] = PackedColorArray([Color(0.5, 1.0, 1.0), Color.WHITE, Color.WHITE])
+	var mixed_mesh := ArrayMesh.new()
+	for surface in 2: mixed_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mixed_arrays)
+	var mixed_instance := MeshInstance3D.new()
+	mixed_instance.mesh = mixed_mesh
+	root.add_child(mixed_instance)
+	check(mixed.apply(mixed_instance) and mixed_instance.material_override == null, "mixed-pass model uses per-surface materials")
+	var source_mesh: ArrayMesh = mixed_instance.mesh
+	var env_material: ShaderMaterial = source_mesh.surface_get_material(0)
+	var base_material: ShaderMaterial = source_mesh.surface_get_material(1)
+	check(env_material != base_material and env_material.shader.code.contains("texture(env_texture, env_uv).rgb * COLOR.rgb") and not base_material.shader.code.contains("env_texture"), "only the tagged surface draws vertex-colour-modulated environment")
+	var renderer := Renderer.new()
+	root.add_child(renderer)
+	check(renderer.bridge.set_level_light(Vector3.UP, Color.WHITE, Color.WHITE, 128, 1.0, 0).ok, "mixed-pass lighting setup")
+	check(renderer.apply_vertex_lighting(mixed_instance, true).ok, "mixed-pass model accepts FX lighting")
+	var lit_mesh: ArrayMesh = mixed_instance.mesh
+	check(lit_mesh.surface_get_material(0) is ShaderMaterial and lit_mesh.surface_get_material(1) is ShaderMaterial and lit_mesh.surface_get_material(0) != env_material and lit_mesh.surface_get_material(1) != base_material, "both surface shaders receive lit copies")
+	var lit_colors: PackedColorArray = lit_mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	check(lit_colors[1].r > 0.0, "FX lighting produces nonzero red reference")
+	check(lit_colors.size() == 3 and lit_colors[0].r <= lit_colors[1].r * 0.5 + 0.001, "FX lighting multiplies existing vertex colour")
+	check(renderer.apply_vertex_lighting(mixed_instance, true).ok and mixed_instance.mesh.surface_get_material(0) == lit_mesh.surface_get_material(0), "relighting reuses per-surface shader copy")
+	mixed_instance.queue_free()
+	renderer.queue_free()
 	viewport.queue_free()
 	print("creature blend: ", checks, " checks passed")
 	quit()
