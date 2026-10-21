@@ -6,7 +6,9 @@ and per-level appearance documented in `t3/research-textures` at `1528708`
 implementation is `champions::presentation::rta::water_draw`. It is
 presentation. Creature `water_test` / `water_disturb` still return the service
 counts. The service grid pointer stays 0, so that call writes nothing there.
-When the count is not zero, the same call is applied to the drawn field.
+When the count is not zero, the same call is applied to the drawn field. The
+field takes its chunks from the same WORLD query (`0x189240`, the
+`WaterImage::disturb_chunks` box and capacity), in query order.
 
 The drawer and the height step do not call `cos16` or `sin16`. Those functions
 are not used here.
@@ -26,18 +28,32 @@ pass.
 
 Those two rows are the executable tables. On a load, the reset runs first and
 writes set 1's fix, colour and scale as 0, then `water_setup` replaces set 0
-only. A `customVars` object (case-insensitive class match) can replace either
-set. The scene applies those lines after setup (`replacing`). `before_setup`
-is tested and is not what the scene uses. `refuse_property_order` records that
-the original factory-versus-setup order was not executed. Float properties use
-the deposited IEEE value of the decimal, because `sscanf` `%f` did not return
-in the interpreter. `waterWavyness` and `waterWavyness2` then multiply by the
-static set-1 scale `0x3CC00000`. Bump strength, radius and the timer word are
-stored. Nothing documented reads the timer.
+only. A `customVars` object (case-insensitive class match, `docs/objects.md`
+of the research) can replace either set. The scene applies those lines after
+setup (`replacing`), as section 7 step 2 of the research note says a level
+property replaces the RGB and the fix. `before_setup` is tested and is not
+what the scene uses. `refuse_property_order` records that the original
+factory-versus-setup order was not executed.
+
+Keys match exactly. Values must be the executed shapes: four comma integers
+for a colour, one integer for the timer, one decimal (optional minus, digits,
+at most one point) for the floats. A closing carriage return is accepted:
+every water line on the disc ends in one, and `sscanf` stops at the first
+character a conversion cannot take. Anything else is refused, stores nothing,
+and is counted. A colour whose fix one byte cannot hold (|fix| > 255) is
+refused too: the drawer writes the fix as the high word of `ALPHA_1`, and the
+pin does not say which bits of that word the GS keeps. Colour parts keep their
+low byte, as `colour_word` in the reference does; a negative part was not an
+executed vector. Float properties use the IEEE value of the decimal (decimal to
+double to float, as the difftest deposited it), because `sscanf` `%f` did not
+return in the interpreter. `waterWavyness` and `waterWavyness2` then multiply
+by the static set-1 scale `0x3CC00000`. Bump strength, radius and the timer
+word are stored. Nothing documented reads the timer.
 
 A negative fix selects `ALPHA` `0x68` and `Cs × F + Cd`. The play shader keeps
 `blend_mix` for a positive fix. A negative fix uses `blend_add` with
-`ALBEDO = texel × COLOR.rgb × abs(fix)`. Retail sets are positive.
+`ALBEDO = min(texel × tint, 1) × abs(fix)`. The executable's sets are
+positive; level lines on the disc include negative fixes.
 
 Alpha channel 0 is not the transparency. Positive FIX uses `ALPHA` `0x64`:
 `(Cs − Cd) × F + Cd` with F = FIX/128. The texture function is modulate:
@@ -46,8 +62,10 @@ Alpha channel 0 is not the transparency. Positive FIX uses `ALPHA` `0x64`:
 depth is neither updated nor tested.
 
 The play shader uses that blend (`blend_mix`, `ALPHA = FIX/128`), modulate
-(`ALBEDO = texel.rgb × COLOR.rgb` with the vertex colour already divided by
-128), `depth_draw_never` and `depth_test_disabled`. `render_priority` is 3.
+(`ALBEDO = min(texel.rgb × tint, 1)`, with `tint` the set colour divided by
+128 as a uniform: a vertex colour channel stops at 1.0 and level colours reach
+255; the clamp is `COLCLAMP` 1 from the research render pipeline),
+`depth_draw_never` and `depth_test_disabled`. `render_priority` is 3.
 The texture is the first `.tex` of `waterenv.lmp`. UV is in texels; the
 shader divides by the texture size. A decode failure draws a 1×1 texel of
 128 so the multiply leaves the vertex colour, and the scene says the texture
@@ -94,32 +112,42 @@ A block is kept while the signed `(frame − stamp) < 200`. At 200 it drops and
 is not stepped. The next tick claims it again.
 
 The claim runs after the step and the two seams, in tile order, so an earlier
-tile claimed this tick is live for a later one. A neighbour that is not live
+tile claimed this tick is live for a later one. Every tile counts as drawn
+every tick: the view cull and the world draw order are not modelled, and tile
+order stands in for that order. A neighbour that is not live
 contributes nothing. The weight is `0x3DCCCCCC`. Slots 0 and 2 are the edges
 the per-frame exchange also copies. Slots 1 and 3 are read by the claim and
 are still not read by that exchange. Height row 0 stays zero. Every
 disturbance sample is cleared. Ten weights stay strictly under 1, so one edge
 is truncated against 1.
 
-`filled_mask()` is level-option bit 8. The scene does not load the option word
-at `0x44fe08`, so the fill stays off and real masks stay the WORLD mask.
+`filled_mask()` is the level flag value `0x8` ("bit 8" in the research note;
+its difftest writes `0x8`). The flag word at `0x44fe08` is row `+0x20` of the
+level table, which the level-lights JSON already carries (`flags`). When the
+user chooses that JSON the scene passes the row's word to the field. On the
+disc copy, 0 of the 90 rows set `0x8` and 0 set `0x10`.
 
 ## Splashes
 
-The drawer splash runs only when option bit `0x10` is set and the tick is not
+The drawer splash runs only when flag `0x10` is set and the tick is not
 frozen. It is inside the per-tile draw, so the field rolls the generator once
 per live tile after the claim. A hit consumes three seeds, disturbs at
-strength 1500 and radius 6, and leaves the write in the velocity grid until
-the next step. The seed starts at 0. That is not a measurement of the retail
-word at `0x404460`, which this pin does not publish. The scene does not set
-the option bit, so this generator does not advance in play.
+strength 1500 and radius 6 through the chunk query, and leaves the write in
+the velocity grid until the next step. The start value of the word at
+`0x404460` is not in the pin, so `set_level_flags` refuses `0x10` unless a
+seed was supplied (tests supply one). No disc row sets `0x10`.
 
-A player standing in water uses the creature water body, not `Player_move`.
-Entry is strength `0x44BB8000` and radius `0x41C00000`. Continuing is strength
-`0x43960000` and radius `0x41400000` when the stick is held or
-`(frame & 0xf) == 0`. The call is after the tick, so it shows on the next
-step. `moving` stands in for the speed word at `+0xb8`, which the play
-observation does not carry.
+A player wading does not disturb the drawn water. `Player_move`'s
+`water_disturb` arguments are not published, and the creature water body
+(300/12, 1500/24) is the creature `water()` at `0x113d78`, not the player. The real-data
+harness has an opt-in `--wade-probe`: one labelled `water_disturb` with the
+Player jump-state strength and radius (`ref_player.py` `state_jump`, 3000 and
+24) at the player position, without the jump's 12-unit drop. It exists to show
+propagation in captures; the scene does not run that state.
+
+In the captures the player stands under the water blend. Players are layer 1
+and water is layer 3 with no depth test (research section 2, an inference
+from `TEST_1`), so the tile covers them at F.
 
 ## Refused
 
@@ -134,8 +162,9 @@ observation does not carry.
   are the jump and the block move, and those constants are not used for walking.
 - Splash particles. Both definition words are zero in the executable and the
   names are not in the image. `second_particle_z` is tested and nothing is spawned.
-- The retail initial splash seed, and the level option word, which this scene
-  does not load.
+- The start value of the drawer splash seed at `0x404460`.
+- A level colour fix outside ±255, and any level line outside the executed
+  value shapes.
 
 ## Pins
 
