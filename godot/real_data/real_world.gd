@@ -2,17 +2,32 @@ extends RefCounted
 
 # Water tiles and moving pieces of the loaded game-folder level, through the
 # native ChampionsRealWorld adapter (water services and level-flow pieces).
-# Water placement is documented: each tile spans its chunk bounds and is drawn
-# at chunk translation z / 4. Its colour, alpha FIX, waves and UV mapping are
-# not documented, so tiles use one labelled neutral translucent material.
+# Drawn water is the documented colour, slope UVs and layer-3 blend
+# (docs/WATER_DRAW.md). The wave steps on the simulation tick. The claim-frame
+# seed stays refused, so a new block is a zero grid.
 # Piece poses come from level_flow::move_piece; collision changes stay in the
 # adapter's terrain copy (the play session keeps its own collision).
-const NEUTRAL_WATER := Color(0.55, 0.6, 0.66, 0.45)
+const WATER_SHADER := """shader_type spatial;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, depth_test_disabled;
+uniform sampler2D water_tex : source_color, filter_linear, repeat_enable;
+uniform float fix = 0.796875;
+void fragment() {
+	vec3 texel = texture(water_tex, UV / vec2(textureSize(water_tex, 0))).rgb;
+	ALBEDO = texel * COLOR.rgb;
+	ALPHA = fix;
+}
+"""
 const ENTER_RADIUS_RAW := 0x41400000 # water_test(12), level-flow section 12
 
 var native: RefCounted
 var info: Dictionary = {}
 var water_root: Node3D
+var water_instance: MeshInstance3D
+var water_shader: Shader
+var water_materials: Array = []
+var water_texture: Texture2D
+var water_texture_refused := false
+var wave_frame := -1
 var piece_instances: Dictionary = {} # chunk -> Array of MeshInstance3D
 var ticks_observed := 0
 var ticks_in_water := 0
@@ -31,37 +46,68 @@ func open(world_path: String, objects: PackedByteArray, terrain_root: Node3D) ->
 	apply_pieces()
 	return info
 
+func set_water_texture(bytes: PackedByteArray) -> Dictionary:
+	var image: Image = null
+	if native != null and not bytes.is_empty():
+		var decoded: Dictionary = native.water_texture(bytes)
+		if decoded.get("ok", false):
+			image = decoded.image
+	water_texture_refused = image == null
+	if image == null:
+		# Neutral modulate texel 128 leaves the documented vertex colour.
+		image = Image.create(1, 1, false, Image.FORMAT_RGBA8)
+		image.set_pixel(0, 0, Color(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0))
+		if not "water texture refused" in errors:
+			errors.append("water texture refused")
+	water_texture = ImageTexture.create_from_image(image)
+	for material in water_materials:
+		material.set_shader_parameter("water_tex", water_texture)
+	return {"ok": not water_texture_refused, "width": image.get_width(), "height": image.get_height()}
+
+func _water_material(fix: float) -> ShaderMaterial:
+	if water_shader == null:
+		water_shader = Shader.new()
+		water_shader.code = WATER_SHADER
+	var material := ShaderMaterial.new()
+	material.shader = water_shader
+	material.render_priority = 3
+	material.set_shader_parameter("fix", fix)
+	if water_texture != null:
+		material.set_shader_parameter("water_tex", water_texture)
+	water_materials.append(material)
+	return material
+
 func _build_water(terrain_root: Node3D) -> void:
-	if info.water.is_empty() or terrain_root == null: return
-	var vertices := PackedVector3Array()
-	for tile in info.water:
-		var a: Vector3 = tile.min
-		var b: Vector3 = tile.max
-		var y := float(tile.drawn_height)
-		var p00 := Vector3(a.x, y, a.z)
-		var p10 := Vector3(b.x, y, a.z)
-		var p11 := Vector3(b.x, y, b.z)
-		var p01 := Vector3(a.x, y, b.z)
-		vertices.append_array(PackedVector3Array([p00, p10, p11, p00, p11, p01]))
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.albedo_color = NEUTRAL_WATER
+	if info.water.is_empty() or terrain_root == null or native == null: return
+	var sync: Dictionary = native.water_sync(0, false)
+	if not sync.get("ok", false) or sync.get("mesh") == null:
+		if not "water mesh refused" in errors: errors.append("water mesh refused")
+		return
+	wave_frame = 0
 	var instance := MeshInstance3D.new()
-	instance.name = "NeutralWaterTiles"
-	instance.mesh = mesh
-	instance.material_override = material
-	# Not a direct terrain child, so native world lighting leaves it alone.
+	instance.name = "WaterTiles"
+	instance.mesh = sync.mesh
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var surfaces: Array = sync.get("surfaces", [])
+	for i in surfaces.size():
+		instance.set_surface_override_material(i, _water_material(float(surfaces[i].fix)))
+	water_instance = instance
+	# A child of the terrain root, inserted before the first layer-4 surface.
+	# render_priority 3 is the documented layer: after opaque WORLD, before
+	# flag 0x200. Water does not write or test depth.
 	water_root = Node3D.new()
 	water_root.name = "RealWater"
 	water_root.add_child(instance)
+	var insert := terrain_root.get_child_count()
+	for i in terrain_root.get_child_count():
+		var child := terrain_root.get_child(i)
+		if child is MeshInstance3D:
+			var mat: Material = child.get_active_material(0)
+			if mat != null and mat.render_priority >= 4:
+				insert = i
+				break
 	terrain_root.add_child(water_root)
+	terrain_root.move_child(water_root, insert)
 
 # Textured terrain children are built one per decoded surface, in order.
 func _index_pieces(terrain_root: Node3D) -> void:
@@ -112,9 +158,28 @@ func first_drawn_claimed_piece() -> int:
 			if piece_instances.has(int(chunk)): return i
 	return -1
 
+func _advance_waves(raw: Dictionary) -> void:
+	if water_instance == null or native == null or not raw.has("ready_ticks"): return
+	var tick := int(raw.ready_ticks)
+	if tick < wave_frame: return
+	var frozen := bool(raw.get("paused", false))
+	var last := {}
+	if frozen:
+		last = native.water_sync(tick, true)
+	else:
+		var frame := wave_frame + 1
+		while frame <= tick:
+			last = native.water_sync(frame, false)
+			frame += 1
+	wave_frame = tick
+	if last.get("dirty", false):
+		water_instance.mesh = last.mesh
+
 # water_test at the session's player position after each observation.
 func observe(raw: Dictionary) -> void:
-	if native == null or info.get("water", []).is_empty() or not raw.has("position_raw"): return
+	if native == null: return
+	_advance_waves(raw)
+	if info.get("water", []).is_empty() or not raw.has("position_raw"): return
 	var position := PackedInt64Array()
 	for word in raw.position_raw: position.push_back(int(word))
 	var result: Dictionary = native.water_test(position)
@@ -131,7 +196,8 @@ func observe(raw: Dictionary) -> void:
 func label() -> String:
 	var parts: Array[String] = []
 	if not info.get("water", []).is_empty():
-		parts.append("%d water tiles (placement exact; neutral colour, waves gated)%s" % [info.water.size(), " · in water" if in_water else ""])
+		var texture := "texture refused" if water_texture_refused else "textured"
+		parts.append("%d water tiles (layer 3, %s, wave on the simulation tick)%s" % [info.water.size(), texture, " · in water" if in_water else ""])
 	if not info.get("pieces", []).is_empty():
 		parts.append("%d moving pieces, %d claimed (level-flow poses)" % [info.pieces.size(), int(info.get("claimed", 0))])
 	return " · ".join(parts)

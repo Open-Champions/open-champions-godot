@@ -127,26 +127,33 @@ inline constexpr Raw ARENA_RING_MODE_B = 0x42100000u; // 36 otherwise
 inline constexpr int ARENA_FIRST_SPREAD = 36;
 inline constexpr int ARENA_RETRY_SPREAD = 240;
 inline constexpr int ARENA_SEARCH_RADIUS = 24;
+// Round 4 (docs/level-flow.md section 18). Mode-A table length, mode-B
+// table length, and the six-byte records at 0x503868.
+inline constexpr int ARENA_MODE_A_COUNT = 13;
+inline constexpr int ARENA_MODE_B_COUNT = 7;
+inline constexpr int ARENA_RECORD_BYTES = 6;
 // Player_ctor 0x1a2420 stores terrain_height(radius, pos) at object +0x18.
 // It does not test the sentinel and does not move x or y. radius is
 // PLACEMENT_RADIUS after the store at 0x1a2244.
 Raw player_ctor_z(const Vec3 &pos, Raw radius, const Height &);
-// What section 17 leaves unexecuted. Calling one throws Unsupported.
+// What sections 17 and 18 leave unexecuted. Calling one throws Unsupported.
 enum class OpenItem {
   LiveFindFreeSpotSeed,  // g_randSeed at Player1_ctor is not a fixed constant
-  RealObjectList,        // the executed search stubbed the object list empty
+  RealObjectList,        // class-constructor radii were not executed
   ArenaRespawn,          // arena_pickSpawnPoint a0 = 0, read and not executed
-  ArenaRotationTable,    // arena_runTask 0x306cb8
+  ArenaRotationTable,    // the mode-A name table is not copied into this module
   PlayerCtorRemainder,   // Player_ctor after the radius store and the snap
   OrientationCopyReaders, // readers of the copied orientation byte 0x41b7c1
   SentinelFirstTick,     // a first-tick reject other than the snap and kill plane
   FacingWordPointerStore, // a nonzero store of 0x4f7124 through a taken address
   GateAnyHeightOnDisc,   // the gate's anyHeight search was not re-run on the disc
   RecallReturnField,     // 0x41b520 is the previous position, not a level field
+  NetPeerIndex,          // message +0xf4 is not clamped; what a peer writes is unknown
 };
 const char *open_item_reason(OpenItem);
 [[noreturn]] void refuse_open(OpenItem);
-[[noreturn]] void arena_respawn(); // a0 = 0
+[[noreturn]] void arena_respawn(); // arena_pickSpawnPoint a0 = 0
+[[noreturn]] void arena_net_peer_index(); // message offset 0xf4, unchecked
 // Low 16 bits of s16(65535 / count) * slot. A non-positive count divides by
 // zero in the original and is refused here.
 std::int32_t arena_ring_angle(int slot, int active_count);
@@ -169,6 +176,28 @@ ArenaPlace arena_initial_place(const Vec3 &entry, int slot, int active_count,
                                bool mode_a, const ArenaSearch &,
                                bool table_facing = false,
                                std::uint16_t table_angle = 0);
+// The rotation byte at 0x8e7343. Index must be 0..12. A zero remainder is
+// replaced by `saved` (the menu index at 0x4f7110). A net peer's word at
+// message +0xf4 is not a value of `saved`; that path is arena_net_peer_index.
+int arena_mode_a_next(int index, int saved);
+// The record byte at 0x503868, shifted left 28 and arithmetic-shifted right
+// 26. The high nibble falls off. A low nibble of 8 or more is negative.
+std::int32_t arena_record_table_offset(int first_byte);
+// One spawn-table slot. occupied is false for a hole this registration grew past.
+struct ArenaSpawnSlot {
+  Vec3 point{};
+  std::uint16_t angle = 0;
+  bool occupied = false;
+};
+struct ArenaSpawnTable {
+  std::vector<ArenaSpawnSlot> entries;
+  int count = 0;
+};
+// 0x30503c. Index -1 writes at count and then increments that byte. Any other
+// index overwrites that slot and leaves count alone. A slot above 255 is
+// refused: the count is a byte, and the factories pass 0 or -1.
+ArenaSpawnTable arena_register_spawn(ArenaSpawnTable, int index,
+                                     const Vec3 &point, std::uint16_t angle);
 // Acts do not choose a marker. act_changed only clears recall destinations,
 // and only when the card state is not 4 and no death task is running.
 struct StartEntry {
@@ -196,7 +225,10 @@ StartResult resolve_start(const SpawnState &incoming,
 // Cold story start the real-data job can call. Identity search: the file
 // position, or the incoming slot when no marker takes. z is player_ctor_z at
 // PLACEMENT_RADIUS. ground is that z other than the sentinel. One player.
-// This is not a live findFreeSpot.
+// When that snap has no floor and no Player1 took, and the records contain
+// an ArenaPlayerStart, the result is arena_mode_a_wave_ground for slot 0
+// and count 1: an empty object list and the executed seed 0. The live seed
+// and the class-constructor radii stay refused.
 struct StoryGround {
   Vec3 position{};
   Raw spawn_z = 0, object_z = 0;
@@ -204,6 +236,15 @@ struct StoryGround {
   int rank = 0;
   bool marker_taken = false, ground = false, recall_cleared = false;
 };
+// Mode-A wave start. arena_init plants the origin at entry 0 with count 1.
+// Each ArenaPlayerStart then overwrites entry 0; each ArenaPlayerAlternate
+// appends. The ring uses entry 0, mode A (radius 180), the caller's search
+// (findFreeSpot: spread 36, then 240 when ok is 0, radius 24), and
+// player_ctor_z at PLACEMENT_RADIUS. The facing word stays clear. Slot 0's
+// angle is 0 for every positive count, so its centre does not depend on count.
+StoryGround arena_mode_a_wave_ground(const std::vector<Record> &, int slot,
+                                     int active_count, const ArenaSearch &,
+                                     const Height &);
 StoryGround story_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &,
                                world_queries::Level &);
