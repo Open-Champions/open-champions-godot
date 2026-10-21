@@ -1,6 +1,7 @@
 // Counts-only lockstep measure. Reads a private disc and prints no names,
 // paths, coordinates or file bytes. Not a CTest.
 #include "champions/archive.hpp"
+#include "netplay_level_lmp.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/netplay.hpp"
 #include "champions/terrain_file.hpp"
@@ -56,15 +57,6 @@ bool ext_is(const fs::path &path, const char *want) {
   return ascii_eq(path.extension().string(), want);
 }
 
-std::uint32_t u32(const std::uint8_t *data, std::size_t at) {
-  return std::uint32_t(data[at]) | (std::uint32_t(data[at + 1]) << 8) |
-         (std::uint32_t(data[at + 2]) << 16) | (std::uint32_t(data[at + 3]) << 24);
-}
-
-std::uint16_t u16(const std::uint8_t *data, std::size_t at) {
-  return std::uint16_t(data[at] | (data[at + 1] << 8));
-}
-
 bool read_file(const fs::path &path, std::vector<std::uint8_t> &out) {
   std::error_code ec;
   const auto size = fs::file_size(path, ec);
@@ -78,38 +70,6 @@ bool read_file(const fs::path &path, std::vector<std::uint8_t> &out) {
     in.read(reinterpret_cast<char *>(out.data()),
             static_cast<std::streamsize>(out.size()));
   return bool(in);
-}
-
-// u16 count, then 12-byte records. Not champions::readLmp (that count is u32).
-bool lmp_world(const std::uint8_t *data, std::size_t size,
-               std::vector<std::uint8_t> &world,
-               std::vector<std::uint8_t> &objects) {
-  if (size < 4)
-    return false;
-  const unsigned count = u16(data, 0);
-  if (4ull + std::uint64_t(count) * 12 > size)
-    return false;
-  bool found = false;
-  world.clear();
-  objects.clear();
-  for (unsigned i = 0; i < count; ++i) {
-    const auto rec = 4u + i * 12u;
-    const auto name_at = u32(data, rec);
-    const auto data_at = u32(data, rec + 4);
-    const auto n = u32(data, rec + 8);
-    if (std::uint64_t(name_at) >= size || std::uint64_t(data_at) + n > size)
-      return false;
-    std::string name;
-    for (std::size_t k = name_at; k < size && data[k]; ++k)
-      name.push_back(static_cast<char>(data[k]));
-    if (!found && champions::hasExtension(name, ".world")) {
-      world.assign(data + data_at, data + data_at + n);
-      found = true;
-    } else if (objects.empty() && ascii_eq(name, "objects.ob")) {
-      objects.assign(data + data_at, data + data_at + n);
-    }
-  }
-  return found;
 }
 
 // Same walk as the netplay CTest: full deflection past pad_apply's radial
@@ -334,6 +294,7 @@ int main(int argc, char **argv) {
   const auto started = std::chrono::steady_clock::now();
   unsigned disc_files = 0, archives_seen = 0, worlds_decoded = 0,
            oversized = 0, placed = 0;
+  champions::netplay_level::LmpRefusals lmp_refused;
   const auto root = disc_root(argc, argv);
   if (root.empty()) {
     std::cout << "disc_files=0\n";
@@ -373,7 +334,9 @@ int main(int argc, char **argv) {
       if (std::uint64_t(entry.offset) + entry.size > file.size())
         continue;
       std::vector<std::uint8_t> world, objects;
-      if (!lmp_world(file.data() + entry.offset, entry.size, world, objects))
+      if (!champions::netplay_level::lmp_world(file.data() + entry.offset,
+                                                entry.size, world, objects,
+                                                lmp_refused))
         continue;
       W::LevelData decoded;
       try {
@@ -438,6 +401,7 @@ int main(int argc, char **argv) {
               << " archives_seen=" << archives_seen
               << " worlds_decoded=" << worlds_decoded
               << " oversized=" << oversized << " placed=" << placed
+              << " lmp_refused=" << lmp_refused.count
               << " elements=" << best.elements << " peers=0 sim_ticks=0"
               << " trace_bytes=0 mismatches=0 save_load=0 synced=0 seconds="
               << seconds;
@@ -451,6 +415,7 @@ int main(int argc, char **argv) {
     std::cout << "disc_files=" << disc_files
               << " archives_seen=" << archives_seen
               << " worlds_decoded=" << worlds_decoded
+              << " lmp_refused=" << lmp_refused.count
               << " elements=" << best.elements << " peers=" << proof.peers
               << " sim_ticks=" << proof.ticks
               << " trace_bytes=" << proof.trace_bytes

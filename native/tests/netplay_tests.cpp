@@ -1,4 +1,5 @@
 #include "champions/netplay.hpp"
+#include "../tools/netplay_level_lmp.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -203,6 +204,41 @@ void research_planes() {
   check(beyond, "screen clamp held a player inside an invented box");
 }
 
+// Authored LMP: one record naming "a.world" (4 payload bytes) and a count
+// word whose low 16 bits are 1. FORMATS.md: the LMP count is u32.
+std::vector<std::uint8_t> authored_lmp(std::uint32_t count) {
+  std::vector<std::uint8_t> lmp(4 + 12, 0);
+  auto put = [&](std::size_t at, std::uint32_t value) {
+    for (unsigned k = 0; k < 4; ++k)
+      lmp[at + k] = std::uint8_t(value >> (8 * k));
+  };
+  put(0, count);
+  const std::uint32_t name_at = 16, data_at = 24;
+  put(4, name_at);
+  put(8, data_at);
+  put(12, 4);
+  for (char c : std::string("a.world"))
+    lmp.push_back(std::uint8_t(c));
+  lmp.push_back(0);
+  lmp.insert(lmp.end(), {1, 2, 3, 4});
+  return lmp;
+}
+
+void lmp_count_is_u32() {
+  namespace L = champions::netplay_level;
+  std::vector<std::uint8_t> world, objects;
+  auto good = authored_lmp(1);
+  bool found = false;
+  L::LmpRefusals refusals;
+  found = L::lmp_world(good.data(), good.size(), world, objects, refusals);
+  check(found && world == std::vector<std::uint8_t>{1, 2, 3, 4} &&
+            refusals.count == 0,
+        "authored LMP world");
+  auto wide = authored_lmp(0x00010001u);
+  found = L::lmp_world(wide.data(), wide.size(), world, objects, refusals);
+  check(!found && refusals.count == 1, "LMP count read as u16");
+}
+
 void loopback() {
   N::LoopbackTransport transport(2);
   rejects([&] { N::LoopbackTransport(1); }, "loopback rejects 1 peer");
@@ -292,6 +328,7 @@ int main(int argc, char **argv) {
   R::ScopedFpu fixed{R::Fpu{R::Fpu::Model::Ps2, false, false}};
   try {
     loopback();
+    lmp_count_is_u32();
     research_planes();
     const auto ground = flat_ground();
     refusals(ground);

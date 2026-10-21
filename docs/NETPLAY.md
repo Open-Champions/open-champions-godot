@@ -65,8 +65,9 @@ runtime.
 
 The public test uses an authored flat heightfield (1,048,576 zero samples,
 inside the 4,194,304 sample cap). `tools/netplay_level_measure.cpp` is not a
-CTest. It walks a private disc with `level_flow::gob_entries` and a u16 LMP
-count, decodes `.world` terrain, and prints counts only.
+CTest. It walks a private disc with `level_flow::gob_entries` and
+`champions::readLmp` (u32 count, research `FORMATS.md`), counts the lumps
+`readLmp` refuses, decodes `.world` terrain, and prints counts only.
 
 ## What this does not simulate
 
