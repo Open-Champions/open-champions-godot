@@ -1,4 +1,5 @@
 #include "combat_runtime_internal.hpp"
+#include "champions/core_math.hpp"
 namespace champions::simulation::rta::combat_runtime {
 namespace {
 // The stack descriptor AntQueen_run states 7, 9 and 10 build
@@ -312,7 +313,8 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Holder.v21", "Skeleton_shatter", "PhProp_ctor2", "model_getSamplePoint", "AntWave_ctor",
+        "Holder.v21", "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2",
+        "model_getSamplePoint", "AntWave_ctor",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
         "CT_type_info_equals"}) {
     std::string n = name;
@@ -326,6 +328,14 @@ void World::State::install_ctor_services() {
       return service(n,a);
     };
   }
+  model.callbacks["World_gameobject_prepare"]=[this](A::Model &,const std::vector<Value> &a)->Value {
+    auto obj=number(a.at(0));
+    auto p=std::make_unique<Actor>();
+    p->id=obj;p->kind=Kind::Effect;
+    objects[obj]=std::move(p);
+    for (unsigned off:{0u,4u,8u}) head(obj+off);
+    return iv(0);
+  };
 }
 void World::State::install_services() {
   const char *names[] = {"handle_clear",
@@ -373,6 +383,15 @@ void World::State::install_services() {
                          "player_giveExp",
                          "world_notifyObjectsNear",
                          "model_getBounds",
+                         "model_getAttachPoint",
+                         "model_getMeshJoint",
+                         "anim_getJointMatrix",
+                         "rigidbody_init",
+                         "quat_fromMat3",
+                         "quat_normalize",
+                         "rigidbody_updateDerived",
+                         "obj_stopRunning",
+                         "resref_get",
                          "model_getSamplePointCount",
                          "dialog_isOpen",
                          "game_isFrozen",
@@ -610,8 +629,14 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "Skeleton_shatter")
     { combat_ctors::skeleton_shatter(model,ar(0),ar(1));return iv(0); }
+  if (n == "PhProp_ctor") {
+    auto parts=std::uint64_t(std::get<std::int64_t>(a.at(6)));
+    combat_ctors::phprop_ctor(model,ar(1),v(2),ar(3),ar(4),ar(5),parts,ar(7),ar(8),ar(0));
+    return iv(0);
+  }
   if (n == "PhProp_ctor2")
-    throw Unsupported("PhProp_ctor2 0x1556c0: the executed bone constructor is pending World integration");
+    { combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
+        std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));return iv(0); }
   if (n == "model_getSamplePoint")
     throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
                       "0x21, Soul_takeDamage with sample points) is not a World "
@@ -678,6 +703,11 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "obj_runEveryFrame" || n == "obj_runEvery60") {
     schedule(ar(0), n == "obj_runEveryFrame" ? 1 : 60);
+    return iv(0);
+  }
+  if (n == "obj_stopRunning") {
+    auto obj=ar(0);
+    if (head(obj+4).next) handles.remove(head(obj+4).next);
     return iv(0);
   }
   if (n == "obj_delete") {
@@ -791,6 +821,24 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getBounds")
     return A::Bounds{};
+  if (n == "model_getAttachPoint") {
+    if (!services.attach_point)
+      throw Unsupported("model_getAttachPoint service missing");
+    return services.attach_point(ar(4)-0x114,ar(1),v(2),ar(3),ar(5));
+  }
+  if (n == "model_getMeshJoint") return iv(0);
+  if (n == "anim_getJointMatrix") {
+    auto matrix=mat34_set_identity();
+    std::vector<A::CallbackResult> words;
+    for (auto word:matrix) words.push_back(A::CallbackResult::unsigned_integer(word));
+    return A::CallbackResult::tuple(std::move(words));
+  }
+  if (n == "rigidbody_init" || n == "quat_fromMat3" || n == "quat_normalize" ||
+      n == "rigidbody_updateDerived") {
+    note(n,{ar(0)});
+    return iv(0);
+  }
+  if (n == "resref_get") return iv(u(ar(0)));
   if (n == "model_getSamplePointCount") {
     if (!full())
       return iv(0);

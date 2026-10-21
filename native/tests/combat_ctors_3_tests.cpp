@@ -89,6 +89,42 @@ void shatter_cases() {
   CT::skeleton_shatter(m,C,6);
   check(mem.load(0x8e44c0,8)==0,"group six stores only the terminator");
 }
+void prop_cases() {
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  auto get=[&](A::Address a,unsigned n){return mem.load(a,n);};
+  for (const char *name:{"handle_link","obj_getPropInt","res_find","obj_updateGridCell",
+      "obj_runEveryFrame","obj_stopRunning","rigidbody_init","quat_fromMat3",
+      "quat_normalize","rigidbody_updateDerived","anim_clear","anim_push","resref_get"})
+    m.callbacks[name]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+      return std::int64_t(0);
+    };
+  m.callbacks["model_getBounds"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return A::Bounds{{0,0,0,0,0,0}};
+  };
+  constexpr A::Address obj=0x180000;
+  auto word=[](const char *s,A::Address a,A::Memory &mem) {
+    for (unsigned k=0;;++k) {mem.poke(a+k,1,std::uint8_t(s[k]));if (!s[k]) break;}
+  };
+  word("fx.lmp",0x190000,mem);word("gutchunks.vif",0x190100,mem);
+  word("gutchunks.tex",0x190200,mem);
+  put(0x4f86a0,4,0x190000);put(0x4f86f0,4,0x190100);
+  put(0x4f86f8,4,0x190200);put(0x404464,4,0x1234);
+  CT::gutchunk_ctor(m,obj,{0x3f800000,0x40000000,0x40400000},2,0);
+  check(m.draws==1,"gut chunk consumes one shared draw");
+  auto seed=Raw((std::uint64_t(0x1234)*0x19660d+0x3c6ef35f)&0xffffffffu)>>16;
+  for (int i=0;i<7;++i) seed=Raw(std::uint64_t(seed)*0x19660d+0x3c6ef35f);
+  check(get(obj+0x44,4)==seed,"gut chunk consumes seven own draws");
+  check(get(obj+0x48,4)==0x50f3b8&&get(obj+0x140,2)==6,"gut chunk table and launch flags");
+  check(get(obj+0x23c,4)==0xbdcccccc,"gut chunk damping");
+  constexpr A::Address gold=0x181000;
+  put(0x44fdcc,4,1234);
+  CT::gold_ctor2(m,gold,{0x3f800000,0x40000000,0x40400000},25);
+  check(m.draws==2,"gold pile consumes one shared draw");
+  check(get(gold+0x48,4)==0x511a88&&get(gold+0x80,4)==25,"gold table and amount");
+  check(get(gold+0x4c,1)==0x29&&get(gold+0x50,4)==1234,"gold countdown and frame");
+  check((get(gold+0xc,4)&0x220c)==0x220c,"gold object flags");
+}
 }
 int main() {
   try {
@@ -96,6 +132,7 @@ int main() {
     holder_cases(CT::VT_WEAPONSHIELD);
     charm_cases();
     shatter_cases();
+    prop_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

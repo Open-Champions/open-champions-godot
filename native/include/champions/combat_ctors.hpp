@@ -160,4 +160,14 @@ Raw damage_desc_get_element(A::Model &, Address descriptor);
 void drop_held_part(A::Model &, Raw part, Address creature, Address definition,
                     Raw flags);
 void skeleton_shatter(A::Model &, Address creature, Raw group);
+void gutchunk_ctor(A::Model &, Address chunk, const Vec3 &position, Raw kind,
+                   Raw bits);
+void phprop_ctor(A::Model &, Address prop, const Vec3 &position, Address lump,
+                 Address model_name, Address texture_name, std::uint64_t parts,
+                 Raw launch, Address item, Raw scale);
+void phprop_ctor2(A::Model &, Address prop, const Vec3 &position, Raw facing,
+                  Address model, Address anim, Address lump, Address model_name,
+                  Address texture_name, std::uint64_t parts, Raw launch,
+                  Address item, Raw scale);
+void gold_ctor2(A::Model &, Address gold, const Vec3 &position, Raw amount);
 } // namespace champions::simulation::rta::combat_ctors
