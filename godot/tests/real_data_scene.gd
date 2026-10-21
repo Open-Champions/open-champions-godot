@@ -270,6 +270,8 @@ func take_script_counts() -> void:
 	add("scripts.missing_entries", int(counts.get("missing_entries", 0)))
 	add("scripts.objects_registered", int(counts.get("objects_registered", 0)))
 	add("scripts.objects_refused", int(counts.get("objects_refused", 0)))
+	add("scripts.refusal_stops", int(counts.get("refusal_stops", 0)))
+	add("scripts.stub_refusals", int(counts.get("stub_refusals", 0)))
 	for name in counts.get("executed", {}):
 		add("executed." + str(name), int(counts.executed[name]))
 		add("levels_executed." + str(name))
