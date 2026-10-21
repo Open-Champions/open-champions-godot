@@ -125,6 +125,7 @@ else()
 endif()
 
 include(CTest)
+include("${CMAKE_CURRENT_SOURCE_DIR}/player_state_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/fx2_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/combat_play_effects_targets.cmake")
 if(BUILD_TESTING)
