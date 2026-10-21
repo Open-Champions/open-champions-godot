@@ -136,14 +136,19 @@ void idle_full_fight() {
 // press is a held edge, as a pad makes it (press_attack(true) for one tick).
 void attack_then_walk() {
   namespace SC = session_control;
-  // The fixture's two Skelights chase and kill a player that stays near them
-  // within about 150 ticks (party wipe), so both runs stop at 120.
+  // This subcase measures the researched Player_run swing and walk timing.
+  // Remove the Full fixture's opponents after construction so their hit
+  // events cannot interrupt the swing; the other subcases exercise the
+  // intact Full fight and its free-spot searches.
   auto run = [](bool mash, std::vector<Raw> &ys, std::vector<Raw> &states,
                 std::vector<Raw> &starts) {
     const int ticks = 120;
     combat_play::Session s(SC::Controller().setup().initial_terrain,
                            combat_play::Fixture::Full);
     s.advance(0);
+    for (const auto &a : s.actors())
+      if (a.slot != 0 && a.present)
+        s.world().delete_object(s.world().target(a.handle));
     for (int t = 0; t < ticks; ++t) {
       const bool press = mash ? (t >= 10 && (t - 10) % 12 == 0) : t == 10;
       if (press)
@@ -198,9 +203,10 @@ void walk_beside_skelight() {
     check(!o.failed, "walking fight tick " + std::to_string(t + 1) + ": " + o.error);
     for (const auto &e : s.tick_events())
       if (e.name == "findFreeSpot") {
-        ++searches;
-        check(e.args[3] == 72 && e.args[4] == 12 && e.args[5] == 0,
-              "Creature_moveTo's search arguments");
+        // Other Full-fight creatures can also search. The researched
+        // Skelight recovery has the 72/12/0 arguments.
+        if (e.args.size() == 10 && e.args[3] == 72 && e.args[4] == 12 && e.args[5] == 0)
+          ++searches;
       }
     const auto a = s.actors().at(0);
     moved_last = a.position[0] != x_before || a.position[1] != y_before;

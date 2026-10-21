@@ -3486,3 +3486,63 @@ it counts; it does not claim the original clock seed. The real-level session
 has no item tables for gives, and the HUD lacks observed mana, XP, level,
 gold and other producers. BLEND-7 and the wave-18 refusals remain. Netplay is
 an in-process offline co-op simulation, without a Godot net scene or sockets.
+
+## Playable integration wave 21 — combat walk, constructors, dialog, menus — 2026-10-21
+
+From `8bdd705`, merge commits `362c9c4` (combat-walk `07f2479`), `7371245`
+(combat-ctors **`a0d7118` exactly**), `b1640a7` (dialog `01b6e8a`) and
+`0548440` (menus **`815a8f3`**) were made in that order. No other branch was
+merged. The combat-walk netplay ancestor was already in wave 19; the
+chosen combat-ctors commit includes combat-runtime-6. Combat-ctors and menus share the
+same early music-volume ancestor `04d2f1a`, so one researched implementation
+is linked into each distinct native and extension target. Its `save_init`
+default is 0.5. The script host was adjusted from an optional volume to that
+raw default; existing refusals for placeholders, live charm and unsupported
+callee states remain.
+
+The Full fixture now builds the AntQueen in slot 4 at (-110, 110) and the
+Soul in slot 6. The Skeleton remains outside slot 5 because its state 3 is
+not executed in the pinned research. The Full trace is
+**`4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`**,
+**31,622 bytes**, in dev headless and all four exported Full runs. It differs
+from wave 20 because the Soul and AntQueen add actors, shared draws and state
+changes, as the combat-ctors reports isolate. Combat-walk, dialog and menus
+do not change it.
+
+Dialog composes with wave-20 items and the offline script seed. A refused
+command still stops its script; `setCFlag` on a placeholder still refuses.
+The real-data dialog census now opens and ends **48/52** talks instead of
+42/52: all six item-condition talks open, while four remain refused for a
+missing quoted text key. The windowed scene opens and closes **24/24** talks
+instead of 21/24, with 133 passed checks and zero failures. One real-level
+script opens a talk in the 60-tick sweep.
+
+Both 111-level sweeps pass **111/111**, zero failed checks. With scripts off,
+all deterministic counts equal wave 20. With scripts on, dialog adds 111
+attached text/font levels, 24 talkers, one open, one executed `startDialog`
+instead of a refusal, and one extra `getv`; all other deterministic counts
+match. The count-by-count and runtime-measure differences are in
+[REAL_DATA.md](REAL_DATA.md) and the
+[wave-21 report](../work/loop-playable-integration-r21-report.md).
+
+Four universal GDExtension builds and the Godot dev matrix **53/53** pass.
+Full headless has 2,620 checks, zero failures; its one-check drop from wave 20
+is the researched music-default assertion replacing two refusal assertions.
+The exported universal app has arm64 and x86_64 executable and extension
+slices, no packaged game data, and matching release dylibs. Export matrix
+**21/21** passes. The 1280×720 graphical Full flow reaches **36,000 ticks**,
+passes **108,826 checks** with zero failures, saves and continues, and has
+63 synthetic captures; the boot, main menu, inventory, and Full combat
+captures were inspected. Exported real-data smoke passes 12/12
+without scripts, 12/12 with scripts and 3/3 arena levels with scripts; the
+HUD and one creature preview are present on each tested level. BLEND-7's
+mixed-pass material refusal remains on nine of the 12 preview levels, with
+zero failed checks.
+
+The final native CTest suites passed **225/225 on arm64** and **225/225 under
+Rosetta x86_64**. The host free-spot test was adjusted after the AntQueen's
+new Full-fight search and a Skelight hit interrupted its player-only timing
+check; the corrected test passed on both architectures. The disc was read only
+and contributed counts, not committed content.
+All commits are local; there was no push or PR. Original-client raster parity,
+Windows/Linux exports, manual play and Internet netplay remain unverified.

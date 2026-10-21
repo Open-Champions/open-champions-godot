@@ -73,16 +73,15 @@ refusal counts in `callee_refusals` and in the command's `refused`:
 - `charmMonster`, `followPlayer`: a creature past `Creature_setCharm`'s gates
   (flag 0x20, not a player, charm timer not -1) whose target handle at
   `+0x234` is live. `handle_clear` of a live handle is research's Unknown.
-- `startMusic`: no music volume. `music_playLevel` reads `g_musicVolume`,
-  which has no default (audit AUD-1). The caller supplies the player's
-  option with `Host::set_music_volume`; the gate and the channel word then
-  use that volume and `Playback`'s duck scalar. The play session supplies
-  none, so in play `startMusic` is refused.
-- `setCFlag`, `selectSetCFlag` with bit 0: no music volume and a creature
-  whose type name at `+0x34` and `name` property select a boss track.
 - `hudFadeScreen`: `hud_stepFade` adds to `g_hudFade`, which the game keeps
   between fades. The host knows that word only after `hudResetFadeScreen`
   has set it.
+
+Since combat-ctors, `Playback` starts at the researched `save_init` music
+volume 0.5 (`0x3f000000`), and `Host::set_music_volume` can replace it with
+the owner's option. `startMusic` and the boss-music bit of `setCFlag` use that
+value through the existing gate. A placeholder object still refuses before
+`setCFlag` reaches its binder.
 
 The host answers the callees these bodies make only where no handler reads
 the answer: `handle_clear`, `ui_drawRect`, `audio_setChannelVolume` and

@@ -772,3 +772,58 @@ scripts, **12 / 12** with scripts and **3 / 3** arena levels with scripts.
 The HUD frame and health bar drew on all 12, 12 and 3 respectively. BLEND-7
 remains the mixed-pass creature FX refusal already recorded in wave 19; no
 level failed. The exported app contains no game-data files.
+
+## Wave 21 (2026-10-21): dialog opens after items, 111 / 111
+
+Both final four-slice counts-only sweeps run 60 ready ticks on the same
+read-only disc copy. `w21on --scripts` and `w21off` each tried, loaded and
+played **111 / 111 / 111** levels, passed **230** checks, and had zero failed
+checks and empty refusal lists. The scripts-off aggregate matches wave 20 on
+every deterministic key.
+
+The scripted aggregate's complete set of changed deterministic keys is:
+
+| Key or group | Wave 20 | Wave 21 | Branch |
+|---|---:|---:|---|
+| `executed.getv` | 979 | 980 | dialog |
+| `executed.startDialog`; `levels_executed.startDialog` | 0; 0 | 1; 1 | dialog |
+| `refused.startDialog`; `levels_refused.startDialog` | 1; 1 | 0; 0 | dialog |
+| `dialog.levels_attached`; `levels_with_text`; `levels_with_font` | absent | 111 each | dialog |
+| `dialog.talkers` | absent | 24 | dialog |
+| `dialog.opens`; `start_messages`; `scripts_run`; `nodes_shown`; `open_at_end_of_play`; `voice_lines`; `anm_reads` | absent | 1 each | dialog |
+| `dialog.ticks_open` | absent | 58 | dialog |
+
+Dialog also emits these zero-valued keys, absent in wave 20: `choices_taken`,
+`client_leaves`, `client_mutex_releases`, `deferred_shops`, `ends`,
+`missing_entries`, `open_gate_refused`, `pending_levels`, `post_actions`,
+`refused`, `shop_requests`, `silent_lines`, `stalls`, `use_ambiguous`,
+`use_blocked_open`, `use_no_candidate`, and `uses`. No other deterministic
+count changed. Combat-walk, combat-ctors and menus did not change a count the
+60-tick level sweep reaches.
+
+The runtime-measure keys changed with machine load and the larger client:
+
+| Measure | Wave 20 scripts on | Wave 21 scripts on | Wave 20 off | Wave 21 off |
+|---|---:|---:|---:|---:|
+| `audio.frames_pushed` | 2,464,369 | 2,011,377 | 2,628,049 | 1,818,193 |
+| `time.load_ms` | 61,328 | 40,749 | 65,535 | 34,705 |
+| `time.play_ms` | 74,620 | 51,042 | 81,278 | 42,350 |
+| `memory.static_peak_bytes` (four process sum) | 2,187,675,620 | 2,198,041,428 | 2,187,577,460 | 2,195,821,332 |
+
+Frames and times depend on the load during each run. Added dialog and menu
+code, plus dialog level state in the scripted sweep, contribute to the larger
+peak, but this run does not isolate their exact shares.
+
+Native dialog census: 26 talkers, 52 attempted talks, **48 opened and
+ended**, zero stalls, four refused by the documented missing quoted text
+key. The six item-condition talks that refused on the dialog branch now
+open. Windowed scene: 24 talkers on 19 levels, **24 opened and closed**,
+133 checks, zero failures; three more openings than dialog round 1. It
+drew dialog box/text on 992 frames and queued 47 voice lines. No private
+screenshots were saved.
+
+The wave-21 exported app passed 12/12 real levels without scripts, 12/12
+with scripts and 3/3 arena levels with scripts at 60 ticks, with one creature
+preview and HUD draw per level. Checks were 26, 26 and 8, all passing.
+BLEND-7 caused nine mixed-pass material refusals among each 12-level preview
+run, but no level failed. The package contains no game data.
