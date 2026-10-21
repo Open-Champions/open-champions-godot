@@ -561,8 +561,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
     // The original checks hud.lmp residency. This attach path does not know
     // it, so the host records the inferred draw count without moving the seed.
-    if (!level_name.is_empty())
-      next->advance_first_level_items(std::string(level_name.utf8().get_data()));
+    next->advance_first_level_items(std::string(level_name.utf8().get_data()));
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {

@@ -178,7 +178,7 @@ void Host::advance_first_level_items(const std::string &level_name,
   // Executed gate: game_loadLevel 0x1e5690 compares against intro;
   // 0x1e56a4 queries hud.lmp residency. Research 7a66b58.
   if (level_name == "intro") return;
-  if (!hud_lmp_resident) {
+  if (level_name.empty() || !hud_lmp_resident) {
     counts_.item_load_gate_refusals += 1;
     counts_.item_load_draws_inferred += 223;
     return;

@@ -197,6 +197,11 @@ int main(int argc, char **argv) {
           gate_host.counts().item_load_gate_refusals == 1 &&
           gate_host.counts().item_load_draws_inferred == 223,
           "unknown HUD residency refuses inferred item draws");
+    gate_host.advance_first_level_items("", false);
+    check(gate_seed.state == expected_gate_seed.state &&
+          gate_host.counts().item_load_gate_refusals == 2 &&
+          gate_host.counts().item_load_draws_inferred == 446,
+          "missing world identity also refuses inferred item draws");
     gate_host.advance_first_level_items("testlevel", false);
     for (unsigned i = 0; i < 223; ++i) expected_gate_seed.draw();
     check(gate_seed.state == expected_gate_seed.state,
