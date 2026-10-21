@@ -130,7 +130,7 @@ at their addresses; nothing read is kept. Then:
 |---|---|
 | the factory builds no object (`clearColor`, `customVars`, the arena start points, `Line`, no test and no fall-back) | nothing is registered (`objects_not_created`); a script finds nothing by that name |
 | the pool has no block of the size class | nothing is registered (`objects_pool_refused`); the original calls no constructor |
-| the constructor is one of SmallSpider 0x2ab450, Gnaw 0x26741c, Mosquito 0x297788, Scorpion 0x2a4d68, Badger 0x244018, Skelight 0x2a8770, Zek 0x2c1f94, or an on-foot Horsemen 0x271c70 | built (`objects_built`), below |
+| the constructor is one of SmallSpider 0x2ab450, Gnaw 0x26741c, Mosquito 0x297788, Scorpion 0x2a4d68, Badger 0x244018, Skelight 0x2a8770, Zek 0x2c1f94, or an on-foot Horsemen 0x271c70 (rider rows refused) | built (`objects_built`), below |
 | any other constructor | a stub at its pool address (`objects_unbuilt`, by constructor in `unbuilt_constructors`) |
 
 Every record the factory constructs takes its block from the host world's
@@ -149,7 +149,16 @@ own generator and, with the selected level's `monsters.bal` and executable
 level table, computes hit points, armor, damage, attack and experience.
 It refuses this statistics path outside one player at difficulty 1. The
 factory's Skelight level argument is 1 at call `0x15b608` (delay slot
-`0x15b60c`; executed research `7a66b58`). `Creature_init` (research
+`0x15b60c`; executed research `7a66b58`). The on-foot Horsemen rows `0x532dc8..0x532df8` call `0x271c70` at `0x15b900`
+with variant 0..3 and mounted 0 (executed, research `dfcc8d3`); the four rider
+rows `0x532cc8..0x532cf8` call it at `0x15b3d4` with mounted 1, and stay
+unbuilt because the mount lifecycle is not ported. Only the base name of a
+request (before `_`) is stored in the level-name global `0x44fe18` and used for
+the `stomedal`/`innpit` override and Skelight's `blomedal` test (executed,
+research `a684d7d`). A creature's hit points are readable only when the item
+gate was observed (known world and HUD residency, or `intro`), the gate was
+not refused, and no earlier record was left unbuilt: otherwise the shared seed
+is not known to be exact at that point, so `getHitPoints` is refused and counted. `Creature_init` (research
 `tools/ref_creature_init.py`, executed) stores the change mask; `handle_clear`
 finds the empty target list `Creature_ctor` left; the animation, run-list
 and grid calls are made on the host's world or have no effect on what is

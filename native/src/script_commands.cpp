@@ -593,6 +593,8 @@ std::uint32_t Host::scene(const std::string &name,
 void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
   external_seed_ = next;
   seed_policy_ = policy;
+  seed_gate_observed_ = false;
+  stats_built_.clear();
 }
 
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {

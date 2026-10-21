@@ -206,9 +206,11 @@ int main(int argc, char **argv) {
     for (unsigned i = 0; i < 223; ++i) expected_gate_seed.draw();
     check(gate_seed.state == expected_gate_seed.state,
           "observed absent HUD applies 223 item draws");
-    // Authored level table and balance row. Expected patterns come from the
-    // executed ref_combat.monster_stats contract on seed 20973, level 2 and
-    // five stored percentages of 100 (which look up as 0x3f7fffff each).
+    // Authored level table and balance row. Expected patterns are reproduced
+    // by research tools/check_creature_stats_vector.py (commit a684d7d):
+    // ref_combat.monster_stats on shared seed 20973, five factors of
+    // fmul(itof(100), 0x3c23d70a), Gnaw at level 2 and Skelight's own factors
+    // at its supplied level 1. Run: python3 tools/check_creature_stats_vector.py
     Image stats_image = image;
     auto put = [&](std::uint32_t at, std::uint32_t value, unsigned n) {
       for (unsigned k = 0; k < n; ++k)
@@ -246,6 +248,30 @@ int main(int argc, char **argv) {
         long_name_host.set_level_stats(level_name + "-outside-table", balance.data(), balance.size());
       } catch (const std::invalid_argument &) { refused = true; }
       check(refused, "external level name cannot overrun known table-name domain");
+    }
+    {
+      // The original stores only the base name: a long sub-name is not a
+      // domain violation, and the statistics equal the base-name request's.
+      rta::SharedRandom base_seed(20973), sub_seed(20973);
+      sc::Host base_host, sub_host;
+      base_host.bind_seed(&base_seed);
+      sub_host.bind_seed(&sub_seed);
+      for (auto *h : {&base_host, &sub_host}) {
+        h->start_single_player();
+        h->set_executable(stats_image.view());
+      }
+      base_host.set_level_stats(level_name, balance.data(), balance.size());
+      sub_host.set_level_stats(level_name + "_a-sub-name-longer-than-any-table-name",
+                               balance.data(), balance.size());
+      const auto one = blob({{"Gnaw", {0, 0, 0}, 0, {"name=sub-gnaw"}}});
+      check(base_host.adopt_objects(one.data(), one.size()) &&
+            sub_host.adopt_objects(one.data(), one.size()), "sub-name records adopt");
+      rta::Pool pool;
+      const auto at = pool.allocate(0x3c8);
+      check(sub_host.is_built(at) && base_host.is_built(at) &&
+            sub_host.variables().memory.u32(at + 0x228) ==
+                base_host.variables().memory.u32(at + 0x228) &&
+            sub_seed.state == base_seed.state, "sub-name request uses the base name");
     }
     rta::SharedRandom stat_seed(20973);
     sc::Host stat_host;

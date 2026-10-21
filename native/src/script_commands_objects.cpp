@@ -136,15 +136,18 @@ void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
   }
   if (rows.empty() || !rows.back().name.empty())
     throw std::invalid_argument("unterminated level table");
+  // mainloop_loadRequestedWorld splits the request at '_' and stores only the
+  // base name (research a684d7d, difftest_level_name_split.py: g_levelName and
+  // g_levelTexName 0x44fe18 both hold the base). Only the base is written.
+  const auto request = level_flow::split_request(name);
   // The executable's own table supplies the longest name this image uses.
-  // Refuse external names longer than that known-safe domain; the capacity of
+  // Refuse base names longer than that known-safe domain; the capacity of
   // the global at 0x44fe18 is not documented.
   std::size_t max_level_name = 0;
   for (const auto &entry : rows)
     max_level_name = std::max(max_level_name, entry.name.size());
-  if (name.size() > max_level_name)
+  if (request.first.size() > max_level_name)
     throw std::invalid_argument("level name exceeds executable table names");
-  const auto request = level_flow::split_request(name);
   const auto row = level_flow::find_level_row(rows, request.first, request.second);
   const auto level = level_flow::monster_level(row, 1, request.first);
   std::vector<BalanceRow> parsed;
@@ -163,7 +166,9 @@ void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
   }
   balance_rows_ = std::move(parsed);
   monster_level_ = level;
-  level_name_ = name;
+  // Base name: the stomedal/innpit override, Skelight's blomedal test and
+  // 0x44fe18 all see it (research a684d7d).
+  level_name_ = request.first;
   stats_ready_ = true;
 }
 
@@ -177,16 +182,24 @@ void Host::advance_first_level_items(const std::string &level_name,
                                      std::optional<bool> hud_lmp_resident) {
   // Executed gate: game_loadLevel 0x1e5690 compares against intro;
   // 0x1e56a4 queries hud.lmp residency. Research 7a66b58.
-  if (level_name == "intro") return;
+  if (level_name == "intro") {
+    seed_gate_observed_ = true;
+    return;
+  }
   if (level_name.empty() || !hud_lmp_resident) {
     counts_.item_load_gate_refusals += 1;
     counts_.item_load_draws_inferred += 223;
+    stats_built_.clear();
     return;
   }
-  if (*hud_lmp_resident) return;
+  if (*hud_lmp_resident) {
+    seed_gate_observed_ = true;
+    return;
+  }
   if (!external_seed_) throw std::invalid_argument("item loader needs session seed");
   // item_loadResources parses every base definition with variant -1.
   for (unsigned i = 0; i < 223; ++i) external_seed_->draw();
+  seed_gate_observed_ = true;
 }
 
 void Host::start_single_player() {
@@ -242,6 +255,11 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
   if (outcome.constructor() == 0x158928) {
+    if (!seed_gate_observed_ || counts_.item_load_gate_refusals ||
+        counts_.load_draws_unmodelled) {
+      counts_.build_refusals["Player1 placement needs faithful seed"] += 1;
+      return Build::NotBuilt;
+    }
     if (!external_seed_ || !terrain_level_) {
       counts_.build_refusals["Player1 needs session seed and WORLD"] += 1;
       return Build::NotBuilt;
@@ -535,6 +553,8 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     const auto hand = std::get<std::uint32_t>(a.at(1));
     const auto entry = std::get<std::uint32_t>(a.at(2)) & 0xffu;
     const auto table = m.mem.load(self, 4);
+    if (table != 0x50cf40 && table != 0x50cda0)
+      throw Refused("Holder.v1 unexecuted table");
     const bool shield = table == 0x50cda0;
     if (hand != 1 && !(shield && hand == 2)) return std::uint64_t{1};
     m.mem.store(self + (hand == 1 ? 8u : 0x98u), 1, entry);
@@ -544,6 +564,8 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     m.mem.store(self + 4, 1, flags);
     return std::uint64_t{flags};
   };
+  // The constructors discard lump_load's result; only its side effects are
+  // outside this model, so this return cannot feed retained object bytes.
   model.callbacks["lump_load"] = [](M1::Model &, const std::vector<M1::Argument> &) {
     return std::uint64_t{0};
   };
@@ -576,13 +598,17 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     }
     case Class::Skelight:
       // Factory call 0x15b608, delay slot 0x15b60c: fifth argument = 1.
-      // Executed call-site difftest: research 7a66b58.
+      // Executed call-site difftest: research 7a66b58 (factory-skelight).
       model.skelight_ctor(c, record.position, facing, 0, 1);
       break;
     case Class::Zek:
       model.zek_ctor(c, type_ptr, record.position, facing, 0);
       break;
     case Class::Horsemen: {
+      // On-foot rows 0x532dc8..0x532df8 reach call 0x15b900 with variant 0..3
+      // and mounted 0 (executed, research dfcc8d3, difftest_horsemen_factory.py).
+      // The rider rows 0x532cc8..0x532cf8 reach 0x15b3d4 with mounted 1; that
+      // mount lifecycle is not ported, so they stay refused below.
       if (outcome.test < HORSEMEN_FOOT_FIRST ||
           outcome.test > HORSEMEN_FOOT_FIRST + 0x30 ||
           (outcome.test - HORSEMEN_FOOT_FIRST) % 0x10)
@@ -618,7 +644,8 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // The host-side copy of the flag word follows the built one.
   static_cast<objects::GameObject &>(*obj).flags = variables_->memory.word(c + 0x0c);
   built_.insert(c);
-  if (stats_ready_) stats_built_.insert(c);
+  if (stats_ready_ && seed_gate_observed_ && !counts_.item_load_gate_refusals &&
+      !counts_.load_draws_unmodelled) stats_built_.insert(c);
   counts_.objects_registered += 1;
   return Build::Built;
 }

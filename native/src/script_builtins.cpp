@@ -300,9 +300,14 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
   auto &base=static_cast<objects::GameObject &>(*obj);
   base.flags=object_flags; base.pos=position; base.angle=facing&65535;
   world->register_external(base);
-  world->handles.link(world->home_cell(base,true),base.heads[2],&base);
-  // Keep failed name-insertion prefixes alive, too, as the linked world does.
-  setup_objects.push_back(obj);
+  try {
+    world->handles.link(world->home_cell(base,true),base.heads[2],&base);
+    // Keep failed name-insertion prefixes alive, too, as the linked world does.
+    setup_objects.push_back(obj);
+  } catch (...) {
+    world->unregister_external(base);
+    throw;
+  }
   for(const auto &name:names) object_names.add(name,obj.get());
   if(obj->props) for(const auto &entry:*obj->props)
     if(entry.compare(0,5,"name=")==0) object_names.add(entry.substr(5),obj.get());

@@ -305,6 +305,7 @@ private:
   std::uint32_t monster_level_ = 0;
   std::string level_name_;
   bool stats_ready_ = false;
+  bool seed_gate_observed_ = false;
   std::unique_ptr<world_queries::Level> terrain_level_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).
