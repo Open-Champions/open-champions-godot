@@ -116,11 +116,15 @@ struct Surface {
 std::vector<Surface> bind_world(const world_geometry::Geometry &world,
                                 const File &textures,
                                 const std::vector<std::uint8_t> &world_bytes = {});
-// Header +0x68. A zero word means 960 world units (docs/formats/world.md).
+// Texture cells and streaming (research docs/level-flow.md 13.1 and
+// docs/formats/world.md; per machine, drawing only).
+// World header +0x68. A zero word means 960 world units.
 double texture_cell_size(const world_geometry::Geometry &world);
-// column = floor(x / size) + 50, row = floor(y / size) + 50, id = row * 100 + column.
+// column = floorf(x / size) + 50, row = floorf(y / size) + 50 in float,
+// id = row * 100 + column (0x17d830).
 int cell_id_of(double x, double y, double cell_size);
-// Nine cells around the focus, rows focus-1..+1, columns focus+1, focus, focus-1.
+// The 3 x 3 cells kept around the camera focus. The original's slot order is
+// not documented; these are rows -1..+1, each with columns -1..+1.
 std::array<int, 9> cells_around(int cell_id);
 // bind_world restricted to the given texture cells. Draw order is recomputed
 // on that subset. An empty cell list binds nothing.
@@ -128,6 +132,16 @@ std::vector<Surface> bind_cells(const world_geometry::Geometry &world,
                                 const File &textures,
                                 const std::vector<std::uint8_t> &world_bytes,
                                 const std::vector<std::int32_t> &cells);
+// The draw order bind_cells (or bind_world, when cells is null) assigns, from
+// geometry alone: no cell is read or decoded. A texture is identified by its
+// cell and header offset, as bind_world identifies one decoded image.
+struct DrawSlot {
+  std::size_t chunk, batch;
+  int draw_order;
+};
+std::vector<DrawSlot> draw_slots(const world_geometry::Geometry &world,
+                                 const std::vector<std::uint8_t> &world_bytes,
+                                 const std::vector<std::int32_t> *cells);
 Surface::Material chunk_header_material(std::uint32_t flags);
 std::vector<Surface::Material> packet_materials(
     const std::vector<std::uint8_t> &world_bytes,
