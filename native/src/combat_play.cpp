@@ -249,9 +249,9 @@ struct Session::State {
         throw C::Unsupported("combat fixture actor has no flat ground");
       handles[slot] = world->retain(world->spawn_class(cls, s));
     };
-    place(4, "AntQueen", 0, 140);
-    place(5, "Skeleton", 70, 140);
-    place(6, "Soul", -70, 140);
+    place(4, "AntQueen", 0, 100);
+    place(5, "Skeleton", 60, 100);
+    place(6, "Soul", -60, 100);
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
     adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);

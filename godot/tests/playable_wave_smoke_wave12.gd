@@ -37,8 +37,14 @@ func run_ticks(controller: Object, attack: bool) -> Dictionary:
 			result.error = str(o.get("error", "stopped"))
 			break
 		result.ticks = int(o.get("ready_ticks", 0))
+		# Holy Shield's absorb light follows its particleGroup_end (with only the
+		# light's pool_new between); count it apart so the potions' own lights
+		# stay comparable.
+		var previous := ""
 		for name in o.get("combat_tick_events", []):
-			result.events[name] = int(result.events.get(name, 0)) + 1
+			var key: String = "HolyShield:" + name if name == "LightEffect_ctor" and previous == "particleGroup_end" else name
+			result.events[key] = int(result.events.get(key, 0)) + 1
+			if name != "pool_new": previous = name
 	result["observation"] = o
 	return result
 
@@ -59,7 +65,7 @@ func run() -> void:
 		row.spawn = "ok" if spawned.get("ok", true) != false else "refused: " + str(spawned.get("error", ""))
 		if spawned.get("ok", true) != false:
 			var actors: Array = spawned.get("combat_actors", [])
-			check(actors.size() == 4 and str(actors[3].kind) == classes[i], "%s is observed in slot 3" % classes[i])
+			check(actors.size() == 7 and str(actors[3].kind) == classes[i], "%s is observed in slot 3" % classes[i])
 			var again: Dictionary = controller.combat_spawn_creature(i)
 			check(again.get("ok", true) == false, "a second creature is refused")
 			var ran := run_ticks(controller, true)
@@ -86,12 +92,9 @@ func run() -> void:
 			row.events = notable
 		out.potions[str(kind)] = row
 	# Observed on the merged runtime (a change here is a behaviour change).
-	for name in ["Critter", "Gnaw", "GnomeNavigator", "Mermaid", "NPC", "Natasla", "Skelight"]:
+	for name in ["Critter", "Gnaw", "GnomeNavigator", "Mermaid", "NPC", "Natasla", "Skelight", "AntQueen", "Skeleton", "Soul"]:
 		var row: Dictionary = out.classes.get(name, {})
 		check(row.get("spawn", "") == "ok" and int(row.get("ticks", 0)) == TICKS - 1 and str(row.get("error", "x")).is_empty() and row.get("present", false), "%s runs %d ready ticks beside the fight" % [name, TICKS - 1])
-	for refused in [["AntQueen", "aq_ground"], ["Skeleton", "slot 25 force"], ["Soul", "demon"]]:
-		var row: Dictionary = out.classes.get(refused[0], {})
-		check(str(row.get("error", "")).contains(refused[1]), "%s stops on its documented refusal (%s)" % refused)
 	var p1: Dictionary = out.potions.get("1", {}).get("events", {})
 	var p2: Dictionary = out.potions.get("2", {}).get("events", {})
 	var p3: Dictionary = out.potions.get("3", {}).get("events", {})

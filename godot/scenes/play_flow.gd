@@ -285,7 +285,10 @@ func _update_menu() -> void:
 		actions[id].disabled = stopped or paused
 	if creature_choice != null:
 		creature_choice.visible = full
-		creature_choice.disabled = stopped or paused or raw_observation.get("combat_actors", []).size() > 3
+		var spawned := false
+		for row in raw_observation.get("combat_actors", []):
+			spawned = spawned or int(row.get("slot", -1)) == 3
+		creature_choice.disabled = stopped or paused or spawned
 	# Pause/stop release the native pad (release_input); mirror it on the toggle.
 	if paused or stopped or not full: actions.combat_block.set_pressed_no_signal(false)
 	if combat:

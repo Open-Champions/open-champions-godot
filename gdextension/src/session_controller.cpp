@@ -1157,8 +1157,18 @@ Dictionary ChampionsSessionController::combat_observation() const {
     Dictionary value;
     value["slot"] = a.slot;
     value["handle"] = int64_t(a.handle);
-    value["kind"] = a.slot == 3 ? String::utf8(combat_->own_creature_class().c_str())
-                    : a.slot ? (combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight") : "Player";
+    String kind = "Player";
+    if (a.slot == 3)
+      kind = String::utf8(combat_->own_creature_class().c_str());
+    else if (a.slot == 4)
+      kind = "AntQueen";
+    else if (a.slot == 5)
+      kind = "Skeleton";
+    else if (a.slot == 6)
+      kind = "Soul";
+    else if (a.slot)
+      kind = combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight";
+    value["kind"] = kind;
     if (combat_->full() && a.present) {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));

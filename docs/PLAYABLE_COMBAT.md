@@ -128,7 +128,7 @@ are unchanged and remain the defaults of their own selections.
 Set-up is the research composed runtime's walk-and-combo scenario: a strength-40
 player with a 30–40 / attack 50 / type 8 weapon, a 120-HP Skelight 80 ahead
 facing the player, plus a second 120-HP Skelight 40 behind for blocking and Holy
-Strike (skill 16, rank 1). Round 5 adds three more authored actors, each at 120 HP facing `0xc000`: an AntQueen at (0, 140), a Skeleton at (70, 140) and a Soul at (−70, 140). The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
+Strike (skill 16, rank 1). Round 5 adds three more authored actors, each at 120 HP facing `0xc000`: an AntQueen at (0, 100), a Skeleton at (60, 100) and a Soul at (−60, 100). The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
 Services are `flat_fixture_services()` with the session's terrain height,
 `dialog_isOpen` = paused, no loot class. Animation is the research `PlayerAnim`
 fixture (player clips 20 ticks; creature swings 30 ticks with mask 0x1 on tick
