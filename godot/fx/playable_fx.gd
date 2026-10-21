@@ -96,6 +96,9 @@ func _level_light_request() -> Dictionary:
 func _apply_level_light_record() -> void:
 	level_light_active = false
 	level_light_record = {}
+	# The refusal describes the current request only. reset() runs before the
+	# loader supplies a name; a later select_level_light must not keep it.
+	refusals.erase("level light refused: loaded level name unknown")
 	var request := _level_light_request()
 	if str(request.path).is_empty(): return
 	# The null-name row is what a miss selects, not a stand-in for a level
