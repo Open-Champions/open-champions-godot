@@ -481,8 +481,9 @@ void test_routed_commands() {
   check(host.counts().inferred[at("setMonsterVal")] == 0, "an executed route is not inferred");
 }
 
-// Each routed command whose callee research did not execute for this state
-// is refused before the binder runs.
+// Callees without the needed state refuse before the binder runs. The audio
+// model now supplies save_init's documented 0.5 music volume at boot, so the
+// two music routes below can run without an explicit slider change.
 void test_callee_refusals() {
   auto built = build_calls(
       {{"start",
@@ -504,14 +505,20 @@ void test_callee_refusals() {
   for (const char *name : {"charmMonster", "followPlayer", "hudFadeScreen"})
     check(host.counts().refused[at(name)] == 1 && host.counts().executed[at(name)] == 0,
           std::string("callee refusal: ") + name);
-  check(host.counts().callee_refusals == 3 && host.counts().stub_refusals == 0, "callee refusals counted");
   // 0x44 is not a node of the host's handle pool: handle_clear cannot run on
   // it, so the charm is still refused (text_host::test_charm_live_target runs
   // a real link).
+  for (const char *name : {"startMusic", "setCFlag"})
+    check(host.counts().executed[at(name)] == 1 && host.counts().refused[at(name)] == 0,
+          std::string("boot-volume execution: ") + name);
+  check(host.counts().callee_refusals == 3 && host.counts().stub_refusals == 0, "callee refusals counted");
   check(memory.u16(imp->addr + 0x312) == 0 && memory.u32(imp->addr + 0x234) == 0x44,
         "a target word outside the handle pool is left alone");
   check((memory.u32(imp->addr + 0xa8) & (1u << 23)) == 0, "followPlayer stores nothing when refused");
-  check(memory.u32(se::G_FADE) == 0 && host.callees().calls.empty(), "nothing reached a callee");
+  check(memory.u32(se::G_FADE) == 0 && !host.callees().calls.empty(), "only music reaches a callee");
+  check((memory.u8(broon->addr + 0xa8) & 1u) != 0,
+        "setCFlag on a boss with the boot volume stores bit 0");
+  check(host.campaign().events().boss_music == 1, "boss-music request is noted");
 }
 
 // With an explicit caller volume, startMusic and the boss bit of setCFlag run.
