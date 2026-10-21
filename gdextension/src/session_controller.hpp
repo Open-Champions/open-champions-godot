@@ -42,7 +42,7 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
-  void pump_scripts();
+  void pump_scripts(std::size_t ready_ticks_before);
   champions::simulation::rta::session_control::Setup combat_setup_;
   champions::simulation::rta::session_control::Observation active_observation() const;
   champions::simulation::rta::session_control::Observation active_advance(uint32_t);

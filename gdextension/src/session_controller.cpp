@@ -266,8 +266,9 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
+    const auto before = active_observation().ready_ticks;
     cache_state(active_advance(static_cast<uint32_t>(mask)), true);
-    pump_scripts();
+    pump_scripts(before);
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -312,9 +313,10 @@ Dictionary ChampionsSessionController::advance_time(int64_t usec,
     } else {
       clock_.advance(usec, [&]() {
         const auto generation = level_ ? level_->flow().generation : 0;
+        const auto before = active_observation().ready_ticks;
         auto state = active_advance(static_cast<uint32_t>(mask));
         cache_state(state, level_ && generation != level_->flow().generation);
-        pump_scripts();
+        pump_scripts(before);
         return !current_.paused && !current_.stopped && !current_.failed;
       });
     }
@@ -490,10 +492,14 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["level_script_policy"] = rta::script_commands::POLICY;
   return result;
 }
-void ChampionsSessionController::pump_scripts() {
-  if (!scripts_ || current_.paused || current_.stopped || current_.failed)
+// The Script task runs once per simulated frame, also while paused (research
+// 9649e6b docs/script.md 2.4 and 2.6). A submission simulates 0 or 1 ready
+// ticks, so the task follows the ready-tick count, not the submissions.
+void ChampionsSessionController::pump_scripts(std::size_t before) {
+  if (!scripts_)
     return;
-  scripts_->on_ready_tick();
+  for (auto tick = before; tick < current_.ready_ticks; ++tick)
+    scripts_->on_ready_tick();
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects) {
@@ -505,12 +511,14 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
+    next->run_prestart();
     if (!objects.is_empty()) {
       std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
       std::memcpy(raw.data(), objects.ptr(), raw.size());
       next->adopt_objects(raw.data(), raw.size());
     }
-    next->begin_level();
+    next->run_start();
     scripts_ = std::move(next);
     Dictionary result;
     result["ok"] = true;
@@ -538,8 +546,10 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["reached_complete"] = static_cast<int64_t>(counts.reached_complete);
   result["faults"] = static_cast<int64_t>(counts.faults);
   result["missing_entries"] = static_cast<int64_t>(counts.missing_entries);
+  result["refusal_stops"] = static_cast<int64_t>(counts.refusal_stops);
   result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
+  result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
   Dictionary executed, refused;
   for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i) {
     const auto name = String::utf8(rta::script_commands::row(i).name);
