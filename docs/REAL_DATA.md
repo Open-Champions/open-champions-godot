@@ -465,3 +465,51 @@ and ticks; the wave-13 108-level counts are back.
 `champions-level-spawn-measure`: paired 111, origin-test 18 with story
 ground 18, cold 3, cold story 0 (was 3), cold mode-A pre-search ground 3;
 every other line unchanged.
+
+## Creature blend audit fixes (2026-10-21)
+
+Audit BLEND-1..6 (`codex/creature-blend`), checked against research
+`t3/research-textures` 1528708: `docs/spec/render-pipeline.md` 4.7, 6 and
+9.6, and `docs/formats/model-texture.md`.
+
+- The environment UV is computed per vertex, as program 0x44 does (4.7, V):
+  `(192 + 64 c.x, 192 + 64 c.y) / 128` with `c` the camera-space unit normal
+  × 0.99, interpolated across the triangle. 0.99 is the figure 4.7 states;
+  the research gives no further digits.
+- The environment pass is drawn only with header flag 0x10, every packet of
+  the mesh carrying the second tag, and header `+0x20` at most 0x80. A FIX
+  above 0x80 in `+0x18` is gated like an unlisted equation.
+- **Assumption (I, 9.6):** the preview's environment pass covers every pixel
+  of the mesh and the composite writes depth once, so a texel that fails
+  `TEST_1` shows the environment sample. The `TEST_2` and `ZBUF` the
+  original's context-2 model pass runs with are not documented (model setup
+  writes `TEST_1` only).
+
+Private disc, read-only, counts only. `champions-real-data-measure`:
+
+| Measure | Count |
+|---|---|
+| Models bound / refused | 2,312 / 11 (unchanged) |
+| Two-pass (flag 0x10) / documented second equation | 524 / 514 |
+| Meshes with the second tag on every packet / drawn with the environment pass | 1,782 / 1,782 |
+| `two_pass_mesh_without_env_tag` (models) | 149, single pass |
+| `env_tag_without_two_pass` | 0 (the model decoder already refuses a second tag without the flag) |
+| `fix2_above_0x80` | 0 |
+
+Every other measure line equals the pre-fix run.
+
+Scene sweep, four headless slices, 60 ready ticks, baseline
+`codex/playable-integration` ac1b0d9 built the same way: 111 / 111 / 111
+with and without `--scripts`, 0 failed checks, 0 refusals. Every
+deterministic count equals the baseline; only `time.*`,
+`audio.frames_pushed` and the peak static memory differ (+0.5 MB summed over
+four slices: the 128 × 128 environment image is now loaded per level). This
+sweep runs with `--levels=0` and loads no creature preview.
+
+A second sweep loads one creature preview per level (`--levels=28` per
+slice, headless, no captures): 111 previews, 107 textured, the same 4
+texture-size refusals as the baseline, 76 two-pass, 107 with the level's
+environment image. It also reports `fx.runtime | material must consume
+vertex colors` on 99 level runs, which the baseline does not. That
+refusal comes from the per-surface materials a mixed environment/single
+pass model gets; it is present at the pre-fix commit too and stays open.
