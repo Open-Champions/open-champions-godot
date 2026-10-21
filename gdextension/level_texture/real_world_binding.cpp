@@ -4,7 +4,11 @@
 #include "champions/level_flow.hpp"
 #include "champions/model_texture_bind.hpp"
 #include "champions/real_world.hpp"
+#include "champions/texture.hpp"
+#include "champions/water_draw.hpp"
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -21,6 +25,7 @@ using namespace godot;
 namespace RW = champions::real_world;
 namespace WG = champions::presentation::rta::world_geometry;
 namespace LF = champions::simulation::rta::level_flow;
+namespace WD = champions::presentation::rta::water_draw;
 
 namespace {
 std::vector<std::uint8_t> read_world(const String &path) {
@@ -45,6 +50,53 @@ float raw_float(std::uint32_t bits) {
 Vector3 to_godot(double x, double y, double z) {
   return Vector3(real_t(x), real_t(z), real_t(-y));
 }
+Ref<ArrayMesh> water_mesh(const std::array<WD::DrawSurface, 2> &surfaces,
+                         PackedFloat32Array &fixes, Array &described) {
+  Ref<ArrayMesh> mesh;
+  mesh.instantiate();
+  for (int set = 0; set < 2; ++set) {
+    const auto &surface = surfaces[static_cast<std::size_t>(set)];
+    if (surface.positions.empty())
+      continue;
+    PackedVector3Array positions;
+    PackedVector2Array uvs;
+    PackedColorArray colors;
+    PackedInt32Array indices;
+    positions.resize(static_cast<std::int64_t>(surface.positions.size()));
+    uvs.resize(static_cast<std::int64_t>(surface.uv_texels.size()));
+    colors.resize(static_cast<std::int64_t>(surface.positions.size()));
+    indices.resize(static_cast<std::int64_t>(surface.indices.size()));
+    const auto channels = WD::colour_channels(surface.colour);
+    const Color tint(channels[0] / 128.f, channels[1] / 128.f,
+                     channels[2] / 128.f, 1.f);
+    for (std::size_t i = 0; i < surface.positions.size(); ++i) {
+      const auto &p = surface.positions[i];
+      positions.set(static_cast<std::int64_t>(i), to_godot(p[0], p[1], p[2]));
+      const auto &uv = surface.uv_texels[i];
+      uvs.set(static_cast<std::int64_t>(i), Vector2(uv[0], uv[1]));
+      colors.set(static_cast<std::int64_t>(i), tint);
+    }
+    for (std::size_t i = 0; i < surface.indices.size(); ++i)
+      indices.set(static_cast<std::int64_t>(i),
+                  static_cast<std::int32_t>(surface.indices[i]));
+    Array arrays;
+    arrays.resize(Mesh::ARRAY_MAX);
+    arrays[Mesh::ARRAY_VERTEX] = positions;
+    arrays[Mesh::ARRAY_TEX_UV] = uvs;
+    arrays[Mesh::ARRAY_COLOR] = colors;
+    arrays[Mesh::ARRAY_INDEX] = indices;
+    mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    fixes.push_back(surface.fix);
+    Dictionary info;
+    info["fix"] = surface.fix;
+    info["colour"] = std::int64_t(surface.colour);
+    info["layer"] = surface.layer;
+    info["triangles"] = surface.triangles;
+    info["second_set"] = set == 1;
+    described.push_back(info);
+  }
+  return mesh;
+}
 RW::cw::Vec3 raw_position(const PackedInt64Array &p) {
   if (p.size() != 3)
     throw std::runtime_error("A raw position needs three words.");
@@ -58,6 +110,10 @@ class ChampionsRealWorld : public RefCounted {
   std::unique_ptr<WG::Geometry> geometry_;
   std::unique_ptr<RW::WaterImage> water_;
   std::unique_ptr<RW::PieceScene> pieces_;
+  std::unique_ptr<WD::Field> waves_;
+  Ref<ArrayMesh> wave_mesh_;
+  PackedFloat32Array wave_fixes_;
+  Array wave_surfaces_;
 
 protected:
   static void _bind_methods() {
@@ -72,6 +128,10 @@ protected:
                          &ChampionsRealWorld::set_door);
     ClassDB::bind_method(D_METHOD("piece_draws"),
                          &ChampionsRealWorld::piece_draws);
+    ClassDB::bind_method(D_METHOD("water_sync", "frame", "frozen"),
+                         &ChampionsRealWorld::water_sync);
+    ClassDB::bind_method(D_METHOD("water_texture", "bytes"),
+                         &ChampionsRealWorld::water_texture);
     ClassDB::bind_static_method("ChampionsRealWorld",
                                 D_METHOD("model_texture", "vif", "tex"),
                                 &ChampionsRealWorld::model_texture);
@@ -87,6 +147,10 @@ public:
     try {
       water_.reset();
       pieces_.reset();
+      waves_.reset();
+      wave_mesh_.unref();
+      wave_fixes_.clear();
+      wave_surfaces_.clear();
       bytes_ = read_world(world_path);
       geometry_ = std::make_unique<WG::Geometry>(WG::decode(bytes_));
       Array water;
@@ -107,8 +171,26 @@ public:
         water.push_back(tile);
       }
       out["water"] = water;
-      if (!geometry_->water.empty())
+      if (!geometry_->water.empty()) {
         water_ = std::make_unique<RW::WaterImage>(bytes_, *geometry_);
+        std::vector<WD::TileSource> sources;
+        sources.reserve(geometry_->water.size());
+        for (const auto &w : geometry_->water) {
+          const auto &c = geometry_->chunks.at(w.chunk);
+          WD::TileSource source;
+          source.chunk = w.chunk;
+          source.neighbours = w.neighbours;
+          source.mask = w.mask;
+          source.second_set = w.second_set;
+          source.min_x = c.bounds_bits[0];
+          source.min_y = c.bounds_bits[1];
+          source.max_x = c.bounds_bits[3];
+          source.chunk_z = c.translation[2];
+          source.flag_0x200 = (c.flags & 0x200u) != 0;
+          sources.push_back(source);
+        }
+        waves_ = std::make_unique<WD::Field>(std::move(sources));
+      }
       std::vector<LF::Record> records;
       if (objects.size())
         records = LF::parse_objects(
@@ -194,6 +276,70 @@ public:
           Transform3D(basis, to_godot(a[3], a[7], a[11]));
       draw["collision"] = pieces_->collision(std::size_t(d.piece));
       out.push_back(draw);
+    }
+    return out;
+  }
+  Dictionary water_sync(int64_t frame, bool frozen) {
+    Dictionary out;
+    out["ok"] = false;
+    out["dirty"] = false;
+    out["layer"] = WD::LAYER;
+    try {
+      if (frame < 0 || frame > 0xffffffffll)
+        throw std::runtime_error("A water frame does not fit an unsigned word.");
+      if (!waves_) {
+        out["ok"] = true;
+        out["tiles"] = 0;
+        out["live"] = 0;
+        return out;
+      }
+      waves_->on_tick(static_cast<std::uint32_t>(frame), frozen);
+      out["dirty"] = waves_->dirty();
+      if (waves_->dirty() || wave_mesh_.is_null()) {
+        wave_fixes_.clear();
+        wave_surfaces_.clear();
+        wave_mesh_ = water_mesh(waves_->surfaces(), wave_fixes_, wave_surfaces_);
+        waves_->clear_dirty();
+      }
+      std::int64_t triangles = 0;
+      for (int i = 0; i < wave_surfaces_.size(); ++i)
+        triangles += static_cast<std::int64_t>(
+            Dictionary(wave_surfaces_[i]).get("triangles", 0));
+      out["mesh"] = wave_mesh_;
+      out["fixes"] = wave_fixes_;
+      out["surfaces"] = wave_surfaces_;
+      out["triangles"] = triangles;
+      out["tiles"] = static_cast<std::int64_t>(waves_->tile_count());
+      out["live"] = static_cast<std::int64_t>(waves_->live_blocks());
+      out["claim_seed"] = String("refused");
+      out["ok"] = true;
+    } catch (const std::exception &e) {
+      out["error"] = String::utf8(e.what());
+    }
+    return out;
+  }
+  Dictionary water_texture(const PackedByteArray &bytes) {
+    Dictionary out;
+    out["ok"] = false;
+    try {
+      if (bytes.is_empty())
+        throw std::runtime_error("The water texture is empty.");
+      const auto image = champions::decodeRtaTexture(
+          {bytes.ptr(), static_cast<std::size_t>(bytes.size())});
+      PackedByteArray rgba;
+      rgba.resize(static_cast<std::int64_t>(image.rgba.size()));
+      if (!image.rgba.empty())
+        std::memcpy(rgba.ptrw(), image.rgba.data(), image.rgba.size());
+      Ref<Image> picture;
+      picture.instantiate();
+      picture->set_data(static_cast<int>(image.width), static_cast<int>(image.height),
+                        false, Image::FORMAT_RGBA8, rgba);
+      out["image"] = picture;
+      out["width"] = static_cast<std::int64_t>(image.width);
+      out["height"] = static_cast<std::int64_t>(image.height);
+      out["ok"] = true;
+    } catch (const std::exception &) {
+      out["error"] = String("water texture refused");
     }
     return out;
   }
