@@ -496,7 +496,28 @@ void missile_fx_spawn() {
 }
 } // namespace
 
+// The spell type-info getters the combat runtime answers are the research
+// getter addresses, not the placeholders 0x3d0001..0x3d0003 (grok audit,
+// research-combat faa7033 ref_player.py:184/186, difftest_combat_runtime.py:58).
+void spell_type_getters() {
+  for (auto composition : {C::Composition::Round1, C::Composition::Full}) {
+    C::World::State st(C::flat_fixture_services(), 1, composition);
+    const std::pair<const char *, std::int64_t> expected[] = {
+        {"SpellAncestralCall_typeinfo", 0x3ce9bc},
+        {"SpellBattleCry_typeinfo", 0x3d08dc},
+        {"SpellHarmTouch_typeinfo", 0x3cdb08},
+        {"SpellHolyShield_typeinfo", 0x3cf124}};
+    for (const auto &e : expected) {
+      const auto got = st.service(e.first, {});
+      const auto *value = std::get_if<std::int64_t>(&got);
+      check(value && *value == e.second, std::string(e.first) + " answers the research getter");
+      check(value && (*value < 0x3d0001 || *value > 0x3d0003), std::string(e.first) + " is not a placeholder");
+    }
+  }
+}
+
 int main(int argc, char **argv) {
+  spell_type_getters();
   try {
     if (argc < 2) throw std::runtime_error("usage: playable-combat-fx <fx_skill_recipes JSON>");
     constants = std::make_shared<const FX::skills::RecipeConstants>(FX::skills::RecipeConstants::from_json(read(argv[1])));

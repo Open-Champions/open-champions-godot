@@ -608,11 +608,11 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   static const std::map<std::string, Raw> types = {
       {"SpellDrowsy_typeinfo", 0x3d1234},
-      {"SpellAncestralCall_typeinfo", 0x3d0001},
-      {"SpellBattleCry_typeinfo", 0x3d0002},
+      {"SpellAncestralCall_typeinfo", SPELL_ANCESTRAL_CALL_GETTER},
+      {"SpellBattleCry_typeinfo", SPELL_BATTLE_CRY_GETTER},
       {"SpellHolyShield_typeinfo", 0x3cf124},
       {"SpellResurrect_typeinfo", 0x3d162c},
-      {"SpellHarmTouch_typeinfo", 0x3d0003},
+      {"SpellHarmTouch_typeinfo", SPELL_HARM_TOUCH_GETTER},
       {"SpellCharge_typeinfo", 0x3cce9c},
       {"SpellBlessed_typeinfo", 0x3ce700},
       {"SpellBash_typeinfo", 0x3ce6b0},
