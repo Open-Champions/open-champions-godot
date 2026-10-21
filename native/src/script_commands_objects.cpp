@@ -13,6 +13,11 @@ namespace M1 = monsters_1;
 // GameObject_ctor 0x14cb10 (research docs/spec/object-system.md 2.2).
 constexpr std::uint32_t VT_GAMEOBJECT = 0x5122a8;
 constexpr std::uint32_t RADIUS_24 = 0x41c00000, HEIGHT_72 = 0x42900000;
+// ScriptGenerator_ctor 0x265f54 (disassembly at research items-gaps ecf9742
+// 0x265f54-0x265fbc): GameObject_ctor(this, position, 0, props), then table
+// 0x514e60 at +0x48, flags |= 9 and the facing halfword at +0x38. 'hide'
+// (string 0x5321a8) is read by GameObject_ctor.
+constexpr std::uint32_t VT_SCRIPT_GENERATOR = 0x514e60, KEY_HIDE = 0x5321a8;
 // Creature serial counter (zeroed at a level change, docs/issues/arena-entry.md
 // timeline row 7; Creature_ctor takes the next one).
 constexpr std::uint32_t CREATURE_SERIAL = 0x4f85c4;
@@ -74,6 +79,89 @@ level_factory::Executable executable_view(std::shared_ptr<const arena_modes::Exe
 
 void Host::set_executable(level_factory::Executable exe) {
   exe_ = std::make_unique<level_factory::Executable>(std::move(exe));
+  // ScriptGenerator_spawn's world_createObject goes through the factory row
+  // and a ported constructor chain; anything else refuses.
+  items_->create_object = [this](const std::string &name, const std::array<std::uint32_t, 3> &pos,
+                                 std::int32_t angle, std::uint32_t props) {
+    return create_object(name, pos, angle, props);
+  };
+  items_->dynamic_type = [this](std::uint32_t address) {
+    const auto *obj = variables_->obj_at(address);
+    return obj ? obj->type_name : std::string();
+  };
+}
+
+std::uint32_t Host::create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
+                                  std::int32_t angle, std::uint32_t props_word) {
+  // The generator's property-list word is the generator's own address here
+  // (build_generator): the list lives in the host, not in the binder memory.
+  const auto *generator = variables_->obj_at(props_word);
+  if (!exe_ || !generator || !generator->props)
+    throw script_items::Refused("world_createObject: the property list is not the host's");
+  const auto outcome = level_factory::classify(class_name, generator->props.get(), *exe_);
+  if (outcome.kind == level_factory::Kind::Nothing)
+    return 0; // the factory returns 0: nothing is created
+  if (outcome.kind != level_factory::Kind::Object)
+    throw script_items::Refused("world_createObject: the factory row calls a function and builds no object");
+  bool ported = false;
+  for (const auto &p : kPorted)
+    ported = ported || p.ctor == outcome.constructor();
+  if (!ported)
+    throw script_items::Refused("world_createObject: the constructor of this class is not ported");
+  if (!external_seed_)
+    throw script_items::Refused("world_createObject: GameObject_ctor draws from the shared seed, which is not bound");
+  const auto address = variables_->world->pool.allocate(outcome.size);
+  if (!address)
+    return 0; // pool_new returned 0
+  level_flow::Record record;
+  record.cls = class_name;
+  record.angle = static_cast<std::uint16_t>(angle);
+  record.position = pos;
+  record.props = *generator->props;
+  const auto result = build(record, outcome, address, record.props);
+  if (result != Build::Built)
+    throw script_items::Refused("world_createObject: the constructor chain is not run here");
+  counts_.objects_built += 1;
+  return address;
+}
+
+Host::Build Host::build_generator(const level_factory::Outcome &outcome, const level_flow::Record &record,
+                                  std::uint32_t c, const std::vector<std::string> &props) {
+  if (!external_seed_) {
+    counts_.build_refusals["no session seed"] += 1;
+    return Build::NotBuilt;
+  }
+  auto &exe = *exe_;
+  if (const auto hide = level_factory::prop_find(&props, exe.string(KEY_HIDE), exe);
+      hide && level_factory::atoi(*hide, exe)) {
+    counts_.build_refusals["ScriptGenerator hide"] += 1;
+    return Build::NotBuilt;
+  }
+  auto list = std::make_shared<std::vector<std::string>>(props);
+  const auto obj = variables_->new_object({}, 0, record.position, record.angle, "15ScriptGenerator", list, c,
+                                          outcome.size);
+  auto &memory = variables_->memory;
+  const std::pair<std::uint32_t, std::uint32_t> words[] = {
+      {0x00, 0}, {0x04, 0}, {0x08, 0}, {0x48, VT_GAMEOBJECT}, {0x1c, RADIUS_24}, {0x20, HEIGHT_72},
+      {0x0c, 0}, {0x10, record.position[0]}, {0x14, record.position[1]}, {0x18, record.position[2]},
+      {0x34, 0}, {0x24, 0}};
+  for (const auto &w : words)
+    memory.word(c + w.first, w.second);
+  memory.byte(c + 0x28, 25);
+  memory.byte(c + 0x29, 73);
+  // GameObject_ctor step 6: one draw from the shared seed seeds the object's own generator.
+  memory.word(c + 0x44, external_seed_->draw());
+  // The property-list word +0x2c is the host's identity for the list.
+  memory.word(c + 0x2c, c);
+  // ScriptGenerator_ctor 0x265f54.
+  memory.word(c + 0x48, VT_SCRIPT_GENERATOR);
+  memory.word(c + 0x0c, memory.word(c + 0x0c) | 9u);
+  memory.byte(c + 0x38, static_cast<std::uint8_t>(record.angle & 0xff));
+  memory.byte(c + 0x39, static_cast<std::uint8_t>(record.angle >> 8));
+  static_cast<objects::GameObject &>(*obj).flags = memory.word(c + 0x0c);
+  built_.insert(c);
+  counts_.objects_registered += 1;
+  return Build::Built;
 }
 
 void Host::start_single_player() {
@@ -119,6 +207,8 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
     }
     if (result == Build::NotBuilt)
       stub(record, address, props, outcome.size);
+    // The factory row's answer for hideMonster / showMonster (creature flag).
+    stub_info_[address] = {level_factory::creature_kind(outcome), outcome.constructor()};
     counts_.objects_unbuilt += 1;
     counts_.load_draws_unmodelled += 1;
     counts_.unbuilt_constructors[outcome.constructor()] += 1;
@@ -128,6 +218,8 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
+  if (outcome.constructor() == SCRIPT_GENERATOR_CTOR)
+    return build_generator(outcome, record, c, props);
   const Ported *ported = nullptr;
   for (const auto &p : kPorted)
     if (p.ctor == outcome.constructor())

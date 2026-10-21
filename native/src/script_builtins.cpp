@@ -1507,7 +1507,7 @@ amx::Cell Variables::creature_dispatch(const std::string &name,amx::Machine &m) 
       scene_call(name=="hideMonster" ? "obj_moveOffGrid" : "obj_updateGridCell",{obj->addr});
       value=flags(memory,obj);
       memory.word(obj->addr+0xc,name=="hideMonster" ? value|0x8000 : value&~0x8000u);
-      if(value&0x20) memory.byte(obj->addr+0x231,name=="hideMonster" ? memory.read(obj->addr+0x231)|8 : memory.read(obj->addr+0x231)&0xf7);
+      if((value&0x20) || (stub_creature && stub_creature(*obj))) memory.byte(obj->addr+0x231,name=="hideMonster" ? memory.read(obj->addr+0x231)|8 : memory.read(obj->addr+0x231)&0xf7);
     } else if(name=="setOFlag") {auto which=arg(1);auto on=arg(2);apply_oflag(obj,which,on!=0);}
     else if(name=="monstersInTrigger") {if(obj->type_name=="14MonsterTrigger") total+=scene_call("MonsterTrigger_count",{obj->addr});}
     else if(name=="followPath") follow_path(obj);

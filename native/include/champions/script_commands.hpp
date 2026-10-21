@@ -57,6 +57,9 @@ struct Row {
 };
 const Row &row(std::size_t index);
 
+// ScriptGenerator's constructor (research items-gaps ecf9742 docs/spec/hide-monster.md 4.1).
+inline constexpr std::uint32_t SCRIPT_GENERATOR_CTOR = 0x265f54;
+
 struct Counts {
   std::uint64_t started = 0;
   std::uint64_t reached_wait = 0;
@@ -394,6 +397,14 @@ private:
               std::uint32_t address, const std::vector<std::string> &props);
   void stub(const level_flow::Record &, std::uint32_t address,
             std::vector<std::string> props, std::int64_t size);
+  // The ScriptGenerator constructor 0x265f54: the base object with the
+  // record's property list (research items-gaps ecf9742 docs/spec/hide-monster.md
+  // 4.1 and 5). world_createObject for ScriptGenerator_spawn: the factory row,
+  // then a ported constructor chain; any other constructor refuses.
+  Build build_generator(const level_factory::Outcome &, const level_flow::Record &,
+                        std::uint32_t address, const std::vector<std::string> &props);
+  std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
+                              std::int32_t angle, std::uint32_t props_word);
   void refuse(std::size_t index, amx::Machine &machine);
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
@@ -434,6 +445,14 @@ private:
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
+  // For a stub the factory row decided: whether its class is a Creature, and
+  // its constructor. A stub the row did not decide has no entry's creature
+  // answer (Unknown) and keeps hideMonster / showMonster refused.
+  struct StubInfo {
+    level_factory::Creature creature = level_factory::Creature::Unknown;
+    std::uint32_t constructor = 0;
+  };
+  std::map<std::uint32_t, StubInfo> stub_info_;
   Counts counts_;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;

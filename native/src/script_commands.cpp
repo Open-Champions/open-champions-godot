@@ -15,6 +15,7 @@ const Row kRows[COMMANDS] = {
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
+
 // g_scriptSelectedObj (research 9649e6b tools/ref_natives.py G_SELECTED_OBJ,
 // docs/script.md line 481): the object the select* commands act on.
 constexpr std::uint32_t SELECTED_WORD = 0x4039f8;
@@ -51,7 +52,9 @@ const StubRead kStubReads[] = {
     {"setMonsterVal", 0x200, false}, {"setMonsterRange", 0x200, false},
     {"setCreatureParams", 0x200, false}, {"charmMonster", 0x200, false},
     {"followPlayer", 0x200, false},
-    // generateMonster reads the found object type before spawning.
+    // generateMonster reads the found object type before spawning. Every
+    // ScriptGenerator record is built (Host::build_generator), so only an
+    // unbuilt one can hide behind a stub (touches_stub).
     {"generateMonster", 0x200, false},
 
 };
@@ -226,6 +229,11 @@ Host::Host()
   install();
   bind_campaign();
   items_ = std::make_unique<script_items::Service>(*variables_);
+  variables_->stub_creature = [this](const objects::GameObject &obj) {
+    const auto info = stub_info_.find(obj.addr);
+    return stubs_.count(obj.addr) != 0 && info != stub_info_.end() &&
+           info->second.creature == level_factory::Creature::Yes;
+  };
   // The executable image's g_difficultyIdx is 1; the mission rows are 1..5
   // and row 0 lies on the skill pairs clearAllSkills fills (research-items
   // 49bc578 docs/script-items.md 3). game_scanCm1Vars(0)'s word is -1 until
@@ -340,9 +348,22 @@ bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
   const auto address = machine.cell(machine.params + 4);
   if (machine.get_addr(address) != amx::ERR_NONE)
     return true;
+  const bool hide_show = std::strcmp(kRows[index].name, "hideMonster") == 0 ||
+                         std::strcmp(kRows[index].name, "showMonster") == 0;
+  const bool generate = std::strcmp(kRows[index].name, "generateMonster") == 0;
   for (const auto *obj : variables_->find(machine.get_string(address), read->limit)) {
-    if (stubs_.count(obj->addr))
+    if (stubs_.count(obj->addr)) {
+      const auto info = stub_info_.find(obj->addr);
+      // hideMonster / showMonster need only the creature flag of the class
+      // (docs/spec/hide-monster.md 3): a stub whose factory row decided it
+      // runs. generateMonster acts only on a ScriptGenerator, and every one
+      // of those is built unless its constructor refused.
+      if (hide_show && info != stub_info_.end() && info->second.creature != level_factory::Creature::Unknown)
+        continue;
+      if (generate && info != stub_info_.end() && info->second.constructor != SCRIPT_GENERATOR_CTOR)
+        continue;
       return true;
+    }
     // A built creature's hit points come from Creature_setStats, which is not
     // ported (docs/script-session.md section 5).
     if (read->hit_points && built_.count(obj->addr))
