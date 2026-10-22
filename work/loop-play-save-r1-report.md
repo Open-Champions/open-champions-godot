@@ -1,4 +1,4 @@
-STATUS: PASS — playthrough blockers #2 and #5 are fixed; unrelated playthrough blockers remain.
+STATUS: FIXED — play-save audit findings PS-1 through PS-7 are addressed; unrelated playthrough blockers remain.
 
 # Loop play-save r1 — 2026-10-22
 
@@ -12,6 +12,22 @@ Coordination: `codex/play-save` from wave 24 `2e57376`; local worktree only. The
 - An open dialog or help box refuses a real-level save. Active world-object state and in-flight script execution are not serialized; the UI labels that world objects restart from level data. Norrath and PS2 slot round trips remain outside this native continuation.
 
 Changed: `gdextension/src/session_controller.{cpp,hpp}`, `godot/scenes/{session_sandbox,play_flow,real_data_play}.gd`, `godot/ui/frontend_menus.gd`, `godot/tests/loop_playthrough.gd`. Added the playthrough harness and runner from `75cca7d` as `ab06ce0`.
+
+## Audit fixes
+
+- **PS-1, PS-2:** The harness performs level-change diagnostics before cold load, frees the first scene and waits for removal before creating the second audio mixer. The cold scene redirects its library history, options file and cache into the per-run output directory before opening the game folder.
+- **PS-3:** A refusal after the real level has been reloaded now says so. Campaign refusal after native restore says the session was replaced; neither path claims the prior session was retained.
+- **PS-4:** The pause check requires exactly five original entries and no Save entry.
+- **PS-5:** Native display reuse compares the saved initial collision terrain with the displayed scene's initial collision terrain using the existing bounded terrain codec. A different level is refused in the playthrough probe; the matching saved level still loads.
+- **PS-6:** Command examples use placeholders for local runtime, dependency, worktree and private game-folder paths.
+- **PS-7:** The host F5 hint starts at the existing notes position after the pause entries, and advances that position before the notes are drawn.
+
+Audit verification on 2026-10-22:
+
+- arm64 Release native configure/build passed; the focused save/player/quest/front-end CTest selection passed **10/10**. Full CTest passed **231/231** at `-j 3`.
+- Arm64 Godot GDExtension build and editor import passed. The dev matrix passed **53/53**. `FULL_TRACE` remained **36,402 bytes**, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+- The read-only four-slice sweep passed **111/111 loaded and played**, **230** checks, **111** scripts attached, **76** started, zero script faults and zero callee refusals. This audit run did not pass the optional effect-recipe and level-light measurement JSON inputs.
+- The headless and rendered playthrough each recorded pause Save routing, save, quit, restored level/HP/gold/quest state/position, fresh-scene cold load, and refusal of display reuse for different collision. The rendered run produced 10 screenshots; pause, Saved and loaded-level views were inspected. Both overall harness exits remain **1** because enemy combat and level change are outside this branch. The read-only game folder had **994** files before and after.
 
 ## Verification
 
@@ -29,12 +45,19 @@ This branch fixes only blockers #2 and #5. Enemy combat, dialog drawing, charact
 ## Commands
 
 ```sh
-cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR=/Users/syndicatemike/Projects/open-champions/worktrees/integration/work/deps/godot-cpp -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR=<local-godot-cpp> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
 cmake --build build/godot-extension --config Release --target champions-archive-extension --parallel 2
-/Users/syndicatemike/Projects/open-champions/worktrees/integration/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+<local-godot> --headless --path godot --editor --quit-after 120 --frame-delay 50
 ctest --test-dir build/native -R '^(native-save|native-snapshot|native-save-access|native-save-partition|native-save-indexed|player-state|player-host|player-exact|quests|frontend-exact)$' --output-on-failure -j 2
-python3 /Users/syndicatemike/Projects/open-champions/worktrees/playable-integration/work/playable-wave21/run-godot.py
-python3 tools/run_loop_playthrough.py --godot /Users/syndicatemike/Projects/open-champions/worktrees/integration/work/runtime/Godot.app/Contents/MacOS/Godot --game-folder /Users/syndicatemike/Projects/open-champions/private-validation/rta-disc --out work/play-save/playthrough
+ctest --test-dir build/native --output-on-failure -j 3
+python3 <local-dev-matrix-runner>
+python3 tools/run_loop_playthrough.py --godot <local-godot> --game-folder <read-only-game-folder> --out work/play-save/playthrough
 ```
 
-The real-data sweep ran `godot --headless --path godot --script res://tests/real_data_scene.gd` with `--all --levels=0 --ticks=60 --scripts`, the same read-only folder, effect/light measurement inputs, and four sequential `--from/--to` slices: 0–28, 28–56, 56–84, 84–111. Its per-slice logs and count summaries are ignored under `work/play-save/sweep/` and `work/play-save/sweep-summaries/`.
+The original real-data sweep ran `godot --headless --path godot --script res://tests/real_data_scene.gd` with `--all --levels=0 --ticks=60 --scripts`, the same read-only folder, effect/light measurement inputs, and four sequential `--from/--to` slices: 0–28, 28–56, 56–84, 84–111. Its per-slice logs and count summaries are ignored under `work/play-save/sweep/` and `work/play-save/sweep-summaries/`. The audit reran the same four slices without the optional effect/light inputs using:
+
+```sh
+<local-godot> --headless --path godot --script res://tests/real_data_scene.gd -- --game-folder=<read-only-game-folder> --cache=<per-slice-cache> --all --levels=0 --from=<slice-start> --to=<slice-end> --ticks=60 --scripts --summary=<per-slice-summary>
+```

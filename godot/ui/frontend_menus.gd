@@ -506,9 +506,10 @@ func _draw() -> void:
 			_host_text(Vector2(16, 80), "Type the name on the host keyboard; Backspace deletes. Then Done.", 12, muted, 608)
 	if name == "options" or name == "options-load":
 		_host_text(Vector2(16, 60), "music live 0x%08x · image 0x%08x · options file %s" % [int(view.get("music_live", 0)), int(view.get("music_image", 0)), "present" if view.get("options_file", false) else "absent"], 12, muted, 608)
-	if name == "pause":
-		_host_text(Vector2(16, 278), "Host shortcut: F5 opens the documented Save screen", 11, muted, 608)
 	var notes_y := maxi(300, bottom + 20)
+	if name == "pause":
+		_host_text(Vector2(16, notes_y), "Host shortcut: F5 opens the documented Save screen", 11, muted, 608)
+		notes_y += 18
 	var error := host_error if not host_error.is_empty() else str(view.get("error", ""))
 	if not error.is_empty():
 		_host_text(Vector2(16, notes_y), "Refused: " + error, 12, Color(0.95, 0.5, 0.45), 608)

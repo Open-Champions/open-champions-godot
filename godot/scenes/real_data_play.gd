@@ -251,16 +251,18 @@ func load_session_file(path: String) -> bool:
 	if not load_real_level(index): return false
 	var world_path: String = str(real.cache_dir.path_join("level-%03d.world" % index))
 	if FileAccess.get_sha256(world_path) != manifest.get("world_sha256", ""):
-		status_label.text = "Load refused: saved level WORLD differs from the selected folder."
+		status_label.text = "Level reloaded; load refused: saved WORLD differs from the selected folder."
 		return false
 	restoring_real_level = true
 	var loaded := super.load_session_file(path)
 	restoring_real_level = false
-	if not loaded: return false
+	if not loaded:
+		status_label.text = "Level reloaded; " + status_label.text.replace("Current session retained; ", "")
+		return false
 	if scripted:
 		var restored: Dictionary = controller.load_campaign_bytes(campaign)
 		if not restored.get("ok", false):
-			status_label.text = "Load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
+			status_label.text = "Session replaced; load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
 			return false
 		_observe(restored)
 	status_label.text = "Loaded level, player, quests and position. World objects restart from level data."

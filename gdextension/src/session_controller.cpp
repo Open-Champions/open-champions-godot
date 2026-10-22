@@ -2036,6 +2036,14 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path, boo
     if (reuse_loaded_level) {
       if (!control_ || String(terrain_.get("mode", "")) != "static_world")
         throw std::runtime_error("Load and verify the saved level's own data first.");
+      rta::native_save::Bytes saved_collision;
+      rta::native_save::Bytes displayed_collision;
+      rta::native_save::terrain_codec::encode_terrain(saved_collision,
+                                                     setup.initial_terrain);
+      rta::native_save::terrain_codec::encode_terrain(displayed_collision,
+                                                     control_->setup().initial_terrain);
+      if (saved_collision != displayed_collision)
+        throw std::runtime_error("The displayed level's collision differs from the save.");
       prepared->terrain = terrain_;
       prepared->name = terrain_name_;
     } else {

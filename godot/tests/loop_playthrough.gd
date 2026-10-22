@@ -285,7 +285,7 @@ func run() -> void:
 			if str(entry.get("id", "")) == "save": pause_save_entry = true
 	# Research gives the original pause exactly five entries, with no Save.
 	# The host's F5 route opens the documented in-game save screen.
-	var native_pause_intact: bool = fe.screen() == "pause" and not pause_save_entry
+	var native_pause_intact: bool = fe.screen() == "pause" and pause_entries == 5 and not pause_save_entry
 	var save_path := out_dir.path_join("playthrough.ocplay")
 	for suffix in ["", ".player", ".menus", ".level", ".campaign"]:
 		if FileAccess.file_exists(save_path + suffix): DirAccess.remove_absolute(save_path + suffix)
@@ -334,12 +334,27 @@ func run() -> void:
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
 		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match})
 	await capture("09-loaded")
+	var transition_before: int = scene.real.current
+	var pending_levels := int(scene.controller.dialog_status().get("counts", {}).get("pending_levels", 0))
+	if pending_levels > 0 and fe.screen() == "playing": advance(0, 180)
+	mark("level_change", "changed" if scene.real.current != transition_before else "refused",
+		{"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false),
+		"pending_script_levels": pending_levels, "exit_target_exposed": false})
+	await capture("10-level-change-attempt")
 	# A new scene has no in-memory WORLD/TEX save association. The load must
-	# recover the level from the selected folder and its saved identity.
+	# recover the level from the selected folder and its saved identity. Remove
+	# the first scene before creating another process-lifetime audio mixer.
+	scene.queue_free()
+	await process_frame
+	scene = null
+	fe = null
 	var cold = load("res://scenes/real_data_play.tscn").instantiate()
 	cold.automatic_steps = false
 	root.add_child(cold)
 	await process_frame
+	cold.components.library.history_path = out_dir.path_join("cold-library.json")
+	cold.components.library._entries.clear()
+	cold.frontend.options_path = out_dir.path_join("cold-options.img")
 	cold.real.cache_dir = out_dir.path_join("cold-cache")
 	var cold_opened: bool = cold.open_game_folder(str(args["game-folder"]))
 	var cold_loaded: bool = cold_opened and cold.level_textures.saves.is_empty() and cold.load_session_file(save_path)
@@ -351,14 +366,16 @@ func run() -> void:
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
 	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded})
+	# A displayed level with different collision must not be reused for this save.
+	var other_index := 0 if level_before != 0 else 1
+	var other_loaded: bool = cold.load_real_level(other_index)
+	var mismatch: Dictionary = cold.controller.prepare_save_file(save_path, true) if other_loaded else {}
+	var mismatch_refused: bool = other_loaded and not mismatch.get("ok", false) and \
+		"collision differs" in str(mismatch.get("error", ""))
+	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
+		{"different_level_loaded": other_loaded})
 	cold.queue_free()
-	var transition_before: int = scene.real.current
-	var pending_levels := int(scene.controller.dialog_status().get("counts", {}).get("pending_levels", 0))
-	if pending_levels > 0 and fe.screen() == "playing": advance(0, 180)
-	mark("level_change", "changed" if scene.real.current != transition_before else "refused",
-		{"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false),
-		"pending_script_levels": pending_levels, "exit_target_exposed": false})
-	await capture("10-level-change-attempt")
+	await process_frame
 	save_json()
 	var incomplete := false
 	for row in rows:
