@@ -404,6 +404,13 @@ func run() -> void:
 		"drops_before": drops_before, "drops_after": drops_after,
 		"objects_built": int(object_counts.get("objects_built", 0)),
 		"objects_unbuilt": int(object_counts.get("objects_unbuilt", 0)),
+		"warboar_unbuilt": int(object_counts.get("warboar_unbuilt", 0)),
+		"minotaur_unbuilt": int(object_counts.get("minotaur_unbuilt", 0)),
+		"player_model": int(before.get("player_model", -1)),
+		"player_class": int(before.get("player_class", -1)),
+		"player_imported": bool(before.get("player_imported", false)),
+		"item_load_gate_refusals": int(object_counts.get("item_load_gate_refusals", 0)),
+		"load_draws_unmodelled": int(object_counts.get("load_draws_unmodelled", 0)),
 		"factory_build_refusals": object_counts.get("build_refusals", {}),
 		"missing_fight_steps": missing_fight_steps})
 	await capture("05-fight-attempt")

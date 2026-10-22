@@ -291,6 +291,8 @@ Dictionary ChampionsSessionController::present_observation(
     result["player_record_currents_known"] = p.current_known;
     result["name"] = String::utf8(p.name.c_str());
     result["player_class"] = p.player_class;
+    result["player_model"] = p.model;
+    result["player_imported"] = p.imported;
     result["level"] = p.level;
     result["acknowledged_level"] = p.acknowledged;
     result["experience"] = p.experience;
@@ -1260,6 +1262,17 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["item_load_gate_refusals"] = static_cast<int64_t>(counts.item_load_gate_refusals);
   result["item_load_draws_inferred"] = static_cast<int64_t>(counts.item_load_draws_inferred);
   result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
+  // Both WarBoar names share the factory constructor. Surface its record
+  // count without disclosing any private level record or treating a stub as
+  // a live combat actor (campaign-combat handoff r2/r3).
+  const auto boars = counts.unbuilt_constructors.find(0x2ba03c);
+  result["warboar_unbuilt"] = static_cast<int64_t>(
+      boars == counts.unbuilt_constructors.end() ? 0 : boars->second);
+  // Round 4 identifies a distinct, Gold-capable Minotaur death path. This
+  // reports its unbuilt factory records only; no Gold is inferred from them.
+  const auto minotaurs = counts.unbuilt_constructors.find(0x288fdc);
+  result["minotaur_unbuilt"] = static_cast<int64_t>(
+      minotaurs == counts.unbuilt_constructors.end() ? 0 : minotaurs->second);
   Dictionary build_refusals;
   for (const auto &kv : counts.build_refusals)
     build_refusals[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
