@@ -178,7 +178,11 @@ func attach_level_script() -> bool:
 	controller.set_level_text(RealText.level_tables(real, level))
 	# The NPC dialog is attached before the level entry runs (docs/DIALOG.md).
 	var volume_bits: int = audio.music_volume_bits if audio != null else -1
-	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits)
+	var world: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", ".world")
+	var balance := PackedByteArray()
+	if real.files.has("balance.lmp"):
+		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
+	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	return result.get("ok", false)
 

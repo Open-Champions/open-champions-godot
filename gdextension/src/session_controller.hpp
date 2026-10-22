@@ -176,7 +176,10 @@ public:
                                         const godot::PackedByteArray &objects,
                                         bool carry_campaign = false,
                                         const godot::Dictionary &dialog = godot::Dictionary(),
-                                        std::int64_t music_volume_bits = -1);
+                                        std::int64_t music_volume_bits = -1,
+                                        const godot::String &level_name = godot::String(),
+                                        const godot::PackedByteArray &balance = godot::PackedByteArray(),
+                                        const godot::PackedByteArray &world = godot::PackedByteArray());
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,

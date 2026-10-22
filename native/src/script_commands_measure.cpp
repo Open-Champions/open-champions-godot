@@ -91,6 +91,8 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.objects_pool_refused += one.objects_pool_refused;
   total.objects_unclassified += one.objects_unclassified;
   total.load_draws_unmodelled += one.load_draws_unmodelled;
+  total.item_load_gate_refusals += one.item_load_gate_refusals;
+  total.item_load_draws_inferred += one.item_load_draws_inferred;
   for (const auto &kv : one.unbuilt_constructors)
     total.unbuilt_constructors[kv.first] += kv.second;
   for (const auto &kv : one.build_refusals)
@@ -198,6 +200,19 @@ int main(int argc, char **argv) {
       chime = entry.second[0x3c];
   std::map<std::string, std::uint64_t> text_refusals;
   std::uint64_t level_tables = 0;
+  std::vector<std::uint8_t> balance;
+  if (exe && files.count("balance.lmp")) {
+    auto archive = read_file(files["balance.lmp"]);
+    try {
+      const auto rows = champions::readLmp({archive.data(), archive.size()});
+      if (const auto *entry = find_entry(rows, "monsters.bal")) {
+        const auto bytes = champions::payload({archive.data(), archive.size()}, *entry);
+        balance.assign(bytes.data, bytes.data + bytes.size);
+      }
+    } catch (const std::exception &) {
+      balance.clear();
+    }
+  }
   sc::Counts total;
   std::uint64_t levels_with_tex = 0, scripts_found = 0, scripts_loaded = 0;
   std::uint64_t scripts_no_level_entry = 0, scripts_load_refused = 0;
@@ -258,6 +273,18 @@ int main(int argc, char **argv) {
         host.start_single_player();
       if (exe)
         host.set_executable(sc::executable_view(exe));
+      if (exe && !balance.empty())
+        try { host.set_level_stats(stem, balance.data(), balance.size()); }
+        catch (const std::exception &) {}
+      for (const auto &entry : inner)
+        if (extension_of(entry.name) == "world") {
+          try {
+            const auto bytes = champions::payload(lump_bytes, entry);
+            host.set_level_world(bytes.data, bytes.size);
+          } catch (const std::exception &) {}
+          break;
+        }
+      host.advance_first_level_items(stem);
     }
     // The text sources are not session state; bare reproduces the earlier host.
     for (const auto &table : gtext)
@@ -335,6 +362,8 @@ int main(int argc, char **argv) {
   std::cout << "objects_pool_refused " << total.objects_pool_refused << '\n';
   std::cout << "objects_unclassified " << total.objects_unclassified << '\n';
   std::cout << "load_draws_unmodelled " << total.load_draws_unmodelled << '\n';
+  std::cout << "item_load_gate_refusals " << total.item_load_gate_refusals << '\n';
+  std::cout << "item_load_draws_inferred " << total.item_load_draws_inferred << '\n';
   std::cout << "unbuilt_constructors " << total.unbuilt_constructors.size() << '\n';
   for (const auto &kv : total.build_refusals)
     std::cout << "build_refused " << kv.first << ' ' << kv.second << '\n';

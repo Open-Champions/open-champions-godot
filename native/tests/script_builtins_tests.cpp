@@ -862,6 +862,9 @@ void setup_api_tests() {
   require(obj->props->size()==2 && game.find_first("Alias")==obj.get() && !game.find_first("late"),"setup property copy/names");
   require(obj->angle()==1 && obj->addr==0x1000000 && obj->type_name=="8Creature" && game.draws==0,"setup fields/no random draw");
   require(champions::simulation::rta::HandlePool::items(world->home_cell(*obj,true))==std::vector<champions::simulation::rta::Object *>{obj.get()},"setup grid link");
+  require(world->collect_in_box({0xc1200000u,0xc1200000u,0xc1200000u},
+                                {0x41200000u,0x41200000u,0x41200000u},8).size()==1,
+          "setup object is visible to the world's spatial query");
   auto next=game.new_object({},2,{},0,"10GameObject",{}, {},1);
   require(next->addr==0x1001000 && champions::simulation::rta::HandlePool::items(world->off_grid)==std::vector<champions::simulation::rta::Object *>{next.get()},"setup aligned allocation/off grid");
   mem->w32(0x4d8ae0,3);mem->w32(game.player_record(0)+0x43d8,obj->addr);
@@ -895,6 +898,52 @@ void setup_api_tests() {
   host->handlers["reenter"]=[&](const b::Host::Arguments &) {game.quest_set("inside",7);return game.ext("dialog_isOpen");};
   require(std::get<std::int64_t>(game.ext("reenter"))==0 && game.quest_vars()[0].second==7,"setup forwarding reentry");
 }
+void external_world_lifetime_test() {
+  auto world = std::make_shared<champions::simulation::rta::objects::World>();
+  std::uint32_t address = 0;
+  {
+    b::Variables binder({}, world);
+    auto object = binder.new_object({"Temporary"}, 0, {0, 0, 0}, 0);
+    address = object->addr;
+    require(world->names.find_first("Temporary") == object.get() &&
+            world->objects.at(address) == object.get(), "external registration is live");
+  }
+  require(!world->names.find_first("Temporary") && !world->objects.count(address),
+          "binder teardown removes external names and addresses");
+  require(world->collect_in_box({0xc1200000u,0xc1200000u,0xc1200000u},
+                                {0x41200000u,0x41200000u,0x41200000u},8).empty(),
+          "surviving World does not walk destroyed binder objects");
+  // HandlePool::clear rejects paired nodes in one head. External-owner
+  // teardown must detach them and clear the surviving World's registries.
+  {
+    auto malformed_world = std::make_shared<champions::simulation::rta::objects::World>();
+    std::shared_ptr<b::Obj> retained;
+    {
+      b::Variables binder({}, malformed_world);
+      retained = binder.new_object({"Malformed"}, 0, {0, 0, 0}, 0);
+      malformed_world->handles.link_both(retained->heads[0], retained.get(),
+                                         retained->heads[0], retained.get());
+    }
+    require(retained != nullptr && !malformed_world->names.find_first("Malformed") &&
+            !malformed_world->objects.count(retained->addr),
+            "binder teardown removed malformed external links and registries");
+    malformed_world.reset();
+  }
+  {
+    auto iter_world = std::make_shared<champions::simulation::rta::objects::World>();
+    std::shared_ptr<b::Obj> retained;
+    std::unique_ptr<champions::simulation::rta::Iterator> iter;
+    {
+      b::Variables binder({}, iter_world);
+      retained = binder.new_object({"Iterated"}, 0, {0, 0, 0}, 0);
+      iter_world->handles.add(retained->heads[0], retained.get());
+      iter = std::make_unique<champions::simulation::rta::Iterator>(retained->heads[0]);
+    }
+    require(iter->done() && !iter_world->names.find_first("Iterated") &&
+            !iter_world->objects.count(retained->addr),
+            "binder teardown invalidated a live iterator and removed its object");
+  }
+}
 void api_tests() {
   for(int dividend=-128; dividend<=128; ++dividend) {
     for(int divisor=-17; divisor<=17; ++divisor) {
@@ -925,6 +974,7 @@ void api_tests() {
   try {b::truncating_divide(power,{{},true});} catch(const std::domain_error &) {zero_threw=true;}
   require(zero_threw,"division empty signed zero divisor");
   setup_api_tests();
+  external_world_lifetime_test();
   host_api_tests();
   argument_api_tests();
   object_api_tests();

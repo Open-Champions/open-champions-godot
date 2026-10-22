@@ -247,6 +247,14 @@ Variables::Variables(std::shared_ptr<Memory> mem,
   if(!host->game) host->game = &host_owner;
 }
 Variables::~Variables() {
+  for (const auto &object : setup_objects) {
+    try {
+      world->unregister_external(*object);
+    } catch (const HandleError &) {
+      // HandlePool::clear rejects live iterators/paired nodes. Teardown must
+      // not throw from this implicitly noexcept destructor.
+    }
+  }
   if(host && host->game==&host_owner) host->game=nullptr;
 }
 Host::Value Variables::ext(const std::string &name, const Host::Arguments &args) {
@@ -297,9 +305,15 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
   // home_cell reads the standalone base projection only during initial linking.
   auto &base=static_cast<objects::GameObject &>(*obj);
   base.flags=object_flags; base.pos=position; base.angle=facing&65535;
-  world->handles.link(world->home_cell(base,true),base.heads[2],&base);
-  // Keep failed name-insertion prefixes alive, too, as the linked world does.
-  setup_objects.push_back(obj);
+  world->register_external(base);
+  try {
+    world->handles.link(world->home_cell(base,true),base.heads[2],&base);
+    // Keep failed name-insertion prefixes alive, too, as the linked world does.
+    setup_objects.push_back(obj);
+  } catch (...) {
+    world->unregister_external(base);
+    throw;
+  }
   for(const auto &name:names) object_names.add(name,obj.get());
   if(obj->props) for(const auto &entry:*obj->props)
     if(entry.compare(0,5,"name=")==0) object_names.add(entry.substr(5),obj.get());

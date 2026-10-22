@@ -9,6 +9,7 @@
 #include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_factory.hpp"
+#include "champions/world_queries.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/quests.hpp"
@@ -82,6 +83,11 @@ struct Counts {
   // Records the original constructs whose shared-seed draws the host did not
   // make (each draws at least once, in GameObject_ctor).
   std::uint64_t load_draws_unmodelled = 0;
+  // An eligible non-front-end load without an observed hud.lmp residency
+  // result cannot apply the 223 item draws. Count the gate and potential
+  // draws separately from constructor draws actually missed.
+  std::uint64_t item_load_gate_refusals = 0;
+  std::uint64_t item_load_draws_inferred = 0;
   // Unbuilt records by constructor address, and build refusals by reason.
   std::map<std::uint32_t, std::uint64_t> unbuilt_constructors;
   std::map<std::string, std::uint64_t> build_refusals;
@@ -262,6 +268,30 @@ public:
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.
   void set_executable(level_factory::Executable);
+  // The selected level and its monsters.bal payload, read from the owner's
+  // game folder at run time. The executable supplies the level table. Until
+  // both are present, a constructed creature's statistics remain unknown.
+  void set_level_stats(const std::string &level_name, const std::uint8_t *balance,
+                       std::size_t size);
+  // The selected level's WORLD payload supplies the terrain queries used by
+  // Player1_ctor's four exact free-spot searches.
+  void set_level_world(const std::uint8_t *world, std::size_t size);
+  // The level-entry inputs of Player1_ctor's marker ranking (research
+  // ref_objects.py player1_marker: prev_level, entrance, gate_travel, and the
+  // start rank 3 after a load from a save, docs/issues/arena-entry.md). Nothing
+  // in this host derives them, so Player1 placement is refused until the
+  // caller supplies them here. The caller owns tracing them to the original's
+  // sources (the previous level's qualified name, the entrance name, the
+  // gate-travel byte 0x41b51e, the load-from-save state).
+  struct Player1Entry {
+    std::string previous_level, entrance;
+    bool gate_travel = false, loaded_from_save = false;
+  };
+  void set_player1_entry(Player1Entry entry) { player1_entry_ = std::move(entry); }
+  // Execute the observed intro/hud.lmp gate. A missing residency result
+  // refuses seed advancement and counts the potentially omitted 223 draws.
+  void advance_first_level_items(const std::string &level_name,
+                                 std::optional<bool> hud_lmp_resident = std::nullopt);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
@@ -312,6 +342,8 @@ public:
   Stop run(const std::string &entry);
 
   const Counts &counts() const { return counts_; }
+  // Records a refused optional input (the host carries on without it).
+  void count_refusal(const std::string &reason) { counts_.build_refusals[reason] += 1; }
   const std::vector<Spawn> &spawns() const { return spawns_; }
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }
@@ -477,10 +509,22 @@ private:
   SharedRandom *external_seed_ = nullptr;
   SeedPolicy seed_policy_ = SeedPolicy::Exact;
   std::unique_ptr<level_factory::Executable> exe_;
+  struct BalanceRow {
+    std::uint16_t hash = 0;
+    std::array<std::uint32_t, 5> factors{};
+  };
+  std::vector<BalanceRow> balance_rows_;
+  std::uint32_t monster_level_ = 0;
+  std::string level_name_;
+  bool stats_ready_ = false;
+  bool seed_gate_observed_ = false;
+  std::optional<Player1Entry> player1_entry_;
+  std::unique_ptr<world_queries::Level> terrain_level_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
+  std::set<std::uint32_t> stats_built_;
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;

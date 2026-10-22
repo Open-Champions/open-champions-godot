@@ -409,7 +409,8 @@ void test_got_item_sound_unknown_currents() {
 }
 
 // docs/script-session.md sections 3-5: the factory decides what is registered;
-// a built creature is readable by hideMonster, its hit points are not.
+// A built creature without selected level statistics is readable by
+// hideMonster, but its hit points remain unknown.
 void test_classified_objects() {
   const auto hide = static_cast<std::size_t>(index_of("hideMonster"));
   const auto hp = static_cast<std::size_t>(index_of("getHitPoints"));
@@ -447,6 +448,56 @@ void test_classified_objects() {
   check((flags & 0x20) && (flags & 0x8000), "creature flag and the hidden flag");
   check(host.variables().memory.u8(gnaw->addr + 0x231) & 8, "the inert hidden bit");
   check(counts.stub_refusals == 2, "both refusals counted");
+}
+
+void test_hit_points_need_faithful_seed() {
+  const auto hp = static_cast<std::size_t>(index_of("getHitPoints"));
+  auto script = build_calls({{"start", {{"getHitPoints", {2000}}}}},
+                            {{2000, "gnawling"}});
+  constexpr std::uint32_t level_name_at = 0x7f0000;
+  auto stat_image = authored_executable();
+  const auto old_string = stat_image.string;
+  const auto old_byte = stat_image.byte;
+  stat_image.string = [old_string](std::uint32_t at) {
+    return at == level_name_at ? std::string("testlevel") : old_string(at);
+  };
+  stat_image.byte = [old_byte](std::uint32_t at) {
+    if (at >= 0x4f7210 && at < 0x4f7214)
+      return static_cast<std::uint8_t>(level_name_at >> (8 * (at - 0x4f7210)));
+    if (at == 0x4f7214 || (at >= 0x4f7240 && at < 0x4f7244))
+      return std::uint8_t{0};
+    return old_byte(at);
+  };
+  const std::uint8_t empty_balance[] = {0, 0};
+  for (int scenario = 0; scenario < 5; ++scenario) {
+    sc::Host host;
+    SharedRandom seed(20973);
+    host.bind_seed(&seed);
+    host.start_single_player();
+    host.set_executable(stat_image);
+    host.set_level_stats("testlevel", empty_balance, sizeof(empty_balance));
+    if (scenario == 1 || scenario >= 3)
+      host.advance_first_level_items("testlevel", true);
+    else if (scenario == 2)
+      host.advance_first_level_items("testlevel");
+    plant(host, script);
+    host.run_prestart();
+    // Scenario 3: an unbuilt record precedes the creature (its draw is not
+    // modelled). Scenario 4: it follows, so the creature's own seed was exact.
+    const auto records = scenario == 3
+        ? objects_blob({{"Cls0", "ghost"}, {"gnaw", "gnawling"}})
+        : scenario == 4 ? objects_blob({{"gnaw", "gnawling"}, {"Cls0", "ghost"}})
+                        : objects_blob({{"gnaw", "gnawling"}});
+    check(host.adopt_objects(records.data(), records.size()), "seed gate records adopt");
+    host.run_start();
+    const bool faithful = scenario == 1 || scenario == 4;
+    check(host.counts().executed[hp] == (faithful ? 1u : 0u) &&
+          host.counts().refused[hp] == (faithful ? 0u : 1u),
+          "getHitPoints requires observed gate and no earlier unbuilt draw");
+    if (scenario >= 3)
+      check(host.counts().load_draws_unmodelled == 1,
+            "earlier unbuilt record makes seed inexact");
+  }
 }
 
 void test_entrance_grid_and_particle() {
@@ -990,6 +1041,7 @@ int main(int argc, char **argv) {
   test_got_item_sound_unknown_currents();
   test_check_alive_which_unknown_currents();
   test_classified_objects();
+  test_hit_points_need_faithful_seed();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();

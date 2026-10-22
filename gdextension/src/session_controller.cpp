@@ -92,8 +92,9 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits"),
-                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)));
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)),
+                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()));
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -785,7 +786,10 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
                                                           const Dictionary &dialog,
-                                                          int64_t music_volume_bits) {
+                                                          int64_t music_volume_bits,
+                                                          const String &level_name,
+                                                          const PackedByteArray &balance,
+                                                          const PackedByteArray &world) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -822,6 +826,26 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    // Malformed statistics or WORLD are refused and counted; the script still
+    // attaches without them.
+    if (executable_ && !level_name.is_empty() && !balance.is_empty()) {
+      try {
+        next->set_level_stats(std::string(level_name.utf8().get_data()), balance.ptr(),
+                              static_cast<std::size_t>(balance.size()));
+      } catch (const std::exception &) {
+        next->count_refusal("Level statistics refused");
+      }
+    }
+    if (!world.is_empty()) {
+      try {
+        next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
+      } catch (const std::exception &) {
+        next->count_refusal("Level WORLD refused");
+      }
+    }
+    // The original checks hud.lmp residency. This attach path does not know
+    // it, so the host records the inferred draw count without moving the seed.
+    next->advance_first_level_items(std::string(level_name.utf8().get_data()));
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {
@@ -1233,6 +1257,8 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_pool_refused"] = static_cast<int64_t>(counts.objects_pool_refused);
   result["objects_unclassified"] = static_cast<int64_t>(counts.objects_unclassified);
   result["load_draws_unmodelled"] = static_cast<int64_t>(counts.load_draws_unmodelled);
+  result["item_load_gate_refusals"] = static_cast<int64_t>(counts.item_load_gate_refusals);
+  result["item_load_draws_inferred"] = static_cast<int64_t>(counts.item_load_draws_inferred);
   result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
   Dictionary build_refusals;
   for (const auto &kv : counts.build_refusals)
