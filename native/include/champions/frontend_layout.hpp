@@ -24,7 +24,7 @@ enum class Font { Medium, Small };
 enum class Align { Left, Centred, Wrapped, WrappedCentred };
 // Executed and Inferred are the research's labels. Host is anything the research
 // lists as Unknown or leaves out.
-enum class Evidence { Executed, Inferred, Host };
+enum class Evidence { Executed, Observed, Inferred, Host };
 const char *evidence_name(Evidence);
 
 struct Draw {
@@ -33,7 +33,8 @@ struct Draw {
   Evidence evidence = Evidence::Executed;
   int layer = 0;
   int x = 0, y = 0, w = 0, h = 0; // Rect uses x,y,w,h = left,top,width,height
-  std::uint32_t colour = 0;       // sprite or frame tint, rect colour, text colour
+  std::uint32_t colour = 0;       // sprite or frame tint, rect colour, text colour (the research word)
+  bool settled = false;           // the colour's alpha byte is fade state in the research; the host paints it opaque
   int style = 0;                  // Frame: ctile 0, border style 1, tile 2
   int min_w = 0;                  // Frame: the documented minimum-width call
   std::string lump, resource;     // Sprite
@@ -62,7 +63,7 @@ namespace layout {
 inline constexpr std::uint32_t LIST_BACKING_TINT = 0x80808080; // style-2 backing frame
 inline constexpr std::uint32_t LIST_CURSOR_TINT = 0x300000ff;  // style-0 selected-row frame
 inline constexpr std::uint32_t LIST_OVERLAY_TINT = 0x3f000000; // style-0 front overlay
-inline constexpr std::uint32_t PAUSE_TEXT = 0x80464646;        // pauseMenu_task batch (Observed)
+inline constexpr std::uint32_t PAUSE_TEXT = 0x80464646;        // pause batch 0x18d5e8 only (Observed)
 inline constexpr std::uint32_t SPRITE_TINT = 0x80808080;       // title and logo sprites
 
 struct Point {
@@ -76,9 +77,9 @@ struct ListSpec {
 };
 std::vector<Point> list_anchors(const ListSpec &);
 // The three ui_drawFrameImpl calls for a selected row: the style-0 cursor frame,
-// the style-2 backing frame and the style-0 overlay. extra is a host-measured
-// text width added to a narrow list (0 = the documented minimum-width calls).
-std::array<Draw, 3> list_frames(const ListSpec &, int selected, int extra = 0);
+// the style-2 backing frame and the style-0 overlay: the documented minimum-width
+// calls only (the research gives no text-width rule).
+std::array<Draw, 3> list_frames(const ListSpec &, int selected);
 // Row counts of the tables the offline path reaches (ref_frontend_layout.TABLES).
 ListSpec main_list();       // 0x4f6b88, state 0
 ListSpec game_type_list();  // 0x4f6bf8, state 1

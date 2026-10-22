@@ -56,13 +56,6 @@ func _units(text: String) -> PackedInt32Array:
 		out.append(c)
 	return out
 
-# Pixel width of a label in a game font (0 when no font is loaded).
-func text_width(font_key: String, text: String) -> int:
-	if not fonts.has(font_key) or dynamic_service == null or text.is_empty():
-		return 0
-	var r: Dictionary = dynamic_service.text_layout(fonts[font_key].bytes, _units(text), 0, 0, text.length(), true, 0, 0, 0, 0, false, 0, 100000, 0x80808080, -1, -1)
-	return int(r.get("width", 0))
-
 func _glyphs(f: Dictionary, units: PackedInt32Array, x: int, y: int, tint: int) -> Array:
 	var r: Dictionary = dynamic_service.text_layout(f.bytes, units, x, y, units.size(), true, 0, 0, 0, 0, false, 0, 100000, tint, -1, -1)
 	return r.get("glyphs", []) if r.get("ok", false) else []
@@ -97,10 +90,18 @@ func build(scene: Dictionary) -> int:
 			"frame":
 				_add_frame(d)
 			"rect":
-				_add({"layer": int(d.layer), "kind": "rect", "rect": Rect2(int(d.x), int(d.y), int(d.w), int(d.h)), "tint": int(d.colour)})
+				_add({"layer": int(d.layer), "kind": "rect", "rect": Rect2(int(d.x), int(d.y), int(d.w), int(d.h)), "tint": _tint(d)})
 			"text":
 				_add_text(d)
 	return items.size()
+
+# The research's colour word; its alpha byte is fade state, which the host paints
+# settled (opaque) when the native draw says so (Draw::settled, a Host choice).
+func _tint(d: Dictionary) -> int:
+	var c := int(d.colour)
+	if bool(d.get("settled", false)):
+		return (c & 0xffffff) | 0x80000000
+	return c
 
 func _add_frame(d: Dictionary) -> void:
 	if layout_service == null:
@@ -109,9 +110,9 @@ func _add_frame(d: Dictionary) -> void:
 	if not r.get("ok", false):
 		last_error = str(r.get("error", "menu_frame refused"))
 		return
-	_add({"layer": int(d.layer), "kind": "frame_box", "rect": Rect2(int(d.x), int(d.y), int(d.w), int(d.h)), "tint": int(d.colour), "pieces": r.draws.size()})
+	_add({"layer": int(d.layer), "kind": "frame_box", "rect": Rect2(int(d.x), int(d.y), int(d.w), int(d.h)), "tint": _tint(d), "pieces": r.draws.size()})
 	for piece in r.draws:
-		_add({"layer": int(d.layer), "kind": "sprite", "lump": "interfac.lmp", "resource": str(piece.resource), "x": int(piece.x), "y": int(piece.y), "clipped": bool(piece.clipped), "clip": piece.get("clip", {}), "tint": int(d.colour), "weave": true, "frame": true})
+		_add({"layer": int(d.layer), "kind": "sprite", "lump": "interfac.lmp", "resource": str(piece.resource), "x": int(piece.x), "y": int(piece.y), "clipped": bool(piece.clipped), "clip": piece.get("clip", {}), "tint": _tint(d), "weave": true, "frame": true})
 
 func _add_text(d: Dictionary) -> void:
 	var key := str(d.font)
@@ -119,11 +120,11 @@ func _add_text(d: Dictionary) -> void:
 	if text.is_empty():
 		return
 	if not fonts.has(key) or dynamic_service == null:
-		_add({"layer": int(d.layer), "kind": "host_text", "font": key, "x": int(d.x), "y": int(d.y), "text": text, "align": str(d.align), "width": int(d.wrap_width), "tint": int(d.colour)})
+		_add({"layer": int(d.layer), "kind": "host_text", "font": key, "x": int(d.x), "y": int(d.y), "text": text, "align": str(d.align), "width": int(d.wrap_width), "tint": _tint(d)})
 		return
 	var f: Dictionary = fonts[key]
 	var units := _units(text)
-	var tint := int(d.colour)
+	var tint := _tint(d)
 	var glyphs := []
 	match str(d.align):
 		"centred": glyphs = _centred(f, units, int(d.x), int(d.y), tint)

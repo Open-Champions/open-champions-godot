@@ -54,3 +54,34 @@ Not run: the export and Rosetta/x64 matrices of wave 23. This change touches no 
 - `frontend_capture.gd` prints a script error at `real_data.gd:280` (`class_call_static` of `ChampionsRealWorld.decode_texture` returns an int) when it starts the hub level. It comes from the base `real_data.gd`, not from this change, and the capture still completes. I left it alone as out of scope.
 - Sounds stay unvoiced until the research captures the `.anm` sound tables for these three clips.
 - Pixel-exact finished screens need a displayed capture of the original (title size, clip and fade; text-width frame expansion; intro picture). The research itself says MORE for those.
+
+## Audit fixes
+
+Source: `native-menus.md` (Claude audit, verdict FIX, 0 HIGH, 5 MEDIUM, 5 LOW). Evidence is the pinned research `t3/research-menus-layout dc458d5` (`docs/frontend-layout.md`, `tools/ref_frontend_layout.py`, `tools/ref_frontend_screens.py`). No new research was done. Each finding was either traced and cited or refused, labelled and counted.
+
+| Finding | Action |
+|---|---|
+| M1 list text colour `0x80464646` | **Refused.** `0x80464646` is the pause batch only (0x18d5e8). The front-end list batch 0x1a09e8 has fixture colour 0 and the parent batch 0x1e0dcc `0x64464646`. Front-end list rows now use a Host identity tint `0x80808080`, `Evidence::Host`; the test asserts only font, layer and anchor. |
+| M2 text widening | **Refused.** No width rule is traced (`frontend-layout.md:65,247`). `list_frames` emits only the executed minimum-width calls; the `extra` and `widths` plumbing is removed through the extension and `frontend_menus.gd`; the widening test is replaced by a minimum-width test. |
+| M3 invented alpha `0x80` | **Traced.** `Draw.colour` now carries the research word verbatim (`0x0A316864`, `0x08325D18`, `0x08585E5D`, `0x0068C7CC`, `0x001E6464`, `0x808080` for the message-box wrapper). A new `Draw.settled` flag says the alpha byte is fade state; the host (`frontend_view.gd`, `_tint`) paints it opaque. That paint choice is labelled Host in `docs/FRONTEND.md`. |
+| M4 colours on the wrong calls | **Fixed from `PLAYERSEL_PHASES` call order:** phase 3 header and description `0x0A316864`, points row and value `0x08325D18`, unselected stat rows `0x08585E5D`, selected `0x0068C7CC`. Phase 2 wide text `0x0A316864`. Test asserts all eight. |
+| M5 class-selection sounds and `(41,29)` text | **Refused.** Class selection has no phase of its own (`frontend-layout.md:132,146`); phase 1 is import selection. `CharClass` plays no menu sound, the `(41,29)` call is a Host text, and the class-page footer is Host. Phase-3 sounds are kept. Test: no `menu_sound` request on class confirm. |
+| L1 slot-list highlight over the label | Fixed: the row text is submitted before the highlight (later submission paints first). |
+| L2 NaN slider | Fixed: `!(live >= 0)` is rejected, then `min(live, 1)`. Test walks NaN, -1, +inf and 2.0. |
+| L3 pause and in-game options labels | New `Evidence::Observed`; the pause rows and the in-game options rows are Observed for font and colour (geometry stays Executed in the frames). `docs/FRONTEND.md` says so. |
+| L4 first-theme flags 5 | Documented in `Flow::notes()` and at the call site; the host always asks for flags 1 (condition not documented). Not changed. |
+| L5 Host-labelled coordinates | Accepted as labelled Host layout (no change). |
+
+Refusals counted: 4 behaviours (text widening, front-end list colour, class-selection sounds and phase-1 text, flags 5 branch). Other changes: `godot/tests/frontend_smoke.gd` now matches the `list row` role prefix.
+
+Verification (arm64 Release, `work/menus-r4/`):
+
+| Gate | Result |
+|---|---|
+| `ctest --test-dir build/native -j 3` | **226/226** after one rerun: `player-exact` timed out under machine load (load average ~130) in the full run and passes alone (221 s). `frontend-exact` 451 checks. |
+| `cmake --build build/godot-extension` | pass |
+| Godot dev matrix (`work/menus-r4/run-godot.py`) | **54/54 exit 0**; `frontend_smoke` 124 checks 0 failures (first run caught 3 stale role-name checks, fixed and rerun alone), `menu_smoke` 36 checks 0 failures |
+| FULL_TRACE (`combined-full-combat`, 2,620 checks, 0 failures) | `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, 31,622 bytes, **identical** to round 3 |
+| 111-level sweep, `r4` (`--scripts`) and `r4n` | both **111/111** tried, loaded and played; 230 checks, 0 failures, empty refusal list. Every deterministic count equals `m3`/`m3n`; only `audio.frames_pushed`, `memory.static_peak_bytes`, `text.frames_drawn.bust` (27 vs 32, timing) and `time.*_ms` differ |
+
+Not run: screenshot recapture (the front-end draws changed only in colour, widening and sounds).

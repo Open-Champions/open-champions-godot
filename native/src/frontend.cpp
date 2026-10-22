@@ -217,7 +217,9 @@ void Flow::enter_frontend(int code) {
   load_from_frontend_ = 1;
   music_.add_core_tasks();
   request("apply_music_volume", {}, music_.live);
-  music("front_end_music", "mx_maintheme_l.vag", 1); // frontend_run 0x1e09b0/0x1e09c4: flags 1 or 5
+  // frontend_run 0x1e09b0/0x1e09c4 requests flags 1 or 5; the condition that
+  // selects 5 is not documented, so this host always asks for 1 (see notes()).
+  music("front_end_music", "mx_maintheme_l.vag", 1);
   options_return_ = Screen::Main;
   load_return_ = Screen::Main;
   go(Screen::Main);
@@ -446,7 +448,8 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       import_context_ = "char"; // page 1 triangle: Import, card state 9
       request("import_ps2", "char");
     } else if (confirm) {
-      sound(menu_sound::select); // phase 1 accept (Executed, PLAYERSEL_SOUNDS)
+      // No menu sound here: PLAYERSEL_SOUNDS belongs to phase 1 (import selection),
+      // and class selection has no phase of its own (REFUSED, docs/FRONTEND.md).
       character_ = Character{};
       character_.model = cursor_;
       character_.class_index = class_of_model(cursor_);
@@ -456,7 +459,6 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       }
       go(Screen::CharAppearance);
     } else if (pressed & CANCEL) {
-      sound(menu_sound::back); // phase 1 back (Executed)
       go(Screen::Difficulty);
     }
     break;
@@ -763,6 +765,7 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("Intro film: MPEG-2 640x448 at 29.97 is not decoded by this client, so movie_isFinished never holds; a press after 30 frames ends it. porko_l.vag is queued held on stream 0 and released only when the movie is ready, so nothing plays.");
     break;
   case Screen::Main:
+    n.push_back("The first theme is requested with flags 1; the research lists flags 1 or 5 at 0x1e09b0/0x1e09c4 and does not document the condition that selects 5.");
     n.push_back("Row destinations are Executed (main_accept: game type, card load, options, credits with its music), dispatched by key. The row texts are the on-screen texts seen (Ran), host-authored: their lookup keys are not recorded.");
     n.push_back("Ran: the main menu takes input about 240 frames after the front end starts, and a choice in its first second can find the character screens' data unloaded. This host does not wait.");
     break;
@@ -797,6 +800,7 @@ std::vector<std::string> Flow::notes() const {
     break;
   case Screen::CharClass:
     n.push_back("Which models the page shows, and in which order, is not documented; all twelve are listed in model order. Triangle imports a PS2 character (page 8 sheet).");
+    n.push_back("Refused: class selection has no phase of its own in the research (phase 1 is import selection), so it plays no menu sound and draws no phase-1 text; the page footer is Host.");
     if (!start_known_)
       n.push_back("Class start stats g_classStartStats 0x4ef400 are read from the user's executable; none is loaded, so rows show spent points only.");
     break;

@@ -138,9 +138,9 @@ func run() -> void:
 	tap(CROSS)
 	check(int(fe.sounds.get("menu_main_accept.anm", 0)) == 1 and fe.sounds_voiced == 0, "accept requests its clip; the clips are not voiced")
 	check(fe.screen() == "options" and int(fe.view.cursor) == 1, "options on music")
-	check(fe.scene_view.draws.filter(func(d): return d.kind == "text" and d.role == "list row").size() == 13, "options draws thirteen rows")
+	check(fe.scene_view.draws.filter(func(d): return d.kind == "text" and str(d.role).begins_with("list row")).size() == 13, "options draws thirteen rows")
 	check(not fe.scene_view.draws.any(func(d): return d.resource == "title.tex"), "options has no title sprite")
-	var value_x: Array = fe.scene_view.draws.filter(func(d): return d.kind == "text" and d.role == "list row" and d.x == 297)
+	var value_x: Array = fe.scene_view.draws.filter(func(d): return d.kind == "text" and str(d.role).begins_with("list row") and d.x == 297)
 	check(value_x.size() == 3, "three value rows at x=297")
 	var before := int(fe.view.music_live)
 	fe.log_lines.clear()
@@ -319,7 +319,7 @@ func run() -> void:
 	if layouts.has("pause"):
 		var pause: Dictionary = layouts["pause"]
 		check(not pause.host_layout, "pause draws only documented calls")
-		var rows: Array = pause.draws.filter(func(d): return d.role == "list row")
+		var rows: Array = pause.draws.filter(func(d): return str(d.role).begins_with("list row"))
 		check(rows.size() == 5 and rows[0].y == 179 and rows[4].y == 267 and rows[0].font == "medium" and rows[0].layer == 7 and rows[0].colour == 0x80464646, "pause rows y=179..267, medium, layer 7")
 		var pf: Array = pause.draws.filter(func(d): return d.kind == "frame")
 		check(pf[1].x == 292 and pf[1].y == 168 and pf[1].w == 56 and pf[1].h == 144, "pause backing frame")

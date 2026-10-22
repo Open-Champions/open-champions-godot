@@ -33,11 +33,11 @@ submission first.
 
 | Element | Draw calls | Label |
 |---|---|---|
-| List rows (main, game type, players, mode, difficulty, options, pause) | centred medium font (0x4f7100), layer 7; first row y = origin_y - (11 rows + 6), step 22; origin (320,309), options (320,238), pause (320,240); value rows (options 0-2) shifted 23 left | Executed |
-| List frames | cursor (style 0, tint 0x300000ff, 40 wide, height 32 at an even y and 33 at an odd y), backing (style 2, 0x80808080, layer 7), front overlay (style 0, 0x3f000000, layer 6); the 4-row, pause and options calls match the research's asserted calls. Selected rows other than row 0 and text widening of narrow lists are Inferred | Executed / Inferred |
+| List rows (main, game type, players, mode, difficulty, options, pause) | centred medium font (0x4f7100) on layer 7; first row y = origin_y - (11 rows + 6), step 22; origin (320,309), options (320,238), pause (320,240); value rows (options 0-2) shifted 23 left. Geometry, front-end font and layer Executed. **Colour**: the front-end list batch 0x1a09e8 has a fixture colour of 0 and the parent batch 0x64464646, so the front-end list colour is a **Host** identity tint (0x80808080). The pause list font word is zero in the fixture (Unknown); its medium font and colour 0x80464646 come from the later text_begin 0x18d5e8 and are **Observed**, not Executed (same for the in-game options rows, which borrow it) | Executed geometry / Host colour / Observed pause |
+| List frames | cursor (style 0, tint 0x300000ff, 40 wide, height 32 at an even y and 33 at an odd y), backing (style 2, 0x80808080, layer 7), front overlay (style 0, 0x3f000000, layer 6); the 4-row, pause and options calls match the research's asserted calls. Selected rows other than row 0 are Inferred. **Refused:** text widening of narrow lists (the research says only that text width "can enlarge" them and traces no width rule), so only the executed minimum-width calls are emitted | Executed / Inferred |
 | Title | `FRONTEND.LMP/title.tex` at (141,15), layer 5, tint 0x80808080, states 0-4 only | Executed |
 | Publisher logo | `SOELOGO.LMP/soe_splash_url.tex` (192,330) and `soe_splash.tex` (64,50), layer 3, tint 0x80808080 | Executed |
-| Footer, message box, slot list, character, name entry | the research's small-font layer-6 batches, colours, frame and rectangle calls and text anchors; label text and the alpha byte (fade, settled to 0x80) are host choices | Executed positions, Host text |
+| Footer, message box, slot list, character, name entry | the research's small-font layer-6 batches, colours (the research word is carried verbatim in `Draw.colour`; its alpha byte is fade state, and the host paints it opaque when `Draw.settled` is set, a Host choice), frame and rectangle calls and text anchors; phase-3 colours follow the call order of `PLAYERSEL_PHASES` (header and description 0x0A316864, points row 0x08325D18, stat rows 0x08585E5D, selected 0x0068C7CC). Label text is a host choice | Executed positions, Host text |
 | Menu sounds | move `menu_main_toggle.anm`, select `menu_main_accept.anm`, back `menu_main_back.anm` (FX.LMP) are requested at the documented triggers and counted by the host (`sounds`) | Executed ids |
 | First theme | `mx_maintheme_l.vag` flags 1 goes through the one music-volume gate (0x3d4ccccc), also for the credits handoff (flags 3) | Executed |
 
@@ -80,6 +80,7 @@ None of the following is documented, so the flow refuses it or the host labels i
 - The exit code the pause menu's exit countdown leads to. `return_to_frontend()`
   restarts with `frontend_start(0)`, labelled.
 - Menu sound samples (see Layout): only the resource names are documented.
+- Audit fixes (refused, each counted in the report): text widening of narrow lists (no width rule traced); front-end list text colour (fixture 0; the pause colour is not borrowed); class selection's menu sounds and its phase-1 wrapped text (class selection has no phase of its own); the branch that selects first-theme flags 5 instead of 1 (the host always asks for 1).
 
 ## Flow (all native)
 
@@ -125,7 +126,7 @@ Session exit codes 1, 0x65 and 0xc9 restart the front end with `frontend_start`
 
 ## Tests
 
-- `frontend-exact` (CTest): 439 checks, including every asserted frame call, list anchor, sound trigger and the theme gate. Covers boot with and without a file, the
+- `frontend-exact` (CTest): 451 checks, including every asserted frame call, list anchor, sound trigger and the theme gate. Covers boot with and without a file, the
   Ran state order, auto-repeat timing, the slider walk against the executed model,
   commit and load, character creation, import, pause, lockout, save latch and exit
   codes.

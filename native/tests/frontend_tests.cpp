@@ -504,14 +504,11 @@ void layout_geometry_vectors() {
                   {{300, 179, 40, 33, 7, 0x300000ff, 0}, {292, 168, 56, 144, 7, 0x80808080, 2}, {301, 180, 54, 136, 6, 0x3f000000, 0}},
                   "pause frames");
   }
-  // A measured width widens a narrow list around its centre; zero is the documented call.
+  // No text-width rule is traced: a narrow list is always the documented minimum.
   {
-    const auto wide = list_frames(main_list(), 0, 60);
-    expect(wide[1].min_w == 56 && wide[1].w == 116 && wide[1].x + wide[1].w / 2 == 320, "widened backing is centred");
-    expect(wide[1].evidence == Evidence::Inferred && list_frames(main_list(), 0)[1].evidence == Evidence::Executed,
-           "widening is labelled Inferred, the minimum Executed");
-    const auto opt = list_frames(options_list(), 0, 60);
-    expect(opt[1].w == 212, "a value-row list keeps its 210 frame");
+    const auto narrow = list_frames(main_list(), 0);
+    expect(narrow[1].min_w == 56 && narrow[1].w == 56 && narrow[1].evidence == Evidence::Executed,
+           "narrow list: the executed minimum width only");
   }
   // Sprites.
   {
@@ -567,7 +564,9 @@ void layout_screen_vectors() {
            "main: title, three frames, four rows");
     for (const auto &d : s.draws)
       if (d.kind == Draw::Kind::Text)
-        expect(d.font == Font::Medium && d.layer == 7 && d.x == 320 && d.colour == 0x80464646, "main row font, layer, colour");
+        expect(d.font == Font::Medium && d.layer == 7 && d.x == 320 && d.evidence == Evidence::Host &&
+                   d.colour != layout::PAUSE_TEXT,
+               "main row font and layer traced; the colour is a Host choice, not the pause colour");
   }
   tap(f, DOWN);
   {
@@ -626,12 +625,24 @@ void layout_screen_vectors() {
     expect(!has_resource(s, "title.tex"), "options has no title sprite");
     int at_297 = 0, at_320 = 0;
     for (const auto &d : s.draws)
-      if (d.kind == Draw::Kind::Text && d.role == "list row")
+      if (d.kind == Draw::Kind::Text && d.role.rfind("list row", 0) == 0)
         (d.x == 297 ? at_297 : at_320) += 1;
     expect(at_297 == 3 && at_320 == 10, "options: three value rows, ten plain rows");
     expect(s.host_layout, "the option value bar is a labelled host drawing");
   }
   (void)g.take_requests();
+  // A non-finite or out-of-range slider word draws a bounded fill (no undefined cast).
+  for (std::uint32_t bits : {0x7fc00000u, 0xbf800000u, 0x7f800000u, 0x40000000u}) {
+    Flow n = to_main(options_with_music(bits));
+    tap(n, DOWN);
+    tap(n, DOWN);
+    tap(n, CROSS);
+    bool ok = false;
+    for (const auto &d : n.layout().draws)
+      if (d.role == "host slider fill")
+        ok = d.w >= 0 && d.w <= 72;
+    expect(ok, "slider fill width stays within the track");
+  }
   // Credits: the music handoff is requested with flags 3, exit requests the theme with flags 1.
   Flow c = to_main();
   tap(c, DOWN);
@@ -674,11 +685,29 @@ void layout_screen_vectors() {
   for (int i = 0; i < 5; ++i)
     tap(k, CROSS);
   expect(k.screen() == Screen::CharClass && k.layout().host_layout, "class page stays a labelled host layout");
+  (void)k.take_requests();
   tap(k, CROSS);
+  expect(!has(k.take_requests(), "menu_sound"), "class selection plays no phase-1 sound (refused)");
   tap(k, CROSS);
   expect(k.screen() == Screen::CharAbility, "ability page");
   {
     const auto s = k.layout();
+    // Phase 3 colours in call order (PLAYERSEL_PHASES): header and description
+    // 0x0A316864, points row and value 0x08325D18, selected stat 0x0068C7CC, others 0x08585E5D.
+    int checked = 0;
+    for (const auto &d : s.draws) {
+      if (d.role == "phase-3 header (text Host)" || d.role == "stat description (text Host)") {
+        expect(d.colour == 0x0A316864 && d.settled, "phase 3 header/description colour");
+        ++checked;
+      } else if (d.role == "phase-3 points row (text Host)" || d.role.rfind("points value", 0) == 0) {
+        expect(d.colour == 0x08325D18, "phase 3 points colour");
+        ++checked;
+      } else if (d.role == "stat label (text Host)") {
+        expect(d.colour == (d.y == 106 ? 0x0068C7CCu : 0x08585E5Du), "phase 3 stat row colour");
+        ++checked;
+      }
+    }
+    expect(checked == 8, "all phase 3 colours checked");
     int rows = 0;
     for (const auto &d : s.draws)
       if (d.role == "stat label (text Host)") {

@@ -143,10 +143,9 @@ public:
   int cursor() const { return cursor_; }
   std::vector<Entry> entries() const;
   std::vector<std::string> notes() const;
-  // The documented draw calls of the current screen, in submission order. widths
-  // are the host-measured pixel widths of the entry labels in the medium font
-  // (empty = unmeasured: the frames are the documented minimum-width calls).
-  Scene layout(const std::vector<int> &widths = {}) const;
+  // The documented draw calls of the current screen, in submission order. The
+  // frames are the documented minimum-width calls (no text-width rule is traced).
+  Scene layout() const;
   // Music requests the volume gate refused (music_playGlobal 0x2110e0).
   int gated_music() const { return gated_music_; }
   std::vector<Request> take_requests();

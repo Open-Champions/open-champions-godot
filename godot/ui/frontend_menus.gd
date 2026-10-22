@@ -27,7 +27,6 @@ var service: RefCounted
 var view_painter: RefCounted # ui/frontend_view.gd
 var scene_view := {}          # the native scene of the current screen
 var last_scene := {}
-var width_cache := {}         # label -> measured medium-font width
 var show_notes := false       # F1: the native notes over the screen
 var sounds := {}              # menu clip resource -> requests seen
 var sounds_voiced := 0        # requests that played (none: the clips are not voiced)
@@ -394,28 +393,17 @@ func _ensure_view() -> void:
 		return
 	view_painter.set_meta("tried", true)
 	view_painter.configure(real, scene.get("inspector"))
-	width_cache.clear()
 	last_scene = {}
 	queue_redraw()
 
 func fonts_loaded() -> bool:
 	return view_painter != null and view_painter.has_fonts()
 
-# Medium-font width of a row label, measured with the user's font (0 without one).
-func _label_width(label: String) -> int:
-	if not width_cache.has(label):
-		width_cache[label] = view_painter.text_width("medium", label) if view_painter != null else 0
-	return int(width_cache[label])
-
-# The native draw calls for the current screen, with the measured row widths.
+# The native draw calls for the current screen.
 func _scene() -> Dictionary:
 	if service == null or not booted:
 		return {}
-	var widths := PackedInt32Array()
-	if fonts_loaded():
-		for entry in view.get("entries", []):
-			widths.append(_label_width(str(entry.label)))
-	var result: Dictionary = service.layout(widths)
+	var result: Dictionary = service.layout()
 	return result if result.get("ok", false) else {}
 
 func _refresh() -> void:

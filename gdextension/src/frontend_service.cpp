@@ -77,11 +77,8 @@ class ChampionsFrontendService : public RefCounted {
     return "left";
   }
 
-  Dictionary scene_of(const PackedInt32Array &widths) {
-    std::vector<int> measured;
-    for (int i = 0; i < widths.size(); ++i)
-      measured.push_back(widths[i]);
-    const auto scene = flow_->layout(measured);
+  Dictionary scene_of() {
+    const auto scene = flow_->layout();
     Dictionary out;
     out["ok"] = true;
     out["screen"] = String::utf8(scene.screen.c_str());
@@ -104,6 +101,7 @@ class ChampionsFrontendService : public RefCounted {
       item["w"] = d.w;
       item["h"] = d.h;
       item["colour"] = int64_t(d.colour);
+      item["settled"] = d.settled;
       item["style"] = d.style;
       item["min_w"] = d.min_w;
       item["lump"] = String::utf8(d.lump.c_str());
@@ -204,7 +202,7 @@ protected:
   static void _bind_methods() {
     ClassDB::bind_method(D_METHOD("boot", "options_file"), &ChampionsFrontendService::boot);
     ClassDB::bind_method(D_METHOD("view"), &ChampionsFrontendService::view);
-    ClassDB::bind_method(D_METHOD("layout", "widths"), &ChampionsFrontendService::layout, DEFVAL(PackedInt32Array()));
+    ClassDB::bind_method(D_METHOD("layout"), &ChampionsFrontendService::layout);
     ClassDB::bind_method(D_METHOD("frame", "buttons", "stick_x", "stick_y"), &ChampionsFrontendService::frame, DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("set_name", "name"), &ChampionsFrontendService::set_name);
     ClassDB::bind_method(D_METHOD("load_class_start_stats", "executable_path"), &ChampionsFrontendService::load_class_start_stats);
@@ -241,9 +239,8 @@ public:
     }
   }
   Dictionary view() { return guarded([] {}); }
-  // The documented draw calls of the current screen. widths: the host-measured
-  // pixel widths of the entry labels in the medium font (empty = unmeasured).
-  Dictionary layout(const PackedInt32Array &widths) {
+  // The documented draw calls of the current screen.
+  Dictionary layout() {
     if (!flow_) {
       Dictionary out;
       out["ok"] = false;
@@ -251,7 +248,7 @@ public:
       return out;
     }
     try {
-      return scene_of(widths);
+      return scene_of();
     } catch (const std::exception &e) {
       return failure(e);
     }
