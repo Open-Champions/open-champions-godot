@@ -668,9 +668,28 @@ void test_selected_stub() {
   check(host.variables().memory.u16(gate->addr + 0x3ac) == 0, "the stub is not written");
 }
 
+void test_object_level_exit() {
+  auto built = build_calls({{"exit", {{"newWorld", {2000}}}}}, {{2000, "aa"}});
+  sc::Host host;
+  plant(host, built);
+  host.start_single_player();
+  const auto blob = gate_objects();
+  check(host.adopt_objects(blob.data(), blob.size()), "exit record adopted");
+  check(host.run_object_entry(1, "exit") == sc::Stop::Refused,
+        "an absent record cannot supply exit context");
+  check(host.run_object_entry(0, "exit") == sc::Stop::Complete,
+        "an object exit runs its authored script public");
+  check(host.variables().memory.cstr(0x41b6d0) == "aa" &&
+            host.variables().memory.read(0x41b720) == 255,
+        "newWorld writes the documented next-world request");
+  check(host.variables().memory.word(SELECTED_WORD) == 0 &&
+            host.variables().memory.word(0x4d8ae4) == 0,
+        "object script context is released after the call");
+}
+
 void test_refusals() {
   // Item and executed-callee routes have their own tests; these still refuse.
-  const char *names[] = {"newWorld", "givePlayerRandom", "setInfo", "dropItem",
+  const char *names[] = {"givePlayerRandom", "setInfo", "dropItem",
                          "rootMonster", "followPath", "cutScene", "sound"};
 
   std::vector<Call> calls;
@@ -999,6 +1018,7 @@ int main(int argc, char **argv) {
   text_host::test_text_refusals();
   text_host::test_charm_live_target();
   test_selected_stub();
+  test_object_level_exit();
   test_refusals();
   test_wait_then_complete();
   test_prestart_before_objects();

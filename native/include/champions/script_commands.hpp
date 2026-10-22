@@ -310,6 +310,12 @@ public:
   void on_ready_tick();
   // One named public. Does not by itself mark the level as started.
   Stop run(const std::string &entry);
+  // Object-driven script starter (Trigger_run / obj_runActionScripts): sets
+  // the selected object and active player globals around a named public.
+  // The index is the original objects.ob record index; a record that made no
+  // object refuses instead of substituting another object's context.
+  Stop run_object_entry(std::size_t record_index, const std::string &entry,
+                        unsigned active_player = 0);
 
   const Counts &counts() const { return counts_; }
   const std::vector<Spawn> &spawns() const { return spawns_; }
@@ -481,6 +487,7 @@ private:
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
+  std::vector<std::uint32_t> record_addresses_;
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;

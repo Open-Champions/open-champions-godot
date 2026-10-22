@@ -97,7 +97,9 @@ void Host::stub(const level_flow::Record &record, std::uint32_t address,
 // record the factory constructs takes its pool block, built or not, so the
 // pool runs out where the original's would.
 bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
-  for (const auto &record : records) {
+  record_addresses_.assign(records.size(), 0);
+  for (std::size_t index = 0; index < records.size(); ++index) {
+    const auto &record = records[index];
     // GameObject_ctor step 7: name= values in double quotes are unquoted in place.
     std::vector<std::string> props = record.props;
     for (auto &entry : props)
@@ -126,12 +128,16 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
       continue;
     }
     const auto result = build(record, outcome, address, props);
+    if (variables_->object_properties.count(address))
+      record_addresses_[index] = address;
     if (result == Build::Built) {
       counts_.objects_built += 1;
       continue;
     }
-    if (result == Build::NotBuilt)
+    if (result == Build::NotBuilt) {
       stub(record, address, props, outcome.size);
+      record_addresses_[index] = address;
+    }
     counts_.objects_unbuilt += 1;
     counts_.load_draws_unmodelled += 1;
     counts_.unbuilt_constructors[outcome.constructor()] += 1;
