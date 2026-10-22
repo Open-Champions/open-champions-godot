@@ -93,6 +93,9 @@ struct Counts {
   // object's field no ported code wrote (hit points). Each is also in
   // refused[].
   std::uint64_t stub_refusals = 0;
+  // Why: "command: reason" (an undecided factory row by constructor, a class
+  // the factory made no row for, or an unresolved name argument).
+  std::map<std::string, std::uint64_t> stub_refusal_reasons;
   // Routed commands refused because, for this state, they would reach a
   // callee research did not execute or a case the port refuses: a charm
   // target word the host's handle pool does not hold, a music volume or a
@@ -401,7 +404,7 @@ private:
   Stop enter(const std::string &name, bool optional);
   Stop enter_level(const char *name);
   bool seed_refused() const;
-  bool touches_stub(std::size_t index, amx::Machine &machine) const;
+  bool touches_stub(std::size_t index, amx::Machine &machine);
   bool adopt_classified(const std::vector<level_flow::Record> &);
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,

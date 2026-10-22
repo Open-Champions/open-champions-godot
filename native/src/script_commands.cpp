@@ -2,6 +2,7 @@
 #include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -339,15 +340,18 @@ void Host::refuse(std::size_t index, amx::Machine &machine) {
 // Reads the name argument as the binder does (the cell at params + 4). An
 // address the machine refuses makes the binder use a remembered string slot,
 // which the host does not track; that counts as touching a stub.
-bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
+bool Host::touches_stub(std::size_t index, amx::Machine &machine) {
   if (selected_form(kRows[index].name))
     return stubs_.count(variables_->memory.word(SELECTED_WORD)) != 0;
   const auto *read = stub_read(kRows[index].name);
   if (!read || (stubs_.empty() && built_.empty()))
     return false;
   const auto address = machine.cell(machine.params + 4);
-  if (machine.get_addr(address) != amx::ERR_NONE)
+  const std::string command = kRows[index].name;
+  if (machine.get_addr(address) != amx::ERR_NONE) {
+    counts_.stub_refusal_reasons[command + ": name argument is not a resolvable address"] += 1;
     return true;
+  }
   const bool hide_show = std::strcmp(kRows[index].name, "hideMonster") == 0 ||
                          std::strcmp(kRows[index].name, "showMonster") == 0;
   const bool generate = std::strcmp(kRows[index].name, "generateMonster") == 0;
@@ -362,6 +366,11 @@ bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
         continue;
       if (generate && info != stub_info_.end() && info->second.constructor != SCRIPT_GENERATOR_CTOR)
         continue;
+      char at[32];
+      std::snprintf(at, sizeof at, "0x%06x", info == stub_info_.end() ? 0u : info->second.constructor);
+      counts_.stub_refusal_reasons[command + ": " + (info == stub_info_.end() ? "stub without a factory row" :
+          info->second.creature == level_factory::Creature::Unknown ? std::string("undecided row, constructor ") + at
+                                                                    : std::string("constructor ") + at)] += 1;
       return true;
     }
     // A built creature's hit points come from Creature_setStats, which is not
