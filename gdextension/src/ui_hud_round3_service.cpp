@@ -1,5 +1,6 @@
 #include "champions/hud_dynamic.hpp"
 #include "champions/ui_composite.hpp"
+#include "champions/ui_text_gaps.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -15,6 +16,7 @@ namespace {
 using namespace godot;
 namespace H = champions::hud_dynamic;
 namespace C = champions::ui_composite;
+namespace G = champions::ui_text_gaps;
 namespace F = champions::simulation::rta;
 
 Dictionary failure(const std::exception &e) {
@@ -22,6 +24,25 @@ Dictionary failure(const std::exception &e) {
   d["ok"] = false;
   d["error"] = String::utf8(e.what());
   return d;
+}
+// A call of the research model as {name, args}: words are unsigned 64-bit ints,
+// names are strings.
+Array calls_array(const std::vector<G::Call> &calls) {
+  Array out;
+  for (const auto &c : calls) {
+    Dictionary d;
+    d["name"] = String::utf8(c.name.c_str());
+    Array args;
+    for (const auto &a : c.args) {
+      if (const auto *w = std::get_if<std::uint32_t>(&a))
+        args.push_back(int64_t(*w));
+      else
+        args.push_back(String::utf8(std::get<std::string>(a).c_str()));
+    }
+    d["args"] = args;
+    out.push_back(d);
+  }
+  return out;
 }
 Dictionary success() {
   Dictionary d;
@@ -87,10 +108,13 @@ protected:
                          &ChampionsUiHudRound3Service::minimap_player_blip);
     ClassDB::bind_method(D_METHOD("minimap_object_blip", "flags_c", "flags_hi", "flags_lo"),
                          &ChampionsUiHudRound3Service::minimap_object_blip);
-    ClassDB::bind_method(D_METHOD("bust_panel", "has_maximum", "value", "maximum", "meter_width",
-                                  "tick", "text_alpha", "sprite_alpha", "portrait_w", "portrait_h",
-                                  "frame_w", "frame_h", "body", "value_text"),
-                         &ChampionsUiHudRound3Service::bust_panel);
+    ClassDB::bind_method(D_METHOD("ui_ramps_step", "pulse", "fade"), &ChampionsUiHudRound3Service::ui_ramps_step);
+    ClassDB::bind_method(D_METHOD("help_plan", "delay", "pulse", "glyph_word", "wrap_height", "label_width", "has_title", "has_body"),
+                         &ChampionsUiHudRound3Service::help_plan);
+    ClassDB::bind_method(D_METHOD("bust_plan", "latch", "fade", "value", "maximum", "sim_frame", "sizes"),
+                         &ChampionsUiHudRound3Service::bust_plan);
+    ClassDB::bind_method(D_METHOD("compass_plan", "dialog_open", "shown"), &ChampionsUiHudRound3Service::compass_plan);
+    ClassDB::bind_method(D_METHOD("confirm_glyph", "layout_byte"), &ChampionsUiHudRound3Service::confirm_glyph);
     ClassDB::bind_method(D_METHOD("flying_step", "life", "alpha"),
                          &ChampionsUiHudRound3Service::flying_step);
     ClassDB::bind_method(D_METHOD("flying_draw", "kind", "crit", "alpha", "x_off", "y_off",
@@ -174,28 +198,113 @@ public:
       return failure(e);
     }
   }
-  Dictionary bust_panel(bool has_maximum, int value, int maximum, int meter_width, int tick,
-                        int text_alpha, int sprite_alpha, int portrait_w, int portrait_h,
-                        int frame_w, int frame_h, String body, String value_text) const {
+  // Session step 13 (docs/ui-text-gaps.md 1) on four slots of raw floats.
+  Dictionary ui_ramps_step(const PackedInt64Array &pulse, const PackedInt64Array &fade) const {
     try {
-      auto records = H::bustPanel(has_maximum, value, maximum, meter_width, tick,
-                                  static_cast<uint32_t>(text_alpha),
-                                  static_cast<uint32_t>(sprite_alpha), portrait_w, portrait_h,
-                                  frame_w, frame_h, body.utf8().get_data(),
-                                  value_text.utf8().get_data());
-      Array out;
-      for (const auto &r : records)
-        out.push_back(submission(r));
-      PackedInt32Array order;
-      for (auto i : H::painterIndices(records))
-        order.push_back(int(i));
+      if (pulse.size() != 4 || fade.size() != 4)
+        throw std::invalid_argument("four slots");
+      G::Ramps r;
+      for (int i = 0; i < 4; ++i) {
+        r.pulse[size_t(i)] = raw_of(pulse[i]);
+        r.fade[size_t(i)] = raw_of(fade[i]);
+      }
+      r = G::rampsStep(r);
+      PackedInt64Array p, f;
+      for (int i = 0; i < 4; ++i) {
+        p.push_back(int64_t(r.pulse[size_t(i)]));
+        f.push_back(int64_t(r.fade[size_t(i)]));
+      }
       auto d = success();
-      d["submissions"] = out;
-      d["order"] = order;
+      d["pulse"] = p;
+      d["fade"] = f;
       return d;
     } catch (const std::exception &e) {
       return failure(e);
     }
+  }
+  // The draw calls of help_task for an open box (docs/ui-text-gaps.md 2). The
+  // pointers are stand-ins the caller maps back to its own units: 1 title, 2 body.
+  Dictionary help_plan(int delay, int64_t pulse, int64_t glyph_word, int wrap_height, int label_width,
+                       bool has_title, bool has_body) const {
+    try {
+      G::HelpState st;
+      st.delay = delay;
+      st.pulse = raw_of(pulse);
+      st.glyph_word = static_cast<uint32_t>(glyph_word);
+      st.wrap_height = wrap_height;
+      st.label_width = label_width;
+      st.title = has_title ? 1 : 0;
+      st.body = has_body ? 2 : 0;
+      st.font_med = 0x4f7100;
+      st.num_players = 0; // the confirm loop is the host's (strings.cpp help_task)
+      auto r = G::helpTask(st);
+      auto d = success();
+      d["calls"] = calls_array(r.calls);
+      return d;
+    } catch (const std::exception &e) {
+      return failure(e);
+    }
+  }
+  // hud_drawBust (docs/ui-text-gaps.md 3). sizes maps a resource name to
+  // [width, height]; a name the draw needs and the map lacks refuses.
+  Dictionary bust_plan(int latch, int64_t fade, int value, int maximum, int sim_frame, const Dictionary &sizes) const {
+    try {
+      G::BustState st;
+      st.latch = static_cast<int8_t>(latch);
+      st.fade = raw_of(fade);
+      st.value = value;
+      st.maximum = maximum;
+      st.sim_frame = sim_frame;
+      st.font_small = 0x4f7104;
+      st.tex = [&](const std::string &name) {
+        const Variant key = String::utf8(name.c_str());
+        if (!sizes.has(key))
+          throw std::invalid_argument("no size for " + name);
+        const Array wh = sizes[key];
+        return G::TexSize{int(wh[0]), int(wh[1])};
+      };
+      auto r = G::hudDrawBust(st);
+      auto d = success();
+      d["calls"] = calls_array(r.calls);
+      d["fade"] = int64_t(r.fade);
+      d["latch"] = int(r.latch);
+      d["value"] = int(r.value);
+      return d;
+    } catch (const std::exception &e) {
+      return failure(e);
+    }
+  }
+  // The compass label (docs/ui-text-gaps.md 5). The world matrix and the mesh
+  // need the game camera's view matrix: the label alone is planned here, and the
+  // gate words the host does not model are assumed open (reported by the caller).
+  Dictionary compass_plan(bool dialog_open, bool shown) const {
+    try {
+      G::CompassState st;
+      st.dialog_open = dialog_open ? 1 : 0;
+      st.shown = shown ? 1 : 0;
+      st.font_small = 0x4f7104;
+      st.view = {0x3f800000, 0, 0, 0, 0, 0x3f800000, 0, 0, 0, 0, 0x3f800000, 0, 0, 0, 0, 0x3f800000};
+      auto r = G::hudDrawCompass(st);
+      Array label;
+      for (const auto &c : r.calls)
+        if (c.name != "model_draw")
+          label.push_back(calls_array({c})[0]);
+      auto d = success();
+      d["calls"] = label;
+      d["passes"] = int(r.calls.size()) - int(label.size());
+      return d;
+    } catch (const std::exception &e) {
+      return failure(e);
+    }
+  }
+  // The drawn confirm glyph for the observed layout byte only (docs 7).
+  Dictionary confirm_glyph(int layout_byte) const {
+    const auto g = G::confirmGlyph(static_cast<int8_t>(layout_byte));
+    if (!g)
+      return failure(std::invalid_argument("layout byte is not observed; its glyph is inferred or unwritten"));
+    auto d = success();
+    d["glyph"] = int64_t(*g);
+    return d;
   }
   Dictionary flying_step(int life, int alpha) const {
     try {

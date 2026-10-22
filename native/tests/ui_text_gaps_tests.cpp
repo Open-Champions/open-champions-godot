@@ -387,7 +387,7 @@ void hand() {
   hs.wrap_height = 42;
   hs.label_width = 60;
   const auto drawn = G::helpTask(hs);
-  ok(drawn.calls.size() == 14, "help box draws its 14 documented calls with a title and body");
+  ok(drawn.calls.size() == 13, "help box draws 13 recorded calls (sprintf is not an outward call here)");
   hs.dl_free = 2999;
   hs.pads[0] = 0x40;
   const auto starved = G::helpTask(hs);

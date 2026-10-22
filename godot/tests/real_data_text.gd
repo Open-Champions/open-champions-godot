@@ -59,8 +59,10 @@ func run() -> void:
 	var seen_message := false
 	var seen_help := false
 	var seen_bust := false
+	var seen_meter := false
+	var seen_dialog_glyph := false
 	for index in range(from, to):
-		if seen_message and seen_help and seen_bust: break
+		if seen_message and seen_help and seen_bust and seen_meter: break
 		scene.return_to_selection()
 		await frames(3)
 		if not scene.load_real_level(index):
@@ -80,8 +82,9 @@ func run() -> void:
 		var message := int(hud.get("message_frames", 0)) > 0 and not seen_message
 		var help: bool = hud.get("help_open", false) and not seen_help
 		var bust := int(hud.get("bust_shown", 0)) > 0 and int(hud.get("bust_max", 0)) == -1 and not seen_bust
-		if not (message or help or bust): continue
-		print("text_level_index ", index, " message ", message, " help ", help, " bust ", bust)
+		var meter := int(hud.get("bust_shown", 0)) > 0 and int(hud.get("bust_max", -1)) != -1 and not seen_meter
+		if not (message or help or bust or meter): continue
+		print("text_level_index ", index, " message ", message, " help ", help, " bust ", bust, " meter ", meter)
 		# Let the overlay run its displayed frames, then look at it.
 		var drawn_before: Dictionary = scene.text_hud.drawn.duplicate()
 		await frames(12)
@@ -89,6 +92,18 @@ func run() -> void:
 			seen_message = true
 			check(int(scene.text_hud.drawn.message) > int(drawn_before.message), "a real setInfo message is drawn")
 			await capture("text-message-%d" % index)
+		if meter:
+			seen_meter = true
+			check(int(scene.text_hud.drawn.bust) > int(drawn_before.bust), "a real bust meter panel is drawn")
+			var clipped := 0
+			var wraps := 0
+			for item in scene.text_hud.items:
+				if item.kind == "sprite" and item.clipped: clipped += 1
+				if item.kind == "text" and item.font == "gamefontsmall.fnt": wraps += 1
+			check(clipped == 1, "the bust meter draws exactly one clipped bar")
+			check(wraps == 1, "the bust caption is one wrap in gamefontsmall")
+			add("bust.meter_seen")
+			await capture("text-meter-%d" % index)
 		if bust:
 			seen_bust = true
 			check(int(scene.text_hud.drawn.bust) > int(drawn_before.bust), "a real bust panel is drawn")
@@ -96,6 +111,15 @@ func run() -> void:
 		if help:
 			seen_help = true
 			check(int(scene.text_hud.drawn.help) > int(drawn_before.help), "a real help box is drawn")
+			# docs/UI_TEXT_GAPS.md: the inner ctile frame (tint 0x3f000000), the glyph and the label.
+			var inner := 0
+			var texts := 0
+			for item in scene.text_hud.items:
+				if item.kind == "sprite" and str(item.resource).begins_with("ctile") and int(item.tint) == 0x3f000000: inner += 1
+				if item.kind == "text" and item.font == "gamefontmed.fnt": texts += 1
+			check(inner > 0, "the help box draws its inner ctile frame")
+			check(texts >= 3, "the help box draws title, body, glyph and label text")
+			add("help.inner_frame_pieces", inner)
 			var th: Dictionary = scene.controller.text_hud()
 			print("help_debug paused_by_help ", th.get("help_paused"), " session_paused ", scene.raw_observation.get("paused"), " delay ", th.get("help_close_delay"), " pulses ", th.get("pulse_starts"))
 			check(th.get("help_paused", false), "an open help box pauses the session")

@@ -254,6 +254,30 @@ inline void run(Check check, std::string &where) {
   check(d.visible.size() == 1, "host: node 2 offers its one choice");
   const int ticks = run_to_close(host);
   check(!d.is_open() && d.cam_move == 0 && ticks < 4000, "host: the conversation closes through the swoop out");
+  // The same conversation with the host's own g_uiFadeIn stepped once per displayed frame
+  // (docs/ui-text-gaps.md 1): the end's message 3 waits for the fade to reach exactly 1.0,
+  // which takes nine displayed frames after the closing restart.
+  {
+    sc::Host fading;
+    check(load(fading, script, objects), "fade host: script loads");
+    fading.attach_dialog(level, services);
+    fading.run_start();
+    check(fading.use(0, front) == "script", "fade host: the use button runs dialogScript");
+    int t = 0;
+    int closing_at = -1;
+    for (; t < 4000 && (fading.dialog().is_open() || fading.dialog().cam_move != 0); ++t) {
+      sc::DialogInputs in;
+      in.pad = t % 4 == 3 ? 0x40u : 0u;
+      in.fade = fading.ui_ramps().fade[0];
+      fading.dialog_tick(in);
+      fading.on_ready_tick();
+      if (closing_at < 0 && fading.dialog().closing != 0)
+        closing_at = t;
+      fading.ui_frame_step();
+    }
+    check(!fading.dialog().is_open() && t < 4000, "fade host: the conversation still closes");
+    check(closing_at >= 0 && t - ticks == 9, "fade host: message 3 comes nine displayed frames later than with a fade held at 1.0");
+  }
   const auto &c = host.dialog_counts();
   check(c.start_messages == 1 && c.opens == 1 && c.ends == 1, "host: one message 0, one open, one end");
   check(c.choices_taken == 3 && c.nodes_shown == 3, "host: three choices taken over nodes 2, 0, 1");

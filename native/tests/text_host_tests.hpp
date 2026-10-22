@@ -83,6 +83,10 @@ void test_text_commands() {
             host.sound().slots[29].tracks == 0 && host.sound().slots[31].frozen == 1,
         "each chime takes the highest free slot and plays while frozen");
   check(host.ui_pulse_starts() == 2, "each opening starts the UI pulse");
+  check(host.ui_ramps().pulse[0] == 0x40000000u, "ui_startPulse(0) stores 2.0 in g_uiPulse[0]");
+  host.ui_frame_step();
+  check(host.ui_ramps().pulse[0] == champions::ui_text_gaps::pulseRamp(champions::ui_text_gaps::TWO, 1)[0],
+        "the pulse decays by 0.8 of its excess per displayed frame");
   // HUD Run: the bust is a 5-tick lease, the message counts down per tick.
   for (int tick = 0; tick < 5; ++tick)
     host.on_ready_tick();

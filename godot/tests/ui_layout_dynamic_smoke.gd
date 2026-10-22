@@ -69,8 +69,11 @@ func _run() -> void:
 		check(present.get("ok", false) and present.colour == 0x00ff0099, "present brightness")
 		var label: Dictionary = round3.compass_label()
 		check(label.get("ok", false) and label.x == 65 and label.y == 394 and label.colour == 0x632f6159, "compass label")
-		var bust: Dictionary = round3.bust_panel(false, 1, 1, 8, 0, 128, 128, 32, 32, 64, 80, "A", "1")
-		check(bust.get("ok", false) and bust.order[0] == bust.submissions.size() - 1 and bust.submissions[0].batch == 1 and bust.submissions[1].batch == 1, "bust batch")
+		var bust: Dictionary = round3.bust_plan(0, 0x3f800000, 1, -1, 0, {"frame.tex": [64, 80], "<portrait>": [32, 32], "fieldnumber.tex": [32, 16]})
+		check(bust.get("ok", false) and bust.calls.size() == 11 and bust.calls[0].name == "text_begin" and int(bust.calls[0].args[0]) == 0x4f7104, "bust draws the caption in gamefontsmall (word 0x4f7104)")
+		var meter: Dictionary = round3.bust_plan(0, 0x3f800000, 1, 2, 0, {"frame.tex": [64, 80], "<portrait>": [32, 32], "bar_yellow00.tex": [8, 4]})
+		check(meter.get("ok", false), "bust with a maximum is planned: one wrap, the meter sprites")
+		check(round3.bust_plan(0, 0x3f800000, 1, 2, 0, {}).get("ok", true) == false, "a missing texture size refuses")
 		check(round3.medal_prompt(true, true, true, true, true).get("shown", true) == false, "medal paused")
 		check(round3.refused("minimap_projector").get("ok", false) == false, "projector refused")
 		check(round3.refused("compass_mesh").get("ok", false) == false, "compass mesh refused")
@@ -79,14 +82,6 @@ func _run() -> void:
 		check(round3.refused("font_header").get("ok", false) == false, "font header refused")
 		# Audit HUD-1: damage numbers come from damage_apply, never from an HP drop.
 		check(not round3.has_method("hp_drop_text"), "HUD-1 no HP-drop damage-number trigger in the service")
-		# Audit HUD-6: the maximum branch's second wrap is undocumented.
-		check(round3.bust_panel(true, 1, 2, 8, 0, 128, 128, 32, 32, 64, 80, "A", "1").get("ok", true) == false, "HUD-6 bust panel with a maximum is refused")
-		# Audit HUD-7: only the sprite alpha is documented, not its RGB.
-		var rgb_free: bool = bust.get("ok", false)
-		for record in bust.get("submissions", []):
-			if record.kind == "sprite":
-				rgb_free = rgb_free and not record.has("tint") and int(record.get("alpha", -1)) == 128
-		check(rgb_free, "HUD-7 bust sprites carry only the documented alpha")
 		_check_round3_overlay()
 	print("UI dynamic layout GDExtension smoke: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)

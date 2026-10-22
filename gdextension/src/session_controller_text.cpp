@@ -47,6 +47,9 @@ void ChampionsSessionController::bind_text_methods() {
                        &ChampionsSessionController::set_text_sources);
   ClassDB::bind_method(D_METHOD("set_level_text", "tables"), &ChampionsSessionController::set_level_text);
   ClassDB::bind_method(D_METHOD("text_hud"), &ChampionsSessionController::text_hud);
+  ClassDB::bind_method(D_METHOD("ui_frame"), &ChampionsSessionController::ui_frame);
+  ClassDB::bind_method(D_METHOD("set_ui_frame_driver", "driven"), &ChampionsSessionController::set_ui_frame_driver);
+  ClassDB::bind_method(D_METHOD("text_key_units", "key"), &ChampionsSessionController::text_key_units);
   ClassDB::bind_method(D_METHOD("help_frame", "confirm"), &ChampionsSessionController::help_frame);
 }
 
@@ -137,6 +140,9 @@ Dictionary ChampionsSessionController::text_hud() const {
     d["bust_value"] = int64_t(static_cast<std::int32_t>(hud.bust_value));
     d["bust_max"] = int64_t(static_cast<std::int32_t>(hud.bust_max));
     d["compass_shown"] = int64_t(hud.compass_shown);
+    // g_simFrame (0x44fdcc) is taken as the ready-tick count: bar frame (t / 2) % 4.
+    d["sim_frame"] = int64_t(current_.ready_ticks);
+    d["dialog_open"] = scripts_->dialog_attached() && scripts_->dialog().is_open();
     d["compass_label"] = units(hud.compass_label);
     d["latch"] = int64_t(hud.latch);
     d["pulse_starts"] = int64_t(scripts_->ui_pulse_starts());
@@ -203,4 +209,39 @@ Dictionary ChampionsSessionController::help_frame(bool confirm) {
   } catch (const std::exception &e) {
     return text_failure(e);
   }
+}
+
+Dictionary ChampionsSessionController::ui_frame() {
+  Dictionary d;
+  d["ok"] = false;
+  if (!scripts_)
+    return d;
+  const auto &r = scripts_->ui_ramps();
+  PackedInt64Array pulse, fade;
+  for (std::size_t i = 0; i < 4; ++i) {
+    pulse.push_back(int64_t(r.pulse[i]));
+    fade.push_back(int64_t(r.fade[i]));
+  }
+  d["pulse"] = pulse;
+  d["fade"] = fade;
+  scripts_->ui_frame_step();
+  d["ok"] = true;
+  return d;
+}
+
+Dictionary ChampionsSessionController::set_ui_frame_driver(bool driven) {
+  ui_frame_driven_ = driven;
+  Dictionary d;
+  d["ok"] = true;
+  d["driven"] = ui_frame_driven_;
+  return d;
+}
+
+PackedInt32Array ChampionsSessionController::text_key_units(const String &key) const {
+  PackedInt32Array out;
+  if (!scripts_ || !scripts_->has_text())
+    return out;
+  for (const auto u : scripts_->text_peek(key.utf8().get_data()))
+    out.push_back(int32_t(u));
+  return out;
 }

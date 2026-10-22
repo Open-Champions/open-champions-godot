@@ -121,44 +121,6 @@ BustMeter bustMeter(int value, int maximum, int width, int tick) {
   const int rounded = F::round_half_away(F::mul(F::div(fill, span), wide));
   return {"bar_yellow0" + std::to_string(n) + ".tex", 521 + rounded - 2};
 }
-Records bustPanel(bool has_maximum, int value, int maximum, int meter_width,
-                  int tick, std::uint32_t text_alpha, std::uint32_t sprite_alpha,
-                  int portrait_w, int portrait_h, int frame_w, int frame_h,
-                  const std::string &body, const std::string &value_text) {
-  // research-ui 1ed740a docs/hud-dynamic.md section 7: with a maximum the
-  // batch is "wrapped line, and ... the second wrap", and the second wrap's
-  // arguments are not given (audit HUD-6). The meter itself is bustMeter.
-  if (has_maximum)
-    undocumented("bust panel with a maximum: the second wrap of its text batch is undocumented");
-  (void)value;
-  (void)maximum;
-  (void)meter_width;
-  (void)tick;
-  Records out;
-  const std::uint32_t text_tint = (text_alpha & 0xffu) << 24 | 0x395f6b;
-  // Section 7 gives only the sprite alpha (fade*128); RGB is unknown (HUD-7).
-  Sprite plain{"", 0, 0, 6, (sprite_alpha & 0xffu) << 24};
-  plain.tint_rgb_known = false;
-  const auto sprite = [&](std::string resource, int x, int y) {
-    Sprite s = plain;
-    s.resource = std::move(resource);
-    s.x = x;
-    s.y = y;
-    return s;
-  };
-  // 0x1dfb6c without a maximum: one text batch, the wrap at (523, 391) and
-  // the value centred at (542, 371), then fieldnumber.tex at (510, 370).
-  out.emplace_back(Text{"wrapped", 523, 391, 6, text_tint, body, 1});
-  out.emplace_back(Text{"centered", 542, 371, 6, text_tint, value_text, 1});
-  out.emplace_back(sprite("fieldnumber.tex", 510, 370));
-  const int portrait_x = checked(499LL - portrait_w / 2);
-  const int portrait_y = checked(static_cast<long long>(frame_h) - portrait_h + 366);
-  const int frame_x = checked(499LL - frame_w / 2);
-  out.emplace_back(sprite("bust-portrait", portrait_x, portrait_y));
-  out.emplace_back(sprite("frame.tex", frame_x, 369));
-  return out;
-}
-
 int flyingTextLife(int kind) { return kind ? 0xb4 : 0x1e; }
 int flyingTextDrift(std::uint32_t rand_word) {
   return static_cast<int>(rand_word % 60u) - 30;
@@ -316,7 +278,9 @@ HelpBox helpBox(int wrap_height, int label_width) {
   box.label_x = 0x144 - half;
   box.label_y = y;
   box.frame_height = checked(static_cast<long long>(wrap_height) + 0x4c);
-  box.inner_height = wrap_height;
+  // Corrected by research t3/research-ui-text-gaps (executed): the inner frame is as
+  // tall as the outer frame's argument.
+  box.inner_height = checked(static_cast<long long>(wrap_height) + 0x4c);
   return box;
 }
 int noticeColumn(int word) { return checked(static_cast<long long>(word) * 320); }

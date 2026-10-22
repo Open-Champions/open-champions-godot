@@ -17,21 +17,25 @@ const HELP_TITLE_TINT := 0x8028444e
 const HELP_BODY_TINT := 0x80464646
 const HELP_FRAME_TINT := 0x80808080
 const BUST_FADE_RAW := 0x3dacf3df # 0.08445 per drawn frame (hud-dynamic.md 7)
+const FONT_WORDS := {0x4f7100: "gamefontmed.fnt", 0x4f7104: "gamefontsmall.fnt"}
+const BUST_TEXT_POINTER := 0x86aab0
+const COMPASS_LABEL_POINTER := 0x86aaf0
+const OBSERVED_LAYOUT_BYTE := 1 # 0x41b69c holds 1 in the executable's data
 # Elements that are not drawn, and why (each needs evidence research lacks).
+# docs/UI_TEXT_GAPS.md: research t3/research-ui-text-gaps settled the help box
+# frame, glyph and label, the bust meter, font and wraps; what stays refused:
 const REFUSED := {
-	"help_inner_frame": "the style argument of help_task's inner ui_drawFrameImpl at (124, 104) is not given (hud-dynamic.md 9)",
-	"help_button": "the glyph byte 0x41b978 and the source of the Affirmation string are not documented",
-	"bust_meter": "with a maximum, the second wrap of the bust text batch is undocumented (bust_panel refuses)",
-	"compass": "the compass mesh footprint is unknown (hud-dynamic.md 10); its keys are missing on the disc",
+	"compass_mesh": "compass.vif needs the game camera's view matrix and a model path in the scene; the second pass's light state is Unknown (ui-text-gaps.md 13). Only the label is drawn, and the host does not model the gate words 0x4f8424 / 0x4f841c, so they are assumed open",
+	"button_layout_other": "a layout byte other than the observed 1 is inferred or unwritten (ui-text-gaps.md 7): its glyph is not drawn",
+	"help_notice_boxes": "the notice-box half of help_task (0x1dcff4 onward) was not re-executed (ui-text-gaps.md 13)",
+	"chime_slot_life": "the chime slot frees on its second update (Inferred): the sound cursor of anim_advance is refused by the native runtime, so SoundSeqs slots are not freed",
 }
 # Presentation choices research does not settle; drawn, and reported as such.
 const UNVERIFIED := {
-	"bust_text_font": "the bust text batch's font is not named; drawn in the default font (gamefontmed)",
-	"bust_sprite_rgb": "only the bust sprite alpha is documented; RGB drawn neutral (0x80)",
-	"bust_art_weave": "field storage of bust.lmp art is not documented; drawn woven, because decoded unwoven it shows two stacked half-height copies",
-	"ctile_weave": "the message box ctile pieces are woven like the documented tile pieces",
-	"ui_pulse": "g_uiPulse decays toward 1 by 0.8 of the excess per frame (mainloop.md step 13) in host floats",
-	"value_text": "the bust value is drawn as a decimal integer",
+	"sim_frame": "g_simFrame for the bar frame (t / 2) % 4 is taken as the ready-tick count",
+	"bust_latch": "the bust hide latch 0x4f66a9 is set by hud_tickMessage / hud_spellSelect, which the host does not model: it stays 0",
+	"label_text": "the Affirmation label is the peeked text of the key; the original looks it up twice per frame and advances the miss ring only on a miss",
+	"ui_fade_initial": "the data value of g_uiFadeIn is not documented: the host starts at 1.0",
 }
 
 var real: Node
@@ -46,11 +50,12 @@ var art_missing := {}
 var state := {}
 var accumulator := 0.0
 var message_alpha := 0
-var bust_fade := 0.0
+var bust_fade_raw := 0
 var pulse := 1.0
-var pulse_starts := 0
+var pulse_raw := 0x3f800000
+var ramps_driven := false
 var items: Array = [] # {layer, order, kind, ...} in submission order
-var drawn := {"message": 0, "help": 0, "bust": 0}
+var drawn := {"message": 0, "help": 0, "bust": 0, "compass": 0}
 var confirm_override := -1 # tests: 0 or 1 replaces the key state
 var last_error := ""
 
@@ -68,6 +73,10 @@ func configure(real_data: Node, session_controller: Object, archive_inspector: O
 	real = real_data
 	controller = session_controller
 	inspector = archive_inspector
+	# Session step 13 is stepped here, once per displayed frame (60 Hz).
+	if controller != null and controller.has_method("set_ui_frame_driver"):
+		controller.set_ui_frame_driver(true)
+		ramps_driven = true
 	fonts.clear()
 	art.clear()
 	art_missing.clear()
@@ -99,24 +108,18 @@ func step_frame() -> void:
 	state = controller.text_hud()
 	items.clear()
 	if not state.get("ok", false): return
-	var starts := int(state.get("pulse_starts", 0))
-	if starts > pulse_starts: pulse = 2.0
-	else: pulse = 1.0 + (pulse - 1.0) * 0.8
-	pulse_starts = starts
+	# The frame draws with g_uiPulse as it stands; step 13 runs after the draw.
+	var ramps: Dictionary = controller.ui_frame()
+	if ramps.get("ok", false):
+		pulse_raw = int(ramps.pulse[0])
+		pulse = bytes_float(pulse_raw)
 	if state.get("help_open", false): build_help()
 	build_message()
 	build_bust()
+	build_compass()
 
 func font(name := "gamefontmed.fnt") -> Dictionary:
 	return fonts.get(name, {})
-
-func scale_colour(colour: int, factor: float) -> int:
-	# color_scaleClamped 0x165428: each byte cvt.w.s(float(byte) * factor), 0..255.
-	var out := 0
-	for shift in [0, 8, 16, 24]:
-		var v := int(float((colour >> shift) & 255) * factor)
-		out |= clampi(v, 0, 255) << shift
-	return out
 
 func add_item(item: Dictionary) -> void:
 	item.order = items.size()
@@ -136,8 +139,8 @@ func text_width(f: Dictionary, units: PackedInt32Array) -> int:
 	var r: Dictionary = dynamic_service.text_layout(f.bytes, units, 0, 0, units.size(), true, 0, 0, 0, 0, false, 0, 100000, 0x80808080, -1, -1)
 	return int(r.get("width", 0))
 
-func wrapped(f: Dictionary, units: PackedInt32Array, x: int, y: int, width: int, top: int, bottom: int, line: int, tint: int) -> Dictionary:
-	var r: Dictionary = dynamic_service.text_layout(f.bytes, units, x, y, units.size(), true, width, top, bottom, line, false, 0, 100000, tint, -1, -1)
+func wrapped(f: Dictionary, units: PackedInt32Array, x: int, y: int, width: int, top: int, bottom: int, line: int, tint: int, centered := false) -> Dictionary:
+	var r: Dictionary = dynamic_service.text_layout(f.bytes, units, x, y, units.size(), true, width, top, bottom, line, centered, 0, 100000, tint, -1, -1)
 	var out := {"glyphs": [], "height": int(r.get("height", 0))}
 	if not r.get("ok", false): return out
 	for run in r.get("runs", []):
@@ -151,23 +154,83 @@ func frame_items(x: int, y: int, w: int, h: int, style: int, layer: int, tint: i
 	for d in r.draws:
 		add_item({"layer": layer, "kind": "sprite", "resource": str(d.resource), "lump": "interfac.lmp", "x": int(d.x), "y": int(d.y), "clipped": bool(d.clipped), "clip": d.get("clip", {}), "tint": tint, "weave": true})
 
-# hud-dynamic.md 9: title centred at (324, 100), body wrapped at (132, 130),
-# width 404, top 0, bottom 448, line 21; frame 0x17fbb8 at (116, 94), 416 by
-# (wrap height + 76); colours scaled by g_uiPulse. Font 0x4f7100 (gamefontmed).
+# docs/ui-text-gaps.md 2 (research t3/research-ui-text-gaps, executed): the draw
+# calls of help_task come from the native plan; this lays out their text and
+# frames. The title, body and label are measured here because the plan needs the
+# wrap height and the label width the original's text calls return.
 func build_help() -> void:
 	var f := font()
-	if f.is_empty(): return
+	if f.is_empty() or round3 == null: return
 	var title: PackedInt32Array = state.get("help_title", PackedInt32Array())
 	var body: PackedInt32Array = state.get("help_body", PackedInt32Array())
-	if state.get("help_has_title", false):
-		add_item({"layer": 6, "kind": "text", "font": "gamefontmed.fnt", "glyphs": centred(f, title, 324, 100, scale_colour(HELP_TITLE_TINT, pulse))})
-	var body_run := wrapped(f, body, 132, 130, 404, 0, 448, 21, scale_colour(HELP_BODY_TINT, pulse))
-	add_item({"layer": 6, "kind": "text", "font": "gamefontmed.fnt", "glyphs": body_run.glyphs})
-	var box: Dictionary = round3.help_box(int(body_run.height), 0) if round3 != null else {}
-	if not box.get("ok", false): return
-	# Wrapper 0x17fbb8: x-1, y-4, width+2, height+8, style 2 (hud-layout.md).
-	frame_items(int(box.frame_x) - 1, int(box.frame_y) - 4, int(box.frame_width) + 2, int(box.frame_height) + 8, 2, 6, scale_colour(HELP_FRAME_TINT, pulse))
+	var has_title: bool = state.get("help_has_title", false)
+	var has_body := body.size() > 0
+	var wrap_height := 0
+	if has_body: wrap_height = int(wrapped(f, body, 132, 130, 404, 0, 448, 21, 0x80808080).height)
+	var label: PackedInt32Array = controller.text_key_units("Affirmation")
+	var label_width := text_width(f, label)
+	var glyph: Dictionary = round3.confirm_glyph(OBSERVED_LAYOUT_BYTE)
+	if not glyph.get("ok", false): return
+	var plan: Dictionary = round3.help_plan(int(state.get("help_close_delay", 0)), pulse_raw, int(glyph.glyph), wrap_height, label_width, has_title, has_body)
+	if not plan.get("ok", false): return
+	interpret(plan.calls, {1: title, 2: body, "label": label})
 	drawn.help += 1
+
+# One plan: calls of the original's text and frame functions, in order, mapped to
+# draw items. Pointers are the plan's stand-ins (see `texts`); a call this client
+# has no drawing for is skipped and counted in `skipped`.
+var skipped := {}
+func interpret(calls: Array, texts: Dictionary, resource_names := {}) -> void:
+	var f := font()
+	var layer := 6
+	var colour := 0
+	for c in calls:
+		var a: Array = c.args
+		match str(c.name):
+			"text_begin":
+				f = font(str(FONT_WORDS.get(int(a[0]), "gamefontmed.fnt")))
+				layer = int(a[1])
+				colour = int(a[2])
+			"text_setColor":
+				colour = int(a[0])
+			"text_drawWideCentered":
+				add_item({"layer": layer, "kind": "text", "font": font_name(f), "glyphs": centred(f, texts.get(int(a[2]), PackedInt32Array()), s32(a[0]), s32(a[1]), colour)})
+			"text_drawWrapped", "text_drawWrappedCentered":
+				var units: PackedInt32Array = texts.get(int(a[2]), PackedInt32Array())
+				var centered := str(c.name) == "text_drawWrappedCentered"
+				add_item({"layer": layer, "kind": "text", "font": font_name(f), "glyphs": wrapped(f, units, s32(a[0]), s32(a[1]), int(a[3]), s32(a[4]), s32(a[5]), int(a[6]), colour, centered).glyphs})
+			"text_drawAscii", "text_drawAsciiCentered":
+				var codes := PackedInt32Array()
+				for ch in str(a[2]).to_utf8_buffer(): codes.append(ch)
+				if str(c.name) == "text_drawAscii":
+					# sprintf("%c", word): the plan's string is one raw byte, escaped when above 0x7f.
+					add_item({"layer": layer, "kind": "text", "font": font_name(f), "glyphs": glyphs(f, codes, s32(a[0]), s32(a[1]), colour)})
+				else:
+					add_item({"layer": layer, "kind": "text", "font": font_name(f), "glyphs": centred(f, codes, s32(a[0]), s32(a[1]), colour)})
+			"text_drawWide":
+				add_item({"layer": layer, "kind": "text", "font": font_name(f), "glyphs": glyphs(f, texts.get(str(a[2]), PackedInt32Array()), s32(a[0]), s32(a[1]), colour)})
+			"ui_drawFrameImpl":
+				frame_items(s32(a[0]), s32(a[1]), s32(a[2]), s32(a[3]), int(a[6]), int(a[4]), int(a[5]))
+			"sprite":
+				var name := str(a[0])
+				if resource_names.has(name): name = str(resource_names[name])
+				add_item({"layer": int(a[3]), "kind": "sprite", "resource": name, "lump": "bust.lmp", "x": s32(a[1]), "y": s32(a[2]), "clipped": false, "clip": {}, "tint": int(a[4]), "weave": true})
+			"sprite_clipped":
+				var bar := str(a[0])
+				add_item({"layer": int(a[3]), "kind": "sprite", "resource": bar, "lump": "bust.lmp", "x": s32(a[1]), "y": s32(a[2]), "clipped": true, "clip": {"left": s32(a[5]), "top": s32(a[6]), "right": s32(a[7]), "bottom": s32(a[8])}, "tint": int(a[4]), "weave": true})
+			"text_end", "text_lookup", "text_widthWide", "res_find", "dialog_isOpen", "light_resetObjectLight", "model_draw":
+				pass
+			_:
+				skipped[str(c.name)] = int(skipped.get(str(c.name), 0)) + 1
+
+func s32(v) -> int:
+	var n := int(v)
+	return n - 0x100000000 if n >= 0x80000000 else n
+
+func font_name(f: Dictionary) -> String:
+	for key in fonts.keys():
+		if fonts[key] == f: return key
+	return "gamefontmed.fnt"
 
 # hud-dynamic.md 4: while timer > 0 and (not suppressed or forced), default
 # font, centred at (320, 78), layer 6 (7 forced), ctile frame behind it.
@@ -213,40 +276,37 @@ func load_art(lump: String, name: String, weave: bool) -> Dictionary:
 	art_missing[key] = true
 	return {}
 
-# hud-dynamic.md 7, no maximum (the 11 disc calls with -1): text batch, then
-# fieldnumber.tex, the portrait and frame.tex from bust.lmp, all layer 6.
+# docs/ui-text-gaps.md 3 (executed): hud_drawBust for both branches. The caption
+# is gamefontsmall, one wrap per branch, the meter's clip right is
+# 521 + round(value / max * bar width) - 2 on the run-time maximum, sprites are
+# neutral RGB 0x808080 with only the fade in alpha, and the art stays woven.
+const BUST_BARS := ["bar_yellow00.tex", "bar_yellow01.tex", "bar_yellow02.tex", "bar_yellow03.tex"]
 func build_bust() -> void:
-	var shown := int(state.get("bust_shown", 0)) > 0
-	if not shown: return
-	var fade := bytes_float(BUST_FADE_RAW)
-	bust_fade = clampf(bust_fade - fade if int(state.get("latch", 0)) != 0 else bust_fade + fade, 0.0, 1.0)
-	if int(state.get("bust_max", -1)) != -1: return
-	var portrait := load_art("bust.lmp", str(state.get("bust_texture", "")), true)
-	var frame := load_art("bust.lmp", "frame.tex", true)
-	if portrait.is_empty() or frame.is_empty() or round3 == null: return
-	var f := font()
-	var text_alpha := int(bust_fade * 110.0)
-	var sprite_alpha := int(bust_fade * 128.0)
-	var value := maxi(0, int(state.get("bust_value", 0)))
-	var r: Dictionary = round3.bust_panel(false, value, -1, 0, 0, text_alpha, sprite_alpha, portrait.width, portrait.height, frame.width, frame.height, "", str(value))
-	if not r.get("ok", false): return
-	var body: PackedInt32Array = state.get("bust_text", PackedInt32Array())
-	var value_units := PackedInt32Array()
-	for c in str(value).to_ascii_buffer(): value_units.append(c)
-	for s in r.submissions:
-		if s.kind == "text":
-			var tint := int(s.colour)
-			if str(s.get("text_kind", "")) == "wrapped":
-				# text_drawWrapped (523, 391, width 112, top -100, bottom 500, line 14).
-				add_item({"layer": 6, "kind": "text", "font": "gamefontmed.fnt", "glyphs": wrapped(f, body, 523, 391, 112, -100, 500, 14, tint).glyphs})
-			else:
-				add_item({"layer": 6, "kind": "text", "font": "gamefontmed.fnt", "glyphs": centred(f, value_units, int(s.x), int(s.y), tint)})
-		elif s.kind == "sprite":
-			var resource := str(s.resource)
-			var lump := "bust.lmp"
-			var name := str(state.get("bust_texture", "")) if resource == "bust-portrait" else resource
-			add_item({"layer": 6, "kind": "sprite", "resource": name, "lump": lump, "x": int(s.x), "y": int(s.y), "clipped": false, "clip": {}, "tint": (sprite_alpha << 24) | 0x808080, "weave": true})
+	if int(state.get("bust_shown", 0)) <= 0 or round3 == null: return
+	var maximum := int(state.get("bust_max", -1))
+	var texture := str(state.get("bust_texture", ""))
+	var sizes := {}
+	var needed := ["frame.tex", texture, "fieldnumber.tex"] if maximum == -1 else ["frame.tex", texture, "fieldmeter.tex"] + BUST_BARS
+	for name in needed:
+		var a := load_art("bust.lmp", name, true)
+		if a.is_empty(): return
+		sizes[name if name != texture else "<portrait>"] = [int(a.width), int(a.height)]
+	var plan: Dictionary = round3.bust_plan(int(state.get("bust_latch", 0)), bust_fade_raw, int(state.get("bust_value", 0)), maximum, int(state.get("sim_frame", 0)), sizes)
+	if not plan.get("ok", false):
+		last_error = str(plan.get("error", ""))
+		return
+	bust_fade_raw = int(plan.fade)
+	var texts := {BUST_TEXT_POINTER: state.get("bust_text", PackedInt32Array())}
+	interpret(plan.calls, texts, {"<portrait>": texture})
 	drawn.bust += 1
+
+# docs/ui-text-gaps.md 5: the label of hud_drawCompass. The mesh is refused (REFUSED).
+func build_compass() -> void:
+	if int(state.get("compass_shown", 0)) <= 0 or round3 == null: return
+	var plan: Dictionary = round3.compass_plan(bool(state.get("dialog_open", false)), true)
+	if not plan.get("ok", false) or plan.calls.is_empty(): return
+	interpret(plan.calls, {COMPASS_LABEL_POINTER: state.get("compass_label", PackedInt32Array())})
+	drawn["compass"] = int(drawn.get("compass", 0)) + 1
 
 func bytes_float(raw: int) -> float:
 	var b := PackedByteArray()

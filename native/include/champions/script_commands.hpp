@@ -6,6 +6,7 @@
 // counted refusal. The composition census stays the 9649e6b table.
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
+#include "champions/ui_text_gaps.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_factory.hpp"
 #include "champions/level_flow.hpp"
@@ -242,6 +243,8 @@ public:
   // commands are refused.
   bool register_text(const std::vector<std::uint8_t> &uni);
   bool has_text() const { return text_->entries() != 0; }
+  // The visible units a key would show, without advancing the miss ring.
+  strings::Units text_peek(const std::string &key) const { return text_->peek(key); }
   strings::TextTable &text() { return *text_; }
   const strings::TextTable &text() const { return *text_; }
   // The help chime: byte +0x3c (sound group) of fx.lmp/butn_message.anm from
@@ -256,6 +259,11 @@ public:
   strings::SoundSeqs &sound() { return *sound_; }
   // ui_startPulse(0) calls made by hud_showHelpMessage.
   std::uint64_t ui_pulse_starts() const { return ui_pulse_starts_; }
+  // g_uiPulse / g_uiFadeIn (docs/ui-text-gaps.md 1). The fade starts at 1.0: its
+  // data value is not documented, and a dialog's own restart sets it to 0.0.
+  // ui_frame_step is session step 13: once per displayed frame, after the draw.
+  const ui_text_gaps::Ramps &ui_ramps() const { return ui_ramps_; }
+  void ui_frame_step() { ui_ramps_ = ui_text_gaps::rampsStep(ui_ramps_); }
   // help_task 0x1dcc78 for one displayed frame. A close runs the post action
   // offline (script_runPostAction), within the play session's budget.
   strings::HelpFrame help_task(bool confirm);
@@ -421,6 +429,7 @@ private:
   std::deque<strings::Units> formatted_;
   std::optional<std::uint8_t> chime_group_;
   std::uint64_t ui_pulse_starts_ = 0;
+  ui_text_gaps::Ramps ui_ramps_;
   // Host-owned handle cells for creature +0x234 words linked by link_target.
   std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   std::uint32_t music_channel_ = 0;
