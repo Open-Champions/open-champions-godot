@@ -255,6 +255,26 @@ func run() -> void:
 	help_close()
 	if fe.screen() == "pause": tap(START)
 	if scene.paused and scene.session_started and not scene.stopped: scene.resume_session()
+	# campaign-combat-handoff.md ranks the hub-to-valor route first: hub has
+	# no hostile objects, while this level has WarBoar placements. Select the
+	# level from the opened game folder rather than relying on its sorted index.
+	var fight_level := -1
+	for i in range(scene.real.levels.size()):
+		if str(scene.real.levels[i].stem) == "valor":
+			fight_level = i
+			break
+	var fight_loaded := false
+	if fight_level >= 0:
+		fight_loaded = scene.load_real_level(fight_level)
+		if fight_loaded:
+			scene.start_play()
+			help_close()
+			if scene.paused and scene.session_started and not scene.stopped:
+				scene.resume_session()
+	mark("enemy_level", "entered" if fight_loaded and scene.real.current == fight_level and scene.play_mode else "refused",
+		{"level_index": scene.real.current, "level_found": fight_level >= 0,
+		"session_started": scene.session_started,
+		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
 	var before: Dictionary = scene.controller.get_observation()
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
@@ -288,10 +308,12 @@ func run() -> void:
 	var drops_before := int(before.get("combat_drops", 0))
 	var drops_after := int(after.get("combat_drops", 0))
 	var gold_after := int(after.get("gold", -1))
-	var fight_passed: bool = after.get("combat_enabled", false) and attack_handled \
+	var fight_passed: bool = fight_loaded and scene.real.current == fight_level \
+		and after.get("combat_enabled", false) and attack_handled \
 		and not enemy_hp_before.is_empty() and enemy_damaged and enemy_died \
 		and drops_after > drops_before and gold_after > gold_before
 	var missing_fight_steps := {}
+	if not fight_loaded or scene.real.current != fight_level: missing_fight_steps["enemy_level_entry"] = 1
 	if not after.get("combat_enabled", false): missing_fight_steps["campaign_combat_runtime"] = 1
 	if not attack_handled: missing_fight_steps["attack_input"] = 1
 	if enemy_hp_before.is_empty(): missing_fight_steps["live_enemy"] = 1
