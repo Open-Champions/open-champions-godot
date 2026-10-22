@@ -34,3 +34,17 @@ Counts only; logs under ignored `work/`, no game data committed.
 - Height extent (+0x20) of built creatures, the Holder.v1 table-slot read, a research hash vector, and the 0x44fe18 capacity stay open.
 - Mid-placement refusal restore has no test.
 - Norrath was not inferred from or tested with these RTA findings.
+
+## audit-final (creature-stats-final, 8bdd705..9cfe9b2: 0 HIGH, 1 MEDIUM, 4 LOW)
+
+Refusals counted in this round: **2** (CS4-3 table-slot read, CS4-4 research marker vector). No new research was started.
+
+| Finding | Resolution |
+| --- | --- |
+| CS4-1 MEDIUM (`intro` applies balance rows) | **Fixed, traced.** research-creature-stats `docs/data-tables.md:216-217` (monsters.bal loaded on every level load outside the front end) and `docs/issues/live-rig.md:164,220` (`intro` is the front end). `set_level_stats` now refuses a base name of `intro` (counts `Front-end level has no balance table`, leaves `stats_ready_` false) and `advance_first_level_items("intro")` also clears `stats_ready_`, so either call order leaves hit points unreadable. New test covers both orders: refusal counted, no balance-scaled hit points. |
+| CS4-2 LOW (pvp default) | **Documented.** Comment at the `monster_level` call states the single-player-only assumption (`start_single_player` is the only mode modelled; PvP mode B level 3.0 is unreachable). |
+| CS4-3 LOW (Holder.v1 table slot) | **Refused (1).** No pinned research for the holder table-slot read; the audit says none is needed now. Left as documented open item. |
+| CS4-4 LOW (Player1 vector, Horsemen variants 1-3) | **Refused (2).** No pinned `difftest_objects.py -k marker` vector for the slot values exists and starting new research is out of scope; extra Horsemen variant rows would need authored image rows for unverified statistics. Stays open. |
+| CS4-5 LOW (attach aborts on malformed stats/WORLD) | **Fixed.** `session_controller.cpp` catches both, counts `Level statistics refused` / `Level WORLD refused` (new `Host::count_refusal`), and attaches without them. |
+
+Verification (audit-final): arm64 Release `ctest -j 3` **216/216 PASS** (`work/creature-stats/final-ctest.log`); GDExtension + level-texture builds **8/8**; Godot dev matrix **51/51** exit 0; sweeps scripts on and off each **111/111** tried/loaded/played, 230 checks, 0 failures; `FULL_TRACE` 21,990 bytes, SHA-256 `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035` (unchanged). Counts only; logs under ignored `work/`.

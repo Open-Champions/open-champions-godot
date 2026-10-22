@@ -217,6 +217,8 @@ public:
   Stop run(const std::string &entry);
 
   const Counts &counts() const { return counts_; }
+  // Records a refused optional input (the host carries on without it).
+  void count_refusal(const std::string &reason) { counts_.build_refusals[reason] += 1; }
   const std::vector<Spawn> &spawns() const { return spawns_; }
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }

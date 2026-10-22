@@ -140,6 +140,14 @@ void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
   // base name (research a684d7d, difftest_level_name_split.py: g_levelName and
   // g_levelTexName 0x44fe18 both hold the base). Only the base is written.
   const auto request = level_flow::split_request(name);
+  // monsters.bal is loaded "on every level load outside the front end"
+  // (research-creature-stats docs/data-tables.md:216-217); `intro` is the front
+  // end (docs/issues/live-rig.md:164,220). Nothing supports applying the table
+  // there, so refuse: creatures keep their hit points unreadable.
+  if (request.first == "intro") {
+    counts_.build_refusals["Front-end level has no balance table"] += 1;
+    return;
+  }
   // The executable's own table supplies the longest name this image uses.
   // Refuse base names longer than that known-safe domain; the capacity of
   // the global at 0x44fe18 is not documented.
@@ -149,6 +157,9 @@ void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
   if (request.first.size() > max_level_name)
     throw std::invalid_argument("level name exceeds executable table names");
   const auto row = level_flow::find_level_row(rows, request.first, request.second);
+  // Single-player only: difficulty 1 and pvp=false are assumed because
+  // Host::start_single_player is the only mode this host models; the PvP
+  // mode B level (3.0, data-tables.md section 5) is not reachable here.
   const auto level = level_flow::monster_level(row, 1, request.first);
   std::vector<BalanceRow> parsed;
   parsed.reserve(count);
@@ -185,6 +196,8 @@ void Host::advance_first_level_items(const std::string &level_name,
   // hud.lmp outcomes). The loader's 223 draws: research-items docs/startup.md:341
   // and docs/issues/sync-breakers.md:383.
   if (level_name == "intro") {
+    // Front end: no balance table is loaded (see set_level_stats).
+    stats_ready_ = false;
     seed_gate_observed_ = true;
     return;
   }

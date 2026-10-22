@@ -307,6 +307,28 @@ int main(int argc, char **argv) {
                 base_host.variables().memory.u32(at + 0x228) &&
             sub_seed.state == base_seed.state, "sub-name request uses the base name");
     }
+    {
+      // CS4-1: the front end loads no monsters.bal, so hit points stay refused.
+      for (const bool stats_first : {true, false}) {
+        rta::SharedRandom intro_seed(20973);
+        sc::Host intro_host;
+        intro_host.bind_seed(&intro_seed);
+        intro_host.start_single_player();
+        intro_host.set_executable(stats_image.view());
+        if (stats_first) intro_host.set_level_stats("intro", balance.data(), balance.size());
+        intro_host.advance_first_level_items("intro", false);
+        if (!stats_first) intro_host.set_level_stats("intro", balance.data(), balance.size());
+        const auto g = blob({{"Gnaw", {0, 0, 0}, 0, {"name=intro-gnaw"}}});
+        check(intro_host.adopt_objects(g.data(), g.size()), "intro creature adopted");
+        rta::Pool intro_pool;
+        const auto at = intro_pool.allocate(0x3c8);
+        check(intro_host.is_built(at), "intro creature built");
+        check(intro_host.counts().build_refusals.count("Front-end level has no balance table") == 1,
+              "intro refusal counted");
+        check(intro_host.variables().memory.u32(at + 0x228) != 0x41edee1au,
+              "intro leaves no balance-scaled hit points");
+      }
+    }
     rta::SharedRandom stat_seed(20973);
     sc::Host stat_host;
     stat_host.bind_seed(&stat_seed);

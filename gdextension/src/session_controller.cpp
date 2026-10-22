@@ -554,11 +554,23 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
-    if (executable_ && !level_name.is_empty() && !balance.is_empty())
-      next->set_level_stats(std::string(level_name.utf8().get_data()), balance.ptr(),
-                            static_cast<std::size_t>(balance.size()));
-    if (!world.is_empty())
-      next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
+    // Malformed statistics or WORLD are refused and counted; the script still
+    // attaches without them.
+    if (executable_ && !level_name.is_empty() && !balance.is_empty()) {
+      try {
+        next->set_level_stats(std::string(level_name.utf8().get_data()), balance.ptr(),
+                              static_cast<std::size_t>(balance.size()));
+      } catch (const std::exception &) {
+        next->count_refusal("Level statistics refused");
+      }
+    }
+    if (!world.is_empty()) {
+      try {
+        next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
+      } catch (const std::exception &) {
+        next->count_refusal("Level WORLD refused");
+      }
+    }
     // The original checks hud.lmp residency. This attach path does not know
     // it, so the host records the inferred draw count without moving the seed.
     next->advance_first_level_items(std::string(level_name.utf8().get_data()));
