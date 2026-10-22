@@ -1,5 +1,7 @@
 extends Control
 
+const RealText = preload("res://real_data/real_text.gd")
+
 # Host shell around the documented menu contract. Canvas positions come from
 # ChampionsMenuService. Buttons in the side panel are host controls: the start
 # bit, the stat-spend bit and the skill-confirm bit were not executed.
@@ -11,6 +13,9 @@ var screen := "inventory"
 var mode := 2
 var font_bytes := PackedByteArray()
 var font_texture: ImageTexture
+var small_font_bytes := PackedByteArray()
+var small_font_texture: ImageTexture
+var scene: Control
 var host: PanelContainer
 var status: Label
 var opener: Button
@@ -67,6 +72,9 @@ func _ready() -> void:
 	_host_button(box, "Close", "Host close. The original close control was not executed.", close_menu)
 	_refresh_status()
 
+func configure(owner: Control) -> void:
+	scene = owner
+
 func _host_button(box: VBoxContainer, label: String, tip: String, action: Callable) -> void:
 	var button := Button.new()
 	button.text = label
@@ -75,14 +83,27 @@ func _host_button(box: VBoxContainer, label: String, tip: String, action: Callab
 	box.add_child(button)
 
 func sync_font(art) -> void:
-	if font_texture != null or art == null:
-		return
-	var view = art.get("hud_view")
-	if view == null or view.font_bytes.is_empty() or view.font_texture == null:
-		return
-	font_bytes = view.font_bytes
-	font_texture = view.font_texture
-	queue_redraw()
+	var changed := false
+	if font_texture == null and art != null:
+		var view = art.get("hud_view")
+		if view != null and not view.font_bytes.is_empty() and view.font_texture != null:
+			font_bytes = view.font_bytes
+			font_texture = view.font_texture
+			changed = true
+	if small_font_texture == null and scene != null and layout_service != null:
+		var real = scene.get("real")
+		if real != null and not real.files.is_empty():
+			var raw: PackedByteArray = RealText.fonts(real).get("gamefontsmall.fnt", PackedByteArray())
+			if not raw.is_empty():
+				var decoded: Dictionary = layout_service.decode_hud_font(raw, true)
+				if decoded.get("ok", false):
+					var image := Image.create_from_data(int(decoded.width), int(decoded.height), false, Image.FORMAT_RGBA8, decoded.rgba)
+					small_font_bytes = raw
+					small_font_texture = ImageTexture.create_from_image(image)
+					changed = true
+	if changed:
+		_refresh_status()
+		queue_redraw()
 
 func open_screen(which: String) -> void:
 	if service == null:
@@ -205,7 +226,7 @@ func _refresh_status() -> void:
 	if not row.get("ok", false):
 		status.text = str(row.get("error", "menu state refused"))
 		return
-	var font_note := "Game font loaded. Which HUD font the original menu uses was not documented." if font_texture != null else "Game font is not loaded yet."
+	var font_note := "Small game font loaded for stats and skills; other in-game text remains host copy." if small_font_texture != null else "Small game font is not loaded yet."
 	status.text = "Host panel. J equips, U drops, K buys or sells, using the selected mask set. These are not original keyboard bindings.\n%s gold %s  level %s  skill %s  stat %s  ack %s\nShop choice y %s and %s. Centre x was not executed.\n%s\n%s" % [
 		str(row.scheme), str(row.gold), str(row.level), str(row.skill_points), str(row.stat_points), str(row.acknowledged),
 		str(place.get("shop_buy_y", "")), str(place.get("shop_sell_y", "")), str(place.get("scheme_note", "")), font_note]
@@ -237,28 +258,33 @@ func _draw() -> void:
 		return
 	for rect in drawn.rects:
 		var height := int(rect.y1) - int(rect.y0)
-		draw_rect(Rect2(int(rect.x0), int(rect.y0), int(rect.x1) - int(rect.x0), height), _word(int(rect.colour)), height <= 2)
+		# The two layer-4 scrollbar strips are executed. Item-cell boxes are
+		# synthetic hit targets, not documented visual sprites.
+		if int(rect.layer) == 4 and height <= 2:
+			draw_rect(Rect2(int(rect.x0), int(rect.y0), int(rect.x1) - int(rect.x0), height), _word(int(rect.colour)), true)
 	for text in drawn.texts:
-		_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred))
+		_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred), screen in ["stats", "level-up", "skills"])
 
 func _word(tint: int) -> Color:
 	var channel := func(shift: int) -> float:
 		return clampf(float((tint >> shift) & 255) / 128.0, 0.0, 1.0)
 	return Color(channel.call(0), channel.call(8), channel.call(16), channel.call(24))
 
-func _glyphs(x: int, y: int, text: String, colour: int, centred: bool) -> void:
-	if font_texture == null or font_bytes.is_empty() or text.is_empty() or layout_service == null:
+func _glyphs(x: int, y: int, text: String, colour: int, centred: bool, small: bool) -> void:
+	var raw := small_font_bytes if small else font_bytes
+	var texture := small_font_texture if small else font_texture
+	if texture == null or raw.is_empty() or text.is_empty() or layout_service == null:
 		return
 	var glyphs: Array = []
 	if centred:
-		var named: Dictionary = layout_service.hud_text_glyphs(font_bytes, text.to_utf8_buffer(), x, y, colour)
+		var named: Dictionary = layout_service.hud_text_glyphs(raw, text.to_utf8_buffer(), x, y, colour)
 		if named.get("ok", false):
 			glyphs = named.glyphs
 	elif dynamic_service != null:
 		var units := PackedInt32Array()
 		for index in text.length():
 			units.append(text.unicode_at(index))
-		var laid: Dictionary = dynamic_service.text_layout(font_bytes, units, x, y, units.size(), true, 0, 0, 448, 17, false, 0, 100000, colour, -1, -1)
+		var laid: Dictionary = dynamic_service.text_layout(raw, units, x, y, units.size(), true, 0, 0, 448, 17, false, 0, 100000, colour, -1, -1)
 		if laid.get("ok", false):
 			glyphs = laid.glyphs
 	for glyph in glyphs:
@@ -269,4 +295,4 @@ func _glyphs(x: int, y: int, text: String, colour: int, centred: bool) -> void:
 		if sw <= 0 or sh <= 0:
 			continue
 		var tint := _word(int(glyph.tint))
-		draw_texture_rect_region(font_texture, Rect2(float(glyph.x_half) * 0.5, float(glyph.y), sw, sh), Rect2(sx, sy, sw, sh), tint, false)
+		draw_texture_rect_region(texture, Rect2(float(glyph.x_half) * 0.5, float(glyph.y), sw, sh), Rect2(sx, sy, sw, sh), tint, false)

@@ -553,6 +553,7 @@ func _attach_game_menus() -> void:
 	if viewport == null:
 		return
 	game_menus = load("res://ui/game_menus.gd").new()
+	game_menus.configure(self)
 	game_menus.set_anchors_preset(Control.PRESET_FULL_RECT)
 	game_menus.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	viewport.add_child(game_menus)
