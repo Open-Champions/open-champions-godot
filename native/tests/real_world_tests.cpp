@@ -171,6 +171,29 @@ int main() {
           "a disturb outside the tile admits no chunk");
     check(image.disturb_chunks(from_int(12), {0, 0, from_int(-100)}).empty(),
           "more than 60 below the surface admits no chunk");
+    {
+      // The player's wading on this tile (research player-wading.md): the tile
+      // surface is 8 above the feet, inside the entry band [-1, 60].
+      R::Wader wader(image, [&](std::uint32_t strength, std::uint32_t radius, const champions::simulation::rta::creature_water::Vec3 &p) {
+        return image.disturb(strength, radius, p);
+      });
+      const champions::simulation::rta::creature_water::Vec3 feet{0, 0, 0}, away{from_int(200), 0, 0};
+      check(!wader.step(1, 0, feet, true), "no water test on frames with frame & 3 != 0");
+      check(wader.step(4, 0, feet, true) && wader.totals().entries == 1 && wader.totals().draws == 1 &&
+                wader.totals().splashes == 1 && wader.totals().disturbs == 1,
+            "frame 4: entry, one shared draw, one splash, one entry ripple");
+      wader.step(5, 0, feet, true);
+      check(wader.totals().disturbs == 2, "a moving wader ripples every frame");
+      wader.step(6, 0, feet, false);
+      check(wader.totals().disturbs == 2, "a still wader ripples only on sixteenth frames");
+      wader.step(16, 0, feet, false);
+      check(wader.totals().disturbs == 3 && wader.in_water(), "the sixteenth frame ripples");
+      wader.step(32, 0x1000, feet, false);
+      check(wader.totals().hurts == 1, "hurting water is counted on a sixteenth frame");
+      check(!wader.step(33, 0, away, true) && wader.totals().exits == 1,
+            "a wading ripple that touches no water clears the bit");
+      check(wader.totals().draws == 1, "wading takes no shared draw");
+    }
     check(bytes == w.b, "input bytes stay unchanged");
 
     L::Record door;

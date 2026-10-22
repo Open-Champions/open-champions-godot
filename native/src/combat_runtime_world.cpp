@@ -847,6 +847,7 @@ Services flat_fixture_services() {
   };
   s.height_below = [](const Vec3 &, Raw) { return Raw(0); };
   s.water_test = [](const Vec3 &, Raw) { return Raw(0); };
+  s.water_disturb = [](const Vec3 &, Raw, Raw) { return Raw(0); };
   s.skill_stat = [](const std::string &, Raw, Raw) { return Raw(0); };
   s.camera_yaw = [](Raw) { return Raw(0); };
   s.camera_flag = [](Raw) { return Raw(0); };

@@ -130,6 +130,10 @@ class ChampionsRealWorld : public RefCounted {
   std::unique_ptr<RW::WaterImage> water_;
   std::unique_ptr<RW::PieceScene> pieces_;
   std::unique_ptr<WD::Field> waves_;
+  // The player's wading on this water (player_wading.hpp). Declared after the
+  // image it borrows, so it is destroyed first.
+  std::unique_ptr<RW::Wader> wader_;
+  std::uint32_t level_flags_ = 0;
   Ref<ArrayMesh> wave_mesh_;
   PackedFloat32Array wave_fixes_;
   Array wave_surfaces_;
@@ -143,6 +147,8 @@ protected:
     ClassDB::bind_method(
         D_METHOD("water_disturb", "strength_raw", "radius_raw", "position_raw"),
         &ChampionsRealWorld::water_disturb);
+    ClassDB::bind_method(D_METHOD("wade_step", "frame", "position_raw", "moving"),
+                         &ChampionsRealWorld::wade_step);
     ClassDB::bind_method(D_METHOD("set_level_flags", "flags"),
                          &ChampionsRealWorld::set_level_flags);
     ClassDB::bind_method(D_METHOD("set_door", "piece", "open"),
@@ -169,6 +175,8 @@ public:
     Dictionary out;
     out["ok"] = false;
     try {
+      wader_.reset();
+      level_flags_ = 0;
       water_.reset();
       pieces_.reset();
       waves_.reset();
@@ -213,6 +221,11 @@ public:
           sources.push_back(source);
         }
         waves_ = std::make_unique<WD::Field>(std::move(sources));
+        wader_ = std::make_unique<RW::Wader>(
+            *water_, [this](std::uint32_t strength, std::uint32_t radius,
+                            const RW::cw::Vec3 &point) {
+              return disturb_all(strength, radius, point);
+            });
         auto *image = water_.get();
         waves_->set_chunk_query(
             [image](std::uint32_t radius, const std::array<std::uint32_t, 3> &p) {
@@ -282,22 +295,56 @@ public:
     }
     return out;
   }
+  // One water_disturb: the service counts the chunks. The service grid pointer
+  // stays 0, so it writes nothing; the drawn field holds the grids and takes
+  // the same call through the same query.
+  std::uint32_t disturb_all(std::uint32_t strength, std::uint32_t radius,
+                            const RW::cw::Vec3 &point) {
+    const auto count = water_->disturb(strength, radius, point);
+    if (count != 0 && waves_)
+      waves_->disturb(strength, radius, point);
+    return count;
+  }
   int64_t water_disturb(int64_t strength, int64_t radius,
                         const PackedInt64Array &position) {
     if (!water_)
       return 0;
     try {
-      const auto point = raw_position(position);
-      const auto count = water_->disturb(std::uint32_t(strength),
-                                         std::uint32_t(radius), point);
-      // The service grid pointer stays 0, so it writes nothing. The drawn
-      // field holds the grids and takes the same call through the same query.
-      if (count != 0 && waves_)
-        waves_->disturb(std::uint32_t(strength), std::uint32_t(radius), point);
-      return static_cast<std::int64_t>(count);
+      return static_cast<std::int64_t>(disturb_all(
+          std::uint32_t(strength), std::uint32_t(radius), raw_position(position)));
     } catch (const std::exception &) {
       return -1;
     }
+  }
+  // One Player_move water step for the scene's player (Wader's contract: the
+  // control walk supplies frame, feet and a moved-this-tick flag).
+  Dictionary wade_step(int64_t frame, const PackedInt64Array &position, bool moving) {
+    Dictionary out;
+    out["ok"] = false;
+    try {
+      if (frame < 0 || frame > 0xffffffffll)
+        throw std::runtime_error("A wading frame does not fit an unsigned word.");
+      if (wader_) {
+        wader_->step(std::uint32_t(frame), level_flags_, raw_position(position), moving);
+        const auto &t = wader_->totals();
+        out["in_water"] = wader_->in_water();
+        out["steps"] = std::int64_t(t.steps);
+        out["ticks_in_water"] = std::int64_t(t.ticks_in_water);
+        out["entries"] = std::int64_t(t.entries);
+        out["exits"] = std::int64_t(t.exits);
+        out["draws"] = std::int64_t(t.draws);
+        out["hurts"] = std::int64_t(t.hurts);
+        out["disturbs"] = std::int64_t(t.disturbs);
+        out["touched"] = std::int64_t(t.touched);
+        out["splashes"] = std::int64_t(t.splashes);
+      } else {
+        out["in_water"] = false;
+      }
+      out["ok"] = true;
+    } catch (const std::exception &e) {
+      out["error"] = String::utf8(e.what());
+    }
+    return out;
   }
   // Level flag word 0x44fe08 from the level table row (level-lights JSON).
   Dictionary set_level_flags(int64_t flags) {
@@ -307,6 +354,7 @@ public:
       out["error"] = String("A level flag word does not fit an unsigned word.");
       return out;
     }
+    level_flags_ = static_cast<std::uint32_t>(flags);
     if (!waves_) {
       out["ok"] = true;
       return out;

@@ -1,0 +1,14 @@
+{
+  "cases": 5191,
+  "content_sha256": "4ad31e4526c91034fe5e4696e6d51d590aaf14b978d85a4e769ed9be0267c919",
+  "references": {
+    "docs/spec/player-wading.md": "ce87cbd33f89fc23122793011242e912b89dcac7a5e7c39046abb640d36da9f1",
+    "tools/difftest_wading.py": "33bd3d3d2ceda29be75ed7398deb76bdcc4796f191991a9a7bba8fbc84c082c6",
+    "tools/ref_wading.py": "c296b8fe908728032557057a72ea924f23fe7364089d82a3d6f007e3a8281ab7",
+    "tools/ref_water_services.py": "b822e671af336c2f73f75aacf02a3fbd0ab33128a70058f4985ec67599b0bdf1",
+    "tools/test_ref_wading.py": "e865245d82450a7841520710a980c34224ea5b7bc89cae6fe64f45e4769cd520"
+  },
+  "research_commit": "942a6bac3543ad14ab350b210da65dc51e9c695a",
+  "schema": "player-wading-v1",
+  "vector_sha256": "2e6ad5ecc675a43842dceba634c02185a8003b96bddf4d5d96884afd2cc4d156"
+}

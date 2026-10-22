@@ -17,6 +17,10 @@ extends SceneTree
 #                 position, then 24 ticks and a capture. A test stimulus: the
 #                 scene does not run that state, and the jump's 12-unit drop
 #                 in z is not applied.
+#   [--wade-diagnostic] run the native Wader on the observed player once per
+#                 observation. OFF by default: the control walk has no frame
+#                 counter or stick speed (player-wading.md 3, 13), so the
+#                 step is refused and its ticks counted (water.wading_refused)
 #   [--level-lights=FILE] level-lights JSON; also supplies the level flag word
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
@@ -28,6 +32,7 @@ var failures := 0
 var captured_kinds := {}
 const RealAudio = preload("res://real_data/real_audio.gd")
 const RealFx = preload("res://real_data/real_fx.gd")
+const RealWorld = preload("res://real_data/real_world.gd")
 
 func _initialize() -> void:
 	for argument in OS.get_cmdline_user_args():
@@ -36,6 +41,7 @@ func _initialize() -> void:
 			args[parts[0]] = parts[1]
 		elif argument.begins_with("--"):
 			args[argument.substr(2)] = true
+	RealWorld.wade_diagnostic = args.has("wade-diagnostic")
 	run.call_deferred()
 
 func add(key: String, n := 1) -> void:
@@ -282,6 +288,13 @@ func run() -> void:
 			add("water.ticks_observed", scene.real.world.ticks_observed)
 			add("water.ticks_in_water", scene.real.world.ticks_in_water)
 			add("water.entries", scene.real.world.entries)
+			# Player_move's water step on the observed player (native Wader):
+			# refused unless --wade-diagnostic; the ripple ran ahead of the water tick.
+			add("water.wading_refused", scene.real.world.wade_refused_ticks)
+			add("water.wading_skipped", scene.real.world.wade_skipped_ticks)
+			if RealWorld.wade_diagnostic: add("water.wading_order_ripple_before_tick")
+			for key in ["steps", "ticks_in_water", "entries", "exits", "draws", "hurts", "disturbs", "touched", "splashes"]:
+				if scene.real.world.wade.has(key): add("water.wading_" + key, int(scene.real.world.wade[key]))
 			for why in scene.real.world.errors: refuse("water.service", why)
 		add("audio.frames_pushed", scene.audio.pushed_frames - frames_before)
 		add("audio.bank_errors", scene.audio.bank_errors.size())

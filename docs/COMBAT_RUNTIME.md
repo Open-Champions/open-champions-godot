@@ -119,8 +119,9 @@ cap. Full actor words and player record fields are compared in the exact corpus.
    single-actor creature movement, base combat, or the old object scheduler for
    these same actors. No live migration or checkpoint conversion is provided.
 2. Supply terrain raycast, slide, height and water-query services backed by the
-   same selected terrain Level. Water must report dry; an actual water result
-   refuses. The `flat_fixture_services()` helper is explicitly synthetic. Production
+   same selected terrain Level. `water_test` and `water_disturb` run the executed
+   wading step (docs/PLAYER_WADING.md); a wader without a `water_disturb`
+   service refuses. The `flat_fixture_services()` helper is explicitly synthetic. Production
    callers must install real services, including dialog-open and jumpgate travel
    state queries for the player damage gates. Animation and skill services have no
    implicit production fallback.
@@ -304,7 +305,7 @@ In the Full composition the player's melee hit is the tick's frame count, not an
 ### Refusals of the Full composition
 
 The Full composition refuses wherever the composed reference refuses or has no defined result:
-- **Movement and water:** entering water; the screen clamp without camera planes; SpellCharge contact.
+- **Movement and water:** the screen clamp without camera planes; SpellCharge contact.
 - **Projectiles and offence:** deflected missiles; Penetrating Arrows and Dodge at a nonzero rank; a projectile as its own attacker; `Player_hitSparks` or a stuck arrow needing model sample points. Thrown potion kinds 1, 2 and 3 are the round-4 bodies. Arrow kinds 1, 2, 5 and 6 are the round-3 bodies. `retain_round2_refusals()` puts the pinned round-2 corpus back on the refusals it recorded for potions, those arrow kinds, and a disease allocation.
 - **Defence:** the Resurrect save; interactable objects; PvP B arena lives and the PvP A kill credit. Silent block sparks are the round-4 body. Holy Shield absorption is the round-4 stub when the caster's pose word at `+0x114` is 0, and the round-5 sample points when that word is set. The same corpus flag still refuses both. A resisted knock-down of the real player still refuses `SkillStrongStance_trigger`. That trigger's light and particles are not this round. The phantom constructor refuses at `Creature_ctor` (below). `GutChunk_ctor` at the blood call stays a refusal; the constructor itself refuses at `PhProp_ctor` and its run was not executed.
 - **Spells:** unknown spell classes; a creature destroyed with attached spells; skills other than 16, 57 and 95.
