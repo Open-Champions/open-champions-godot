@@ -257,15 +257,48 @@ func run() -> void:
 	var hp_before := float(before.get("hp", -1.0))
 	var gold_before := int(before.get("gold", -1))
 	var actors_before: Array = before.get("combat_actors", [])
-	var attack_handled := game_key(KEY_J)
-	advance(0, 120)
+	var enemy_hp_before := {}
+	for actor in actors_before:
+		if int(actor.get("slot", 0)) > 0 and actor.get("present", false) and not actor.get("dead", false):
+			enemy_hp_before[int(actor.slot)] = float(actor.get("hp", -1.0))
+	var attack_handled := false
+	# Exercise pressed edges throughout the fight window. A single tap cannot
+	# establish damage, a death, or a drop in the live session.
+	var attack_event := InputEventKey.new()
+	attack_event.keycode = KEY_J
+	attack_event.physical_keycode = KEY_J
+	for i in range(10):
+		attack_event.pressed = true
+		attack_handled = scene.handle_input_event(attack_event) or attack_handled
+		advance(0, 12)
+		attack_event.pressed = false
+		scene.handle_input_event(attack_event)
 	var after: Dictionary = scene.controller.get_observation()
 	var actors_after: Array = after.get("combat_actors", [])
-	mark("enemy_fight", "combat_observed" if after.get("combat_enabled", false) else "refused",
-		{"attack_input_handled": attack_handled, "actors_before": actors_before.size(),
-		"actors_after": actors_after.size(), "hp_before": hp_before,
-		"hp_after": float(after.get("hp", -1.0)), "gold_before": gold_before,
-		"gold_after": int(after.get("gold", -1)), "drops_observed": 0})
+	var enemy_damaged := false
+	var enemy_died := false
+	for actor in actors_after:
+		var slot := int(actor.get("slot", 0))
+		if enemy_hp_before.has(slot):
+			enemy_damaged = enemy_damaged or float(actor.get("hp", -1.0)) < float(enemy_hp_before[slot])
+			enemy_died = enemy_died or actor.get("dead", false) or not actor.get("present", true)
+	var drops_before := int(before.get("combat_drops", 0))
+	var drops_after := int(after.get("combat_drops", 0))
+	var gold_after := int(after.get("gold", -1))
+	var fight_passed: bool = after.get("combat_enabled", false) and attack_handled \
+		and not enemy_hp_before.is_empty() and enemy_damaged and enemy_died \
+		and drops_after > drops_before and gold_after > gold_before
+	var object_counts: Dictionary = scene.controller.script_command_counts()
+	mark("enemy_fight", "passed" if fight_passed else "refused",
+		{"attack_input_handled": attack_handled, "live_enemies_before": enemy_hp_before.size(),
+		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
+		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
+		"hp_before": hp_before, "hp_after": float(after.get("hp", -1.0)),
+		"gold_before": gold_before, "gold_after": gold_after,
+		"drops_before": drops_before, "drops_after": drops_after,
+		"objects_built": int(object_counts.get("objects_built", 0)),
+		"objects_unbuilt": int(object_counts.get("objects_unbuilt", 0)),
+		"factory_build_refusals": object_counts.get("build_refusals", {})})
 	await capture("05-fight-attempt")
 	help_close()
 	if scene.controller.dialog_status().get("open", false):
