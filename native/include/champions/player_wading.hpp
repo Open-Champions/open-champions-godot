@@ -39,9 +39,6 @@ inline constexpr Raw VOLUME_FOOT = 0x3ecccccc;                // 0.4, 0x1b4728
 // damage_apply on itself (0x1b4490): attack 100000000, flags 0x1000030, range 1e8.
 inline constexpr Raw HURT_AMOUNT = 100000000, HURT_FLAGS = 0x1000030,
                      HURT_RANGE = 0x4cbebc20;
-// Player_run (docs/spec/player-wading.md section 6): same z offset.
-inline constexpr Raw RUN_JUMP_STRENGTH = 0x453b8000, RUN_JUMP_RADIUS = 0x41c00000,
-                     RUN_BLOCK_STRENGTH = 0x447a0000, RUN_BLOCK_RADIUS = 0x41400000;
 
 struct TestResult {
   bool hit = false;
@@ -99,9 +96,7 @@ inline bool step(const Input &in, const Host &host) {
 // ---- the footstep ----------------------------------------------------------
 inline constexpr Raw FOLEY_DEFAULT = 0x80000;   // flags with no item, 0x1beef8
 inline constexpr Raw FOLEY_ANY = 0x780000;      // 0x1e7ce0
-inline constexpr Raw FOLEY_SILENT = 0x400000;   // result register of a silent step, 0x1e7cec
-inline constexpr std::uint32_t FOLEY_WATER_FORMAT = 0x53ddd8, FOLEY_PLAIN_FORMAT = 0x53de30,
-                               FOLEY_LUMP = 0x53d688;
+inline constexpr std::uint32_t FOLEY_WATER_FORMAT = 0x53ddd8, FOLEY_PLAIN_FORMAT = 0x53de30;
 struct FoleyChoice {
   bool audible = false;
   std::uint32_t format = 0; // executable string address of the sprintf format

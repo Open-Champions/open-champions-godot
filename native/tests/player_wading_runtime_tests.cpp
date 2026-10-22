@@ -104,7 +104,6 @@ int main() {
     }
     check(g.wet(), "a dry player over water enters within four frames");
     check(g.count("presentation:sound_playOnObject", entered_at) == 1, "one splash on entry");
-    check(g.w->events()[entered_at + 0].name.size() > 0, "entry events recorded");
     check(f.cell(16, 16) == 1000 && f.cell(15, 16) == 749 && f.cell(15, 15) == 499,
           "the entry ring: 1000 centre, 749 and 499 around it");
     const int after_entry = f.total();

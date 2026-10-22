@@ -42,15 +42,22 @@ step (f), in the original's call order:
   splash and burst are recorded as `presentation:` events. The `Player_run` state 7
   and 0xb ripples reach the same service (result ignored). Any real level still
   uses the fixture's flat dry ground, so the Full fixture itself never meets water.
-- **Real levels in Godot** use the diagnostic control walk, which has no
-  `Player_move`. `real_world::Wader` runs the same `step` on the level's WORLD
-  water image from the observed player: frame = ready tick, position = feet,
-  `moving` = the feet moved since the last observation (stand-in for `s >= 0.01`),
-  not airborne. The binding sends each ripple into the service count and the drawn
-  `Field`. Counted, not applied: the entry's shared-seed draw (the control session
-  has no seed model that shares the tick) and the hurting-water damage. The
-  GDScript steps once per ready tick before the water tick of the same frame;
-  the research does not give that order, so it is an authored choice.
+- **Real levels in Godot: REFUSED by default.** The diagnostic control walk has
+  no `Player_move`, so the step's inputs are not observed: `g_simFrame` (the `& 3`
+  and `& 15` gates, research section 3), the stick speed `s` (set to 1.0 by
+  Player_move step (e), section 13) and the airborne byte. The research also
+  lists the order of the ripple against the water tick as unknown. The scene
+  therefore does not step the player's wading; `water.wading_refused` counts the
+  ticks it would have. `real_world::Wader` (the same `step` on the level's WORLD
+  water image) stays as a library type and behind the explicit `--wade-diagnostic`
+  opt-in (`RealWorld.wade_diagnostic`, off by default). The opt-in steps once per
+  observation, at the observed tick, ahead of that frame's water tick
+  (`water.wading_order_ripple_before_tick` is recorded; an authored diagnostic
+  choice, not research), with frame = ready tick, `moving` = the feet moved since
+  the last observation, never airborne, skipped catch-up ticks counted in
+  `water.wading_skipped`. Counted, not applied: the entry's shared-seed draw and
+  the hurting-water damage. A missing `water_disturb` service refuses in
+  `Player_move` and in `Player_run`'s ripples alike.
 
 ## Tests
 

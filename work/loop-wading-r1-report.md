@@ -110,3 +110,33 @@ python3 -I work/wading/aggregate.py          # sweep totals against w23on / w23o
 ```
 
 Logs and counts-only summaries are under ignored `work/wading/` and `work/private/`.
+
+## Audit fixes
+
+Audit `native-wading.md` (b75c174..13b9b6f): FIX, 0 HIGH, 1 MEDIUM, 3 LOW. All four addressed; no new research.
+
+- **W-1 (MEDIUM), refused.** The scene inputs have no research trace: frame = ready tick for `g_simFrame` (`& 3`, `& 15`
+  gates, player-wading.md §3), `moving` for the stick speed `s` (set by Player_move step (e), §13), airborne always
+  false, and the ripple-versus-water-tick order (listed unknown). So the Godot scenes no longer run `Wader` by default:
+  `real_world.gd` counts the ticks in `water.wading_refused` (sweep: 2,832) and `water.wading_*` is absent. The explicit
+  opt-in `--wade-diagnostic` (`RealWorld.wade_diagnostic`, off by default) steps once per observation at the observed tick
+  (not several frames on one `moving` and position; the stepped-over catch-up ticks count in `water.wading_skipped`)
+  and records `water.wading_order_ripple_before_tick`. `Wader` and `wade_step` stay as library/binding API, labelled in
+  `real_world.hpp`; docs (PLAYER_WADING, REAL_DATA, WATER_DRAW) updated.
+- **W-2 (LOW), fixed.** `Player_run`'s `water_disturb` now throws `Unsupported` when the service is absent
+  (`combat_runtime_tick.cpp`), as `Player_move` does.
+- **W-3 (LOW), fixed.** The burst note records no height when `water_height` is absent (no invented `0`).
+- **W-4 (LOW), fixed.** Removed the vacuous event-name check, the constants-versus-literals block, and the unused
+  `RUN_*`, `FOLEY_SILENT` and `FOLEY_LUMP` constants (the replay covers the used ones).
+
+Verification after the fixes (arm64, Release; the machine was at load average ~50 from other jobs):
+- CTest `-j 3`: 227/228 first run; `player-exact` hit its 240 s limit (143 s unloaded in round 1, and again alone under load).
+  Rerun alone with `--timeout 1500`: passed (220 s). So **228/228**. `player-wading-exact`, `player-wading-runtime`,
+  `real-world-adapter` pass.
+- GDExtensions rebuilt (arm64 debug); Godot dev matrix `work/wading/run-godot.py`: **54/54 exit 0**.
+- FULL_TRACE `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, 31,622 bytes: unchanged.
+- 111-level sweep, scripts on `w25on` and off `w25off`: **111 tried, 111 loaded, 111 played, 230 checks, 0 failures,
+  empty refusal list** each. Against round 1 the only changes: `water.wading_*` (steps, entries, draws, splashes,
+  disturbs, touched, ticks_in_water) 0 again, `water.wading_refused` 2,832; `text.frames_drawn.bust` 29 -> 31 with
+  scripts on (display cadence, as noted above; scripts off unchanged). Position-based water counts equal wave 23.
+- Not run: x86_64 CTest, export builds.

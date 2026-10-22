@@ -232,12 +232,8 @@ int main(int argc, char **argv) {
       check(false, "unknown case " + c.tag);
     }
   }
-  // Authored checks of the constants against the research table (section 11).
-  check(PW::WADE_STRENGTH == 0x43960000 && PW::WADE_RADIUS == 0x41400000 && PW::Z_OFFSET == 0x41400000,
-        "wading ripple 300.0 / 12.0 at z - 12.0");
-  check(PW::ENTRY_STRENGTH_AIR == 0x453b8000 && PW::ENTRY_STRENGTH_FOOT == 0x447a0000 && PW::ENTRY_RADIUS == 0x41c00000,
-        "entry ripple 3000.0 / 1000.0, radius 24.0");
-  check(PW::VOLUME_AIR == 0x3f800000 && PW::VOLUME_FOOT == 0x3ecccccc, "splash volume 1.0 / 0.4");
+  // The constants are exercised by the replay above (every ripple, splash and
+  // hurt argument is compared with the research model's value).
   // x - 0.0 is computed as written: -0.0 stays -0.0, no frame changes it.
   check(PW::ripple_point({0x80000000, 0, 0})[0] == 0x80000000, "x - 0.0 keeps -0.0");
   // A missing callback refuses; it never reads as dry.

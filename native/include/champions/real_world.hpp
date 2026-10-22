@@ -69,6 +69,8 @@ private:
 // Not applied, only counted: the entry's shared-seed draw (`draws`) and the
 // hurting-water damage (`hurts`). The entry splash sound and burst are
 // presentation and are not played. `airborne` is always false here.
+// The Godot scenes REFUSE to run this by default (no host frame counter or
+// stick speed); it runs only behind the explicit --wade-diagnostic opt-in.
 // The disturb callback receives each ripple's strength, radius and point and
 // returns the chunks touched; the Godot binding also feeds the drawn field.
 class Wader {

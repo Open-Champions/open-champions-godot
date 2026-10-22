@@ -279,7 +279,12 @@ void World::State::player_water(Address p, Raw s) {
     note("presentation:sound_playOnObject", {volume});
   };
   host.burst = [this](const PW::Vec3 &at, const PW::TestResult &t) {
-    note("presentation:fx_burst_1fbdf0", {at[0], at[1], t.has_height ? t.height : 0});
+    // The height is the chunk's minimum z from water_test (research
+    // player-wading.md section 3); with no height service it is not recorded.
+    if (t.has_height)
+      note("presentation:fx_burst_1fbdf0", {at[0], at[1], t.height});
+    else
+      note("presentation:fx_burst_1fbdf0", {at[0], at[1]});
   };
   PW::Input in;
   in.frame = u(FRAME);
