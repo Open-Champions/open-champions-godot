@@ -290,6 +290,7 @@ Dictionary ChampionsSessionController::present_observation(
     result["player_record_currents_known"] = p.current_known;
     result["name"] = String::utf8(p.name.c_str());
     result["player_class"] = p.player_class;
+    result["player_model_index"] = p.model;
     result["level"] = p.level;
     result["acknowledged_level"] = p.acknowledged;
     result["experience"] = p.experience;
