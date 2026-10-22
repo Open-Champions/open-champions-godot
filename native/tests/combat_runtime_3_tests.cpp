@@ -1,4 +1,5 @@
 #include "champions/combat_runtime.hpp"
+#include "champions/arena_monsters.hpp"
 #include "champions/core_state.hpp"
 #include <array>
 #include <optional>
@@ -185,10 +186,13 @@ void host() {
     auto chunk = h.w->spawn_gut_chunk(pos, 2, 0);
     check(h.w->contains(chunk) && h.w->read(chunk + 0x48) == 0x50f3b8,
           "GutChunk builds the PhProp chain and installs its table");
+    check(h.w->read(chunk + 0x190) == ONE,
+          "GutChunk's rigid body has the executed inverse mass");
     std::string refusal;
-    try { h.w->run_actor(chunk); } catch (const C::Unsupported &e) { refusal = e.what(); }
-    check(refusal.find("PhProp_run needs the unmodelled rigidbody_init output") != std::string::npos,
-          "the unmodelled composed physics run stays refused");
+    try { h.w->run_actor(chunk); }
+    catch (const arena_monsters::Unsupported &e) { refusal = e.what(); }
+    check(refusal.find("model_getHullPoints returned null") != std::string::npos,
+          "the absent loaded model hull stays refused");
   }
   {
     Host h;

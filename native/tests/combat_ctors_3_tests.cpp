@@ -536,6 +536,177 @@ void demon_near_cases() {
     check(!CT::soul_is_demon_near(m,c),"the Creature.v0 call-out is asked for an unknown getter");
   }
 }
+void rigidbody_round5_cases() {
+  // tools/test_ref_rigidbody.py and ref_rigidbody.py at research-combat-5
+  // f33d1a3: dirty init block, one cosmetic draw, exact orientation and inertia.
+  constexpr A::Address body=0x100000;
+  A::Memory mem; A::Model m(mem);
+  for (unsigned off=0;off<0x98;off+=4) mem.poke(body+off,4,0xdeadbeef);
+  mem.poke(0x404460,4,12345);
+  mem.poke(0x404464,4,0x98765432);
+  CT::rigidbody_init(m,body,0x40000000,0x3f800000,
+                     0x40000000,0x40400000,0x40800000);
+  const Raw expected[]={0x3f000000,0x3e75c28f,0x3e999999,0x3eec4ec4};
+  for (unsigned k=0;k<4;++k)
+    check(mem.load(body+4*k,4)==expected[k],"rigid inverse mass and inertia");
+  check(mem.load(0x404460,4)==0x05391c44,"one cosmetic draw");
+  check(mem.load(0x404464,4)==0x98765432&&m.draws==0,"shared draw unchanged");
+  check(mem.load(body+0x24,4)==0x3f7ff25e&&
+        mem.load(body+0x28,4)==0x3ca71719,"reference quaternion twice normalized");
+  check(mem.load(body+0x44,4)==0xbf7fc978&&
+        mem.load(body+0x48,4)==0xbd270e33&&
+        mem.load(body+0x64,4)==0x3f800000,"reference rotation matrix");
+  for (unsigned off:{0x10u,0x14u,0x18u,0x2cu,0x38u,0x68u,0x8cu})
+    check(mem.load(body+off,4)==0,"dirty body cleared");
+  // The reference's identity update writes world inertia and angular speed.
+  mem.poke(body+0x1c,4,0);mem.poke(body+0x20,4,0);
+  mem.poke(body+0x24,4,0);mem.poke(body+0x28,4,0x3f800000);
+  mem.poke(body+4,4,0x40000000);mem.poke(body+8,4,0x40400000);
+  mem.poke(body+12,4,0x40a00000);mem.poke(body+0x38,4,0x3f800000);
+  CT::rigidbody_update_derived(m,body);
+  check(mem.load(body+0x68,4)==0x40000000&&
+        mem.load(body+0x78,4)==0x40400000&&
+        mem.load(body+0x88,4)==0x40a00000,"derived diagonal inertia");
+  check(mem.load(body+0x8c,4)==0x40000000,"derived angular velocity");
+}
+void arrow_hit_round5_cases() {
+  // tools/test_ref_combat5.py Timer and Light reference cases, f33d1a3.
+  constexpr A::Address creature=0x110000,light=0x120000,source=0x130000;
+  A::Memory mem;A::Model m(mem);
+  m.callbacks["handle_clear"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  m.callbacks["handle_link"] = m.callbacks["handle_clear"];
+  for (unsigned which=0;which<5;++which) {
+    CT::creature_set_effect_timer(m,creature,which,0,0x40200000);
+    check(mem.load(creature+0x340+4*which,4)==0x40200000,"five effect timer slots");
+  }
+  auto prior=m.calls.size();
+  CT::creature_set_effect_timer(m,creature,5,source,0);
+  check(m.calls.size()==prior,"nonpositive out-of-range timer has no list calls");
+  CT::creature_set_effect_timer(m,creature,1,source,0x3f800000);
+  check(m.calls.size()==prior+2&&m.calls[prior].name=="handle_clear"&&
+        m.calls[prior+1].name=="handle_link","positive timer relinks source");
+  m.callbacks["GameObject_ctor"] = [](A::Model &self,const std::vector<A::Value> &a)->A::Value {
+    const auto obj=A::Address(std::get<std::int64_t>(a.at(0)));
+    const auto pos=std::get<A::Vec3>(a.at(1));
+    self.draw_shared();
+    for (unsigned k=0;k<3;++k) self.store(obj+0x10+4*k,4,pos[k]);
+    self.store(obj+0xc,4,0);
+    return std::int64_t(0);
+  };
+  m.callbacks["light_link"] = m.callbacks["handle_clear"];
+  m.callbacks["obj_runEveryFrame"] = m.callbacks["handle_clear"];
+  mem.poke(0x44fdcc,4,1000);mem.poke(0x404464,4,0);
+  const std::array<Raw,12> fl{0x437f0000,0x41200000,0x41200000,0,
+      0,0,0,0,0x42f00000,0x42700000,0x3f000000,0x3e800000};
+  prior=m.calls.size();
+  CT::light_effect_ctor(m,light,{0x3f800000,0x40000000,0x40400000},0,7,fl);
+  check(mem.load(light+0xb4,4)==1015&&mem.load(light+0x48,4)==0x50e198,
+        "exploding arrow light runs fifteen frames");
+  check(mem.load(light+0xc,4)==3&&mem.load(light+0xb8,4)==7,
+        "light is non-solid and retains tag");
+  check(mem.load(light+0x56,2)==255&&mem.load(light+0x58,2)==10&&
+        mem.load(light+0x5e,2)==255,"light colour record duplicates start");
+  check(mem.load(light+0xb0,4)==0xc07fffff,"reference light radius step");
+  check(m.draws==1,"light takes one shared GameObject draw");
+  check(m.calls[prior].name=="GameObject_ctor"&&m.calls[prior+1].name=="light_link"&&
+        m.calls[prior+2].name=="obj_runEveryFrame","light constructor call order");
+}
+void staticfire_round5_cases() {
+  // tools/test_ref_combat5.py StaticFire reference, debris branch.
+  constexpr A::Address fire=0x140000;
+  A::Memory mem;A::Model m(mem);
+  m.callbacks["GameObject_ctor"] = [](A::Model &self,const std::vector<A::Value> &a)->A::Value {
+    auto obj=A::Address(std::get<std::int64_t>(a.at(0)));
+    auto pos=std::get<A::Vec3>(a.at(1));
+    for (unsigned k=0;k<3;++k) self.store(obj+0x10+4*k,4,pos[k]);
+    self.draw_shared();
+    self.store(obj+0x44,4,self.mem.load(0x404464,4));
+    self.store(obj+0xc,4,0);
+    return std::int64_t(0);
+  };
+  auto zero=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  for (auto name:{"light_link","light_unlink","obj_runEveryFrame",
+                 "obj_addToAlwaysDraw","path_blockNodes"}) m.callbacks[name]=zero;
+  m.callbacks["world_collectObjectsInBox"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return A::Objects{{1,2,3,4}};
+  };
+  mem.poke(0x404464,4,0);mem.poke(0x44fdc8,4,0xf00);
+  CT::staticfire_ctor(m,fire,{0x41200000,0x41a00000,0x41f00000},240,
+                      0x9000,1,0x43700000,0x3f000000);
+  check(mem.load(fire+0x48,4)==0x50da38&&mem.load(fire+0x50,4)==0x43700000,
+        "debris fire table and size");
+  check(mem.load(fire+0x68,4)==0x46435000&&mem.load(fire+0x7c,4)==120,
+        "four neighbours halve life; heat scales");
+  check(mem.load(fire+0x4a4,4)==fire+0xbc&&mem.load(fire+0x76,2)==100,
+        "ordinary fire keeps internal particle ring");
+  check(mem.load(fire+0xb8,4)==0x42840000&&
+        mem.load(fire+0x72,2)==3&&mem.load(fire+0x74,2)==0,
+        "fire light position and particle push");
+  check(m.draws==1&&mem.load(fire+0x44,4)==0xd1ccf6e9,
+        "one shared and two own draws");
+  m.callbacks["CT_type_id"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(77);
+  };
+  m.callbacks["StaticFire_typeinfo"] = m.callbacks["CT_type_id"];
+  m.callbacks["CT_type_info_equals"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(1);
+  };
+  m.calls.clear();
+  CT::staticfire_ctor(m,fire+0x1000,{0x41200000,0x41a00000,0x41f00000},240,
+                      0x9000,0,0x43700000,0x3f000000);
+  unsigned unlinked=0,typed=0;
+  for (const auto &call:m.calls) {
+    if (call.name=="light_unlink") ++unlinked;
+    if (call.name=="CT_type_id") ++typed;
+  }
+  check(unlinked==4&&typed==4,"four same-type neighbours unlink lights");
+}
+void minion_round5_cases() {
+  // tools/test_ref_combat5.py Minion reference: current attach point is
+  // written after animation and before the still-refused state dispatch.
+  constexpr A::Address c=0x150000,def=0x160000,table=0x170000;
+  constexpr A::Address node=0x180000,held=0x190000;
+  A::Memory mem;A::Model m(mem);
+  mem.poke(c+0x24,4,def);mem.poke(def+0xc,4,0x300000);
+  mem.poke(c+0x48,4,table);mem.poke(table+0xb8,2,0xfffc);
+  mem.poke(c+0x3c8,4,node);mem.poke(node+0xc,4,held);
+  mem.poke(c+0x38,2,0xc123);mem.poke(c+0x232,2,0x20);
+  mem.poke(c+0xdc,4,0x3f800000);
+  auto zero=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  for (auto name:{"Creature_processDamage","Creature_run","Creature_updateActive",
+                 "Creature_stepAnim","Creature_applyKnockback","Minion.slot23",
+                 "obj_updateGridCell"}) m.callbacks[name]=zero;
+  m.callbacks["model_getAttachPoint"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return A::Sample{{0x3f800000,0x40000000,0x40400000},{0,0,0}};
+  };
+  check(CT::minion_run_prefix(m,c),"Minion exits above state table");
+  check(mem.load(held+0x10,4)==0x3f800000&&
+        mem.load(held+0x14,4)==0x40000000&&
+        mem.load(held+0x18,4)==0x40400000&&
+        mem.load(held+0x38,2)==0xc123,"held Soul copies point and facing");
+  check(m.calls.size()==8&&m.calls[5].name=="Minion.slot23"&&
+        m.calls[6].name=="model_getAttachPoint"&&
+        m.calls[7].name=="obj_updateGridCell","Minion placement call order");
+  check(std::get<std::int64_t>(m.calls[6].args[2])==0xffffc123,
+        "Minion passes sign-extended facing word to attach point");
+  mem.poke(c+0x232,2,1);
+  bool refused=false;
+  try {CT::minion_run_prefix(m,c);} catch (const A::Unsupported &) {refused=true;}
+  check(refused,"unexecuted Minion state dispatch refuses");
+  mem.poke(c+0x232,2,0x20);
+  m.callbacks["Creature_run"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(1);
+  };
+  m.calls.clear();
+  check(!CT::minion_run_prefix(m,c)&&m.calls.size()==2&&
+        m.calls[1].name=="Creature_run","early Creature_run skips placement");
+}
 int main() {
   try {
     holder_cases(0x50cf40);
@@ -551,6 +722,10 @@ int main() {
     phprop_run_round4_cases();
     demon_near_cases();
     held_part_draw_case();
+    rigidbody_round5_cases();
+    arrow_hit_round5_cases();
+    staticfire_round5_cases();
+    minion_round5_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {
