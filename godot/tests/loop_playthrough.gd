@@ -86,6 +86,48 @@ func capture(label: String) -> void:
 	else:
 		refusal(label, "screenshot write failed")
 
+# Compare two rendered viewport captures with the dialog view shown and hidden.
+# The box bounds come from docs/DIALOG.md; a nonzero count proves that its
+# pixels, rather than only native draw calls or a decoded texture, reached play.
+func dialog_box_pixels() -> int:
+	RenderingServer.force_draw()
+	var shown: Image = scene.viewport.get_texture().get_image()
+	scene.npc_dialog.hide()
+	await process_frame
+	RenderingServer.force_draw()
+	var hidden: Image = scene.viewport.get_texture().get_image()
+	scene.npc_dialog.show()
+	await process_frame
+	if shown == null or hidden == null or shown.is_empty() or hidden.is_empty(): return 0
+	var size: Vector2 = scene.npc_dialog.size
+	var factor := minf(size.x / 640.0, size.y / 448.0)
+	var origin := Vector2((size.x - 640.0 * factor) * 0.5, (size.y - 448.0 * factor) * 0.5)
+	var box := Rect2i(Vector2i(origin + Vector2(35, 280) * factor), Vector2i(Vector2(560, 156) * factor))
+	var bounds := box.intersection(Rect2i(Vector2i.ZERO, shown.get_size()))
+	var changed := 0
+	for y in range(bounds.position.y, bounds.end.y, 3):
+		for x in range(bounds.position.x, bounds.end.x, 3):
+			if shown.get_pixel(x, y) != hidden.get_pixel(x, y): changed += 1
+	return changed
+
+# The level screenshot is paired with an actor-hidden viewport capture. The
+# count checks that the inspected mesh actually contributed visible pixels.
+func player_actor_pixels() -> int:
+	RenderingServer.force_draw()
+	var shown: Image = scene.viewport.get_texture().get_image()
+	scene.actor_visual.hide()
+	await process_frame
+	RenderingServer.force_draw()
+	var hidden: Image = scene.viewport.get_texture().get_image()
+	scene.actor_visual.show()
+	await process_frame
+	if shown == null or hidden == null or shown.is_empty() or hidden.is_empty(): return 0
+	var changed := 0
+	for y in range(0, shown.get_height(), 3):
+		for x in range(0, shown.get_width(), 3):
+			if shown.get_pixel(x, y) != hidden.get_pixel(x, y): changed += 1
+	return changed
+
 func tap(bits: int) -> void:
 	fe.tap(bits)
 	collect("frontend")
@@ -182,6 +224,14 @@ func run() -> void:
 		{"level_index": scene.real.current, "session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
 	await capture("03-level")
+	var class_mesh: bool = scene.actor_visual.mesh != null and scene.actor_visual.mesh != scene._default_mesh \
+		and not (scene.actor_visual.mesh is CapsuleMesh) and not (scene.actor_visual.mesh is SphereMesh) \
+		and not scene.asset_label.text.begins_with("Practice figure")
+	var actor_pixels := await player_actor_pixels() if DisplayServer.get_name() != "headless" else 0
+	mark("player_visual", "not_applicable_headless" if DisplayServer.get_name() == "headless" else \
+		("class_mesh" if class_mesh and actor_pixels > 0 else "refused"),
+		{"class_mesh": class_mesh, "mesh_type": scene.actor_visual.mesh.get_class(), "actor_pixels": actor_pixels,
+		"practice_label": scene.asset_label.text.begins_with("Practice figure")})
 	if scene.real.current < 0 and not scene.real.levels.is_empty():
 		var direct: bool = scene.load_real_level(0)
 		mark("direct_level_diagnostic", "loaded" if direct else "refused", {"level_index": scene.real.current})
@@ -218,20 +268,42 @@ func run() -> void:
 		"nearest_target_known": false, "paused": scene.paused,
 		"menu_visible": scene.menu.visible})
 	if opened_dialog:
-		for i in range(3): await process_frame
+		# Opening the dialog starts a camera swoop. Its draw task returns no
+		# operations until that move has arrived; sample only a drawable frame.
+		for i in range(4000):
+			advance()
+			await process_frame
+			if not scene.controller.dialog_status().get("camera_moving", false) and \
+					 not scene.npc_dialog.frame.get("sprites", []).is_empty() and \
+					 scene.npc_dialog.frame.get("glyphs", []).size() > 40: break
 		var frame: Dictionary = scene.npc_dialog.frame
 		for why in frame.get("refusals", []): refusal("dialog_draw", why)
+		await capture("04-dialog-attempt")
+		var box_pixels := await dialog_box_pixels() if DisplayServer.get_name() != "headless" else 0
 		var visual_result := "not_applicable_headless" if DisplayServer.get_name() == "headless" else \
-			("drawn" if frame.get("open", false) and
-			(not frame.get("sprites", []).is_empty() or not frame.get("glyphs", []).is_empty()) else "refused")
+			("drawn" if frame.get("open", false) and not frame.get("sprites", []).is_empty() and \
+			 not frame.get("glyphs", []).is_empty() and box_pixels > 0 else "refused")
 		mark("dialog_visual", visual_result,
 			{"box_sprites": frame.get("sprites", []).size(),
 			"glyphs": frame.get("glyphs", []).size(),
+			"box_pixels": box_pixels,
+			"camera_moving": scene.controller.dialog_status().get("camera_moving", false),
 			"frame_open": frame.get("open", false),
 			"paused": scene.paused, "menu_visible": scene.menu.visible,
 			"font_ready": scene.npc_dialog.font_texture != null,
 			"box_ready": scene.npc_dialog.box_texture != null})
-	await capture("04-dialog-attempt")
+		# The later prompt is absent during the opening text reveal. Capture it
+		# before sending a choice so its text and cursor can be inspected too.
+		var prompt_drawn := false
+		for i in range(4000):
+			advance()
+			await process_frame
+			if int(scene.npc_dialog.frame.get("cursor_glyph_quads", 0)) > 0:
+				prompt_drawn = true
+				break
+		mark("dialog_prompt", "drawn" if prompt_drawn else "unavailable",
+			{"cursor_glyph_quads": int(scene.npc_dialog.frame.get("cursor_glyph_quads", 0))})
+		if prompt_drawn: await capture("04-dialog-prompt")
 	if opened_dialog:
 		game_key(KEY_DOWN)
 		var closed := false
