@@ -102,8 +102,11 @@ render-frame elapsed time, or Godot physics as substitutes.
   it to data the research never ran, so the story start stays the story snap
   and reports no ground there. The caller that knows the level was loaded in
   mode A (mode B set, 0x4f7124 clear: the executed case) calls
-  `arena_mode_a_start_ground` itself. The Godot session does not select an
-  arena mode, so it refuses those levels.
+  `arena_mode_a_start_ground` itself. The Godot session reads the mode-A name
+  table from the owner's executable at run time. Only when a level's story
+  snap has no ground and its name is listed there does the session use the
+  arena start and publish `start.arena_mode` "A". A missing or unlisted table
+  keeps the refusal.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared

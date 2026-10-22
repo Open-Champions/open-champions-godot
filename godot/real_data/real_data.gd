@@ -26,6 +26,7 @@ var world: RefCounted = null # RealWorld presenter of the current level
 var level_lights_path := "" # user's fx_level_lights.py --json output, if chosen
 var fonts: Array[Dictionary] = [] # {path, row_index, fingerprint} FNT rows found
 var creature: RefCounted = null # RealCreature texture of the current preview
+var arena_tables: Dictionary = {} # counts from the owner's executable
 var last_error := ""
 
 func configure(owner: Control, cache: String) -> void:
@@ -49,6 +50,7 @@ func open_disc(path: String) -> bool:
 	if levels.is_empty():
 		return _fail("No GOB with a matching level TEX was found.")
 	disc_dir = path
+	arena_tables = scene.controller.load_arena_tables(files.get("slus_209.73", ""))
 	_install_presentation()
 	return true
 
@@ -146,7 +148,7 @@ func load_level(index: int) -> Dictionary:
 	# Level-spawn story start (docs/LEVEL_FLOW.md section 17) from this level's
 	# objects.ob. Without it the session keeps the historical origin start.
 	var objects := read_entry(level.gob, level.stem + ".lmp", "objects.ob")
-	scene.controller.set_terrain_start_objects(world_path, objects)
+	scene.controller.set_terrain_start_objects(world_path, objects, str(level.stem))
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
 	library._add_candidate(session_path)
