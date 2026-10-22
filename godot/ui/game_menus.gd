@@ -72,8 +72,8 @@ func _ready() -> void:
 	_host_button(box, "Close", "Host close. The original close control was not executed.", close_menu)
 	_refresh_status()
 
-func configure(owner: Control) -> void:
-	scene = owner
+func configure(play_flow: Control) -> void:
+	scene = play_flow
 
 func _host_button(box: VBoxContainer, label: String, tip: String, action: Callable) -> void:
 	var button := Button.new()
@@ -226,7 +226,7 @@ func _refresh_status() -> void:
 	if not row.get("ok", false):
 		status.text = str(row.get("error", "menu state refused"))
 		return
-	var font_note := "Small game font loaded for stats and skills; other in-game text remains host copy." if small_font_texture != null else "Small game font is not loaded yet."
+	var font_note := "Small game font loaded for stats and skills; inventory and save text await font evidence." if small_font_texture != null else "Small game font is not loaded yet."
 	status.text = "Host panel. J equips, U drops, K buys or sells, using the selected mask set. These are not original keyboard bindings.\n%s gold %s  level %s  skill %s  stat %s  ack %s\nShop choice y %s and %s. Centre x was not executed.\n%s\n%s" % [
 		str(row.scheme), str(row.gold), str(row.level), str(row.skill_points), str(row.stat_points), str(row.acknowledged),
 		str(place.get("shop_buy_y", "")), str(place.get("shop_sell_y", "")), str(place.get("scheme_note", "")), font_note]
@@ -256,14 +256,12 @@ func _draw() -> void:
 	var drawn: Dictionary = service.frame(screen)
 	if not drawn.get("ok", false):
 		return
-	for rect in drawn.rects:
-		var height := int(rect.y1) - int(rect.y0)
-		# The two layer-4 scrollbar strips are executed. Item-cell boxes are
-		# synthetic hit targets, not documented visual sprites.
-		if int(rect.layer) == 4 and height <= 2:
-			draw_rect(Rect2(int(rect.x0), int(rect.y0), int(rect.x1) - int(rect.x0), height), _word(int(rect.colour)), true)
-	for text in drawn.texts:
-		_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred), screen in ["stats", "level-up", "skills"])
+	# The native frame records the scrollbar strip geometry and layer, but the
+	# executed drawRect colour is unknown. Item-cell boxes are host hit targets.
+	# Neither is painted until the corresponding visual contract is traced.
+	if screen in ["stats", "level-up", "skills"]:
+		for text in drawn.texts:
+			_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred), true)
 
 func _word(tint: int) -> Color:
 	var channel := func(shift: int) -> float:
