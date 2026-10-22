@@ -101,8 +101,10 @@ its own launch and rendering evidence.
    player at difficulty 1 and uses the documented object factory with the
    owner-selected executable. The [item commands](SCRIPT_ITEMS.md) run their
    researched has, count, remove, give and generate handlers; gives need item
-   tables and a bound seed. The arena monster builder is a separate library
-   call.
+   tables and a bound seed; ground items and `givePlayerRandom` refuse at their
+   documented evidence boundaries. The [item-round gaps](ITEMS_GAPS.md) cover the
+   host bit, generators and bounded hide/show behavior on stubs. The
+   arena monster builder is a separate library call.
    With the level script on, the real-data play scene attaches the
    [NPC dialog machine](DIALOG.md): the game folder's talkers can be talked
    to, and choice actions reach the quest and item models. The conversation

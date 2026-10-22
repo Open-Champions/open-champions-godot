@@ -1264,6 +1264,10 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   for (const auto &kv : counts.build_refusals)
     build_refusals[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
   result["build_refusals"] = build_refusals;
+  Dictionary stub_reasons;
+  for (const auto &kv : counts.stub_refusal_reasons)
+    stub_reasons[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
+  result["stub_refusal_reasons"] = stub_reasons;
   result["seed_bound"] = bool(script_seed_);
   result["seed_paired"] = script_world_.has_value();
   result["seed_unpaired"] = script_seed_unpaired_;

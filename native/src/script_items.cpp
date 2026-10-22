@@ -1,5 +1,8 @@
 #include "champions/script_items.hpp"
 #include "champions/messages.hpp"
+#include "champions/core_math.hpp"
+#include "champions/item_generation.hpp"
+#include "champions/objects.hpp"
 #include <cstring>
 #include <stdexcept>
 
@@ -232,7 +235,7 @@ void recalc_load_limits(View &v) {
     if (obj == 0)
       continue;
     const auto level = passive_level(v, v.s32(obj + OBJ_SLOT), PASSIVE_LOAD);
-    v.store(r + P_LOAD_LIMIT, 4, load_limit(v.s32(r + P_EFF_STRENGTH), level, v.s32(G_LOAD_BONUS)));
+    v.store(r + P_LOAD_LIMIT, 4, load_limit(v.s32(r + P_EFF_STRENGTH), level, LOAD_BONUS_VALUE));
   }
 }
 bool fits(const View &v, std::int32_t slot, Raw weight, bool strict) {
@@ -353,6 +356,13 @@ std::shared_ptr<items::Tables> image_tables(const ImageReader &read) {
   t->name_space = str(S_SPACE);
   t->of_key = str(S_OF_KEY);
   t->gold_scale_multiplayer = u64(A_GOLD_SCALE_MP);
+  // item_generateWithAffixes reads the weapon value multipliers (a float per subtype
+  // 0-6, docs/data-tables.md; a subtype past the table refuses) and the loot quality
+  // rows (12 rows of 3 floats, docs/spec/items.md 3).
+  for (std::uint32_t k = 0; k < WEAPON_MULT_ROWS; ++k)
+    t->weapon_multipliers.push_back(u32(A_WEAPON_MULT + 4 * k));
+  for (std::uint32_t row = 0; row < QUALITY_ROWS; ++row)
+    t->quality_rows.push_back({u32(A_QUALITY + 12 * row), u32(A_QUALITY + 12 * row + 4), u32(A_QUALITY + 12 * row + 8)});
   return t;
 }
 
@@ -555,6 +565,10 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
   }
   if (name == "inventory_giveItem") {
     const auto slot = word_arg(args, 0, "give"), announce = word_arg(args, 1, "give");
+    // A record whose definition is 0 makes the original read the category byte
+    // at address 0x1d (docs/spec/item-drops.md 2, error paths): unknown here.
+    if (!scratch_definition())
+      throw Refused("inventory_giveItem: the record holds no definition (stale record)");
     const auto index = with_machine([&](msg::Machine &m) { return m.give_item(sword(slot), SCRATCH, sword(announce)); });
     // A full bag or a second held-once item: -1. The handler does not test it,
     // so the item is lost.
@@ -596,17 +610,107 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
   }
   if (name == "player_resetIdleAnim")
     return static_cast<std::uint32_t>(delegate(name, {word_arg(args, 0, "idle")}));
-  if (name == "pool_new")
-    return static_cast<std::uint32_t>(delegate(name, {word_arg(args, 0, "pool")}));
+  if (name == "pool_new") {
+    const auto size = word_arg(args, 0, "pool");
+    if (delegates.count(name))
+      return static_cast<std::uint32_t>(delegate(name, {size}));
+    // Every native item caller requests 0x190 for a ground ItemProp. Its
+    // resource and bounds services are unbound, so refuse before consuming a
+    // pool block. The pool model itself is tested independently.
+    if (size == 0x190)
+      throw Refused("ground item: resource and model-bounds services are unbound");
+    if (!variables_.world)
+      throw Refused("pool_new: no object world");
+    return variables_.world->pool.allocate(size); // full pool returns 0; corruption still throws
+  }
   if (name == "ItemProp_ctor2") {
     const auto block = word_arg(args, 0, "ground item");
     const auto *pos = args.size() > 1 ? std::get_if<std::array<std::uint32_t, 3>>(&args[1]) : nullptr;
     if (!pos)
       throw Refused("ItemProp_ctor2: position");
-    delegate(name, {block, (*pos)[0], (*pos)[1], (*pos)[2], SCRATCH, 0});
+    if (delegates.count(name)) {
+      delegate(name, {block, (*pos)[0], (*pos)[1], (*pos)[2], SCRATCH, 0});
+      return 0u;
+    }
+    ground_item(block, *pos);
     return 0u;
   }
+  // givePlayerRandom's callees (docs/spec/item-drops.md section 2). The handler
+  // blanks its stack record before its first draw; nothing reads the record
+  // between that and this call, which is the first one after the draw.
+  if (name == "level_monsterLevelTimesDifficulty") {
+    // givePlayerRandom's stack record is unknown after ten failed generations
+    // (item-drops.md section 6). No native caller may run the handler.
+    throw Refused("givePlayerRandom: unmodelled stack record after generator failure");
+  }
+  if (name == "stack_record_store") {
+    const auto offset = word_arg(args, 0, "record"), value = word_arg(args, 1, "record");
+    if (offset >= ITEM_SIZE)
+      throw Refused("stack_record_store: offset outside the record");
+    scratch_[offset] = static_cast<std::uint8_t>(value);
+    return 0u;
+  }
+  if (name == "item_generateWithAffixes") {
+    if (!tables_)
+      throw Refused("item_generateWithAffixes needs the item tables");
+    const auto budget = sword(word_arg(args, 0, "generate")), category = sword(word_arg(args, 1, "generate")),
+               suffix = sword(word_arg(args, 2, "generate")), level = sword(word_arg(args, 3, "generate"));
+    items::Rng rng(memory.word(G_RAND_SEED));
+    std::optional<items::Item> item;
+    try {
+      item = items::generate_with_affixes(*tables_, random_game(), rng, budget, category, suffix, level);
+    } catch (const items::Error &error) {
+      throw Refused(std::string("item_generateWithAffixes: ") + error.what());
+    }
+    memory.word(G_RAND_SEED, rng.seed);
+    if (!item)
+      return 0u; // the record is not written
+    scratch_ = item->pack(scratch_);
+    return 1u;
+  }
   throw Refused(name + " is not part of the item contract");
+}
+
+std::uint32_t Service::scratch_definition() const {
+  return std::uint32_t(scratch_[0]) | std::uint32_t(scratch_[1]) << 8 | std::uint32_t(scratch_[2]) << 16 |
+         std::uint32_t(scratch_[3]) << 24;
+}
+
+// The handler's pre-set of its stack record (0x145f4c-0x145f98): halfwords +0x24,
+// +0x2c, +0x34, +0x3c = 0xffff, bytes +0x21 and +0x20 = 0xff, halfwords
+// +0x10..+0x1e = 0. The rest keeps what the stack held.
+void Service::blank_record() {
+  for (std::uint32_t k = 0; k < 4; ++k) {
+    scratch_[0x24 + 8 * k] = scratch_[0x25 + 8 * k] = 0xff;
+    for (std::uint32_t b : {0x10u + 2 * k, 0x11u + 2 * k, 0x18u + 2 * k, 0x19u + 2 * k})
+      scratch_[b] = 0;
+  }
+  scratch_[0x21] = scratch_[0x20] = 0xff;
+}
+
+// The globals item_generateWithAffixes and level_monsterLevelTimesDifficulty read
+// (ref_item_drops.game_from): g_numPlayers, the four class words, g_difficultyIdx,
+// g_pvpModeA, g_pvpModeB and g_levelMonsterLevel.
+items::Game Service::random_game() const {
+  const auto &memory = variables_.memory;
+  items::Game game;
+  game.num_players = items::s32(memory.word(G_NUM_PLAYERS));
+  game.classes.clear();
+  for (std::int32_t k = 0; k < 4; ++k)
+    game.classes.push_back(items::s32(memory.word(rec(k) + P_CLASS)));
+  game.difficulty = items::s32(memory.word(G_DIFFICULTY));
+  game.pvp_a = items::s32(memory.word(0x4f711c));
+  game.pvp_b = items::s32(memory.word(0x4f7120));
+  game.level = memory.word(0x4f714c);
+  return game;
+}
+
+// The pinned constructor writes resource names, lookup pointers and model bounds
+// before it can publish an ItemProp (item-drops.md sections 1.2-1.3). This host
+// has no res_find/model_getBounds service, so it refuses before registering an
+// incomplete object or drawing from the shared seed.
+void Service::ground_item(std::uint32_t, const std::array<std::uint32_t, 3> &) {
+  throw Refused("ItemProp_ctor2: resource and model-bounds services are unbound");
 }
 
 std::uint32_t Service::generator_spawn(std::uint32_t generator, std::uint32_t type_name_at, const std::string &type_name) {
@@ -634,13 +738,14 @@ std::uint32_t Service::generator_spawn(std::uint32_t generator, std::uint32_t ty
 bool routes(const char *command) {
   static const char *names[] = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem",
                                 "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem",
-                                "generateMonster"};
+                                "givePlayerRandom", "generateMonster"};
   for (const char *name : names)
     if (command && std::strcmp(command, name) == 0)
       return true;
   return false;
 }
 bool draws_seed(const char *command) {
-  return command && (std::strcmp(command, "givePlayerItem") == 0 || std::strcmp(command, "giveOnePlayerItem") == 0);
+  return command && (std::strcmp(command, "givePlayerItem") == 0 || std::strcmp(command, "giveOnePlayerItem") == 0 ||
+                     std::strcmp(command, "givePlayerRandom") == 0);
 }
 } // namespace champions::simulation::rta::script_items

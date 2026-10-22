@@ -12,6 +12,7 @@
 #include "champions/world_queries.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
+#include "champions/net_launch.hpp"
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
@@ -59,6 +60,9 @@ struct Row {
 };
 const Row &row(std::size_t index);
 
+// ScriptGenerator's constructor (research items-gaps ecf9742 docs/spec/hide-monster.md 4.1).
+inline constexpr std::uint32_t SCRIPT_GENERATOR_CTOR = 0x265f54;
+
 struct Counts {
   std::uint64_t started = 0;
   std::uint64_t reached_wait = 0;
@@ -96,6 +100,9 @@ struct Counts {
   // object's field no ported code wrote (hit points). Each is also in
   // refused[].
   std::uint64_t stub_refusals = 0;
+  // Why: "command: reason" (an undecided factory row by constructor, a class
+  // the factory made no row for, or an unresolved name argument).
+  std::map<std::string, std::uint64_t> stub_refusal_reasons;
   // Routed commands refused because, for this state, they would reach a
   // callee research did not execute or a case the port refuses: a charm
   // target word the host's handle pool does not hold, a music volume or a
@@ -264,6 +271,16 @@ public:
   // 0x4d8ae0 = 1 and g_difficultyIdx 0x4f719c = 1, the executable image values
   // and the offline setup's stores. Call before run_prestart.
   void start_single_player();
+  // net_launchUpdate's end of launch (docs/spec/items-gaps.md 2.3): record 0, the
+  // host's, sets g_difficultyIdx, the kill limit and the PvP mode words on every
+  // machine, and in modes 2 and 3 game_set4f7110(+0xf4). Nothing in the play
+  // session launches a net game yet; this is the contract's receiving half.
+  void receive_launch(const net_launch::Record &record0);
+  // givePlayerRandom remains refused: its stack-record contents after ten failed
+  // generations are Unknown (item-drops.md 6). The level-name global at
+  // 0x41b721 has no pinned capacity, so bind_level_name also refuses.
+  void bind_monster_level(std::uint32_t raw_float);
+  void bind_level_name(const std::string &name);
   // The owner's executable, for the object factory's strings and the class
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.
@@ -466,13 +483,21 @@ private:
   Stop enter(const std::string &name, bool optional);
   Stop enter_level(const char *name);
   bool seed_refused() const;
-  bool touches_stub(std::size_t index, amx::Machine &machine) const;
+  bool touches_stub(std::size_t index, amx::Machine &machine);
   bool adopt_classified(const std::vector<level_flow::Record> &);
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,
               std::uint32_t address, const std::vector<std::string> &props);
   void stub(const level_flow::Record &, std::uint32_t address,
             std::vector<std::string> props, std::int64_t size);
+  // The ScriptGenerator constructor 0x265f54: the base object with the
+  // record's property list (research items-gaps ecf9742 docs/spec/hide-monster.md
+  // 4.1 and 5). world_createObject for ScriptGenerator_spawn: the factory row,
+  // then a ported constructor chain; any other constructor refuses.
+  Build build_generator(const level_factory::Outcome &, const level_flow::Record &,
+                        std::uint32_t address, const std::vector<std::string> &props);
+  std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
+                              std::int32_t angle, std::uint32_t props_word);
   void refuse(std::size_t index, amx::Machine &machine);
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
@@ -525,6 +550,16 @@ private:
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
   std::set<std::uint32_t> stats_built_;
+  // For a stub the factory row decided: whether its class is a Creature, and
+  // its constructor. A stub the row did not decide has no entry's creature
+  // answer (Unknown) and keeps hideMonster / showMonster refused.
+  struct StubInfo {
+    level_factory::Creature creature = level_factory::Creature::Unknown;
+    std::uint32_t constructor = 0;
+    bool load_property_refused = false;
+  };
+  std::map<std::uint32_t, StubInfo> stub_info_;
+  bool monster_level_bound_ = false;
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;

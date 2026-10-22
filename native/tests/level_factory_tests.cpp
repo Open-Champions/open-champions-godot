@@ -96,6 +96,37 @@ int main(int argc, char **argv) {
     };
     const auto &rows = L::tests();
     check(rows.size() == table.size() && rows.size() == 206, "test table size");
+    {
+      // creature_kind: the research probe's per-row answer (creature_class_table.inc).
+      // Every object-building name-test row has an entry; four are undecided.
+      unsigned yes = 0, no = 0, unknown = 0, building = 0;
+      for (const auto &r : rows) {
+        if (!r.size || r.clear_color)
+          continue;
+        ++building;
+        L::Outcome o;
+        o.kind = L::Kind::Object;
+        o.test = r.name;
+        const auto kind = L::creature_kind(o);
+        (kind == L::Creature::Yes ? yes : kind == L::Creature::No ? no : unknown) += 1;
+      }
+      check(building == 201 && yes == 97 && no == 100 && unknown == 4, "creature table covers every building row");
+      L::Outcome probe;
+      probe.kind = L::Kind::Object;
+      probe.test = 0x5323f0;
+      check(L::creature_kind(probe) == L::Creature::No, "a GameObject-chain row is not a creature");
+      probe.test = 0x532870;
+      check(L::creature_kind(probe) == L::Creature::Yes, "a Creature_ctor-chain row is a creature");
+      probe.test = 0x532f78;
+      check(L::creature_kind(probe) == L::Creature::Unknown, "an undecided row stays unknown");
+      probe.test = 0;
+      check(L::creature_kind(probe) == L::Creature::Unknown, "a property fall-back has no row");
+      probe.test = 0x5323c0; // the Line row (a WaveMaker by property)
+      check(L::creature_kind(probe) == L::Creature::Unknown, "the Line row is unknown");
+      probe.test = 0x5323f0;
+      probe.kind = L::Kind::Call;
+      check(L::creature_kind(probe) == L::Creature::Unknown, "a call row builds no object");
+    }
     for (std::size_t i = 0; i < rows.size(); ++i) {
       const auto &r = rows[i];
       const auto &t = table[i];
