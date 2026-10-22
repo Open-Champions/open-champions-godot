@@ -461,10 +461,13 @@ func take_script_counts() -> void:
 	add("scripts.callee_refusals", int(counts.get("callee_refusals", 0)))
 
 	for key in ["objects_built", "objects_unbuilt", "objects_not_created", "objects_pool_refused",
-			"objects_unclassified", "load_draws_unmodelled"]:
+			"objects_unclassified", "load_draws_unmodelled",
+			"item_load_gate_refusals", "item_load_draws_inferred"]:
 		add("scripts." + key, int(counts.get(key, 0)))
 	var refusals: Dictionary = counts.get("build_refusals", {})
 	for reason in refusals: add("scripts.build_refused." + str(reason), int(refusals[reason]))
+	var stub_reasons: Dictionary = counts.get("stub_refusal_reasons", {})
+	for reason in stub_reasons: add("scripts.stub_refusal." + str(reason), int(stub_reasons[reason]))
 	if counts.get("seed_bound", false): add("scripts.seed_bound")
 	if counts.get("seed_paired", false): add("scripts.seed_paired")
 	if counts.get("seed_unpaired", false): add("scripts.seed_unpaired")

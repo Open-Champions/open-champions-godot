@@ -141,6 +141,8 @@ func load_real_level(index: int) -> bool:
 	if not result.ok:
 		status_label.text = "Level refused at %s. %s" % [result.stage, str(result.get("error", ""))]
 		return false
+	if displayed_asset_name == "Practice figure":
+		asset_label.text = "Practice figure · class model resource mapping undocumented"
 	var scripted := false
 	if level_script != null and level_script.button_pressed: scripted = attach_level_script()
 	else: controller.disable_level_script()
@@ -148,6 +150,11 @@ func load_real_level(index: int) -> bool:
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
 	return true
+
+func restore_default_actor() -> void:
+	super.restore_default_actor()
+	if real != null and real.current >= 0:
+		asset_label.text = "Practice figure · class model resource mapping undocumented"
 
 func _level_script_toggled(on: bool) -> void:
 	if real == null or real.current < 0: return
@@ -178,7 +185,11 @@ func attach_level_script() -> bool:
 	controller.set_level_text(RealText.level_tables(real, level))
 	# The NPC dialog is attached before the level entry runs (docs/DIALOG.md).
 	var volume_bits: int = audio.music_volume_bits if audio != null else -1
-	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits)
+	var world: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", ".world")
+	var balance := PackedByteArray()
+	if real.files.has("balance.lmp"):
+		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
+	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	return result.get("ok", false)
 

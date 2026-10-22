@@ -924,3 +924,41 @@ cadence, not fixed ready ticks. The timing and pushed-audio totals depend on
 machine load and scheduling. These runs do not isolate a speed change.
 The [wave-23 report](../work/loop-playable-integration-r23-report.md)
 records the remaining integration gates and export smoke.
+
+## Wave 24 (2026-10-22): merged combat, player, wading and dialog work
+
+The four-slice, 60-ready-tick sweeps `w24on --scripts` and `w24off` each
+tried, loaded and played **111/111** levels, with **230 passed checks**,
+zero failed checks and an empty refusal list. The read-only disc stayed
+outside the worktree; each slice had a separate `user://` cache.
+
+Against the final wave-23 sweeps, every deterministic count change is
+accounted for by the merged branches:
+
+| Count (four-slice sum) | Wave 23 on | Wave 24 on | Wave 23 off | Wave 24 off | Cause |
+|---|---:|---:|---:|---:|---|
+| `water.wading_refused` | 0 | 2,832 | 0 | 2,832 | `codex/wading`: the default scene refuses a wading step without researched frame and input services. |
+| `dialog.camera_steps` | 0 | 126 | 0 | 0 | `codex/dialog-gaps`: scripted dialog camera execution. |
+| `dialog.camera_views` | 0 | 1 | 0 | 0 | `codex/dialog-gaps`: one scripted camera view. |
+
+`codex/combat-ctors` changes the synthetic Full fight, not these level-sweep
+counts. `codex/player-state` adds carried player state but changes no
+deterministic sweep count. Existing script refusals and position-based water
+counts are unchanged.
+
+The remaining count changes are runtime or display-cadence observations; the
+parallel runs do not isolate a branch as their cause:
+
+| Count (four-slice sum) | Wave 23 on | Wave 24 on | Wave 23 off | Wave 24 off |
+|---|---:|---:|---:|---:|
+| `audio.frames_pushed` | 1,650,449 | 5,185,107 | 1,615,409 | 5,093,681 |
+| `memory.static_peak_bytes` | 1,531,512,448 | 1,531,890,592 | 1,529,063,272 | 1,529,439,240 |
+| `time.load_ms` | 19,105 | 162,241 | 18,592 | 114,947 |
+| `time.play_ms` | 35,718 | 336,681 | 34,283 | 226,747 |
+| `text.frames_drawn.bust` | 27 | 37 | 0 | 0 |
+
+The exported wave-24 app's 60-tick read-only smoke tried, loaded and played
+**12/12** levels with scripts off and **12/12** with scripts on (26 checks
+each), plus **3/3** arena levels with scripts on (8 checks). All three had
+zero failures and empty refusal lists. The [wave-24 report](../work/loop-playable-integration-r24-report.md)
+records the build, trace and export evidence.

@@ -145,6 +145,33 @@ GameObject &World::checked_object(rta::Object *object) const {
     throw ObjectError("list refers to an object outside this World");
   return *found->second;
 }
+void World::register_external(GameObject &object) {
+  owned_objects_[&object] = &object;
+}
+void World::unregister_external(GameObject &object) {
+  if (!owned_objects_.count(&object)) return;
+  // Remove every paired world-list node before the binder releases the
+  // object's embedded list heads. Restart at the head after each removal:
+  // both partners may be in this same list. An active iterator is detached
+  // and invalidated instead of throwing during external-owner teardown.
+  for (auto &head : object.heads)
+    while (auto *node = head.next) {
+      if (node->kind == LinkKind::Node) {
+        handles.remove_ref(node);
+      } else {
+        HandlePool::unlink(node);
+        node->prev = node->next = nullptr;
+      }
+    }
+  for (std::size_t slot = 0; slot < names.objs.size(); ++slot)
+    if (names.objs[slot] == &object) {
+      names.objs[slot] = nullptr;
+      --names.count;
+    }
+  if (auto it = objects.find(object.addr); it != objects.end() && it->second == &object)
+    objects.erase(it);
+  owned_objects_.erase(&object);
+}
 World::World(CallbackPolicy policy) : callback_policy(policy) {}
 World::~World() {
   *lifetime_ = false;

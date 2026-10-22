@@ -48,6 +48,7 @@ func run() -> void:
 	foreground.material_override = Factory.create(texture, {"alpha1": 1, "test1": 0x587f4, "blend_enabled": true})
 	check(foreground.material_override.render_priority == 0, "ordinary batch has base sort layer")
 	for i in 4: await process_frame
+	await RenderingServer.frame_post_draw
 	var pixel := viewport.get_texture().get_image().get_pixel(32, 32)
 	check(absf(pixel.r - 0.5) < 0.2 and absf(pixel.g - 0.5) < 0.2, "GS reverse-alpha 64/128 mixes green and red")
 	bytes[3] = 80
@@ -56,6 +57,7 @@ func run() -> void:
 	foreground.material_override = Factory.create(texture, {"alpha1": 1, "test1": 0x582f5, "blend_enabled": true, "sort_layer": 4})
 	check(foreground.material_override.render_priority == 4, "translucent batch carries layer four priority")
 	for i in 4: await process_frame
+	await RenderingServer.frame_post_draw
 	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
 	check(pixel.r > 0.8 and pixel.g < 0.2, "GS alpha 80/128 is cut out before drawing")
 	bytes[3] = 0
@@ -63,6 +65,7 @@ func run() -> void:
 	texture = ImageTexture.create_from_image(image)
 	foreground.material_override = Factory.create(texture, {"alpha1": 2, "test1": 0x587f4, "blend_enabled": true})
 	for i in 4: await process_frame
+	await RenderingServer.frame_post_draw
 	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
 	check(pixel.g > 0.8 and pixel.r < 0.2, "alpha 2 with alpha 0 replaces the destination with the source")
 	bytes[3] = 128
@@ -70,6 +73,7 @@ func run() -> void:
 	texture = ImageTexture.create_from_image(image)
 	foreground.material_override = Factory.create(texture, {"alpha1": 2, "test1": 0x587f4, "blend_enabled": true})
 	for i in 4: await process_frame
+	await RenderingServer.frame_post_draw
 	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
 	check(pixel.r < 0.05 and pixel.g < 0.05, "alpha 2 with alpha 128 writes black and does not keep the destination")
 	var automap := Factory.automap_material(texture)
@@ -82,6 +86,7 @@ func run() -> void:
 	texture = ImageTexture.create_from_image(image)
 	foreground.material_override = Factory.create(texture, {"alpha1": 9, "test1": 0x587f4, "blend_enabled": true, "environment": true})
 	for i in 4: await process_frame
+	await RenderingServer.frame_post_draw
 	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
 	check(pixel.g > 0.8 and pixel.r < 0.05, "environment chunk without its first pass draws its base pass opaque")
 	viewport.queue_free()

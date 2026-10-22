@@ -53,6 +53,14 @@ std::optional<std::string> prop_find(const std::vector<std::string> *props,
                                      const std::string &key, const Executable &);
 std::uint32_t atoi(const std::string &, const Executable &);
 
+// Whether the object a row builds is a Creature (object flag 0x20, set only by
+// Creature_ctor 0x109d68). Decided per factory row from the research's probe
+// (research t3/research-items-gaps ecf9742 docs/spec/hide-monster.md 3-4,
+// native/src/creature_class_table.inc). Unknown: the outcome has no name-test
+// row (a property fall-back, the Line/WaveMaker row) or the probe did not decide.
+enum class Creature : std::uint8_t { No, Yes, Unknown };
+Creature creature_kind(const Outcome &);
+
 struct Row {
   bool prefix;
   std::uint32_t name;

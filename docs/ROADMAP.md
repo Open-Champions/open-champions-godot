@@ -18,7 +18,7 @@ documented static frame, base HUD and font metrics for later scene integration.
 Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,
 medal and net-camera arithmetic, plus the present-brightness formula, beside that service.
 The play scene's inventory, shop, skills, stats and level-up screens call the existing item handlers; undocumented frame positions stay refusals.
-The [front end](FRONTEND.md) (boot screens, main menu, character creation, options with the music slider, load/save and the game pause menu) is a native flow under a labelled host layout; the research documents its navigation, not its screen positions.
+The [front end](FRONTEND.md) (boot screens, main menu, character creation, options with the music slider, load/save and the game pause menu) is a native flow. Its documented draw calls (positions, frames, fonts, layers, tints, menu sound ids and the first-theme gate, research-menus-layout dc458d5) are painted with the user's own textures and fonts; class art, card rows, the intro picture and the credits layout stay a labelled host layout.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
 platform verification. Godot and godot-cpp are fetched locally, not vendored.
@@ -101,8 +101,10 @@ its own launch and rendering evidence.
    player at difficulty 1 and uses the documented object factory with the
    owner-selected executable. The [item commands](SCRIPT_ITEMS.md) run their
    researched has, count, remove, give and generate handlers; gives need item
-   tables and a bound seed. The arena monster builder is a separate library
-   call.
+   tables and a bound seed; ground items and `givePlayerRandom` refuse at their
+   documented evidence boundaries. The [item-round gaps](ITEMS_GAPS.md) cover the
+   host bit, generators and bounded hide/show behavior on stubs. The
+   arena monster builder is a separate library call.
    With the level script on, the real-data play scene attaches the
    [NPC dialog machine](DIALOG.md): the game folder's talkers can be talked
    to, and choice actions reach the quest and item models. The conversation

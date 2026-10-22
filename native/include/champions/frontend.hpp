@@ -1,5 +1,6 @@
 #pragma once
 
+#include "champions/frontend_layout.hpp"
 #include "champions/music_volume.hpp"
 
 #include <array>
@@ -18,9 +19,13 @@
 //   t3/research-menus 099900e docs/menus.md 6-7
 //   t3/research-saves 8d43286 docs/save-format.md (options image, card states)
 //   t3/research-combat-ctors e9777eb docs/spec/music-volume.md (slider, commit, boot)
-// Screen positions, frames, fonts, colours and sound samples of these screens are
-// not in the research. They are not modelled here; notes() names each gap so the
-// host can label its own layout. Nothing here is copied from the game.
+//   t3/research-menus-layout dc458d5 docs/frontend-layout.md and its tools
+//                            (list/frame geometry, fonts, sprites, sounds, theme gate)
+// layout() returns the draw calls the research documents (positions, frames,
+// sprite and font names, layers, colours) and marks every element it does not
+// document as Host; notes() names each remaining gap. Texture and sample bytes
+// are never held here: the host loads them from the user's disc at run time.
+// Nothing here is copied from the game.
 // Local presentation state only: nothing here feeds shared gameplay state.
 namespace champions::frontend {
 
@@ -138,6 +143,11 @@ public:
   int cursor() const { return cursor_; }
   std::vector<Entry> entries() const;
   std::vector<std::string> notes() const;
+  // The documented draw calls of the current screen, in submission order. The
+  // frames are the documented minimum-width calls (no text-width rule is traced).
+  Scene layout() const;
+  // Music requests the volume gate refused (music_playGlobal 0x2110e0).
+  int gated_music() const { return gated_music_; }
   std::vector<Request> take_requests();
 
   // Host results.
@@ -209,6 +219,7 @@ private:
   int save_latch_ = 0; // 0x4f8f28
   int load_from_frontend_ = 0; // 0x8e1ab8
   int exit_code_ = 0;
+  int gated_music_ = 0;
   std::uint32_t slider_timer_ = 0; // 0x4d8a10
   Character character_;
   bool character_ready_ = false;
@@ -220,6 +231,8 @@ private:
   bool card_paused_ = false;   // memcard_pushPause state to restore
 
   void go(Screen next, int cursor = 0);
+  void music(const char *kind, const char *name, std::uint32_t flags);
+  void sound(menu_sound which);
   void request(const std::string &kind, const std::string &arg = {}, std::uint32_t value = 0);
   void enter_frontend(int code);
   void finish_character();

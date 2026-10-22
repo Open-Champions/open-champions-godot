@@ -76,7 +76,23 @@ Outcome object(std::uint32_t size, std::vector<std::uint32_t> calls) {
   out.calls = std::move(calls);
   return out;
 }
+struct CreatureRow {
+  std::uint32_t test;
+  std::uint8_t kind;
+};
+const CreatureRow kCreatureRows[] = {
+#include "creature_class_table.inc"
+};
 } // namespace
+
+Creature creature_kind(const Outcome &outcome) {
+  if (outcome.kind != Kind::Object || outcome.test == 0 || outcome.test == LINE)
+    return Creature::Unknown;
+  for (const auto &row : kCreatureRows)
+    if (row.test == outcome.test)
+      return row.kind == 1 ? Creature::Yes : row.kind == 0 ? Creature::No : Creature::Unknown;
+  return Creature::Unknown;
+}
 
 const std::vector<Row> &tests() { return kTests; }
 
