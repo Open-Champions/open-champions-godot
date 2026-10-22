@@ -5,6 +5,7 @@
 #include "champions/script_commands.hpp"
 #include "champions/script_effects.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -397,9 +398,12 @@ void test_mounted_records() {
     }
     return std::string();
   };
-  const auto rider_class = row_class(0x532cc8), nightmare_class = row_class(0x532c98);
+  const std::array<std::string, 4> rider_classes = {
+      row_class(0x532cc8), row_class(0x532cd8), row_class(0x532ce8), row_class(0x532cf8)};
+  const auto nightmare_class = row_class(0x532c98);
   const auto foot_class = row_class(0x532dc8);
-  check(!rider_class.empty() && !nightmare_class.empty() && !foot_class.empty(), "the factory rows exist");
+  for (const auto &cls : rider_classes) check(!cls.empty(), "a mounted factory row exists");
+  check(!nightmare_class.empty() && !foot_class.empty(), "the other factory rows exist");
   auto built = build_calls({{"start", {}}}, {});
   sc::Host host;
   SharedRandom live(20973);
@@ -407,23 +411,25 @@ void test_mounted_records() {
   host.set_executable(authored_executable());
   plant(host, built);
   host.run_prestart();
-  const auto blob = objects_blob({{rider_class, "rider"}, {foot_class, "foot"}, {nightmare_class, "horse"}});
+  const auto blob = objects_blob({{rider_classes[0], "rider0"}, {rider_classes[1], "rider1"},
+                                  {rider_classes[2], "rider2"}, {rider_classes[3], "rider3"},
+                                  {foot_class, "foot"}, {nightmare_class, "horse"}});
   check(host.adopt_objects(blob.data(), blob.size()), "mounted records adopt");
   const auto &counts = host.counts();
-  // Shared draws: the rider record two (rider, then mount), the placed Nightmare one; the
+  // Shared draws: each rider record two (rider, then mount), the placed Nightmare one; the
   // undocumented on-foot row (same constructor, rows 0x532dc8..) keeps the old accounting.
   SharedRandom expect(20973);
-  expect.draw();
-  expect.draw();
-  expect.draw();
-  check(live.state == expect.state, "the rider record drew twice and the Nightmare once");
+  for (int i = 0; i < 9; ++i) expect.draw();
+  check(live.state == expect.state, "four rider records drew twice each and the Nightmare once");
   check(counts.build_refusals.count("mount property list contents Unknown") == 1 &&
-            counts.build_refusals.at("mount property list contents Unknown") == 1,
-        "the rider record is refused at the Unknown mount list, once");
-  auto *rider = host.variables().find_first("rider");
-  check(rider && !host.is_built(rider->addr), "the rider stays a stub");
-  check(host.variables().find_first("foot") != nullptr && counts.objects_unbuilt == 2,
-        "the rider and on-foot records are counted unbuilt");
+            counts.build_refusals.at("mount property list contents Unknown") == 4,
+        "all four rider records refuse at the Unknown mount list");
+  for (int i = 0; i < 4; ++i) {
+    auto *rider = host.variables().find_first("rider" + std::to_string(i));
+    check(rider && !host.is_built(rider->addr), "a mounted rider stays a stub");
+  }
+  check(host.variables().find_first("foot") != nullptr && counts.objects_unbuilt == 5,
+        "the four rider records and on-foot record are counted unbuilt");
   check(counts.load_draws_unmodelled == 1, "only the undocumented on-foot row owes an unmodelled draw");
   auto *horse = host.variables().find_first("horse");
   check(horse && host.is_built(horse->addr) && counts.objects_built == 1, "a placed Nightmare is built");
@@ -431,7 +437,7 @@ void test_mounted_records() {
   check(mem.word(horse->addr + 0x48) == 0x5155e8 && mem.u8(horse->addr + 0xb4) == 10 &&
             mem.word(horse->addr + 0xe0) == 0xc1a00000 && mem.u8(horse->addr + 0x28) == 0x32,
         "the built Nightmare carries its table, kind, seat offset and byte 0x28");
-  check(counts.objects_registered == 4, "rider, mount, on-foot stub and Nightmare are registered");
+  check(counts.objects_registered == 10, "four rider-mount pairs, on-foot stub and Nightmare are registered");
 }
 
 void test_entrance_grid_and_particle() {
