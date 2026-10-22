@@ -402,6 +402,16 @@ void pause_vectors() {
   tap(f, DOWN); tap(f, DOWN); tap(f, DOWN);
   tap(f, CROSS);
   expect(f.screen() == Screen::Options, "pause options");
+  {
+    const auto s = f.layout();
+    expect(f.entries().size() == 2, "pause options use two host controls");
+    bool executed_frame = false, observed_row = false;
+    for (const auto &d : s.draws) {
+      executed_frame = executed_frame || (d.kind == Draw::Kind::Frame && d.evidence == Evidence::Executed);
+      observed_row = observed_row || (d.kind == Draw::Kind::Text && d.evidence == Evidence::Observed);
+    }
+    expect(!executed_frame && !observed_row, "pause options borrow no front-end geometry or pause colour");
+  }
   (void)f.take_requests();
   for (int i = 0; i < 6; ++i)
     f.frame(LEFT);
@@ -458,10 +468,323 @@ void save_vectors() {
 
 void notes_vectors() {
   Flow f;
-  bool layout = false;
-  for (const auto &n : f.notes())
-    layout = layout || n.find("not in the research") != std::string::npos;
-  expect(layout, "layout gap named");
+  bool sound = false, unknown = false;
+  for (const auto &n : f.notes()) {
+    sound = sound || n.find("not voiced") != std::string::npos;
+    unknown = unknown || n.rfind("Unknown: ", 0) == 0;
+  }
+  expect(sound, "the unvoiced menu sounds are named");
+  expect(unknown, "the Unknown layout parts are named");
+}
+
+// ---- layout (research-menus-layout dc458d5) ----------------------------------------
+// Golden values come from tools/ref_frontend_layout.py list_geometry /
+// list_frame_calls / pause_geometry run on the pinned head; they are numbers only.
+struct Call {
+  int x, y, w, h, layer;
+  std::uint32_t tint;
+  int style;
+};
+void expect_frames(const std::array<Draw, 3> &f, const Call (&want)[3], const char *name) {
+  for (int i = 0; i < 3; ++i) {
+    const auto &d = f[static_cast<std::size_t>(i)];
+    const auto &w = want[i];
+    expect(d.kind == Draw::Kind::Frame && d.x == w.x && d.y == w.y && d.w == w.w && d.h == w.h &&
+               d.layer == w.layer && d.colour == w.tint && d.style == w.style,
+           name);
+  }
+}
+
+void layout_geometry_vectors() {
+  using namespace layout;
+  // Four-row front-end tables (main 0x4f6b88, players 0x4f6de8, difficulty 0x4f6e38).
+  for (const auto &spec : {main_list(), players_list(), difficulty_list()}) {
+    const auto a = list_anchors(spec);
+    expect(a.size() == 4 && a[0].x == 320 && a[0].y == 259 && a[3].y == 325, "four-row anchors");
+    expect_frames(list_frames(spec, 0),
+                  {{300, 259, 40, 33, 7, 0x300000ff, 0}, {292, 248, 56, 122, 7, 0x80808080, 2}, {301, 260, 54, 114, 6, 0x3f000000, 0}},
+                  "four-row frames");
+  }
+  // Two-row tables (game type 0x4f6bf8, mode 0x4f6c68).
+  for (const auto &spec : {game_type_list(), mode_list()}) {
+    const auto a = list_anchors(spec);
+    expect(a.size() == 2 && a[0].y == 281 && a[1].y == 303, "two-row anchors");
+    expect_frames(list_frames(spec, 0),
+                  {{300, 281, 40, 33, 7, 0x300000ff, 0}, {292, 270, 56, 78, 7, 0x80808080, 2}, {301, 282, 54, 70, 6, 0x3f000000, 0}},
+                  "two-row frames");
+  }
+  // Three rows: the selected frame is 32 high at an even y (0x4f6c28: y = 270).
+  {
+    const ListSpec three{3, 0, 320, 309};
+    const auto a = list_anchors(three);
+    expect(a[0].y == 270 && a[1].y == 292 && a[2].y == 314, "three-row anchors");
+    expect_frames(list_frames(three, 0),
+                  {{300, 270, 40, 32, 7, 0x300000ff, 0}, {292, 259, 56, 100, 7, 0x80808080, 2}, {301, 271, 54, 92, 6, 0x3f000000, 0}},
+                  "three-row frames");
+  }
+  // Options (0x4f6e88, front-end origin y 238): rows 0-2 are value rows at x=297.
+  {
+    const auto a = list_anchors(options_list());
+    expect(a.size() == 13 && a[0].x == 297 && a[0].y == 89 && a[2].x == 297 && a[2].y == 133, "options value rows");
+    expect(a[3].x == 320 && a[3].y == 155 && a[12].x == 320 && a[12].y == 353, "options plain rows");
+    expect_frames(list_frames(options_list(), 0),
+                  {{180, 89, 280, 33, 7, 0x300000ff, 0}, {214, 78, 212, 320, 7, 0x80808080, 2}, {223, 90, 210, 312, 6, 0x3f000000, 0}},
+                  "options frames");
+  }
+  // Pause (0x44f3b8, normal offline table: five enabled rows).
+  {
+    const auto a = list_anchors(pause_list());
+    expect(a.size() == 5 && a[0].y == 179 && a[4].y == 267, "pause anchors");
+    expect_frames(list_frames(pause_list(), 0),
+                  {{300, 179, 40, 33, 7, 0x300000ff, 0}, {292, 168, 56, 144, 7, 0x80808080, 2}, {301, 180, 54, 136, 6, 0x3f000000, 0}},
+                  "pause frames");
+  }
+  // No text-width rule is traced: a narrow list is always the documented minimum.
+  {
+    const auto narrow = list_frames(main_list(), 0);
+    expect(narrow[1].min_w == 56 && narrow[1].w == 56 && narrow[1].evidence == Evidence::Executed,
+           "narrow list: the executed minimum width only");
+  }
+  // Sprites.
+  {
+    const auto logo = layout::logo_sprites();
+    expect(logo[0].resource == "soe_splash_url.tex" && logo[0].x == 192 && logo[0].y == 330 && logo[0].layer == 3 &&
+               logo[0].colour == 0x80808080 && logo[0].lump == "SOELOGO.LMP",
+           "logo url sprite");
+    expect(logo[1].resource == "soe_splash.tex" && logo[1].x == 64 && logo[1].y == 50 && logo[1].layer == 3, "logo sprite");
+    const auto title = layout::title_sprite();
+    expect(title.resource == "title.tex" && title.lump == "FRONTEND.LMP" && title.x == 141 && title.y == 15 &&
+               title.layer == 5 && title.colour == 0x80808080,
+           "title sprite");
+  }
+  expect(std::string(menu_sound_resource(menu_sound::move)) == "menu_main_toggle.anm" &&
+             std::string(menu_sound_resource(menu_sound::select)) == "menu_main_accept.anm" &&
+             std::string(menu_sound_resource(menu_sound::back)) == "menu_main_back.anm",
+         "sound resources");
+}
+
+int count_kind(const Scene &s, Draw::Kind k) {
+  int n = 0;
+  for (const auto &d : s.draws)
+    n += d.kind == k;
+  return n;
+}
+bool has_resource(const Scene &s, const char *name) {
+  for (const auto &d : s.draws)
+    if (d.kind == Draw::Kind::Sprite && d.resource == name)
+      return true;
+  return false;
+}
+
+void layout_screen_vectors() {
+  Flow f;
+  expect(f.layout().host_layout, "the card prompt is host-labelled");
+  tap(f, CROSS);
+  auto logo = f.layout();
+  expect(logo.screen == "soe-logo" && !logo.host_layout && has_resource(logo, "soe_splash.tex") &&
+             has_resource(logo, "soe_splash_url.tex"),
+         "logo screen draws both documented sprites");
+  for (int i = 0; i < SOE_LOGO_FRAMES; ++i)
+    f.frame(0);
+  expect(f.screen() == Screen::IntroMovie && f.layout().host_layout, "the film's picture stays a labelled host layout");
+  for (int i = 0; i < 40; ++i)
+    f.frame(0);
+  f.frame(CROSS);
+  f.frame(0);
+  expect(f.screen() == Screen::Main, "main menu");
+  {
+    const auto s = f.layout();
+    expect(!s.host_layout && has_resource(s, "title.tex") && count_kind(s, Draw::Kind::Frame) == 3 &&
+               count_kind(s, Draw::Kind::Text) == 4,
+           "main: title, three frames, four rows");
+    for (const auto &d : s.draws)
+      if (d.kind == Draw::Kind::Text)
+        expect(d.font == Font::Medium && d.layer == 7 && d.x == 320 && d.evidence == Evidence::Host &&
+                   d.colour != layout::PAUSE_TEXT,
+               "main row font and layer traced; the colour is a Host choice, not the pause colour");
+  }
+  tap(f, DOWN);
+  {
+    const auto rs = f.take_requests();
+    int sounds = 0;
+    for (const auto &r : rs)
+      if (r.kind == "menu_sound") {
+        ++sounds;
+        expect(r.arg == "menu_main_toggle.anm", "a move looks up the toggle clip");
+      }
+    expect(sounds == 1, "one move, one sound");
+    const auto s = f.layout();
+    expect(s.draws[5].kind == Draw::Kind::Frame && s.draws[5].evidence == Evidence::Host,
+           "uncaptured selected row uses a host highlight");
+  }
+  tap(f, UP);
+  (void)f.take_requests();
+  tap(f, UP); // at the top: no move, no sound
+  expect(!has(f.take_requests(), "menu_sound"), "no move, no sound");
+  // Cancel on the main list: no transition, no sound (Executed).
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::Main && !has(f.take_requests(), "menu_sound"), "main cancel is silent");
+  // Accept row 0: accept clip first, then state 1.
+  tap(f, CROSS);
+  {
+    const auto rs = f.take_requests();
+    expect(f.screen() == Screen::GameType && !rs.empty() && rs.front().kind == "menu_sound" &&
+               rs.front().arg == "menu_main_accept.anm",
+           "accept clip, then game type");
+    const auto s = f.layout();
+    expect(has_resource(s, "title.tex") && s.draws[3].y == 281, "game type: title and the two-row frames");
+  }
+  tap(f, CIRCLE);
+  {
+    const auto rs = f.take_requests();
+    expect(f.screen() == Screen::Main && !rs.empty() && rs.front().kind == "menu_sound" &&
+               rs.front().arg == "menu_main_back.anm",
+           "game-type cancel looks up the back clip");
+  }
+  // Table row counts.
+  tap(f, CROSS);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::Players && f.entries().size() == 4 && f.layout().host_layout, "players: four table rows, rows beyond the first are host-labelled");
+  tap(f, CROSS);
+  expect(f.screen() == Screen::Mode && f.entries().size() == 2, "mode: two table rows");
+  tap(f, CROSS);
+  expect(f.screen() == Screen::Difficulty && f.entries().size() == 4, "difficulty: four table rows");
+  // Options: thirteen rows, no title sprite, the value shift.
+  Flow g = to_main();
+  tap(g, DOWN);
+  tap(g, DOWN);
+  tap(g, CROSS);
+  expect(g.screen() == Screen::Options && g.entries().size() == 13, "options: thirteen rows");
+  {
+    const auto s = g.layout();
+    expect(!has_resource(s, "title.tex"), "options has no title sprite");
+    int at_297 = 0, at_320 = 0;
+    for (const auto &d : s.draws)
+      if (d.kind == Draw::Kind::Text && d.role.rfind("list row", 0) == 0)
+        (d.x == 297 ? at_297 : at_320) += 1;
+    expect(at_297 == 3 && at_320 == 10, "options: three value rows, ten plain rows");
+    expect(s.host_layout, "the option value bar is a labelled host drawing");
+  }
+  (void)g.take_requests();
+  // A non-finite or out-of-range slider word draws a bounded fill (no undefined cast).
+  for (std::uint32_t bits : {0x7fc00000u, 0xbf800000u, 0x7f800000u, 0x40000000u}) {
+    Flow n = to_main(options_with_music(bits));
+    tap(n, DOWN);
+    tap(n, DOWN);
+    tap(n, CROSS);
+    bool ok = false;
+    for (const auto &d : n.layout().draws)
+      if (d.role == "host slider fill")
+        ok = d.w >= 0 && d.w <= 72;
+    expect(ok, "slider fill width stays within the track");
+  }
+  // Credits: the music handoff is requested with flags 3, exit requests the theme with flags 1.
+  Flow c = to_main();
+  tap(c, DOWN);
+  tap(c, DOWN);
+  tap(c, DOWN);
+  (void)c.take_requests();
+  tap(c, CROSS);
+  expect(c.screen() == Screen::Credits, "credits");
+  {
+    bool found = false;
+    for (const auto &r : c.take_requests())
+      if (r.kind == "credits_music" && r.arg == "mx_endcredits_ext_l.vag" && r.value == 3)
+        found = true;
+    expect(found, "credits music, flags 3");
+    expect(c.layout().host_layout, "credits data layout is a labelled host layout");
+  }
+  tap(c, CIRCLE);
+  {
+    bool found = false;
+    for (const auto &r : c.take_requests())
+      if (r.kind == "front_end_music" && r.arg == "mx_maintheme_l.vag" && r.value == 1)
+        found = true;
+    expect(found && c.screen() == Screen::Main && c.cursor() == 3, "credits exit requests the theme with flags 1");
+  }
+  // Pause: the executed geometry, no host element offline.
+  Flow p = to_main();
+  for (int i = 0; i < 5; ++i)
+    tap(p, CROSS);
+  p.attach_play();
+  tap(p, START);
+  expect(p.screen() == Screen::Pause, "pause");
+  {
+    const auto s = p.layout();
+    expect(!s.host_layout && count_kind(s, Draw::Kind::Frame) == 3 && count_kind(s, Draw::Kind::Text) == 5, "pause: five rows, three frames");
+    expect(s.draws[5].x == 300 && s.draws[5].y == 179 && s.draws[6].y == 168, "pause frames");
+    expect(s.draws[0].y == 179 && s.draws[4].y == 267, "pause rows");
+  }
+  // Class art is Unknown: the screen stays host-labelled.
+  Flow k = to_main();
+  for (int i = 0; i < 5; ++i)
+    tap(k, CROSS);
+  expect(k.screen() == Screen::CharClass && k.layout().host_layout, "class page stays a labelled host layout");
+  (void)k.take_requests();
+  tap(k, CROSS);
+  expect(!has(k.take_requests(), "menu_sound"), "class selection plays no phase-1 sound (refused)");
+  tap(k, CROSS);
+  expect(k.screen() == Screen::CharAbility, "ability page");
+  {
+    const auto s = k.layout();
+    // Phase 3 colours in call order (PLAYERSEL_PHASES): header and description
+    // 0x0A316864, points row and value 0x08325D18, selected stat 0x0068C7CC, others 0x08585E5D.
+    int checked = 0;
+    for (const auto &d : s.draws) {
+      if (d.role == "phase-3 header (text Host)" || d.role == "stat description (text Host)") {
+        expect(d.colour == 0x0A316864 && !d.settled, "phase 3 colour is retained without invented fade");
+        ++checked;
+      } else if (d.role == "phase-3 points row (text Host)" || d.role.rfind("points value", 0) == 0) {
+        expect(d.colour == 0x08325D18, "phase 3 points colour");
+        ++checked;
+      } else if (d.role == "stat label (text Host)") {
+        expect(d.colour == (d.y == 106 ? 0x0068C7CCu : 0x08585E5Du), "phase 3 stat row colour");
+        ++checked;
+      }
+    }
+    expect(checked == 8, "all phase 3 colours checked");
+    int rows = 0;
+    for (const auto &d : s.draws)
+      if (d.role == "stat label (text Host)") {
+        expect(d.x == 41 && d.y == 106 + 17 * rows && d.font == Font::Small && d.layer == 6, "ability rows from y=106, 17 apart");
+        ++rows;
+      }
+    expect(rows == 4, "four ability rows");
+    bool footer = false;
+    for (const auto &d : s.draws)
+      footer = footer || (d.kind == Draw::Kind::Frame && d.x == 21 && d.y == 18 && d.h == 355 && d.layer == 6 &&
+                          d.colour == 0x08000000 && d.style == 1);
+    expect(footer, "common footer frame");
+  }
+}
+
+// The first theme obeys music_playGlobal's gate; the flags stay 1 (research dc458d5).
+void theme_gate_vectors() {
+  const struct {
+    std::uint32_t bits;
+    bool queued;
+    const char *name;
+  } rows[] = {{0x00000000, false, "volume 0"},
+              {0xbf800000, false, "volume -1.0"},
+              {0x3d4cccccu - 1, false, "just below the gate"},
+              {0x3d4ccccc, true, "the gate value"},
+              {0x3f000000, true, "volume 0.5"}};
+  for (const auto &r : rows) {
+    Flow f(options_with_music(r.bits));
+    tap(f, CROSS);
+    tap(f, CROSS); // logo press: front end starts
+    bool theme = false;
+    std::uint32_t flags = 0;
+    for (const auto &q : f.take_requests())
+      if (q.kind == "front_end_music") {
+        theme = true;
+        flags = q.value;
+        expect(q.arg == "mx_maintheme_l.vag", "the front-end theme");
+      }
+    expect(theme == r.queued, r.name);
+    expect(!theme || flags == 1, "the original flags are kept (no 0x40 fade-stop)");
+    expect(f.gated_music() == (r.queued ? 0 : 1), "the refusal is counted");
+  }
 }
 } // namespace
 
@@ -477,6 +800,9 @@ int main() {
   pause_vectors();
   save_vectors();
   notes_vectors();
+  layout_geometry_vectors();
+  layout_screen_vectors();
+  theme_gate_vectors();
   std::cout << "PASS frontend " << checks << " checks\n";
   return 0;
 }

@@ -254,6 +254,11 @@ public:
   static std::array<std::uint32_t,3> distance3(const std::array<std::uint32_t,3> &, const std::array<std::uint32_t,3> &);
   std::uint32_t vehicle_of(amx::Cell) const;
   std::uint64_t draws = 0;
+  // hideMonster / showMonster test object flag 0x20 and then touch +0x231. An
+  // unbuilt stub has flags 0; this answers, per object, whether its class is a
+  // Creature (decided per factory row from the research probe). Unset: the
+  // flag word alone decides.
+  std::function<bool(const objects::GameObject &)> stub_creature;
   std::uint32_t random_draw();
   objects::GameObject *player_object(amx::Cell) const;
   void empty_bag(amx::Cell, unsigned);

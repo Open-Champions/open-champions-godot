@@ -2,6 +2,7 @@
 #include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -15,6 +16,7 @@ const Row kRows[COMMANDS] = {
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
+
 // g_scriptSelectedObj (research 9649e6b tools/ref_natives.py G_SELECTED_OBJ,
 // docs/script.md line 481): the object the select* commands act on.
 constexpr std::uint32_t SELECTED_WORD = 0x4039f8;
@@ -51,7 +53,9 @@ const StubRead kStubReads[] = {
     {"setMonsterVal", 0x200, false}, {"setMonsterRange", 0x200, false},
     {"setCreatureParams", 0x200, false}, {"charmMonster", 0x200, false},
     {"followPlayer", 0x200, false},
-    // generateMonster reads the found object type before spawning.
+    // generateMonster reads the found object type before spawning. Every
+    // ScriptGenerator record is built (Host::build_generator), so only an
+    // unbuilt one can hide behind a stub (touches_stub).
     {"generateMonster", 0x200, false},
 
 };
@@ -226,6 +230,11 @@ Host::Host()
   install();
   bind_campaign();
   items_ = std::make_unique<script_items::Service>(*variables_);
+  variables_->stub_creature = [this](const objects::GameObject &obj) {
+    const auto info = stub_info_.find(obj.addr);
+    return stubs_.count(obj.addr) != 0 && info != stub_info_.end() &&
+           info->second.creature == level_factory::Creature::Yes;
+  };
   // The executable image's g_difficultyIdx is 1; the mission rows are 1..5
   // and row 0 lies on the skill pairs clearAllSkills fills (research-items
   // 49bc578 docs/script-items.md 3). game_scanCm1Vars(0)'s word is -1 until
@@ -360,21 +369,43 @@ void Host::refuse(std::size_t index, amx::Machine &machine) {
 // Reads the name argument as the binder does (the cell at params + 4). An
 // address the machine refuses makes the binder use a remembered string slot,
 // which the host does not track; that counts as touching a stub.
-bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
+bool Host::touches_stub(std::size_t index, amx::Machine &machine) {
   if (selected_form(kRows[index].name))
     return stubs_.count(variables_->memory.word(SELECTED_WORD)) != 0;
   const auto *read = stub_read(kRows[index].name);
   if (!read || (stubs_.empty() && built_.empty()))
     return false;
   const auto address = machine.cell(machine.params + 4);
-  if (machine.get_addr(address) != amx::ERR_NONE)
+  const std::string command = kRows[index].name;
+  if (machine.get_addr(address) != amx::ERR_NONE) {
+    counts_.stub_refusal_reasons[command + ": name argument is not a resolvable address"] += 1;
     return true;
+  }
+  const bool hide_show = std::strcmp(kRows[index].name, "hideMonster") == 0 ||
+                         std::strcmp(kRows[index].name, "showMonster") == 0;
+  const bool generate = std::strcmp(kRows[index].name, "generateMonster") == 0;
   for (const auto *obj : variables_->find(machine.get_string(address), read->limit)) {
-    if (stubs_.count(obj->addr))
+    if (stubs_.count(obj->addr)) {
+      const auto info = stub_info_.find(obj->addr);
+      // hideMonster / showMonster need only the creature flag of the class
+      // (docs/spec/hide-monster.md 3): a stub whose factory row decided it
+      // runs. generateMonster acts only on a ScriptGenerator, and every one
+      // of those is built unless its constructor refused.
+      if (hide_show && info != stub_info_.end() && info->second.creature != level_factory::Creature::Unknown)
+        continue;
+      if (generate && info != stub_info_.end() && info->second.constructor != SCRIPT_GENERATOR_CTOR)
+        continue;
+      char at[32];
+      std::snprintf(at, sizeof at, "0x%06x", info == stub_info_.end() ? 0u : info->second.constructor);
+      counts_.stub_refusal_reasons[command + ": " + (info == stub_info_.end() ? "stub without a factory row" :
+          info->second.load_property_refused ? std::string("hide/wait load property, constructor ") + at :
+          info->second.creature == level_factory::Creature::Unknown ? std::string("undecided row, constructor ") + at
+                                                                    : std::string("constructor ") + at)] += 1;
       return true;
-    // A built creature's hit points come from Creature_setStats, which is not
-    // ported (docs/script-session.md section 5).
-    if (read->hit_points && built_.count(obj->addr))
+    }
+    // A built creature is readable only when this level supplied the balance
+    // rows and monster level used by Creature_setStats.
+    if (read->hit_points && built_.count(obj->addr) && !stats_built_.count(obj->addr))
       return true;
   }
   return false;
@@ -550,6 +581,11 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
       counts_.text_refusals[*reason] += 1;
     return reason.has_value();
   }
+  if (name == "givePlayerRandom") {
+    // The stack's +0x00..+0x0f after ten failed generations are Unknown in
+    // item-drops.md section 6. Refuse before its first random draw.
+    return true;
+  }
   if (name == "charmMonster" || name == "followPlayer") {
     // Creature_setCharm reaches handle_clear of +0x234 past these gates.
     // Research d4987fd executed it on a live target (docs/strings.md 5): it
@@ -569,6 +605,15 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
   return false;
 }
 
+void Host::bind_monster_level(std::uint32_t raw) {
+  variables_->memory.word(0x4f714c, raw);
+  monster_level_bound_ = true;
+}
+void Host::bind_level_name(const std::string &) {
+  // The allocation size of 0x41b721 is not pinned; copying any caller string
+  // there risks overwriting unrelated emulated memory.
+  throw script_items::Refused("level-name global capacity is unknown");
+}
 void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
 void Host::set_fade_level(std::uint32_t level) { variables_->memory.word(script_effects::G_FADE, level); }
 std::uint32_t Host::fade_level() const { return variables_->memory.word(script_effects::G_FADE); }
@@ -925,6 +970,8 @@ std::uint32_t Host::scene(const std::string &name,
 void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
   external_seed_ = next;
   seed_policy_ = policy;
+  seed_gate_observed_ = false;
+  stats_built_.clear();
 }
 
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {

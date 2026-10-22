@@ -31,8 +31,16 @@ inline constexpr const char *POLICY = "rta-script-items-v1";
 
 // Globals (docs/script-items.md section 1).
 inline constexpr std::uint32_t G_NUM_PLAYERS = 0x4d8ae0, G_PLAYERS = 0x4d8af0, REC_SIZE = 0x4c30;
-inline constexpr std::uint32_t G_LOAD_BONUS = 0x4d8ae8;   // read only by player_recalcStats
+// 0x4d8ae8: the word player_recalcStats tests for the +5000 load bonus. It has no
+// writer in the executable (research items-gaps ecf9742 docs/spec/items-gaps.md 1:
+// every load, store, addiu, ori, data word and block-copy search found only the
+// reader at 0x1b69e0), so the image's 0 is a constant: recalc_load_limits never
+// reads the binder memory for it, and nothing in the client writes it.
+inline constexpr std::uint32_t G_LOAD_BONUS = 0x4d8ae8;
+inline constexpr std::int32_t LOAD_BONUS_VALUE = 0;
 inline constexpr std::uint32_t G_RAND_SEED = 0x404464;
+// g_weaponValueMult (7 floats) and g_lootQualityRows (12 rows of 3 floats), read for the generator.
+inline constexpr std::uint32_t A_WEAPON_MULT = 0x3e9cb0, A_QUALITY = 0x3e9c18, WEAPON_MULT_ROWS = 7, QUALITY_ROWS = 12;
 inline constexpr std::uint32_t G_MEDAL_MISSION = 0x4f713c, G_MEDAL_PLAYER = 0x4f7148;
 inline constexpr std::uint32_t G_ALIVE_LIST = 0x4f8440;
 inline constexpr std::uint32_t G_DIFFICULTY = 0x4f719c;   // g_difficultyIdx, 1..5; the image holds 1
@@ -133,7 +141,7 @@ Raw load_limit(std::int32_t effective_strength, std::int32_t passive_load_level,
 // The load-limit part of player_recalcStats over slots 0 .. g_numPlayers - 1:
 // a record whose object pointer is 0 keeps its old limit; the passive is asked
 // for the slot the object names (+0x3c8). The bonus word is read, never
-// written: its writer is open in the research.
+// written: it has no writer, so the bonus is the constant 0 (LOAD_BONUS_VALUE).
 void recalc_load_limits(View &);
 // The handlers' weight test: load + weight < limit, or, when not strict, a
 // weight that is exactly 0 (-0.0 too).
@@ -169,6 +177,8 @@ public:
   using Delegate = std::function<std::uint64_t(const std::vector<std::uint64_t> &)>;
   struct Counts {
     std::uint64_t parsed = 0, given = 0, lost = 0, removed = 0, equipped = 0;
+    // Ground items built by ItemProp_ctor2 (one shared and one own draw each).
+    std::uint64_t ground_items = 0;
     // Call-outs whose bodies are not in this contract and that the script host
     // does not own (player_countPotions, the rest of player_recalcStats, the
     // idle-animation reset, sounds, HUD text). Counted, not applied.
@@ -208,6 +218,11 @@ public:
 private:
   std::uint64_t delegate(const std::string &, const std::vector<std::uint64_t> &);
   std::uint64_t machine_service(View &, const std::string &, const std::vector<std::uint64_t> &);
+  static constexpr std::int64_t GROUND_ITEM_BLOCK = 0x190;
+  std::uint32_t scratch_definition() const;
+  void blank_record();
+  items::Game random_game() const;
+  void ground_item(std::uint32_t block, const std::array<std::uint32_t, 3> &pos);
   template <class Body> auto with_machine(Body body);
   builtins::Variables &variables_;
   std::shared_ptr<const items::Tables> tables_;

@@ -1,0 +1,23 @@
+{
+  "research_commit": "ecf9742",
+  "policy": "rta-give-random-v1",
+  "seed": 20973,
+  "cases": 120,
+  "outcomes": {
+    "ok": 100,
+    "fault": 20,
+    "drop": 54,
+    "special": 66
+  },
+  "files": {
+    "docs/spec/item-drops.md": "25ddb30f1904c61d1054dcfeaf7a7197df234d87f55c1147b50c04ca944ec187",
+    "docs/spec/items-gaps.md": "45be1683799b972d49ca1e30c1d30c28eba9c979c37c8f924a23dabf0c2179cd",
+    "tools/ref_item_drops.py": "e6cbe5c5baf088450f4af3e0d255914e920ced8a7adf05f31b3977476676fe61",
+    "tools/difftest_item_drops.py": "ae87cc86ab93426a4a692bad87ea9ad8ccd58c655af66d1571381883eacc5118",
+    "tools/ref_script_items.py": "34d35c696497b63c6edc1d7f69193df005e8a74dd1e1b65165a2534f1145f281",
+    "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+    "tools/ref_messages.py": "af6ea5fea7ccb6a06ba9992547a87062d9c3070b7ab0e9737241274def52e12c",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+  }
+}
