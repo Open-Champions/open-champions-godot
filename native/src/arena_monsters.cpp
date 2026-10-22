@@ -2136,10 +2136,10 @@ void Model::nightmare_on_touch_list(Address c,const std::vector<Raw> &touched) {
 }
 Raw Model::nightmare_pick_charge_target(Address c) {
   Depth guard(depth_,limits_.depth);raw_creature(c);
-  // The table capacity / maximum player count is Unknown in the research: a
-  // count above the host's history limit is refused, not read.
+  // The table capacity / maximum player count is Unknown in the research.
+  // history_entries is this host's chosen bound, not a game value.
   for(std::int32_t slot=0;slot<s32(u32(G_NUM_PLAYERS));++slot) {
-    if(slot>std::int32_t(limits_.history_entries))throw creature_hp::ResourceLimit("player scan limit");
+    if(slot>=std::int32_t(limits_.history_entries))throw creature_hp::ResourceLimit("player scan limit");
     auto p=player_object(slot);
     if(!p||(u32(Address(p)+0xc)&8))continue;
     std::int32_t angle=0;bool hit=false;int k=0;

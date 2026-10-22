@@ -476,6 +476,8 @@ private:
   std::uint64_t ui_pulse_starts_ = 0;
   // Host-owned handle cells for creature +0x234 words linked by link_target.
   std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
+  // Rider +0x3c8 and mount +0x3c8 are separate host handle-list heads.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> mounted_cells_;
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;

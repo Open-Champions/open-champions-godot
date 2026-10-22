@@ -4,7 +4,6 @@
 // Also checks the native-only host refusals the research leaves Unknown.
 #include "champions/arena_monsters.hpp"
 #include <cstdint>
-#include <fstream>
 #include <iostream>
 #include <map>
 #include <sstream>
@@ -51,8 +50,9 @@ struct Answer {
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 2) { std::cerr << "usage: horsemen-mount-tests vectors.tsv\n"; return 2; }
-  std::ifstream in(argv[1]);
+  if (argc != 2) { std::cerr << "usage: horsemen-mount-tests expected-cases < vectors.tsv\n"; return 2; }
+  const auto expected_cases = std::stoull(argv[1]);
+  std::istream &in = std::cin;
   std::string line, linked_bytes, unlinked_bytes;
   std::size_t cases = 0, failed = 0;
   while (std::getline(in, line)) {
@@ -152,6 +152,10 @@ int main(int argc, char **argv) {
         if (std::to_string(m.draws) != f[8] || result != f[9]) std::cerr << "  draws " << m.draws << "/" << f[8] << " result " << result << "/" << f[9] << "\n";
       }
     }
+  }
+  if (cases != expected_cases || cases == 0) {
+    std::cerr << "vector count " << cases << " != manifest " << expected_cases << "\n";
+    return 1;
   }
   // Native-only refusals (the research leaves these Unknown / the host's choice).
   {

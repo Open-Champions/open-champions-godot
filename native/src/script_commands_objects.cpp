@@ -372,13 +372,10 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   return Build::Built;
 }
 
-// The mounted Horsemen and the Nightmare row, on the arena model (research t3/research-horsemen-mount
-// 397c35c, docs/spec/horsemen-mount.md). Sections 1.1 and 2.2 fix what a rider record consumes: two
-// pool blocks and two shared-seed draws (the rider's GameObject_ctor, then the mount's). The contents
-// of the mount's property list (0x500848 + 12 v) are Unknown there: the mount's constructor reads its
-// list through obj_getPropInt / obj_getPropStr, so a rider record is built up to that first read and
-// then refused, both objects registered as stubs. A placed Nightmare passes the record's own list and
-// is built.
+// The mounted Horsemen and Nightmare rows, from research t3/research-horsemen-mount
+// 338d459, docs/spec/horsemen-mount.md sections 1-2. The four addressed lists
+// each contain miniboss=1 and a distinct name. One rider record consumes two
+// pool blocks and two shared draws; a placed Nightmare consumes one of each.
 Host::Build Host::build_mounted(const level_flow::Record &record, const level_factory::Outcome &outcome,
                                 std::uint32_t c, const std::vector<std::string> &props) {
   namespace AM = arena_monsters;
@@ -401,7 +398,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
       return Build::NotBuilt;
     }
   }
-  const char *kUnknownList = "mount property list contents Unknown";
+  constexpr const char *MOUNT_NAMES[] = {"horsedisease", "horsewar", "horsepestilence", "horsedeath"};
   M1::Memory mem({}, [&exe](creature_hp::Address a, std::size_t n) -> std::uint64_t {
     std::uint64_t v = 0;
     for (std::size_t i = n; i-- > 0;) {
@@ -433,7 +430,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   std::map<std::uint32_t, std::shared_ptr<builtins::Obj>> objects;
   std::uint32_t mount_block = 0;
   std::uint64_t draws = 0;
-  auto is_unknown_list = [&](std::uint32_t self) { return rider && self == mount_block; };
+  auto is_rider_mount = [&](std::uint32_t self) { return rider && self == mount_block && mount_block; };
   auto prop_text = [&](std::uint32_t key) -> std::optional<std::string> {
     return level_factory::prop_find(&props, exe.string(key), exe);
   };
@@ -455,8 +452,11 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     const auto def = num(a.at(2));
     if (self != c && self != mount_block)
       throw Refused("GameObject_ctor on another block");
-    // The mount's property list is not read: its host object carries an empty list.
-    auto list = std::make_shared<std::vector<std::string>>(is_unknown_list(self) ? std::vector<std::string>{} : props);
+    // Observed 12-byte lists at 0x500848 + 12*variant, each ending in null.
+    const auto list_props = is_rider_mount(self)
+        ? std::vector<std::string>{"miniboss=1", std::string("name=") + MOUNT_NAMES[variant]}
+        : props;
+    auto list = std::make_shared<std::vector<std::string>>(list_props);
     const bool is_rider_object = rider && self == c;
     const auto size = self == c ? outcome.size : MOUNT_BLOCK_SIZE;
     objects[self] = variables_->new_object({}, 0, pos, record.angle, is_rider_object ? "8Horsemen" : "9Nightmare", list, self, size);
@@ -470,19 +470,19 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     m.mem.store(self + 0x29, 1, 73);
     m.mem.store(self + 0x44, 4, external_seed_->draw());
     ++draws;
-    if (rider && draws == 2)
+    if ((rider && draws == 2) || (!rider && draws == 1))
       last_draws_complete_ = true;
     return std::int64_t(0);
   };
   model.callbacks["obj_getPropInt"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
-    if (is_unknown_list(num(a.at(0))))
-      throw Refused(kUnknownList);
+    if (is_rider_mount(num(a.at(0))))
+      return std::int64_t(num(a.at(1)) == 0x52fa60 ? 1 : 0); // MiniBoss key in Creature_ctor.
     const auto text = prop_text(num(a.at(1)));
     return std::int64_t(text ? level_factory::atoi(*text, exe) : 0u);
   };
   model.callbacks["obj_getPropStr"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
-    if (is_unknown_list(num(a.at(0))))
-      throw Refused(kUnknownList);
+    if (is_rider_mount(num(a.at(0))))
+      return std::int64_t(exe.string(num(a.at(1))) == "name" ? place(MOUNT_NAMES[variant]) : 0u);
     const auto text = prop_text(num(a.at(1)));
     return std::int64_t(text ? place(*text) : 0u);
   };
@@ -500,12 +500,10 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   };
   model.callbacks["Creature_init"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
     const auto self = num(a.at(0));
-    if (is_unknown_list(self))
-      throw Refused(kUnknownList);
-    if (prop_text(KEY_DEAD)) throw Refused("Creature_init dead");
-    if (prop_text(KEY_INIT_SCRIPT)) throw Refused("Creature_init initScript");
-    if (m.mem.load(self + 0xa8, 8) & 1)
-      throw Refused("Creature_init MiniBoss");
+    if (!is_rider_mount(self) && prop_text(KEY_DEAD)) throw Refused("Creature_init dead");
+    if (!is_rider_mount(self) && prop_text(KEY_INIT_SCRIPT)) throw Refused("Creature_init initScript");
+    // Creature_init first calls virtual slot 18 for a MiniBoss. Nightmare
+    // inherits the documented empty Creature slot 18 (docs/creatures.md).
     std::uint32_t mask = 0;
     const auto format = exe.string(KEY_CHANGE);
     const auto at = format.find("%d");
@@ -514,12 +512,12 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     for (int n = 0; n < 32; ++n) {
       auto key = format;
       key.replace(at, 2, std::to_string(n));
-      if (level_factory::prop_find(&props, key, exe))
+      if (!is_rider_mount(self) && level_factory::prop_find(&props, key, exe))
         mask |= 1u << n;
     }
     if (mask)
       m.mem.store(self + 0xe8, 4, mask);
-    if (m.mem.load(self + 0x50, 4))
+    if (!is_rider_mount(self) && m.mem.load(self + 0x50, 4))
       for (const auto key : KEY_WEAPONS)
         if (const auto text = level_factory::prop_find(&props, exe.string(key), exe))
           if (level_factory::atoi(*text, exe))
@@ -541,9 +539,21 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
       throw Refused("handle_clear on a list with nodes");
     return std::int64_t(0);
   };
-  // The rider-mount link needs the host's handle pool; not modelled here.
-  model.callbacks["handle_link"] = [&](AM::Model &, const std::vector<AM::Value> &) -> AM::Value {
-    throw Refused("rider-mount handle_link not modelled");
+  model.callbacks["handle_link"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto head = num(a.at(0)), target = num(a.at(1));
+    if (!rider || (head != c + 0x3c8 && head != mount_block + 0x3c8) ||
+        (target != c && target != mount_block) || num(a.at(2)) != target)
+      throw Refused("rider-mount handle_link outside observed pair");
+    auto found = objects.find(target);
+    if (found == objects.end()) throw Refused("rider-mount handle_link target absent");
+    auto &cell = mounted_cells_[head];
+    if (!cell) cell = std::make_unique<Cell>();
+    auto *node = variables_->world->handles.link(*cell, found->second->heads[0], found->second.get());
+    const auto word = HandlePool::NODE_BASE + HandlePool::NODE_SIZE * static_cast<std::uint32_t>(node->index);
+    m.mem.store(head, 4, word);
+    m.mem.store(word + 12, 4, target);
+    variables_->memory.word(word + 12, target);
+    return std::int64_t(0);
   };
   // Resource and animation calls: their results are not stored by these constructors.
   for (const char *name : {"anim_clear", "anim_push", "anim_randomizeTopTime", "anim_start", "anim_startBlendInOut",
@@ -569,22 +579,33 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     }
     return Build::Stubbed;
   }
-  if (rider)
-    throw std::logic_error("rider constructor completed without reading the Unknown mount list");
-  // A placed Nightmare: copy the object's bytes as build() does.
+  // Failed mount allocation leaves an on-foot rider in state 0 (spec 1.1).
+  // Keep that partial constructor as a labelled stub; never abort level load.
+  if (rider && !mount_block) {
+    last_draws_complete_ = draws == 1;
+    counts_.build_refusals["rider on foot (mount pool exhausted)"] += 1;
+    stubs_.insert(objects.at(c)->addr);
+    counts_.objects_registered += 1;
+    return Build::Stubbed;
+  }
+  // Copy both completed objects (or the placed Nightmare) into the binder.
   auto skipped = [](std::uint32_t off) {
     for (const auto &sp : kNotCopied)
       if (off >= sp.offset && off < sp.offset + sp.size)
         return true;
     return false;
   };
-  for (std::uint32_t off = 0; off < outcome.size; ++off)
-    if (!skipped(off))
-      variables_->memory.byte(c + off, static_cast<std::uint8_t>(mem.load(c + off, 1)));
+  for (const auto &entry : objects) {
+    const auto self = entry.first;
+    const auto size = self == c ? outcome.size : MOUNT_BLOCK_SIZE;
+    for (std::uint32_t off = 0; off < size; ++off)
+      if (!skipped(off))
+        variables_->memory.byte(self + off, static_cast<std::uint8_t>(mem.load(self + off, 1)));
+    static_cast<objects::GameObject &>(*entry.second).flags = variables_->memory.word(self + 0x0c);
+    built_.insert(self);
+  }
   variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
-  static_cast<objects::GameObject &>(*objects.at(c)).flags = variables_->memory.word(c + 0x0c);
-  built_.insert(c);
-  counts_.objects_registered += 1;
+  counts_.objects_registered += objects.size();
   return Build::Built;
 }
 

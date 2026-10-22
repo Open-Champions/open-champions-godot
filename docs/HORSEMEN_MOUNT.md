@@ -1,7 +1,7 @@
 # Mounted Horsemen: the Nightmare mount, rider link and lifecycle (Return to Arms)
 
-Authored from research `t3/research-horsemen-mount` at `397c35cd99ac3fd3660834f5e4ac37767bbfbc3a`
-(audit PASS after its fix round): `docs/spec/horsemen-mount.md`, `tools/ref_horsemen_mount.py`,
+Authored from research `t3/research-horsemen-mount` at `338d459` (the 1,101
+synthetic behavior vectors remain pinned to its earlier `397c35c`): `docs/spec/horsemen-mount.md`, `tools/ref_horsemen_mount.py`,
 `tools/difftest_horsemen_mount.py`, `tools/test_ref_horsemen_mount.py`. Contract revision: Return to Arms
 SLUS_209.73 US v2.00. Nothing here has run on a console. No research source, decompiler output or game
 bytes are copied; the tests use the research rig's blank synthetic memory.
@@ -34,10 +34,10 @@ table functions by identity, as for the other arena classes. The rider side (`Ho
 
 - A rider record takes **two pool blocks and two shared-seed draws** (the rider's `GameObject_ctor`, then the
   mount's; spec 1.1). Before this change the record counted one block and one unmodelled draw.
-- The mount's property list (`0x500848 + 12 v`) has **Unknown** contents (spec 2.2, 10). The mount's
-  `Creature_ctor` reads it through `obj_getPropInt` / `obj_getPropStr`, so the record is built up to that first
-  read and then refused (`build_refused "mount property list contents Unknown"`). Rider and mount register as
-  stubs. No MiniBoss flag, no per-variant name is assumed.
+- The four **Observed** property lists at `0x500848 + 12 v` each contain `miniboss=1` and a distinct
+  name: `horsedisease`, `horsewar`, `horsepestilence`, `horsedeath`. The host builds `RiderDisease`,
+  `RiderWar`, `RiderPestilence`, and `RiderDeath` with their named MiniBoss mounts and reciprocal
+  handles. The MiniBoss path of `Creature_init` reaches the inherited empty Creature slot 18.
 - A placed `Nightmare` passes the record's own list and is built.
 - Rows 0x532dc8-0x532df8 call the same constructor but are not documented by the research: they keep the
   previous accounting (one block, one unmodelled draw).
@@ -46,22 +46,21 @@ table functions by identity, as for the other arena classes. The rider side (`Ho
 
 | Item | Why |
 |---|---|
-| Mount property-list contents, mount creature flag 1, per-variant mount name | Unknown (spec 2.2, 10) |
-| Run-list order of rider and mount | Unknown (spec 3): the host decides and reports |
+| Run-list order of rider and mount | Unknown in the game (spec 3). This host registers the rider, then mount into successive every-60 buckets; activation can change their later scheduling. The play scene does not tick them. |
 | Triggers for mount states 0x19 / 0x1a | no known caller (spec 6): bodies are ported, no trigger invented |
 | Whether a mounted rider can carry a stun / root / cooldown | Unknown (spec 6): the stranded-rider outcome is reproduced, not "fixed" |
-| Charge-target picker table capacity / maximum player count | Unknown (spec 4): a count above the host history limit is refused (`player scan limit`), never read |
+| Charge-target picker table capacity / maximum player count | Unknown (spec 4): the host chooses `history_entries` as its bound and refuses any slot at or above it (`player scan limit`) |
 | `Horsemen_draw` matrix chain (spec 7, rank 5) | not ported; only the mount's draw and the seat transform are |
-| Rider-mount `handle_link` at level load | unreachable today (the record is refused earlier); refused if reached |
 | Ticking the pair inside the play scene | no scene runtime ticks Horsemen-class objects (on-foot included) |
+| Mount pool exhaustion | the on-foot rider is labelled as a stub; no level-load exception escapes |
 
 ## Evidence
 
 `tools/generate_horsemen_mount_vectors.py RESEARCH_DIR OUT.tsv OUT.json` replays the memory rig of the
 research unit tests through `ref_horsemen_mount.py` (SHA-256 pins in the script) and writes
-`native/tests/vectors/horsemen_mount.tsv` (1,101 cases: every set-state value linked and unlinked, filter
+a local TSV, committed as `native/tests/vectors/horsemen_mount.tsv.gz` (1,101 cases: every set-state value linked and unlinked, filter
 cases, constructors, picker, contact slots, draw, seat, angles, every run state against seven answer sets,
-the rider's mounted run). `champions-horsemen-mount-tests` replays them and compares the ordered stores,
+the rider's mounted run). The committed gzip and JSON case count are required by CTest. `champions-horsemen-mount-tests` replays them and compares the ordered stores,
 call-outs, shared draws and results exactly; it adds the native-only refusals above. The unit tests of the
 research are a regression guard there, not evidence about the original; the evidence is its difftest.
 
