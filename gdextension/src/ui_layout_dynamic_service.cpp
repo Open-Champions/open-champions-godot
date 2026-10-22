@@ -461,9 +461,11 @@ public:
 };
 } // namespace
 void register_ui_hud_round3_service();
+void register_hud_extras_service();
 void register_menu_service();
 void register_ui_layout_dynamic_service() {
   GDREGISTER_CLASS(ChampionsUiDynamicLayoutService);
   register_ui_hud_round3_service();
+  register_hud_extras_service();
   register_menu_service();
 }
