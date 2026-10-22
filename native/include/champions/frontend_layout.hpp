@@ -34,7 +34,7 @@ struct Draw {
   int layer = 0;
   int x = 0, y = 0, w = 0, h = 0; // Rect uses x,y,w,h = left,top,width,height
   std::uint32_t colour = 0;       // sprite or frame tint, rect colour, text colour (the research word)
-  bool settled = false;           // the colour's alpha byte is fade state in the research; the host paints it opaque
+  bool settled = false;           // documented fade batch; the host may paint it opaque
   int style = 0;                  // Frame: ctile 0, border style 1, tile 2
   int min_w = 0;                  // Frame: the documented minimum-width call
   std::string lump, resource;     // Sprite

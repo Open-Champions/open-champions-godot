@@ -85,3 +85,32 @@ Verification (arm64 Release, `work/menus-r4/`):
 | 111-level sweep, `r4` (`--scripts`) and `r4n` | both **111/111** tried, loaded and played; 230 checks, 0 failures, empty refusal list. Every deterministic count equals `m3`/`m3n`; only `audio.frames_pushed`, `memory.static_peak_bytes`, `text.frames_drawn.bust` (27 vs 32, timing) and `time.*_ms` differ |
 
 Not run: screenshot recapture (the front-end draws changed only in colour, widening and sounds).
+
+## Audit fixes — final audit (2026-10-22)
+
+Source: `native-menus-final.md` (2 MEDIUM, 5 LOW), against pinned `t3/research-menus-layout dc458d5`. This supersedes the earlier claims that phase-3 sound triggers, nonzero cursor rows, and in-game options geometry were traced.
+
+| Finding | Resolution and pinned evidence |
+|---|---|
+| M1 | **Refused native frame geometry for selected rows other than 0.** `tools/ref_frontend_layout.py:48-70` and `docs/frontend-layout.md:60-65` cover row 0 only. Other rows keep a visible `Evidence::Host` highlight; the self-derived coordinate test was replaced by an evidence-label test. |
+| M2 | **Refused the front-end 13-row table for pause options.** `tools/ref_frontend_layout.py:20,31` and `docs/frontend-layout.md:111` cover the front-end table `0x4f6e88`; the in-game `0x44f218` count and layout are uncaptured. Pause options now show only two Host controls, no Executed frames or Observed pause-batch colour. |
+| L1 | **Refused phase-3 sound triggers.** `docs/frontend-layout.md` lists sites but not input conditions. `CharAbility` no longer requests accept/back clips. The documented main-list triggers remain. |
+| L2 | Message-box frame style, layer, opacity and inflation are `Evidence::Host`; `tools/ref_frontend_screens.py:740` gives only the wrapper tuple. |
+| L3 | Host character, name and exit rows use the Host identity tint. `docs/frontend-layout.md` ties `0x80464646` only to pause text batch `0x18d5e8`. |
+| L4 | Removed the claim that the import-row rectangle is drawn. Host class footer has no research site; phase-2–4 footer prompt retains `0x229cb4`, as recorded in `tools/ref_frontend_screens.py`. |
+| L5 | **Refused blanket low-alpha fade treatment.** Only the slot-list batch sets `Draw::settled`; `docs/frontend-layout.md:88,177-180` and the credits colour points support fade. Other research words retain their alpha in `Draw.colour`. The Godot view paints its authored placeholder text at a readable Host opacity; Host highlights use explicit Host opacity. This is labelled presentation, not a claim about native fade. |
+
+New refusals counted: **4 behaviour claims** (M1 cursor rows, M2 pause options table, L1 phase-3 sound triggers, L5 blanket fade conversion), **8 total** including the four earlier audit refusals above. L2 and L3 remain rendered as labelled Host choices. No private bytes or names were added to tracked files. Current verification follows below.
+
+Verification on the final menus tree (arm64 Release):
+
+| Gate | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`; `cmake --build build/native -j 4`; `ctest --test-dir build/native --output-on-failure -j 3` | Configure/build pass. Full CTest **224/226** in 2,579 s; `player-exact` hit its 240 s timeout and `session-facing-exact` hit its internal 600 s timeout under shared worktree load. The initial failures are retained. Focused `frontend-exact` passed. Isolated `player-exact` passed in 239.67 s and `session-facing-exact` passed in 274.67 s. |
+| `cmake --build build/godot-extension -j 4` | Pass (macOS template_debug). |
+| Godot dev matrix, `work/menus-r5c/run-godot.py` | **54/54 exit 0** after the Host text presentation fix; `frontend_smoke` 124 checks, 0 failures. The first matrix was 53/54 because the rendered material test sampled before `frame_post_draw`; the isolated failure was reproduced, the test was fixed, and the full matrix passed twice afterward. |
+| FULL_TRACE, `combined-full-combat` | **Unchanged** SHA-256 `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, 31,622 bytes. |
+| 111-level sweep, `m5on --scripts` and `m5off` | Both **111/111** tried, loaded and played; 230 checks, 0 failures, empty refusal lists. Every deterministic count matches `r4`/`r4n`; only timing, audio frames, static peak memory and text frame counts were excluded from that comparison. |
+| Rendered front-end capture | 21 screens captured with the read-only disc in ignored `work/private/`. Main, ability and pause-options screens inspected. The first ability capture exposed unreadable Host text; after the Host opacity fix the recapture is readable. The existing base `real_data.gd` static decode error still appears during hub startup, but all 21 captures complete. |
+
+The rendered material test's `frame_post_draw` wait is a test timing fix: it waits for the viewport's new frame before checking alpha pixels. It changes no game material code.

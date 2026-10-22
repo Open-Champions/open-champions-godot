@@ -95,11 +95,12 @@ func build(scene: Dictionary) -> int:
 				_add_text(d)
 	return items.size()
 
-# The research's colour word; its alpha byte is fade state, which the host paints
-# settled (opaque) when the native draw says so (Draw::settled, a Host choice).
+# The native draw retains the research colour word. Text here is host-authored
+# placeholder copy, so the host paints it readable at its own opacity. Only
+# documented fade batches set Draw::settled; this is not a fade interpretation.
 func _tint(d: Dictionary) -> int:
 	var c := int(d.colour)
-	if bool(d.get("settled", false)):
+	if str(d.kind) == "text" or bool(d.get("settled", false)):
 		return (c & 0xffffff) | 0x80000000
 	return c
 

@@ -377,6 +377,16 @@ void pause_vectors() {
   tap(f, DOWN); tap(f, DOWN); tap(f, DOWN);
   tap(f, CROSS);
   expect(f.screen() == Screen::Options, "pause options");
+  {
+    const auto s = f.layout();
+    expect(f.entries().size() == 2, "pause options use two host controls");
+    bool executed_frame = false, observed_row = false;
+    for (const auto &d : s.draws) {
+      executed_frame = executed_frame || (d.kind == Draw::Kind::Frame && d.evidence == Evidence::Executed);
+      observed_row = observed_row || (d.kind == Draw::Kind::Text && d.evidence == Evidence::Observed);
+    }
+    expect(!executed_frame && !observed_row, "pause options borrow no front-end geometry or pause colour");
+  }
   (void)f.take_requests();
   for (int i = 0; i < 6; ++i)
     f.frame(LEFT);
@@ -579,8 +589,8 @@ void layout_screen_vectors() {
       }
     expect(sounds == 1, "one move, one sound");
     const auto s = f.layout();
-    expect(s.draws[5].kind == Draw::Kind::Frame, "cursor frame follows the row");
-    expect(s.draws[5].y == 281 && s.draws[5].h == 33, "selected row 1: frame at y=281, odd height 33");
+    expect(s.draws[5].kind == Draw::Kind::Frame && s.draws[5].evidence == Evidence::Host,
+           "uncaptured selected row uses a host highlight");
   }
   tap(f, UP);
   (void)f.take_requests();
@@ -697,7 +707,7 @@ void layout_screen_vectors() {
     int checked = 0;
     for (const auto &d : s.draws) {
       if (d.role == "phase-3 header (text Host)" || d.role == "stat description (text Host)") {
-        expect(d.colour == 0x0A316864 && d.settled, "phase 3 header/description colour");
+        expect(d.colour == 0x0A316864 && !d.settled, "phase 3 colour is retained without invented fade");
         ++checked;
       } else if (d.role == "phase-3 points row (text Host)" || d.role.rfind("points value", 0) == 0) {
         expect(d.colour == 0x08325D18, "phase 3 points colour");

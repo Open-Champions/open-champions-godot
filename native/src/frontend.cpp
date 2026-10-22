@@ -472,13 +472,12 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       ++character_.spent[static_cast<std::size_t>(cursor_)];
     if (pressed & CONFIRM) {
       if (ability_remaining() == 0) {
-        sound(menu_sound::select); // phase 3 accept (Executed); the conditions are not recorded
+        // The phase-3 sound sites have no documented trigger condition.
         go(Screen::CharName);
       } else {
         error_ = "20 ability points must be spent before the screen can be left";
       }
     } else if (pressed & CANCEL) {
-      sound(menu_sound::back); // phase 3 back (Executed)
       go(Screen::CharAppearance);
     }
     break;
@@ -682,6 +681,17 @@ std::vector<Entry> Flow::entries() const {
                           "unlock test options_get4f8f38Level 0x1ec448 was not executed"));
     break;
   case Screen::Options: {
+    if (!in_frontend()) {
+      // The in-game table 0x44f218 was not captured. Keep only host controls
+      // whose behaviour this flow implements; do not borrow the 13-row table.
+      out.push_back(entry("entry0", "(entry 0)", "pause option row unknown", false,
+                          "the in-game option table was not captured"));
+      auto music = entry("music", "Music", "host pause music control");
+      music.type = 4;
+      music.value = music_.live;
+      out.push_back(music);
+      break;
+    }
     out.push_back(entry("entry0", "(entry 0)", "list entry 0 is not documented", false,
                         "entry order is documented only for music at index 1"));
     auto music = entry("music", "Music", "menu_music, index 1, type 4 float slider (Executed)");

@@ -94,9 +94,11 @@ std::array<Draw, 3> list_frames(const ListSpec &s, int selected) {
     cursor_x = s.origin_x - cursor_w / 2;
   }
   std::array<Draw, 3> out;
-  // Selected-row frame: height 32 at an even y, 33 at an odd y (Executed for row 0).
+  // Only row 0 was executed in the research. Other rows use a host highlight;
+  // their cursor-frame geometry is not claimed as a native call.
   out[0] = make_frame(cursor_x, row_y, cursor_w, 32 + (row_y & 1), 7, LIST_CURSOR_TINT, 0,
-                      row == 0 ? Evidence::Executed : Evidence::Inferred, "list cursor frame");
+                      row == 0 ? Evidence::Executed : Evidence::Host,
+                      row == 0 ? "list cursor frame" : "host list cursor highlight");
   out[1] = make_frame(x - 1, y - 4, w + 2, h + 8, 7, LIST_BACKING_TINT, 2, Evidence::Executed,
                       "list backing frame");
   out[2] = make_frame(x + 8, y + 8, w, h, 6, LIST_OVERLAY_TINT, 0, Evidence::Executed,
@@ -161,11 +163,8 @@ constexpr std::uint32_t HOST_MUTED = 0x80707070;    // host labels
 // of 0 and the parent batch 0x1e0dcc 0x64464646; neither is a displayed colour, and
 // 0x80464646 belongs to the pause batch only. The identity tint is a Host choice.
 constexpr std::uint32_t HOST_LIST_TEXT = 0x80808080;
-// The alpha byte of the research's colour words is fade state (0 or a small step
-// count), so a Draw carries the research word verbatim. The host paints such a
-// word fully opaque (Draw::settled, Host choice); a word with alpha >= 0x80 is not
-// touched.
-bool fade_alpha(std::uint32_t colour) { return (colour >> 24) < 0x80; }
+// Only the slot-list batch and credits colour points are tied to fade by the
+// research. Other words retain their alpha; callers mark a known fade batch.
 
 const char *const STAT_ROWS[4] = {"Strength", "Intelligence", "Dexterity", "Stamina"};
 
@@ -180,7 +179,6 @@ Draw text(Font font, Align align, int layer, int x, int y, std::uint32_t colour,
   d.x = x;
   d.y = y;
   d.colour = colour;
-  d.settled = fade_alpha(colour);
   d.text = std::move(str);
   d.role = role;
   d.site = site;
@@ -198,7 +196,6 @@ Draw rect(int left, int top, int right, int bottom, int layer, std::uint32_t col
   d.w = right - left;
   d.h = bottom - top;
   d.colour = colour;
-  d.settled = fade_alpha(colour);
   d.role = role;
   d.site = site;
   return d;
@@ -228,16 +225,15 @@ void add_list(Scene &s, const ListSpec &spec, const std::vector<Entry> &entries,
 void add_message_box(Scene &s, const std::string &body, Evidence text_evidence) {
   Draw frame;
   frame.kind = Draw::Kind::Frame;
-  frame.evidence = Evidence::Inferred;
+  frame.evidence = Evidence::Host;
   frame.x = 60 - 1;
   frame.y = 186 - 4;
   frame.w = 520 + 2;
   frame.h = 68 + 8;
   frame.min_w = 520;
   frame.layer = 0;
-  frame.colour = 0x808080; // the wrapper's tint word has no alpha (ref_frontend_screens 0x1df504)
-  frame.settled = true;
-  frame.style = 2;
+  frame.colour = 0x80808080; // Host opacity; wrapper gives only 0x00808080
+  frame.style = 2; // host backing; the wrapper does not specify style or inflation
   frame.role = "message box frame";
   frame.site = "0x1df504";
   Draw line = text(Font::Small, Align::WrappedCentred, 6, 320, 212, 0x323c3c, body,
@@ -270,7 +266,7 @@ void add_footer(Scene &s, const std::string &prompt, bool host_screen = false) {
   s.draws.push_back(f);
   s.draws.push_back(text(Font::Small, Align::Centred, 6, 320, 404, 0x0A316864, prompt,
                          host_screen ? Evidence::Host : Evidence::Inferred, "footer prompt (text Host)",
-                         "0x229cb4"));
+                         host_screen ? "" : "0x229cb4"));
 }
 
 void host_text(Scene &s, int x, int y, const std::string &str, Align align = Align::Left,
@@ -331,12 +327,16 @@ Scene Flow::layout() const {
     if (front)
       add_list(s, layout::options_list(), list, cur, HOST_LIST_TEXT, Evidence::Host,
                "list row (font, layer Executed; colour Host)");
-    else
-      add_list(s, layout::options_list(), list, cur, layout::PAUSE_TEXT, Evidence::Observed,
-               "list row (font and colour Observed from the pause batch 0x18d5e8)");
+    else {
+      // The in-game table 0x44f218 has no captured count or geometry. Show only
+      // the two host controls that this flow actually implements.
+      for (std::size_t i = 0; i < list.size(); ++i)
+        host_text(s, 320, 220 + 28 * static_cast<int>(i),
+                  (static_cast<int>(i) == cur ? "> " : "  ") + list[i].label, Align::Centred);
+    }
     // The value bar is host-drawn: knobs, glyphs and the live values are Unknown.
     if (list.size() > 1 && list[1].type == 4) {
-      const auto anchors = layout::list_anchors(layout::options_list());
+      const auto anchors = front ? layout::list_anchors(layout::options_list()) : std::vector<layout::Point>{};
       float live = 0;
       std::uint32_t bits = list[1].value;
       static_assert(sizeof(float) == sizeof(std::uint32_t), "float is 32 bits");
@@ -344,13 +344,13 @@ Scene Flow::layout() const {
       if (!(live >= 0.0f)) // also rejects NaN
         live = 0.0f;
       live = std::min(live, 1.0f);
-      const int bx = 336, by = anchors[1].y + 4, bw = 72;
-      s.draws.push_back(rect(bx, by, bx + bw, by + 6, 7, 0x303030, Evidence::Host, "host slider track"));
+      const int bx = 336, by = front ? anchors[1].y + 4 : 252, bw = 72;
+      s.draws.push_back(rect(bx, by, bx + bw, by + 6, 7, 0x80303030, Evidence::Host, "host slider track"));
       s.draws.push_back(rect(bx, by, bx + static_cast<int>(live * float(bw)), by + 6, 7,
-                             0x366876, Evidence::Host, "host slider fill"));
+                             0x80366876, Evidence::Host, "host slider fill"));
     }
     host(front ? "value bars, knobs and glyphs of the option rows are Unknown"
-               : "the pause option list (table 0x44f218) was not captured; the front-end list geometry is borrowed");
+               : "the pause option list (table 0x44f218) was not captured; two host controls are shown");
     s.unknown = {"what rows 0-2 control, value bars and knobs, glyphs, fade"};
     break;
   }
@@ -371,8 +371,10 @@ Scene Flow::layout() const {
     // title centred (320,110), prompt (320,320), row-highlight rectangle
     // (66,133)-(574,152) colour 0x366876 (an Inferred highlight).
     const char *title = screen_ == Screen::LoadGame ? "Load Game" : screen_ == Screen::SaveGame ? "Save Game" : "Saved";
-    s.draws.push_back(text(Font::Small, Align::Centred, 6, 320, 110, 0x001E6464, title,
-                           Evidence::Inferred, "slot-list title (text Host)", "0x21d6e8"));
+    Draw slot_title = text(Font::Small, Align::Centred, 6, 320, 110, 0x001E6464, title,
+                           Evidence::Inferred, "slot-list title (text Host)", "0x21d6e8");
+    slot_title.settled = true;
+    s.draws.push_back(slot_title);
     for (std::size_t i = 0; i < list.size(); ++i) {
       const int y = 133 + 22 * static_cast<int>(i); // row 0 is the documented rectangle; the step is Host
       // The row text is submitted before the highlight: inside a layer the later
@@ -380,12 +382,14 @@ Scene Flow::layout() const {
       s.draws.push_back(text(Font::Small, Align::Centred, 6, 320, y + 2, 0x323c3c, list[i].label,
                              Evidence::Host, "slot-list row"));
       if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(66, y, 574, y + 19, 6, 0x366876,
-                               i == 0 ? Evidence::Inferred : Evidence::Host, "slot-list row highlight", "0x21e508"));
+        s.draws.push_back(rect(66, y, 574, y + 19, 6, 0x80366876,
+                               Evidence::Host, "slot-list row highlight", "0x21e508"));
     }
-    s.draws.push_back(text(Font::Small, Align::Centred, 6, 320, 320, 0x001E6464,
+    Draw slot_prompt = text(Font::Small, Align::Centred, 6, 320, 320, 0x001E6464,
                            screen_ == Screen::Saved ? "Cross: close" : "Cross: choose   Circle: back",
-                           Evidence::Inferred, "slot-list prompt (text Host)", "0x21c8b0"));
+                           Evidence::Inferred, "slot-list prompt (text Host)", "0x21c8b0");
+    slot_prompt.settled = true;
+    s.draws.push_back(slot_prompt);
     s.unknown = {"per-row text positions with real file data, the spinner and the error sound"};
     break;
   }
@@ -401,8 +405,8 @@ Scene Flow::layout() const {
       const int col = static_cast<int>(i) / per, row = static_cast<int>(i) % per;
       const int x = 190 + col * 260, y = 120 + row * 30;
       if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(x - 120, y - 3, x + 120, y + 19, 6, 0x366876, Evidence::Host, "host row highlight"));
-      s.draws.push_back(text(Font::Small, Align::Centred, 7, x, y, layout::PAUSE_TEXT, list[i].label, Evidence::Host, "host row"));
+        s.draws.push_back(rect(x - 120, y - 3, x + 120, y + 19, 6, 0x80366876, Evidence::Host, "host row highlight"));
+      s.draws.push_back(text(Font::Small, Align::Centred, 7, x, y, HOST_LIST_TEXT, list[i].label, Evidence::Host, "host row"));
     }
     s.unknown = {"which models the page shows and in what order, class art, cursor and highlight"};
     break;
@@ -459,8 +463,8 @@ Scene Flow::layout() const {
     const int done_y = 300;
     for (std::size_t i = 1; i < list.size(); ++i) {
       if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(220, done_y - 3, 420, done_y + 19, 6, 0x366876, Evidence::Host, "host row highlight"));
-      s.draws.push_back(text(Font::Medium, Align::Centred, 7, 320, done_y, layout::PAUSE_TEXT, list[i].label, Evidence::Host, "host row"));
+        s.draws.push_back(rect(220, done_y - 3, 420, done_y + 19, 6, 0x80366876, Evidence::Host, "host row highlight"));
+      s.draws.push_back(text(Font::Medium, Align::Centred, 7, 320, done_y, HOST_LIST_TEXT, list[i].label, Evidence::Host, "host row"));
     }
     host("the name grid's glyphs and cursor are Unknown; the host keyboard types");
     s.unknown = {"grid glyphs, the cursor rectangle (zero width in the fixture), accepted-name colours, executed sounds"};
@@ -481,8 +485,8 @@ Scene Flow::layout() const {
     for (std::size_t i = 0; i < list.size(); ++i) {
       const int x = 250 + 140 * static_cast<int>(i);
       if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(x - 50, 233, x + 50, 255, 6, 0x366876, Evidence::Host, "host row highlight"));
-      s.draws.push_back(text(Font::Medium, Align::Centred, 7, x, 236, layout::PAUSE_TEXT, list[i].label, Evidence::Host, "host row"));
+        s.draws.push_back(rect(x - 50, 233, x + 50, 255, 6, 0x80366876, Evidence::Host, "host row highlight"));
+      s.draws.push_back(text(Font::Medium, Align::Centred, 7, x, 236, HOST_LIST_TEXT, list[i].label, Evidence::Host, "host row"));
     }
     break;
   }
