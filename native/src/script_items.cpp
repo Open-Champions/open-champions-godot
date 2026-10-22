@@ -545,6 +545,21 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
     if (rng.draws)
       memory.word(G_RAND_SEED, rng.seed);
     scratch_ = item.pack(scratch_);
+    // givePlayerRandom's special-level branch stores bytes +0x20/+0x21 of its record
+    // right after this parse (0x14601c-0x146098, docs/spec/item-drops.md 2). The
+    // binder's call sequence is pinned to the research's vectors, so the service
+    // applies the stores when the call is that parse: variant 0, no presets, the
+    // level name holds the special fragment and the text is the one for the
+    // current difficulty 1..3.
+    if (variant == 0 && use_presets == 0) {
+      const auto difficulty = items::s32(memory.word(G_DIFFICULTY));
+      if (difficulty >= 1 && difficulty <= 3 && memory.cstr(0x5312b8 + 0x50 * std::uint32_t(difficulty - 1)) == text &&
+          memory.cstr(0x41b721).find(memory.cstr(0x5312a8)) != std::string::npos) {
+        constexpr std::uint8_t special[3][2] = {{0x12, 0x33}, {0x33, 0x34}, {0x24, 0x35}};
+        scratch_[0x20] = special[difficulty - 1][0];
+        scratch_[0x21] = special[difficulty - 1][1];
+      }
+    }
     counts.parsed += 1;
     return item.definition ? item.definition->addr : 0u;
   }
