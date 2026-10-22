@@ -73,6 +73,13 @@ struct Services {
   std::function<Slide(const Vec3 &, const Vec3 &, Raw, Raw)> slide;
   std::function<Raw(const Vec3 &, Raw)> height_below;
   std::function<Raw(const Vec3 &, Raw)> water_test;
+  // water_disturb 0x189514 (point, strength, radius) -> chunks touched, for the
+  // player's wading ripples (docs/PLAYER_WADING.md). A missing function refuses
+  // when a wading step needs it. The flat fixture is a dry world (touches 0).
+  std::function<Raw(const Vec3 &, Raw, Raw)> water_disturb;
+  // Optional: the minimum z (raw32) of water_test's first chunk, the height of
+  // the airborne entry's splash burst. Presentation only.
+  std::function<Raw(const Vec3 &, Raw)> water_height;
   // world_findFreeSpot 0x14acf8's terrain tests (point, radius):
   // terrain_testFlag1 0x183b48 and terrain_height 0x183820. Full only.
   std::function<Raw(const Vec3 &, Raw)> terrain_blocked;
@@ -92,6 +99,17 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // model_getMeshJoint 0x179358 (model, mesh index) -> the u8 at +6 of the
+  // 10-byte mesh record (model-texture.md, mesh record). The record is loaded
+  // data (the user's disc at run time); the research models the call as an
+  // unmodelled call-out. A missing function refuses. Not defaulted: there is
+  // no joint to invent for a synthetic model.
+  std::function<Raw(Raw model, Raw mesh)> mesh_joint;
+  // resref_get 0x17377c (resource reference address) -> the cached data
+  // pointer (engine.md: it looks the entry up again when g_lumpGeneration
+  // changes). Also loaded data and an unmodelled call-out in the research.
+  // A missing function refuses; the first word at the pointer is not it.
+  std::function<Raw(Raw ref)> resref;
   // model_buildHideMask (model, variant bits): the 64-bit show mask the
   // AntQueen and Skeleton constructors store at +0x220. A missing function
   // refuses.

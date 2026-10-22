@@ -233,6 +233,7 @@ func _present_npc_dialog() -> void:
 	if controller == null: return
 	var talk: Dictionary = controller.dialog_status()
 	if not talk.get("ok", false): return
+	if frontend != null: frontend.set_dialog_open(bool(talk.get("open", false)))
 	if talk.get("stalled", false):
 		status_label.text = "Dialog stopped: %s. \"Leave stalled dialog\" ends it (not in the original)." % str(talk.get("stall_reason", ""))
 	elif talk.get("open", false):

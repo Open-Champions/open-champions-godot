@@ -16,15 +16,15 @@ extends "res://ui/original_art/hud_view.gd"
 # is not drawn and `refusals` says why. `assumed` lists the documented gates
 # that play does not observe and that the drawn elements take as clear.
 const REFUSALS := {
-	"experience": "the experience bar needs acknowledged level +0x58 > 0, experience +0x5c and the 0x41b554/0x41b558 rows (observation keys acknowledged_level, experience, experience_base, experience_next, all integers) and the bar_green frames from HUD.LMP; play observes no level or experience until a player record supplies them (hud-xp.md)",
-	"level_text": "the level text is the signed byte at player +0x59 with the acknowledged level +0x58 for its colour; play observes neither (hud-layout.md, hud-dynamic.md section 3)",
-	"name_text": "the name colour needs the arena colour 0x3054c4, player_slotColor, the blink mask 0x505b04 and ui_fitText, and play has no player name (hud-dynamic.md section 3)",
-	"level_up_glow": "hud_statusbar00glow.tex is drawn only while a level is pending (acknowledged +0x58 < level +0x59); play observes no level (hud-dynamic.md section 3)",
+	"experience": "the experience bar needs observed acknowledged level, experience, executable thresholds and all eleven bar_green frames (hud-xp.md)",
+	"level_text": "the level text needs the observed signed player level, acknowledged level and the small HUD font (hud-dynamic.md section 3)",
+	"name_text": "the name colour needs an observed arena/player colour and blink mask before ui_fitText can draw it (hud-dynamic.md section 3)",
+	"level_up_glow": "hud_statusbar00glow.tex needs a pending level, an observed live player object and simulation HP > 0 (hud-dynamic.md section 3)",
 	"portrait": "hud_drawPlayerStatus submits no portrait; the only HUD portrait is the bust panel 0x1dfb6c, shown by script showBust (0x4f66d4); with a level script, ui/text_hud.gd draws it (docs/STRINGS.md), not this view (hud-dynamic.md section 7)",
 	"quick_slots": "the notice and count icons (icons.lmp counthealth/countmana/...) draw only with a nonzero timer 0x41b828 set by their starters, and the quick-cast selector 0x1dd270 opens only on the local D-pad with skill icons and the resref 0x86aa30; play supplies none (hud-dynamic.md sections 3 and 6)",
-	"gold": "hud_drawGold 0x1dc708 draws only while the counter alpha 0x4f6950 > 0, which rises only after a gold floater from Gold_onTouch or chest gold (observation key gold_pickups: [{slot, amount, x, y}]); the native session has no such producer yet (hud-gold.md)",
+	"gold": "hud_drawGold draws only after a gold floater from Gold_onTouch or chest gold (observation key gold_pickups); direct record gold writers leave the counter hidden (hud-gold.md)",
 	"gold_coin": "gold03.tex dimensions are not in the pinned research (hud-gold.md section 8 gives only its position), so the coin is not drawn",
-	"minimap": "the projector's gate, scissor, cell transform and blips are native (hud_extras, hud-minimap.md), but the map tiles are drawn by VU1 program 0x403e20, read but not executed, and the icons run scripts from draw code; both are refused, and a blip-only map would not be the original picture",
+	"minimap": "the projector, scissor and blips are documented, but map tiles need the unexecuted VU1 program and icons call scripts from draw code; both remain refused (hud-minimap.md)",
 	"boss_meter": "g_bossMeterHp 0x41b6a0 has no producer in play (hud-dynamic.md section 4)",
 	"message": "hud_showMessage 0x1d92a0: only the level script's setInfo produces it in play, and ui/text_hud.gd draws that (docs/STRINGS.md); its other callers have no producer (hud-dynamic.md section 4)",
 }
@@ -59,6 +59,7 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 	if not playing:
 		gold_seen = false
 		records.clear()
+		glow_context = {}
 		painter_order = PackedInt32Array()
 		queue_redraw()
 		return
@@ -78,7 +79,8 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 			refusals[element] = "documented texture %s not loaded from the game folder" % record.resource
 		elif not element in drawn:
 			drawn.append(element)
-	if not text_glyphs.is_empty(): drawn.append("level_text")
+	for element in text_drawn:
+		if not element in drawn: drawn.append(element)
 	for element in drawn: refusals.erase(element)
 	_observe_gold(value)
 	queue_redraw()
@@ -89,6 +91,7 @@ func _element(record: Dictionary) -> String:
 	if resource.begins_with("bar_red"): return "health_bar"
 	if resource.begins_with("bar_blue"): return "mana_bar"
 	if resource.begins_with("bar_green"): return "experience"
+	if resource == "hud_statusbar00glow.tex": return "level_up_glow"
 	return "status_frame"
 
 # The documented gap fillers (research t3/research-hud-gaps, hud-status.md and

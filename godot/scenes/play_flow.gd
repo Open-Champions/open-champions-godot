@@ -483,6 +483,13 @@ func load_session_file(path: String) -> bool:
 		set_paused(true)
 		if game_menus != null:
 			game_menus.load_companion(path)
+		if controller.has_method("load_player_companion"):
+			var player_loaded: Dictionary = controller.load_player_companion(path)
+			if player_loaded.get("ok", false):
+				_observe(player_loaded)
+			else:
+				status_label.text = "Native scene loaded, but player record refused: " + str(player_loaded.get("error", "unknown"))
+				return false
 	else:
 		status_label.text = "Load refused: %s. Current session retained; choose a valid native save." % status_label.text
 	return ok
@@ -792,6 +799,11 @@ func save_session_file(path: String) -> bool:
 	if result.get("ok", false) and level_textures != null: level_textures.remember_save(path)
 	if result.get("ok", false) and game_menus != null:
 		game_menus.save_companion(path)
+	if result.get("ok", false) and controller.has_method("save_player_companion"):
+		var player_saved: Dictionary = controller.save_player_companion(path)
+		if not player_saved.get("ok", false):
+			status_label.text = "Native scene saved, but player record refused: " + str(player_saved.get("error", "unknown"))
+			return false
 	return result.get("ok", false)
 
 func _focus_menu() -> void:
@@ -1013,6 +1025,12 @@ func _show_ps2_import(result: Dictionary) -> Dictionary:
 		result.act, result.difficulty]
 	if not result.refusals.is_empty():
 		ps2_status.text += " · not applied: " + "; ".join(PackedStringArray(result.refusals))
+	if controller != null and controller.has_method("set_player_character"):
+		var accepted: Dictionary = controller.set_player_character(result)
+		if accepted.get("ok", false):
+			_observe(accepted)
+		else:
+			ps2_status.text += " · session record refused: " + str(accepted.get("error", "unknown"))
 	_show_menu(flow)
 	return result
 

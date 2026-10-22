@@ -54,7 +54,8 @@ Field take_field(const builtins::Memory &memory, std::uint32_t address) {
 }
 } // namespace
 
-void mirror_from_variables(Campaign &campaign, const builtins::Variables &variables) {
+void mirror_from_variables(Campaign &campaign, const builtins::Variables &variables,
+                           bool current_known) {
   const auto &memory = variables.memory;
   int players = memory.s32(NUM_PLAYERS);
   if (players < 0)
@@ -88,9 +89,9 @@ void mirror_from_variables(Campaign &campaign, const builtins::Variables &variab
     record.exp = memory.s32(base + EXP_AT);
     record.skill = memory.s32(base + SKILL_AT);
     record.stat = memory.read(base + STAT_AT);
-    record.hp = float_of(memory.word(base + HP_AT));
+    if (current_known || slot != 0) record.hp = float_of(memory.word(base + HP_AT));
     record.max_hp = float_of(memory.word(base + MAX_HP_AT));
-    record.mana = float_of(memory.word(base + MANA_AT));
+    if (current_known || slot != 0) record.mana = float_of(memory.word(base + MANA_AT));
     record.max_mana = float_of(memory.word(base + MAX_MANA_AT));
     record.gold = memory.s32(base + GOLD_AT);
     campaign.set_record(slot, std::move(record));
@@ -108,7 +109,8 @@ void mirror_from_variables(Campaign &campaign, const builtins::Variables &variab
   campaign.set_vars(std::move(vars));
 }
 
-void mirror_to_variables(const Campaign &campaign, builtins::Variables &variables) {
+void mirror_to_variables(const Campaign &campaign, builtins::Variables &variables,
+                         bool current_known) {
   auto &memory = variables.memory;
   memory.word(NUM_PLAYERS, static_cast<std::uint32_t>(campaign.num_players()));
   memory.word(DIFFICULTY, static_cast<std::uint32_t>(campaign.difficulty()));
@@ -135,9 +137,9 @@ void mirror_to_variables(const Campaign &campaign, builtins::Variables &variable
     memory.word(base + EXP_AT, static_cast<std::uint32_t>(record.exp));
     memory.word(base + SKILL_AT, static_cast<std::uint32_t>(record.skill));
     memory.byte(base + STAT_AT, record.stat);
-    memory.word(base + HP_AT, bits_of(record.hp));
+    if (current_known || slot != 0) memory.word(base + HP_AT, bits_of(record.hp));
     memory.word(base + MAX_HP_AT, bits_of(record.max_hp));
-    memory.word(base + MANA_AT, bits_of(record.mana));
+    if (current_known || slot != 0) memory.word(base + MANA_AT, bits_of(record.mana));
     memory.word(base + MAX_MANA_AT, bits_of(record.max_mana));
     memory.word(base + GOLD_AT, static_cast<std::uint32_t>(record.gold));
   }
@@ -153,8 +155,9 @@ void mirror_to_variables(const Campaign &campaign, builtins::Variables &variable
   }
 }
 
-void restore_variables(const Campaign &campaign, builtins::Variables &variables) {
-  mirror_to_variables(campaign, variables);
+void restore_variables(const Campaign &campaign, builtins::Variables &variables,
+                       bool current_known) {
+  mirror_to_variables(campaign, variables, current_known);
   // The packed g_questVars table, rewritten whole: name, 0, value byte, and
   // an empty name after the last entry (ref_natives vars_*).
   auto &memory = variables.memory;

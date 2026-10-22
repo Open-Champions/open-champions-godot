@@ -37,6 +37,7 @@ struct Host {
     };
     services.height_below = [this](const Vec3 &, Raw) { return ground; };
     services.water_test = [](const Vec3 &, Raw) { return Raw(0); };
+    services.water_disturb = [](const Vec3 &, Raw, Raw) { return Raw(0); };
     services.animation_start = [](Raw, Raw, Raw, Raw, Raw) {};
     services.animation_advance = [](Raw, Raw) { return Raw(0); };
     services.animation_root = [](C::Address) { return std::array<Raw, 2>{0, 0}; };
@@ -261,8 +262,11 @@ void host() {
   }
   {
     Host h;
-    check(refused([&] { h.w->spawn_gut_chunk({0, 0, 0}, 1, 0); }, "PhProp_ctor"),
-          "GutChunk construction stays refused at PhProp_ctor");
+    auto chunk = h.w->spawn_gut_chunk({0, 0, 0}, 1, 0);
+    check(h.w->contains(chunk) && h.w->slot_function(chunk, 4) == 0x1edb18,
+          "the GutChunk constructor installs its executed run slot");
+    check(refused([&] { h.w->run_actor(chunk); }, "PhProp_run needs the unmodelled"),
+          "the composed physics run stays at its evidence boundary");
   }
   std::cout << checks << " round-4 host checks passed\n";
 }
