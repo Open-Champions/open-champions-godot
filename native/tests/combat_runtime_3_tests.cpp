@@ -179,20 +179,16 @@ void host() {
     check(h.w->read(made + 0x1a4) == 0, "full resistance is zero seconds");
   }
   {
-    // GutChunk_ctor 0x201958 starts with PhProp_ctor 0x155a0c, whose chain
-    // (0x153e54, GameObject_ctor: one shared draw, grid B link) is not read
-    // (skills-01-34.md FrostShard "Draws"). The constructor refuses there.
+    // The round-3 constructor research now covers the complete chain.
     Host h;
     Vec3 pos{0x3f800000, 0x40000000, 0x40400000};
+    auto chunk = h.w->spawn_gut_chunk(pos, 2, 0);
+    check(h.w->contains(chunk) && h.w->read(chunk + 0x48) == 0x50f3b8,
+          "GutChunk builds the PhProp chain and installs its table");
     std::string refusal;
-    try {
-      h.w->spawn_gut_chunk(pos, 2, 0);
-    } catch (const C::Unsupported &e) {
-      refusal = e.what();
-    }
-    check(refusal.find("PhProp_ctor 0x155a0c") != std::string::npos,
-          "GutChunk's PhProp_ctor is refused: '" + refusal + "'");
-    check(!has_event(*h.w, "PhProp_ctor"), "PhProp_ctor is not a silent note");
+    try { h.w->run_actor(chunk); } catch (const C::Unsupported &e) { refusal = e.what(); }
+    check(refusal.find("PhProp_run needs the unmodelled rigidbody_init output") != std::string::npos,
+          "the unmodelled composed physics run stays refused");
   }
   {
     Host h;

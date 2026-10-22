@@ -544,3 +544,11 @@ Private files were unavailable under the job rules; no private acceptance was
 attempted. Godot integration, visual gameplay, target-platform runs and console
 or emulator execution need separate evidence. See the local round report for the
 actual build/test results and commit.
+
+## Full fixture decisions: the Skeleton's placement (combat-ctors round 4)
+
+The Full fixture's slot-5 Skeleton at (70, 100) (`combat_play.cpp`) is an **authored fixture choice**, like the AntQueen's (-110, 110). It is not a research value. The research's round-5 probe placement is (70, 140) (`research-combat-ctors-4` `6baf4cd`, `full-placement.md` 6.4); y = 140 is off the synthetic level's flat ground (±128), which the fixture's placement check demands. (70, 100) keeps x, lies on the flat ground and is on the far side of the player from the AntQueen (slot 4) and the Soul (slot 6). In this fixture the Skeleton first enters state 3 at frame 282; the research's frame 123 belongs to (70, 140) and is not comparable. Placing it makes the Skeleton's constructor and equipped-holder draws on the shared seed, so it changes the seed-driven rolls of every later actor and the Godot `FULL_TRACE` (a new actor pair per line plus shifted seeds). That is a fixture consequence, not a traced event. The earlier sentences above that say slots 4 and 5 stay empty describe rounds 1 and 2.
+
+**Loaded-data services (round 4).** `model_getMeshJoint` (`0x179358`, the u8 at +6 of the 10-byte mesh record, `model-texture.md`) and `resref_get` (`0x17377c`, the cached data pointer, `engine.md`) are call-outs with no modelled result in the research (`ref_phprop.py`, `gut-chunk.md` section 9). The World no longer answers them with 0 and "the first word at the pointer": `Services::mesh_joint` and `Services::resref` supply loaded data, and a missing function refuses (`Skeleton_shatter` → `PhProp_ctor2`, `Gold_ctor2`). The synthetic Full fixture supplies neither.
+
+**Soul_isDemonNear, standalone.** `combat_ctors::soul` takes `typeid(obj)` of every box object, as `soul-run.md` and `ref_soul_run.py` do; it no longer skips objects with an unset slot 0 or an unknown getter and refuses instead. The World answers `Soul_isDemonNear` through its own call-out and does not take this path.

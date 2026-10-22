@@ -6,10 +6,9 @@
 // CAI-1, CAI-2, CAI-4, CAI-5, CAI-6). Gnaw has an executed constructor, run
 // and setState (research-anim 5694ae3 tools/ref_monsters_1.py gnaw_ctor,
 // gnaw_run, gnaw_set_state; docs/spec/monsters-1.md section 4). AntQueen,
-// Skeleton and Soul have executed constructors, set-states and run prologues
-// (research-combat-ctors e9777eb, docs/spec/combat-ctors.md; the bodies are
-// combat_ctors.cpp); their switches run states 0 and 1 only (round 5 and
-// own-state-machines.md sections 8, 9 and 11). Skelight keeps its own body
+// Skeleton and Soul have executed constructors and set-states
+// (research-combat-ctors e9777eb), and full run switches
+// (research-combat-ctors-3 9ff6ae0). Skelight keeps its own body
 // (skelight_run). Every other class's constructor, run prologue and setState
 // side effects were not executed, so spawning one refuses.
 namespace champions::simulation::rta::combat_runtime {
@@ -57,21 +56,11 @@ bool ctor_class(const std::string &name) {
 constexpr Raw SKELCOM_TOKEN = 0xc1200000, CLASS_TOKEN = 0xc1100000;
 constexpr Address SKELCOM_ENTRIES = 0x48; // five weapon rows of 0x70 bytes
 const char *const SKELETON_TYPE_NAME = "Skeleton";
-// Bodies of documented table words. Executed in research-combat-ctors-2
-// (combat-ctors-2.md): Skeleton_isEnemy, the three take-damage slots, the
-// type-info getters and the destructors (CT::install_round2). Still refused:
-// Skeleton slot 12 (Skeleton_onNearbyEvent 0x2a7688, full-placement.md
-// section 4 row 5). Slot 3's empty overrides are docs/monsters-2.md's.
+// Class bodies from the executed constructor rounds. Slot 3's empty overrides
+// are docs/monsters-2.md's.
 void install_ctor_refusals(A::Model &m) {
   CT::install_round2(m);
-  auto refuse = [](std::string what) {
-    return [what](A::Model &, Address, const std::vector<Value> &) -> Value {
-      throw Unsupported(what);
-    };
-  };
-  m.class_bodies[0x2a7688] =
-      refuse("Skeleton slot 12 0x2a7688 (Skeleton_onNearbyEvent) is not executed "
-             "(full-placement.md section 4)");
+  CT::install_round3(m);
   auto empty = [](A::Model &, Address, const std::vector<Value> &) -> Value {
     return std::int64_t(0);
   };
@@ -186,90 +175,12 @@ void World::State::apply_own_state(Address c, const char *cls, Raw requested) {
   }
   w(c + 0x232, 2, state);
 }
-// Gnaw_run 0x267654 (ref_monsters_1.gnaw_run, monsters-1.md section 2.1): the
-// prologue, then the own-machine switch with the step's event word.
-// AntQueen_run 0x236f78 runs whole (research-combat-ctors-2). Skeleton_run
-// 0x2a6864 and Soul_run 0x2a9870: the executed prologue (combat_ctors), then
-// the switch for states 0 and 1. The switch's decisions are own_machines
-// (own-state-machines.md sections 9 and 11) with combat round 5's calls:
-// Skeleton's slot 25 with 0, then 1 for the bow's second sight; Soul's
-// phase-gated isDemonNear. A state past 1 refuses (full-placement.md section
-// 4 ranks Skeleton_run state 3 and creature_allyInLineOfFire as not executed).
+// Full run bodies: AntQueen in round 2, Skeleton and Soul in round 3.
 void World::State::ctor_class_run(Address a, const std::string &cls) {
   actor(a);
-  if (cls == "AntQueen") {
-    // AntQueen_run 0x236f78 in full, every state (research-combat-ctors-2
-    // antqueen-run.md; CT::antqueen_run).
-    CT::antqueen_run(model, a);
-    return;
-  }
-  bool go = true;
-  if (cls == "Skeleton")
-    go = CT::skeleton_run_prologue(model, a);
-  else
-    go = CT::soul_run_prologue(model, a);
-  if (!go || !objects.count(a))
-    return;
-  // The switch reads the state as an unsigned halfword.
-  auto state = std::uint32_t(h(a + 0x232));
-  if (state > 1)
-    throw Unsupported(cls + "_run state " + std::to_string(state) +
-                      ": the switch past states 0 and 1 is not executed in "
-                      "the combat world");
-  own_machines::Probe probe;
-  probe.clock = u(a + 0x300);
-  probe.timer = u(a + 0xf4);
-  probe.flight = u(a + 0x3d4);
-  probe.queue = b(a + 0x118);
-  probe.anim = h(a + 0x11a);
-  probe.cflags = u(a + 0xa8);
-  probe.kind = u(a + 0x3d0);
-  probe.target = u(a + 0x234) != 0;
-  probe.owner = u(a + 0x3c8) != 0;
-  probe.frame = u(FRAME);
-  probe.serial = b(a + 0x230);
-  int sights = 0;
-  probe.v25_hook = [&] {
-    if (cls == "Soul")
-      throw Unsupported("Soul_run calls no slot 25 in states 0 and 1");
-    Raw force = cls == "Skeleton" && sights > 0 ? 1 : 0;
-    ++sights;
-    return model.slot25_can_see_target(a, force) != 0 ? 1 : 0;
-  };
-  probe.see_hook = []() -> int {
-    throw Unsupported("no sight cone in states 0 and 1");
-  };
-  probe.roll_hook = []() -> std::uint32_t {
-    throw Unsupported("no draw in states 0 and 1");
-  };
-  probe.side_hook = [&](const std::string &name) {
-    if (name == "demon" && cls == "Soul")
-      probe.demon = is_demon_near(a);
-    else if (name == "move_by" && cls == "Soul") {
-      // The same zero-vector Creature_moveBy the prologue already made
-      // (ref_combat_ctors.soul_run_prologue; own-state-machines.md 11 lists it
-      // at the switch because its prologue was stubbed). Not made twice.
-    } else if (name == "away") {
-      probe.away = model.is_away_from_home(a);
-      if (probe.away && !full())
-        throw Unsupported("walking home");
-    } else if (name == "move_dest" && cls != "Soul") {
-      if (!full())
-        throw Unsupported("walking/wander");
-      model.move_to_dest(a);
-    } else if (name == "move_to" && cls == "Soul") {
-      // Creature_moveTo toward the wander destination +0x104 that
-      // Creature_pickWanderDest wrote (docs/monsters-2.md "Soul", state 1).
-      if (!full())
-        throw Unsupported("walking/wander");
-      probe.arrived = model.move_to(a, vec(a + 0x104));
-    } else
-      throw Unsupported(cls + " decision call is not in states 0 and 1: " + name);
-  };
-  probe.request_hook = [&](std::uint32_t requested) {
-    vcall(a, 27, {iv(requested)});
-  };
-  own_machines::run(cls, state, probe);
+  if (cls == "AntQueen") CT::antqueen_run(model,a);
+  else if (cls == "Skeleton") CT::skeleton_run(model,a);
+  else CT::soul_run(model,a);
 }
 void World::State::own_class_run(Address a, const char *cls) {
   if (ctor_class(cls)) {

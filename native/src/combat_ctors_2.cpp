@@ -180,6 +180,8 @@ Address type_info(A::Model &m, Raw getter) {
 }
 Address type_id(A::Model &m, Address obj) {
   Body b{m};
+  if (auto cb = m.callbacks.find("CT_type_id"); cb != m.callbacks.end())
+    return Address(integer(cb->second(m, {iv(obj)})));
   auto fn = b.u32(Address(b.u32(obj + 0x48) + 4));
   if (find_type_info(fn))
     return type_info(m, fn);
@@ -191,6 +193,8 @@ Address type_id(A::Model &m, Address obj) {
 bool type_info_equals(A::Model &m, Address a, Address b) {
   if (a == b)
     return true;
+  if (auto cb = m.callbacks.find("CT_type_info_equals"); cb != m.callbacks.end())
+    return integer(cb->second(m, {iv(a),iv(b)})) != 0;
   Body x{m};
   return cbytes_equal(m, x.u32(a), x.u32(b));
 }

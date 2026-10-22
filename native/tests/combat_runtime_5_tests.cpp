@@ -145,7 +145,11 @@ void live_fight() {
           "type name Skeleton matches no prefix: drawn kind, no side, HomeRange 1000");
     check(h.w->read(s + 0x232, 2) == 0 && h.w->read(s + 0xf4) == h.w->read(s + 0x300) + 120,
           "Skeleton_ctor calls Skeleton_setState(0): +0xf4 = clock + 120");
-    check(has_event(*h.w, "Holder.v1", s + 0x3d8), "the hand parts are holder call-outs");
+    auto holder = s + 0x3d8;
+    auto bits = h.w->read(holder + 4, 1);
+    check(bool(bits & 1) == bool(h.w->read(holder + 8, 1)) &&
+              bool(bits & 2) == bool(h.w->read(holder + 0x98, 1)),
+          "the executed holder slot 1 stores the hand parts and presence bits");
     auto soul = place(h, "Soul", -60, 100);
     check(h.w->read(soul + 0x48) == 0x517740 && h.w->slot_function(soul, 16) == 0x2ab298,
           "Soul table with Soul_getModel");
@@ -179,12 +183,11 @@ void live_fight() {
     check(gone, "Skeleton_dtor frees the block");
   }
   {
-    // The Skeleton's target scans run Skeleton_isEnemy (combat-ctors-2.md
-    // section 4); its first sighting of the player requests state 3, whose
-    // switch arm is not executed (full-placement.md section 4).
+    // The first sighting now enters the executed state-3 chase. This host
+    // fixture supplies no terrain free-spot service, which is its boundary.
     Host h;
     player(h);
-    place(h, "Skeleton", 60, 100);
+    auto s = place(h, "Skeleton", 60, 100);
     std::string error;
     int ticks = 0;
     try {
@@ -193,8 +196,9 @@ void live_fight() {
     } catch (const std::exception &e) {
       error = e.what();
     }
-    check(error.find("Skeleton_run state 3") != std::string::npos,
-          "the Skeleton gets past Skeleton_isEnemy and stops at state 3: " + error);
+    check(h.w->read(s + 0x232, 2) == 3 &&
+              error.find("world_findFreeSpot terrain service missing") != std::string::npos,
+          "the Skeleton enters its chase before the absent host terrain service: " + error);
   }
   {
     // AntQueen sees the player and enters state 3 (walk tracks, +0x3c4 =
