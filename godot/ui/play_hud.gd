@@ -24,7 +24,11 @@ const REFUSALS := {
 	"quick_slots": "the notice and count icons (icons.lmp counthealth/countmana/...) draw only with a nonzero timer 0x41b828 set by their starters, and the quick-cast selector 0x1dd270 opens only on the local D-pad with skill icons and the resref 0x86aa30; play supplies none (hud-dynamic.md sections 3 and 6)",
 	"gold": "hud_drawGold draws only after a gold floater from Gold_onTouch or chest gold (observation key gold_pickups); direct record gold writers leave the counter hidden (hud-gold.md)",
 	"gold_coin": "gold03.tex dimensions are not in the pinned research (hud-gold.md section 8 gives only its position), so the coin is not drawn",
+	"gold_cosmetic_seed": "floater start owes a cosmetic seed draw, but sound-path draws are Unknown; the play HUD counts the debt and does not consume the shared seed (hud-gold.md)",
 	"minimap": "the projector, scissor and blips are documented, but map tiles need the unexecuted VU1 program and icons call scripts from draw code; both remain refused (hud-minimap.md)",
+	"minimap_tiles": "the VU1 tile program was read but not executed, and its numeric output is Unknown (hud-minimap.md)",
+	"minimap_icons": "draw-time vars_get and script_runByName effects, icon writer and field +0x10 are Unknown (hud-minimap.md)",
+	"other_notices": "ammunition, thrown and camera notice starters were not executed in the pinned research (hud-quickslots.md)",
 	"boss_meter": "g_bossMeterHp 0x41b6a0 has no producer in play (hud-dynamic.md section 4)",
 	"message": "hud_showMessage 0x1d92a0: only the level script's setInfo produces it in play, and ui/text_hud.gd draws that (docs/STRINGS.md); its other callers have no producer (hud-dynamic.md section 4)",
 }
@@ -43,6 +47,10 @@ var drawn: Array[String] = []
 var extras: RefCounted
 var gold_language := 0
 var gold_seen := false
+var quick_slot_state: Dictionary = {}
+var potion_state: Dictionary = {}
+var potion_event_seen := -1
+var minimap_projection: Dictionary = {}
 
 func _ready() -> void:
 	super._ready()
@@ -58,6 +66,10 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 	assumed = {}
 	if not playing:
 		gold_seen = false
+		potion_event_seen = -1
+		quick_slot_state.clear()
+		potion_state.clear()
+		minimap_projection.clear()
 		records.clear()
 		glow_context = {}
 		painter_order = PackedInt32Array()
@@ -83,6 +95,8 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 		if not element in drawn: drawn.append(element)
 	for element in drawn: refusals.erase(element)
 	_observe_gold(value)
+	_observe_quick_slots(value)
+	_observe_minimap(value)
 	queue_redraw()
 
 func _element(record: Dictionary) -> String:
@@ -102,6 +116,11 @@ func _element(record: Dictionary) -> String:
 # Inverted rectangles are passed through; they cover no pixels.
 func _add_status_extras(value: Dictionary) -> void:
 	if extras == null or not valid_bar(value, "hp", "max_hp"): return
+	# hud_view's older layout path also submits an XP bar after player-state
+	# merged. Use the executed hud_extras draw once, with its exact clip.
+	for i in range(records.size() - 1, -1, -1):
+		if str(records[i].get("resource", "")).begins_with("bar_green"):
+			records.remove_at(i)
 	var mana_ok := valid_bar(value, "mana", "max_mana")
 	var origins: Dictionary = layout_service.hud_origins(false, PackedInt32Array([SLOT]), 1)
 	var request := {
@@ -184,6 +203,54 @@ func _observe_gold(value: Dictionary) -> void:
 func _gold_text(text: String, x: int, y: int, colour: int) -> void:
 	var glyphs: Dictionary = layout_service.hud_text_glyphs(font_bytes, text.to_utf8_buffer(), x, y, colour)
 	if glyphs.get("ok", false): text_glyphs.append_array(glyphs.glyphs)
+
+# These inputs are accepted only from an observed player/raw-pad and bag-2
+# source. The current session does not expose those records. A host keyboard
+# key is not substituted for the original configured button mask.
+func _observe_quick_slots(value: Dictionary) -> void:
+	if extras == null:
+		refusals["quick_slots"] = "ChampionsHudExtrasService is unavailable"
+		return
+	if value.get("hud_selector_input") is Dictionary:
+		quick_slot_state = extras.selector_input(value.hud_selector_input)
+		if not quick_slot_state.get("ok", false):
+			refusals["quick_slots"] = str(quick_slot_state.get("error", "selector input refused"))
+		else:
+			refusals["quick_slots"] = "selector input and message are computed, but the play session has no quick-slot handler or observed skill icon records"
+	else:
+		quick_slot_state.clear()
+		refusals["quick_slots"] = "raw D-pad, nine gates, configured button masks and skill records are not observed in play (hud-quickslots.md)"
+	var event = value.get("hud_potion_use", null)
+	if event is Dictionary and typeof(event.get("id")) == TYPE_INT and int(event.id) != potion_event_seen:
+		potion_state = extras.potion_use(event)
+		if potion_state.get("ok", false): potion_event_seen = int(event.id)
+		else: refusals["potion_notice"] = str(potion_state.get("error", "potion input refused"))
+	if potion_state.get("ok", false) and not potion_state.get("notices", []).is_empty():
+		refusals["potion_notice"] = "potion notice timers were computed, but icons.lmp notice art and a Player_usePotion producer are not bound to play"
+	elif not event is Dictionary:
+		refusals["potion_notice"] = "the play session has no bag-2 inventory or Player_usePotion event (hud-quickslots.md)"
+
+# The projector consumes the local camera, grid and world automap texture gate.
+# No player-position or WORLD-renderer substitute is used for those inputs.
+func _observe_minimap(value: Dictionary) -> void:
+	minimap_projection.clear()
+	if extras == null:
+		refusals["minimap"] = "ChampionsHudExtrasService is unavailable"
+		return
+	var input = value.get("hud_minimap", null)
+	if not input is Dictionary:
+		refusals["minimap_projector"] = "local camera yaw/position, automap grid, world texture and zoom are not observed in play (hud-minimap.md)"
+		return
+	for key in ["world_texture", "free_units", "yaw", "centre_x", "centre_y", "origin_x", "origin_y", "offx", "offy", "zoom", "half_w", "half_h", "width", "height"]:
+		if not input.has(key):
+			refusals["minimap_projector"] = "minimap projector input missing " + key
+			return
+	minimap_projection = extras.minimap_view(input)
+	if not minimap_projection.get("ok", false):
+		refusals["minimap_projector"] = str(minimap_projection.get("error", "projector refused"))
+	elif minimap_projection.get("gate", false):
+		refusals["minimap_tiles"] = str(extras.refusal("minimap_tiles").get("error", "VU1 tiles refused"))
+		refusals["minimap_icons"] = str(extras.refusal("minimap_icons").get("error", "scripted icons refused"))
 
 # Logical 640x448 to a 4:3 rectangle centred in the view (640x480 square pixels).
 func _canvas_transform() -> void:

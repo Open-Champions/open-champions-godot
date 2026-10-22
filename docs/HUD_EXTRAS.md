@@ -59,24 +59,37 @@ slots 4,093 (1,600 potion uses), minimap 820 (260 views, 56 drawn, 48 blips).
 - the gold counter from `gold_pickups: [{slot, amount, x, y}]` and `gold`, with the
   real HUD font, credit after 43 ticks and a 133-frame single-pickup life.
 
-The native play session does not yet produce level, experience or gold pickups. Those
-keys are the contract for the player record (`codex/player-state`, `Record.level`,
-`acknowledged`, `experience`, `gold`, `Tables.experience`) and the pickup path. Until
-then the play scene keeps `experience` and `gold` in `refusals` with the reason.
+After merging `codex/playable-integration` at `2e57376`, the native play session
+observes the player record's `level`, `acknowledged`, `experience`, `gold` and the
+selected executable's `Tables.experience` thresholds. The play HUD draws XP
+when these values and all eleven green frames are present. A direct writer to
+record gold does not start the counter: it still requires an observed floater
+from `Gold_onTouch` or chest gold. The current play session has no such pickup
+producer, so the counter stays hidden and labelled as refused.
 
-### Coordination with `codex/player-state`
+Created characters now carry current HP and mana after the documented first
+recalculation with a live Player object: `firstLevelCurrent(max_hp, max_mana)`.
+Imported and loaded records retain their observed current values. The native
+play simulation's HP/mana remain separate from record HP/mana; the HUD bars
+continue to draw the simulation's values because no original record-to-object
+mirror has been ported.
 
-That branch (tip `b8b1813`, not merged into this base) owns the record: `Record::hp`,
-`max_hp`, `mana`, `max_mana`, `current_known`, `level`, `acknowledged`, `experience`,
-`gold`, and `Tables::experience`. Its `create()` leaves `current_known` false because
-the research had not settled the starting current values. `hud-xp.md` part B now does:
-current = maximum once `player_recalcStats` runs with a Player object. Integration step
-after both merge: after `create()`, set `hp = firstLevelCurrent(...)` from `max_hp`/
-`max_mana` (`hud_extras::firstLevelCurrent`) and `current_known = true`; on respawn use
-`respawnHp`. The experience thresholds for the bar are `Tables::experience[ack-1]` and
-`[ack]`. This branch does not include or modify `player_state.*`, so the two merge
-without overlap; `session_controller.cpp`, `play_flow.gd` and `hud_view.gd` are untouched
-here.
+The GDExtension exposes `potion_use` and `selector_input` to the play HUD for
+complete, observed bag-2 and raw-pad inputs. The selector also requires an
+observed local slot and positive current HP before reading its nine gates. The play HUD computes those only
+when an event/record is supplied; it labels the absent producers and art as
+refusals. The minimap projector similarly accepts a complete local-camera,
+grid and texture-gate record as `hud_minimap`, but the current play session
+supplies none. Tiles and icons remain refused for the research's VU1 and
+draw-script Unknowns.
+
+### Player-state integration
+
+The merged record provides the XP and gold inputs and executable-backed
+thresholds. `set_player_character` applies `firstLevelCurrent` only to a newly
+created character. A native player respawn path is not present, so
+`respawnHp` remains tested standalone and uncalled in play. Neither the raw
+pad nor bag-2 inventory is inferred from that record.
 
 ## Tests
 

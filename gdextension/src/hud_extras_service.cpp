@@ -56,6 +56,8 @@ protected:
     ClassDB::bind_method(D_METHOD("gold_draw", "local_mask", "language", "font"), &ChampionsHudExtrasService::gold_draw);
     ClassDB::bind_method(D_METHOD("gold_state"), &ChampionsHudExtrasService::gold_state);
     ClassDB::bind_method(D_METHOD("format_gold", "value", "language"), &ChampionsHudExtrasService::format_gold);
+    ClassDB::bind_method(D_METHOD("potion_use", "input"), &ChampionsHudExtrasService::potion_use);
+    ClassDB::bind_method(D_METHOD("selector_input", "input"), &ChampionsHudExtrasService::selector_input);
     ClassDB::bind_method(D_METHOD("minimap_view", "input"), &ChampionsHudExtrasService::minimap_view);
     ClassDB::bind_method(D_METHOD("refusal", "name"), &ChampionsHudExtrasService::refusal);
   }
@@ -212,6 +214,77 @@ public:
   }
   String format_gold(int64_t value, int language) const {
     return String::utf8(X::formatGold(int32_t(value), language).c_str());
+  }
+  // An explicit bag and live current values are required. The native play
+  // session currently has neither a bag-2 mirror nor Player_usePotion input;
+  // callers must pass observed data, never an inferred inventory.
+  Dictionary potion_use(const Dictionary &in) const {
+    try {
+      for (const char *key : {"hp", "max_hp", "pending_hp", "mana", "max_mana", "pending_mana", "bag", "kind"})
+        if (!in.has(key)) throw X::Refusal("potion input is incomplete");
+      X::PotionInput p;
+      p.hp = raw_float(getf(in, "hp", 0)); p.max_hp = raw_float(getf(in, "max_hp", 0));
+      p.hp_pending = raw_float(getf(in, "pending_hp", 0));
+      p.mana = raw_float(getf(in, "mana", 0)); p.max_mana = raw_float(getf(in, "max_mana", 0));
+      p.mana_pending = raw_float(getf(in, "pending_mana", 0));
+      p.kind = int(geti(in, "kind", -1));
+      p.copy = bool(in.get("copy", false)); p.local = bool(in.get("local", true));
+      p.menu_open = bool(in.get("menu_open", false)); p.grid = bool(in.get("grid", false));
+      const Array bag = in["bag"];
+      for (const Variant &cell : bag) {
+        if (cell.get_type() != Variant::DICTIONARY) throw X::Refusal("bag-2 cell is not a record");
+        const Dictionary d = cell;
+        if (!d.has("kind") || !d.has("size") || !d.has("quantity"))
+          throw X::Refusal("bag-2 cell is incomplete");
+        p.bag.push_back({int(geti(d, "kind", -1)), int(geti(d, "size", -1)), int32_t(geti(d, "quantity", 0))});
+      }
+      const auto r = X::usePotion(p);
+      Dictionary out = success(); Array notices, next_bag;
+      for (const auto &n : r.notices) notices.push_back(Array::make(n.first, n.second));
+      for (const auto &c : r.bag) {
+        Dictionary cell; cell["kind"] = c.kind; cell["size"] = c.size; cell["quantity"] = c.quantity;
+        next_bag.push_back(cell);
+      }
+      out["returned_early"] = r.returned_early; out["notices"] = notices;
+      out["size"] = r.size; out["count"] = r.count;
+      out["removed_cell"] = r.removed_cell ? Variant(*r.removed_cell) : Variant();
+      out["sent_drop"] = r.sent_drop; out["bag"] = next_bag;
+      if (r.regen) out["regen_raw"] = Array::make(int64_t((*r.regen)[0]), int64_t((*r.regen)[1]));
+      out["pending_raw"] = int64_t(r.pending);
+      return out;
+    } catch (const std::exception &e) { return failure(e); }
+  }
+  // The nine gates and button masks are read from one explicit raw-pad frame.
+  // This computes the documented mask/message; it does not claim a handler ran.
+  Dictionary selector_input(const Dictionary &in) const {
+    try {
+      for (const char *key : {"local", "hp", "gates", "held", "pressed", "direction", "a", "b", "use", "accept"})
+        if (!in.has(key)) throw X::Refusal("selector raw-pad input is incomplete");
+      const Array supplied = in["gates"];
+      if (supplied.size() != X::GateCount) throw X::Refusal("selector needs all nine gates");
+      std::array<bool, X::GateCount> gates{};
+      for (int i = 0; i < X::GateCount; ++i) gates[std::size_t(i)] = bool(supplied[i]);
+      const bool menu = bool(in.get("local_menu_open", false));
+      // hud_spellSelect returns before reading the pad for a nonlocal slot
+      // or a player whose record current HP is not positive.
+      const bool eligible = bool(in["local"]) && getf(in, "hp", 0) > 0.0;
+      const bool readable = eligible && X::padReadable(gates, menu);
+      const auto axes = X::padAxes(readable ? uint32_t(geti(in, "held", 0)) : 0u);
+      X::SelectorButtons buttons{uint32_t(geti(in, "a", 0)), uint32_t(geti(in, "b", 0)),
+                                  uint32_t(geti(in, "use", 0)), uint32_t(geti(in, "accept", 0))};
+      const auto mask = axes.any ? X::maskLocalButtons({}, buttons) : X::MaskEntry{};
+      const int direction = int(geti(in, "direction", -1));
+      const auto message = readable ? X::selectorMessage(int(geti(in, "slot", 0)), direction,
+          bool(in.get("sheet", false)), uint32_t(geti(in, "pressed", 0)), buttons,
+          int(geti(in, "kind", 0)), int(geti(in, "value", 0))) : X::SelectorMessage{};
+      Dictionary out = success();
+      out["eligible"] = eligible; out["readable"] = readable; out["dx"] = axes.dx; out["dy"] = axes.dy;
+      out["held"] = axes.any; out["mask_frames"] = mask.frames;
+      out["mask_bits"] = int64_t(mask.mask); out["message_id"] = message.id;
+      Array args; for (int i = 0; i < message.count; ++i) args.push_back(message.args[std::size_t(i)]);
+      out["message_args"] = args;
+      return out;
+    } catch (const std::exception &e) { return failure(e); }
   }
   // Keys: world_texture, free_units, yaw (s16), centre_x/y, origin_x/y, offx,
   // offy, zoom, half_w, half_h, width, height. Blips and tiles are separate.

@@ -156,6 +156,30 @@ func _run() -> void:
 	check(str(hud.extras.format_gold(1234567, 0)) == "1,234,567" and str(hud.extras.format_gold(1234567, 1)) == "1.234.567", "separator by language byte")
 	check(not hud.extras.refusal("minimap_tiles").ok and str(hud.extras.refusal("minimap_icons").error).contains("script_runByName"), "minimap tiles and icons refused with reasons")
 	check(hud.extras.minimap_view({"world_texture": true, "free_units": 40000, "yaw": 0, "half_w": 1.0, "zoom": 1.0}).gate == false, "minimap gate: half width below 2 draws nothing")
+	# Conditional play wiring consumes complete observed records. Unknown
+	# native-session producers stay refused even when the arithmetic succeeds.
+	var selector := {"local": true, "hp": 50.0,
+		"gates": [false, false, false, false, false, false, false, false, false],
+		"held": 0x2000, "pressed": 0x20, "direction": 0,
+		"a": 0x20, "b": 0x10, "use": 0x80, "accept": 0x40}
+	var potion := {"id": 1, "hp": 50.0, "max_hp": 100.0, "pending_hp": 0.0,
+		"mana": 30.0, "max_mana": 60.0, "pending_mana": 0.0, "bag": [], "kind": 0}
+	var projector := {"world_texture": true, "free_units": 40000, "yaw": 0,
+		"centre_x": 0.0, "centre_y": 0.0, "origin_x": 0.0, "origin_y": 0.0,
+		"offx": 0.0, "offy": 0.0, "zoom": 1.0, "half_w": 60.0,
+		"half_h": 60.0, "width": 216, "height": 216}
+	hud.observe_play(dict_with(value, {"hud_selector_input": selector, "hud_potion_use": potion, "hud_minimap": projector}), true)
+	check(hud.quick_slot_state.get("ok", false) and hud.quick_slot_state.get("dx", 0) == 1 and hud.quick_slot_state.get("mask_frames", 0) == 3 and hud.quick_slot_state.get("message_id", -1) == 0, "selector raw-pad input reaches native gates, mask and message")
+	var remote_selector: Dictionary = selector.duplicate()
+	remote_selector.local = false
+	check(not hud.extras.selector_input(remote_selector).get("readable", true), "nonlocal selector returns before raw-pad read")
+	var dead_selector: Dictionary = selector.duplicate()
+	dead_selector.hp = 0.0
+	check(not hud.extras.selector_input(dead_selector).get("readable", true), "zero-current selector returns before raw-pad read")
+	check(hud.potion_state.get("ok", false) and hud.potion_state.get("notices", []).size() == 1 and hud.potion_state.notices[0][0] == 1, "missing health potion starts line-1 notice")
+	check(hud.minimap_projection.get("ok", false) and hud.minimap_projection.get("gate", false) and not str(hud.refusals.get("minimap_tiles", "")).is_empty() and not str(hud.refusals.get("minimap_icons", "")).is_empty(), "projector runs while Unknown tiles and icons stay refused")
+	hud.observe_play(value, true)
+	check(not str(hud.refusals.get("quick_slots", "")).is_empty() and not str(hud.refusals.get("minimap_projector", "")).is_empty(), "missing play producers are labelled")
 	hud.observe_play(value, false)
 	check(not hud.gold_seen, "leaving play resets the gold state")
 	# A texture that was not loaded is refused, never drawn as a stand-in.
