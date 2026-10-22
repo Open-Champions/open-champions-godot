@@ -948,7 +948,8 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_player_vectors.py"
         --native "$<TARGET_FILE:champions-player-trace>"
         --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/player.tsv.gz")
-    set_tests_properties(player-exact PROPERTIES TIMEOUT 240)
+    # 274,304 full-state vectors exceed 240 s on the arm64 HUD worktree.
+    set_tests_properties(player-exact PROPERTIES TIMEOUT 900)
     add_executable(champions-monsters-1-trace tools/monsters_1_trace.cpp)
     target_link_libraries(champions-monsters-1-trace PRIVATE champions-monsters-1)
     add_executable(champions-monsters-1-tests tests/monsters_1_tests.cpp)
