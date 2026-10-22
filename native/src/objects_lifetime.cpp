@@ -151,9 +151,18 @@ void World::register_external(GameObject &object) {
 void World::unregister_external(GameObject &object) {
   if (!owned_objects_.count(&object)) return;
   // Remove every paired world-list node before the binder releases the
-  // object's embedded list heads. A shared World may outlive that binder.
+  // object's embedded list heads. Restart at the head after each removal:
+  // both partners may be in this same list. An active iterator is detached
+  // and invalidated instead of throwing during external-owner teardown.
   for (auto &head : object.heads)
-    handles.clear(head);
+    while (auto *node = head.next) {
+      if (node->kind == LinkKind::Node) {
+        handles.remove_ref(node);
+      } else {
+        HandlePool::unlink(node);
+        node->prev = node->next = nullptr;
+      }
+    }
   for (std::size_t slot = 0; slot < names.objs.size(); ++slot)
     if (names.objs[slot] == &object) {
       names.objs[slot] = nullptr;

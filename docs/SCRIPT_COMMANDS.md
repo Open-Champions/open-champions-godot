@@ -130,7 +130,8 @@ at their addresses; nothing read is kept. Then:
 |---|---|
 | the factory builds no object (`clearColor`, `customVars`, the arena start points, `Line`, no test and no fall-back) | nothing is registered (`objects_not_created`); a script finds nothing by that name |
 | the pool has no block of the size class | nothing is registered (`objects_pool_refused`); the original calls no constructor |
-| the constructor is one of SmallSpider 0x2ab450, Gnaw 0x26741c, Mosquito 0x297788, Scorpion 0x2a4d68, Badger 0x244018, Skelight 0x2a8770, Zek 0x2c1f94, or an on-foot Horsemen 0x271c70 (rider rows refused) | built (`objects_built`), below |
+| the constructor is SmallSpider 0x2ab450, Gnaw 0x26741c, Mosquito 0x297788, Scorpion 0x2a4d68, or Badger 0x244018 | built (`objects_built`), below |
+| Skelight 0x2a8770, Zek 0x2c1f94, or an on-foot Horsemen 0x271c70 reaches `Holder.v1` | counted stub (`Holder.v1 table slot 1 is untraced`); no holder-dependent bytes or statistics are published |
 | any other constructor | a stub at its pool address (`objects_unbuilt`, by constructor in `unbuilt_constructors`) |
 
 Every record the factory constructs takes its block from the host world's
@@ -152,7 +153,11 @@ factory's Skelight level argument is 1 at call `0x15b608` (delay slot
 `0x15b60c`; executed research `7a66b58`). The on-foot Horsemen rows `0x532dc8..0x532df8` call `0x271c70` at `0x15b900`
 with variant 0..3 and mounted 0 (executed, research `dfcc8d3`); the four rider
 rows `0x532cc8..0x532cf8` call it at `0x15b3d4` with mounted 1, and stay
-unbuilt because the mount lifecycle is not ported. Only the base name of a
+unbuilt because the mount lifecycle is not ported. The on-foot path also
+stays unbuilt: research-creature-stats `3469927`
+`docs/creature-stats-port-check.md` pins the two Holder slot-1 bodies but not
+which table slot points to which body. No class-name mapping substitutes for
+that missing read. Only the base name of a
 request (before `_`) is stored in the level-name global `0x44fe18` and used for
 the `stomedal`/`innpit` override and Skelight's `blomedal` test (executed,
 research `a684d7d`). A creature's hit points are readable only when the item
@@ -169,8 +174,10 @@ except fields no ported code computes: the height and draw byte
 the creature serial (an unbuilt creature before it would have taken one), and
 the pointers into the record's strings. Statistics are copied only when the
 selected balance and level data are present; otherwise hit-point reads still
-refuse. A level name longer than every name in the executable's level table
-is refused before it can be written into the emulated level-name global.
+refuse. A base name not present in the executable's level table, including a
+short arbitrary name, is refused before it can be written into the emulated
+level-name global. The allocation capacity at `0x44fe18` is unpinned;
+the accepted domain is limited to names the original executable lists.
 A record whose `Creature_init` would
 call the class or run a script (a `dead` or `initScript` property, the
 MiniBoss bit, a weapon element on a weapon) stays a stub and is counted in

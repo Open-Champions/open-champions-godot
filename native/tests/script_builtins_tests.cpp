@@ -913,6 +913,36 @@ void external_world_lifetime_test() {
   require(world->collect_in_box({0xc1200000u,0xc1200000u,0xc1200000u},
                                 {0x41200000u,0x41200000u,0x41200000u},8).empty(),
           "surviving World does not walk destroyed binder objects");
+  // HandlePool::clear rejects paired nodes in one head. External-owner
+  // teardown must detach them and clear the surviving World's registries.
+  {
+    auto malformed_world = std::make_shared<champions::simulation::rta::objects::World>();
+    std::shared_ptr<b::Obj> retained;
+    {
+      b::Variables binder({}, malformed_world);
+      retained = binder.new_object({"Malformed"}, 0, {0, 0, 0}, 0);
+      malformed_world->handles.link_both(retained->heads[0], retained.get(),
+                                         retained->heads[0], retained.get());
+    }
+    require(retained != nullptr && !malformed_world->names.find_first("Malformed") &&
+            !malformed_world->objects.count(retained->addr),
+            "binder teardown removed malformed external links and registries");
+    malformed_world.reset();
+  }
+  {
+    auto iter_world = std::make_shared<champions::simulation::rta::objects::World>();
+    std::shared_ptr<b::Obj> retained;
+    std::unique_ptr<champions::simulation::rta::Iterator> iter;
+    {
+      b::Variables binder({}, iter_world);
+      retained = binder.new_object({"Iterated"}, 0, {0, 0, 0}, 0);
+      iter_world->handles.add(retained->heads[0], retained.get());
+      iter = std::make_unique<champions::simulation::rta::Iterator>(retained->heads[0]);
+    }
+    require(iter->done() && !iter_world->names.find_first("Iterated") &&
+            !iter_world->objects.count(retained->addr),
+            "binder teardown invalidated a live iterator and removed its object");
+  }
 }
 void api_tests() {
   for(int dividend=-128; dividend<=128; ++dividend) {

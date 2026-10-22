@@ -156,6 +156,13 @@ void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
     max_level_name = std::max(max_level_name, entry.name.size());
   if (request.first.size() > max_level_name)
     throw std::invalid_argument("level name exceeds executable table names");
+  // A short arbitrary caller string is not proof that it fits the original
+  // allocation. Accept only a base name present in the executable table;
+  // the capacity of 0x44fe18 itself remains unpinned.
+  if (request.first.empty() || std::none_of(rows.begin(), rows.end(), [&](const level_flow::LevelRow &entry) {
+        return entry.name == request.first;
+      }))
+    throw std::invalid_argument("level name is not in executable table");
   const auto row = level_flow::find_level_row(rows, request.first, request.second);
   // Single-player only: difficulty 1 and pvp=false are assumed because
   // Host::start_single_player is the only mode this host models; the PvP
@@ -579,28 +586,12 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       throw Refused("handle_clear on a list with nodes");
     return std::uint64_t{0};
   };
-  // Holder slot 1, executed and difftested on both concrete tables in
-  // t3/research-creature-stats (3469927). The holder is embedded in c. The
-  // table is read from the holder's own first word, which the ported
-  // constructor stored: WeaponShield 0x50cda0 (Horsemen, UndeadKnight) and
-  // Weapon1 0x50cf40 (Skelight), the last table each constructor loads for
-  // the helper (research docs/monsters.md:165). The table-to-body mapping is
-  // that doc's class naming; the read of the table slot itself is not pinned.
-  model.callbacks["Holder.v1"] = [&](M1::Model &m, const std::vector<M1::Argument> &a) {
-    const auto self = std::get<std::uint32_t>(a.at(0));
-    const auto hand = std::get<std::uint32_t>(a.at(1));
-    const auto entry = std::get<std::uint32_t>(a.at(2)) & 0xffu;
-    const auto table = m.mem.load(self, 4);
-    if (table != 0x50cf40 && table != 0x50cda0)
-      throw Refused("Holder.v1 unexecuted table");
-    const bool shield = table == 0x50cda0;
-    if (hand != 1 && !(shield && hand == 2)) return std::uint64_t{1};
-    m.mem.store(self + (hand == 1 ? 8u : 0x98u), 1, entry);
-    auto flags = static_cast<std::uint32_t>(m.mem.load(self + 4, 1));
-    const auto bit = hand == 1 ? 1u : 2u;
-    flags = entry ? flags | bit : flags & ~bit;
-    m.mem.store(self + 4, 1, flags);
-    return std::uint64_t{flags};
+  // The two Holder.v1 bodies are executed (research-creature-stats 3469927,
+  // creature-stats-port-check.md, "Weapon holder slot 1"), but that pinned
+  // research does not read slot 1 from any table. Refuse before choosing a
+  // body from the holder's class name or first word.
+  model.callbacks["Holder.v1"] = [](M1::Model &, const std::vector<M1::Argument> &) -> std::uint64_t {
+    throw Refused("Holder.v1 table slot 1 is untraced");
   };
   // The constructors discard lump_load's result; only its side effects are
   // outside this model, so this return cannot feed retained object bytes.

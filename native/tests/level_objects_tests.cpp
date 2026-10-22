@@ -282,6 +282,11 @@ int main(int argc, char **argv) {
         long_name_host.set_level_stats(level_name + "-outside-table", balance.data(), balance.size());
       } catch (const std::invalid_argument &) { refused = true; }
       check(refused, "external level name cannot overrun known table-name domain");
+      refused = false;
+      try {
+        long_name_host.set_level_stats("other", balance.data(), balance.size());
+      } catch (const std::invalid_argument &) { refused = true; }
+      check(refused, "an unlisted short name also refuses unknown global capacity");
     }
     {
       // The original stores only the base name: a long sub-name is not a
@@ -371,25 +376,11 @@ int main(int argc, char **argv) {
     check(skel_host.adopt_objects(skel.data(), skel.size()), "Skelight adopted");
     rta::Pool skel_pool;
     const auto skel_at = skel_pool.allocate(0x468);
-    check(skel_host.is_built(skel_at),
-          "Skelight built (built=" + std::to_string(skel_host.counts().objects_built) +
-          ", unbuilt=" + std::to_string(skel_host.counts().objects_unbuilt) +
-          ", absent=" + std::to_string(skel_host.counts().objects_not_created) + ")");
-    const auto &skel_mem = skel_host.variables().memory;
-    check(skel_mem.u32(skel_at + 0x228) == 0x41a8355bu &&
-          skel_mem.u32(skel_at + 0x22c) == 0x41a8355bu,
-          "Skelight's level override reaches hit points");
-    check(skel_mem.u32(skel_at + 0x460) == 1u &&
-          skel_mem.u8(skel_at + 0x3c8 + 8) == 4u &&
-          (skel_mem.u8(skel_at + 0x3c8 + 4) & 1u) == 1u,
-          "Skelight's level and embedded weapon holder");
+    check(!skel_host.is_built(skel_at) && skel_host.counts().objects_unbuilt == 1 &&
+          skel_host.counts().build_refusals.count("Holder.v1 table slot 1 is untraced") == 1,
+          "Skelight refuses before publishing holder-dependent bytes or statistics");
     {
-      // Collision radius (+0x1c) is an immediate of the constructor: the host
-      // object follows the binder, so Player1's free-spot box query tests the
-      // creature's own radius and not GameObject_ctor's 24 default.
-      const auto found = skel_host.variables().find("stat-skelight", 0x200);
-      check(found.size() == 1 && found[0]->radius == skel_mem.u32(skel_at + 0x1c) &&
-            found[0]->radius == 0x41400000u, "Skelight host radius is its constructor's 12");
+      // A fully built creature still copies its traced collision radius.
       const auto gnaw_found = stat_host.variables().find("stat-gnaw", 0x200);
       check(gnaw_found.size() == 1 &&
             gnaw_found[0]->radius == stat_mem.u32(stat_at + 0x1c),
@@ -446,6 +437,9 @@ int main(int argc, char **argv) {
             saved->host.variables().world->spawn_pos[0] == rta::objects::Vec3{} &&
             saved->host.counts().load_draws_unmodelled == 0,
             "rank 3 Player1 takes no spawn slots and draws once");
+      // Smoke coverage only: the pinned marker difftest establishes the
+      // algorithm, but this authored WORLD fixture has no independent exact
+      // position/facing/seed vector. Do not claim exact placement from it.
       // A taken marker fills all four slots and the rank.
       auto taken = make(true, true);
       taken->host.set_player1_entry({"prior", "start", false, false});
@@ -460,10 +454,11 @@ int main(int argc, char **argv) {
           check(state.spawn_facing[slot] != 0, "taken Player1 fills every facing slot");
       }
     }
-    for (const auto &[cls, size, should_build] :
-         std::array<std::tuple<std::string, std::uint32_t, bool>, 3>{{
-             {"FootVariant", 0x478, true}, {"ZekVariant", 0x480, true},
-             {"MountedVariant", 0x478, false}}}) {
+    for (const auto &[cls, size, reason] :
+         std::array<std::tuple<std::string, std::uint32_t, std::string>, 3>{{
+             {"FootVariant", 0x478, "Holder.v1 table slot 1 is untraced"},
+             {"ZekVariant", 0x480, "Holder.v1 table slot 1 is untraced"},
+             {"MountedVariant", 0x478, "mounted Horsemen needs Nightmare_ctor"}}}) {
       rta::SharedRandom class_seed(20973);
       sc::Host class_host;
       class_host.bind_seed(&class_seed);
@@ -473,12 +468,9 @@ int main(int argc, char **argv) {
       const auto record = blob({{cls, {0, 0, 0}, 0, {}}});
       check(class_host.adopt_objects(record.data(), record.size()), cls + " adopted");
       rta::Pool class_pool;
-      check(class_host.is_built(class_pool.allocate(size)) == should_build,
-            cls + (should_build ? " built" : " refused"));
-      if (!should_build)
-        check(class_host.counts().build_refusals.count(
-                  "mounted Horsemen needs Nightmare_ctor") == 1,
-              "mounted constructor refusal is explicit");
+      check(!class_host.is_built(class_pool.allocate(size)) &&
+            class_host.counts().build_refusals.count(reason) == 1,
+            cls + " has a counted constructor refusal");
     }
     std::cout << "PASS level-objects: " << checks << " checks, " << built << " built, " << stubs
               << " stubs\n";

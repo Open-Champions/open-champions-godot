@@ -1,4 +1,4 @@
-STATUS: FIXED — CS3-1 and CS3-2 resolved (radius traced and copied; level-flow inputs refused unless the caller supplies them), trivial lows handled; arm64 CTest 216/216, GDExtension builds 8/8, Godot dev matrix 51/51, 111/111 sweeps scripts on and off, FULL_TRACE unchanged.
+STATUS: COMPLETE — CS5 audit fixes; arm64 CTest 216/216, GDExtension builds 8/8, Godot dev matrix 51/51, 111/111 sweeps scripts on and off, FULL_TRACE unchanged.
 
 # Creature statistics audit fixes, round 4
 
@@ -48,3 +48,52 @@ Refusals counted in this round: **2** (CS4-3 table-slot read, CS4-4 research mar
 | CS4-5 LOW (attach aborts on malformed stats/WORLD) | **Fixed.** `session_controller.cpp` catches both, counts `Level statistics refused` / `Level WORLD refused` (new `Host::count_refusal`), and attaches without them. |
 
 Verification (audit-final): arm64 Release `ctest -j 3` **216/216 PASS** (`work/creature-stats/final-ctest.log`); GDExtension + level-texture builds **8/8**; Godot dev matrix **51/51** exit 0; sweeps scripts on and off each **111/111** tried/loaded/played, 230 checks, 0 failures; `FULL_TRACE` 21,990 bytes, SHA-256 `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035` (unchanged). Counts only; logs under ignored `work/`.
+
+## Audit fixes (creature-stats-final2, 2026-10-22)
+
+This section supersedes the earlier claim that Skelight, Zek and on-foot
+Horsemen complete construction in the script host. The final audit found one
+MEDIUM and three LOW issues. Pinned research is `research-creature-stats`
+`3469927` and the cited earlier executed contracts.
+
+| Finding | Resolution |
+| --- | --- |
+| CS5-1 MEDIUM (`Holder.v1`) | **Refused.** `docs/creature-stats-port-check.md`, “Weapon holder slot 1,” pins the bodies at `0x11afb0` and `0x11bc18`, but no pinned source reads virtual slot 1 from `0x50cf40` or `0x50cda0`. The callback now throws `Holder.v1 table slot 1 is untraced` before selecting a body or writing holder bytes. Skelight, Zek and on-foot Horsemen remain counted stubs; mounted Horsemen retains its earlier Nightmare refusal. Native tests assert the new boundary. |
+| CS5-2 LOW (`0x44fe18` capacity) | **Bounded refusal.** `docs/monsters.md:244` and `symbols/fmt-world.tsv:44` establish the global's role, and `difftest_level_name_split.py` establishes the base-name split, but none pins allocation size. `set_level_stats` now refuses any base name absent from the executable level table, including short arbitrary names; the existing overlong-name refusal remains. Exact allocation capacity is still unclaimed. |
+| CS5-3 LOW (teardown exception) | **Fixed.** `World::unregister_external` now detaches paired nodes and live iterators without `HandlePool::clear` throwing, then removes the external object's names and address. `Variables::~Variables` also catches an unexpected `HandleError` so it cannot escape the implicitly `noexcept` destructor. `script-builtins-api` checks a synthetic same-list paired-node case and the surviving World's registries. |
+| CS5-4 LOW (Player1 oracle) | **Exactness refused.** `docs/creature-stats-port-check.md` records an executed marker difftest but supplies no exact vector for this authored WORLD fixture. The local taken-marker test is explicitly labelled smoke coverage for rank and slot presence; it does not claim exact spawn positions, facings or final seed. |
+
+**Runtime refusal categories added or widened: 2** — Holder-dependent
+construction and level names outside the executable table. **Evidence claims
+refused: 1** — exact Player1 placement fidelity for this fixture. The
+destructor fix is a behavior repair, not a research-value refusal. No guessed
+table-slot mapping or allocation size was added.
+
+### Audit verification
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4`: pass; native test binary is arm64.
+- `ctest --test-dir build/native --output-on-failure -j 3`: **216/216 pass**,
+  625.45 s (`work/creature-stats/audit-final2-ctest.log`). Focused
+  `level-objects`, `script-builtins-api`, `script-commands` and
+  `level-factory` passed; after the teardown change, `objects-runtime-host`,
+  `level-objects` and `script-builtins-api` passed **3/3**.
+- `python3 work/creature-stats/run-builds.py`: **8/8** configure/build steps
+  pass; main debug extension is universal arm64/x86_64.
+- `python3 work/creature-stats/run-godot.py`: **51/51** dev matrix cases pass.
+  FULL_TRACE: 21,990 bytes, SHA-256
+  `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035`,
+  unchanged.
+- `bash work/run-slices-creature-stats.sh cs-audit2-on --scripts` and
+  `bash work/run-slices-creature-stats.sh cs-audit2-off`: each **111/111 tried,
+  loaded and played**, 230 checks, 0 failures, empty sweep refusal lists;
+  all four slice processes exit 0 in each run. Against the latest prior
+  `csfin/csfinn` counts, scripts-off is unchanged. Scripts-on has eight
+  counted Holder construction refusals and 20 counted level-statistics
+  refusals for off-table base names; built objects fall 332→324, unbuilt
+  rise 15,569→15,577, and stub command refusals rise 260→265.
+
+The exact Player1 spawn positions, facings and final seed for the authored
+WORLD fixture remain unverified. The original allocation size of `0x44fe18`
+also remains unknown; off-table input is refused. Private-disc results above
+are counts only; logs stay under ignored `work/`.
