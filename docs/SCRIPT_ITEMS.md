@@ -46,8 +46,9 @@ In the research's order of priority:
      The item is lost, and `Service::counts.lost` counts it.
    - **Equip after a −1:** the handler would equip the address 0x48 bytes
      before the bag. That path **refuses**.
-   - **Does not fit:** the ground item (`pool_new`, then `ItemProp_ctor2`)
-     refuses. `ItemProp_ctor2`'s draw is open in the research.
+   - **Does not fit:** the ground item: `pool_new` takes a block from the
+     world's pool and `ItemProp_ctor2` builds it with one shared and one own
+     draw ([ITEMS_GAPS.md](ITEMS_GAPS.md) section 3).
 5. **`game_scanCm1Vars`.** `scan_cm1_vars(0, …, word)` returns the word at
    `0x4f7110`, which the host starts at the image's −1. With any other
    argument it scans this machine's profile names, and
@@ -78,7 +79,8 @@ In the research's order of priority:
 Inventory capacity (`player_recalcStats`' load limit):
 
 ```
-float(strength + 125) + float(passive 0x40) × 15.0, + 5000.0 when the word 0x4d8ae8 ≠ 0, capped at 9999.0
+float(strength + 125) + float(passive 0x40) × 15.0, capped at 9999.0
+(the +5000.0 branch is kept in load_limit() for parity; 0x4d8ae8 has no writer, so it is never taken)
 ```
 
 A record whose object pointer is 0 keeps its old limit. The passive is asked
@@ -88,12 +90,14 @@ the count weighs 1.0 in `recalc_load`.
 
 ## What stays refused
 
+The item-round gaps are closed by [ITEMS_GAPS.md](ITEMS_GAPS.md) (research
+`t3/research-items-gaps` `ecf9742`). What is still refused:
+
 | Command or path | Why |
 |---|---|
-| The writer of `0x4d8ae8` | Open in the research. The word is read and never written. |
-| A ground item (`ItemProp_ctor2`) | Its draw was not re-run. |
-| `givePlayerRandom` | Not composed. Still a host refusal. |
-| A non-literal `generateMonster` class name | The 15 were not classified. Every name goes through the same refusing factory. |
+| `generateMonster` for a class whose constructor chain is not ported | The factory row is decided, but only five creature constructors are ported. Any other row refuses before it takes a pool block. |
+| `hideMonster` / `showMonster` on a stub whose factory row the research probe did not decide | 4 rows are undecided; no shipped hide or show target is one. |
+| `givePlayerRandom` until the session binds the level name, the monster level and the executable | None is bound yet. 0 shipped calls. A stale record (the generator failed 10 times) refuses. |
 | The Skeleton rise; the AntQueen and Skeleton states in the arena builder | combat-ctors keeps them refused. |
 | Weapon equips that run `*weaponEquipNotify` / `*bowEquipNotify` | They run a script inside `inventory_equipItem`, which is not composed here. `script_runByName` refuses. |
 | `dropItem`, `selectDropItem` | Not in this contract. |
@@ -119,9 +123,9 @@ The combat world's `combat_stats::recalc_stats` is the session's.
 
 - **Gives need the item tables and the bound session seed.** The parse may
   draw. The play session binds neither yet, so both gives refuse there.
-- **`generateMonster` reads its generators' type names.** It joins the stub-read
-  list (limit 0x200), so a generator that is an adopted `objects.ob` stub
-  refuses.
+- **`generateMonster` reads its generators' type names.** It stays on the stub-read
+  list, but every `ScriptGenerator` record is now built ([ITEMS_GAPS.md](ITEMS_GAPS.md)
+  section 5), so only a generator whose build refused is a stub that blocks it.
 - **A refusal part-way** (a ground item, an equip after −1, the Skeleton rise)
   is counted as a refusal and stops the entry. What ran before it stays.
 
