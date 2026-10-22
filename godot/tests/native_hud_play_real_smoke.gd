@@ -17,7 +17,8 @@ func _initialize() -> void:
 func run() -> void:
 	var counts := {"folder": 0, "level": 0, "player": 0, "current": 0,
 		"xp_thresholds": 0, "xp_bar": 0, "health_bar": 0, "mana_refused": 0,
-		"direct_gold_hidden": 0, "quick_refused": 0, "minimap_refused": 0,
+		"direct_gold_hidden": 0, "quick_refused": 0, "potion_refused": 0,
+		"minimap_refused": 0, "minimap_tiles_refused": 0, "minimap_icons_refused": 0,
 		"pending_gate": 0}
 	if not args.has("disc") or not args.has("cache"):
 		print("NATIVE_HUD_PLAY_REAL " + JSON.stringify(counts))
@@ -63,7 +64,10 @@ func run() -> void:
 		counts.mana_refused = int(not "mana_bar" in scene.play_hud.drawn and not str(scene.play_hud.refusals.get("mana_bar", "")).is_empty())
 		counts.direct_gold_hidden = int(not "gold" in scene.play_hud.drawn and not str(scene.play_hud.refusals.get("gold", "")).is_empty())
 		counts.quick_refused = int(not str(scene.play_hud.refusals.get("quick_slots", "")).is_empty())
+		counts.potion_refused = int(not str(scene.play_hud.refusals.get("potion_notice", "")).is_empty())
 		counts.minimap_refused = int(not str(scene.play_hud.refusals.get("minimap_projector", "")).is_empty())
+		counts.minimap_tiles_refused = int(not str(scene.play_hud.refusals.get("minimap_tiles", "")).is_empty())
+		counts.minimap_icons_refused = int(not str(scene.play_hud.refusals.get("minimap_icons", "")).is_empty())
 		var pending: Dictionary = value.duplicate()
 		pending["hp"] = 0.0
 		pending["pending_health"] = 5.0

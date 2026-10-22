@@ -245,7 +245,13 @@ Host::Host()
   // The executable image starts g_hudFade at zero (research-fade 197f52a).
   variables_->memory.word(script_effects::G_FADE, 0);
 }
-Host::~Host() = default;
+Host::~Host() {
+  // These host-owned heads contain partners of nodes in Variables' objects.
+  // Remove the pairs before the heads are destroyed; Variables unregisters
+  // its objects later in member destruction.
+  for (auto &entry : target_cells_)
+    variables_->world->handles.clear(*entry.second);
+}
 
 void Host::bind_campaign() {
   auto scene = variables_->scene_service;
