@@ -20,6 +20,7 @@ var level_script: CheckButton
 var real_exit_choice: OptionButton
 var _level_change_queued := false
 var _level_change_loading := false
+var _refused_level_request := ""
 var last_campaign_carried := false
 var last_campaign_image_restored := false
 var hud_art_counts: Dictionary = {}
@@ -196,6 +197,7 @@ func attach_level_script(carry_campaign := false) -> bool:
 	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
+	if result.get("ok", false): _refused_level_request = ""
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	_refresh_exit_targets()
 	return result.get("ok", false)
@@ -230,6 +232,11 @@ func _apply_level_change() -> bool:
 	var pending: Dictionary = controller.script_level_request()
 	if not pending.get("queued", false): return false
 	var requested: String = str(pending.get("name", ""))
+	if requested == _refused_level_request: return false
+	if pending.get("post_action_pending", false):
+		_refused_level_request = requested
+		status_label.text = "Level change refused: a pending post action cannot be carried."
+		return false
 	# level_flow::split_request uses the first underscore for a subname. The
 	# resource lookup takes the base; no guessed destination is substituted.
 	var base: String = requested.get_slice("_", 0).to_lower()
@@ -239,9 +246,11 @@ func _apply_level_change() -> bool:
 			destination = i
 			break
 	if destination < 0:
+		_refused_level_request = requested
 		status_label.text = "Level change refused: the requested level has no selected game-folder resource."
 		return false
 	if destination == real.current:
+		_refused_level_request = requested
 		status_label.text = "Level change refused: same-level reload state is not ported."
 		return false
 	_level_change_loading = true
@@ -249,6 +258,7 @@ func _apply_level_change() -> bool:
 	var changed := load_real_level(destination, true, real.current_qualified,
 		str(pending.get("entrance", "")), requested)
 	if changed and was_playing: start_play()
+	if not changed: _refused_level_request = requested
 	_level_change_loading = false
 	return changed
 
@@ -282,8 +292,10 @@ func start_play() -> void:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
-	if not _level_change_loading and controller != null and controller.script_level_request().get("queued", false):
-		_queue_level_change()
+	if not _level_change_loading and controller != null:
+		var pending: Dictionary = controller.script_level_request()
+		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:
+			_queue_level_change()
 	# The preview rebuilds its mesh when it samples a new tick.
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)

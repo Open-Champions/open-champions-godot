@@ -1,4 +1,4 @@
-STATUS: PASS for playthrough blocker #6's documented script exit path; automatic walk-in triggering and gate travel remain refused.
+STATUS: PASS for audit fixes PE-1..PE-4 and playthrough step 6; automatic walk-in triggering and gate travel remain refused.
 
 2026-10-22 | `codex/play-exits` from wave-24 `2e57376` | local implementation only
 
@@ -23,3 +23,21 @@ Evidence: sibling `champions-return-to-arms-re/docs/script.md` for scene command
 ## Remaining boundary
 
 The menu action is a diagnostic way to invoke an object script. Automatic player entry into a Trigger rectangle and normal proximity/use dispatch are not connected to this Godot play loop. JumpGate travel and portal anyHeight arrival are refused by the existing native contract. Same-level reload is refused. Thus the verified result is a real cross-level transition and carry, not an unassisted retail-style exit interaction.
+
+## Audit fixes
+
+- **PE-1:** The diagnostic menu action now refuses `PushTrigger` records with `once`, `shop`, or `offOnly`. It refuses a `Trigger` with any re-arming property and, conservatively, every `Trigger` on a level containing a `TriggerParams` record because the host does not model rectangle linking, entry edges, recall countdown, or re-arming state. Refused entries are no longer advertised as script actions. The button remains a bounded diagnostic, not a normal position/use interaction.
+- **PE-2:** Exit classification now compares the parsed class directly with the documented plain names. Leading digits are not stripped.
+- **PE-3:** The scene remembers a refused level request and does not queue the same request again on each observation tick. Attaching a new script resets that refusal, and a distinct request can be tried.
+- **PE-4:** A change with a pending post action is refused before replacing the script host, since that action should run in the new level and this host cannot carry it. The `save_campaign` image carries the campaign's player records and quest variables. It does **not** carry the `level_flow::State` gate list, level states, save buffer, gate travel, recall state, or retained spawn state. The selected entrance is used for this transition's placement, but the old `g_entranceName` is not retained for a later change. These are still unsupported cross-level state paths.
+
+Evidence: `research-levels/docs/gameplay.md` trigger and push-trigger sections; `research-levels/docs/level-flow.md` §§7.4, 9; `research-script-session/docs/script.md` post-action section; local `native/src/quests.cpp` campaign save schema and `native/src/script_commands.cpp` campaign bridge. No inferred retail values were added.
+
+Audit-fix verification (macOS arm64, 2026-10-22):
+
+- `cmake --build build/godot-extension --config Release --parallel 2`: passed; rebuilt the archive extension with the exit guards. `file build/native/champions-script-commands-tests` identified an arm64 executable.
+- `ctest --test-dir build/native --output-on-failure -j 3 -R '^(script-commands|level-flow-exact|quests|script-builtins-api)$'`: **4/4 passed**.
+- `python3 work/play-exits/run-godot.py`: Godot dev matrix **54/54 exited 0**. The full-combat row retained `FULL_TRACE` SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659` at **36,402 bytes**.
+- `Godot --headless --path godot --script res://tests/real_data_scene.gd -- --game-folder=<owner-disc> --cache=<ignored-work-cache> --all --levels=0 --from=0 --to=111 --ticks=60 --scripts --summary=<ignored-work-json>`: **111 candidates, 111 loaded, 111 played; 224 checks passed, 0 failures, 0 refusal kinds**.
+- `python3 tools/run_loop_playthrough.py --godot <local-Godot> --game-folder <owner-disc> --out work/play-exits/audit-playthrough`: step 6 was **changed** in both headless and rendered modes, with campaign image and player record carried. The rendered transition screenshot was inspected. Both complete playthrough processes still exited 1 on the later combat/save/load refusals stated above; step 6 itself passed. The read-only disc retained **994 files** before and after.
+- `git diff --check`: passed. Logs, screenshots and cache are under ignored `work/play-exits/`.

@@ -793,6 +793,11 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
+    // A pending post action belongs to the destination's script load. This
+    // bounded host does not carry it, so keep the current level intact.
+    if (carry_campaign && scripts_ &&
+        !scripts_->variables().memory.cstr(0x86fa80).empty())
+      throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
     auto next = std::make_unique<rta::script_commands::Host>();
@@ -1305,14 +1310,22 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   return result;
 }
 namespace {
-std::string exit_class(const std::string &encoded) {
-  std::size_t n = 0;
-  while (n < encoded.size() && encoded[n] >= '0' && encoded[n] <= '9') ++n;
-  return encoded.substr(n);
-}
 bool is_exit_record(const std::string &name) {
   return name == "Trigger" || name == "PushTrigger" || name == "JumpGate" ||
          name == "Portal" || name == "PortalHurt";
+}
+bool unsupported_exit_conditions(const rta::level_flow::Record &record,
+                                 const std::vector<rta::level_flow::Record> &objects) {
+  if (record.cls == "PushTrigger")
+    return record.prop("shop") || record.prop("offOnly") || record.prop("once");
+  if (record.cls != "Trigger") return false;
+  for (const char *name : {"onOnly", "offOnly", "timeout", "needScriptHit"})
+    if (record.prop(name)) return true;
+  // Linking TriggerParams requires the original rectangle search and re-arm
+  // state. Refuse conservatively when this level contains one.
+  for (const auto &other : objects)
+    if (other.cls == "TriggerParams") return true;
+  return false;
 }
 }
 Dictionary ChampionsSessionController::script_level_request() const {
@@ -1327,6 +1340,7 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["name"] = String::utf8(name.c_str());
   result["orientation"] = int64_t(scripts_->variables().memory.read(0x41b720));
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
+  result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
   return result;
 }
 Array ChampionsSessionController::script_exit_targets() const {
@@ -1334,7 +1348,7 @@ Array ChampionsSessionController::script_exit_targets() const {
   if (!scripts_) return result;
   for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
     const auto &record = script_level_objects_[i];
-    const auto kind = exit_class(record.cls);
+    const auto &kind = record.cls;
     if (!is_exit_record(kind)) continue;
     Dictionary item;
     item["index"] = int64_t(i);
@@ -1344,8 +1358,9 @@ Array ChampionsSessionController::script_exit_targets() const {
     // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
     // Neither is a direct script action. The host exposes them without claiming
     // an undocumented interaction or gate destination.
-    item["script_action"] = kind == "Trigger" ? record.prop("t").has_value()
-                            : kind == "PushTrigger" ? record.prop("action").has_value() : false;
+    item["script_action"] = !unsupported_exit_conditions(record, script_level_objects_) &&
+        (kind == "Trigger" ? record.prop("t").has_value()
+         : kind == "PushTrigger" ? record.prop("action").has_value() : false);
     result.push_back(item);
   }
   return result;
@@ -1357,11 +1372,11 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
     if (!scripts_ || index < 0 || std::size_t(index) >= script_level_objects_.size())
       throw std::runtime_error("No level exit at that index.");
     const auto &record = script_level_objects_[std::size_t(index)];
-    const auto kind = exit_class(record.cls);
+    const auto &kind = record.cls;
     if (kind != "Trigger" && kind != "PushTrigger")
       throw std::runtime_error("Portal arrival and JumpGate prompt have no direct script action in this host.");
-    if (kind == "PushTrigger" && (record.prop("shop") || record.prop("offOnly")))
-      throw std::runtime_error("This PushTrigger has conditions the host cannot evaluate.");
+    if (unsupported_exit_conditions(record, script_level_objects_))
+      throw std::runtime_error("This exit has conditions or lifetime state the host cannot evaluate.");
     if (kind == "PushTrigger") {
       // The object table preserves duplicate properties in their source order.
       // PushTrigger checks every key before running every action in that order.
