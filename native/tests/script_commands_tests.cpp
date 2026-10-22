@@ -381,6 +381,59 @@ void test_classified_objects() {
   check(counts.stub_refusals == 2, "both refusals counted");
 }
 
+
+// research t3/research-horsemen-mount 397c35c, docs/spec/horsemen-mount.md sections 1.1 and 2.2: a
+// rider record takes two pool blocks and two shared-seed draws (the rider's GameObject_ctor, then
+// the mount's); the mount's property list (0x500848 + 12 v) is Unknown, so the record is refused
+// there and both objects stay stubs. A placed Nightmare passes its own record list and is built.
+void test_mounted_records() {
+  namespace LF = champions::simulation::rta::level_factory;
+  auto row_class = [](std::uint32_t name) {
+    int k = 0;
+    for (const auto &row : LF::tests()) {
+      if (row.name == name)
+        return "Cls" + std::to_string(k);
+      ++k;
+    }
+    return std::string();
+  };
+  const auto rider_class = row_class(0x532cc8), nightmare_class = row_class(0x532c98);
+  const auto foot_class = row_class(0x532dc8);
+  check(!rider_class.empty() && !nightmare_class.empty() && !foot_class.empty(), "the factory rows exist");
+  auto built = build_calls({{"start", {}}}, {});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live, sc::SeedPolicy::OfflineSession);
+  host.set_executable(authored_executable());
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = objects_blob({{rider_class, "rider"}, {foot_class, "foot"}, {nightmare_class, "horse"}});
+  check(host.adopt_objects(blob.data(), blob.size()), "mounted records adopt");
+  const auto &counts = host.counts();
+  // Shared draws: the rider record two (rider, then mount), the placed Nightmare one; the
+  // undocumented on-foot row (same constructor, rows 0x532dc8..) keeps the old accounting.
+  SharedRandom expect(20973);
+  expect.draw();
+  expect.draw();
+  expect.draw();
+  check(live.state == expect.state, "the rider record drew twice and the Nightmare once");
+  check(counts.build_refusals.count("mount property list contents Unknown") == 1 &&
+            counts.build_refusals.at("mount property list contents Unknown") == 1,
+        "the rider record is refused at the Unknown mount list, once");
+  auto *rider = host.variables().find_first("rider");
+  check(rider && !host.is_built(rider->addr), "the rider stays a stub");
+  check(host.variables().find_first("foot") != nullptr && counts.objects_unbuilt == 2,
+        "the rider and on-foot records are counted unbuilt");
+  check(counts.load_draws_unmodelled == 1, "only the undocumented on-foot row owes an unmodelled draw");
+  auto *horse = host.variables().find_first("horse");
+  check(horse && host.is_built(horse->addr) && counts.objects_built == 1, "a placed Nightmare is built");
+  const auto &mem = host.variables().memory;
+  check(mem.word(horse->addr + 0x48) == 0x5155e8 && mem.u8(horse->addr + 0xb4) == 10 &&
+            mem.word(horse->addr + 0xe0) == 0xc1a00000 && mem.u8(horse->addr + 0x28) == 0x32,
+        "the built Nightmare carries its table, kind, seat offset and byte 0x28");
+  check(counts.objects_registered == 4, "rider, mount, on-foot stub and Nightmare are registered");
+}
+
 void test_entrance_grid_and_particle() {
   const auto entrance = index_of("setEntrance");
   const auto hide = index_of("hideMonster");
@@ -919,6 +972,7 @@ int main(int argc, char **argv) {
   test_offline_seed_policy();
   test_single_player();
   test_classified_objects();
+  test_mounted_records();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();
