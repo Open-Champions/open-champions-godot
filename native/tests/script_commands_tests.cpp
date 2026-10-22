@@ -340,6 +340,74 @@ void test_single_player() {
   check(host.campaign().record(0).quest_count == 1, "addQuest writes the one player's quest list");
 }
 
+// A newly created player has no established current HP/mana in the research.
+// The script host must not turn its zero-initialized storage into a fake read.
+void test_unknown_player_currents() {
+  auto built = build_calls({{"start", {{"checkPlayerAlive", {0}}, {"healPlayer", {}},
+                                      {"zeroPlayerMana", {}}, {"givePlayerExp", {100}}}}}, {});
+  sc::Host host;
+  host.set_player_currents_known(false);
+  const auto rec = host.variables().player_record(0);
+  auto &memory = host.variables().memory;
+  memory.word(rec + 0xac, 0x41200000u); // authored sentinel 10.0
+  memory.word(rec + 0xc0, 0x41400000u); // authored sentinel 12.0
+  host.start_single_player();
+  plant(host, built);
+  check(host.run_start() == sc::Stop::Complete, "discarded unknown-current calls finish");
+  check(host.counts().unknown_player_current_refusals == 4,
+        "every HP/mana-dependent call is counted as refused");
+  for (const char *name : {"checkPlayerAlive", "healPlayer", "zeroPlayerMana", "givePlayerExp"})
+    check(host.counts().refused[std::size_t(index_of(name))] == 1 &&
+              host.counts().executed[std::size_t(index_of(name))] == 0,
+          std::string("unknown current refusal: ") + name);
+  check(memory.word(rec + 0xac) == 0x41200000u && memory.word(rec + 0xc0) == 0x41400000u,
+        "unknown current commands did not write HP or mana");
+  const auto saved = host.save_campaign();
+  sc::Host carried;
+  carried.set_player_currents_known(false);
+  auto &next_memory = carried.variables().memory;
+  const auto next_rec = carried.variables().player_record(0);
+  next_memory.word(next_rec + 0xac, 0x41200000u);
+  next_memory.word(next_rec + 0xc0, 0x41400000u);
+  carried.start_single_player();
+  carried.load_campaign(saved);
+  check(next_memory.word(next_rec + 0xac) == 0x41200000u &&
+            next_memory.word(next_rec + 0xc0) == 0x41400000u,
+        "campaign restore does not write unknown current fields");
+}
+
+// checkPlayerAlive reads HP only when which == 0 (script.md:688).
+void test_check_alive_which_unknown_currents() {
+  for (std::uint32_t which : {0u, 1u}) {
+    auto built = build_calls({{"start", {{"checkPlayerAlive", {static_cast<int>(which)}}}}}, {});
+    sc::Host host;
+    host.set_player_currents_known(false);
+    host.start_single_player();
+    plant(host, built);
+    host.run_start();
+    check(host.counts().unknown_player_current_refusals == (which == 0 ? 1u : 0u),
+          which == 0 ? "checkPlayerAlive(0) refused for unknown currents"
+                     : "checkPlayerAlive(1) reads no HP and is not refused");
+  }
+}
+
+// playGotItemSound reads +0xac only with two or more players (research-menus
+// docs/script.md row 61), so unknown currents refuse it only then.
+void test_got_item_sound_unknown_currents() {
+  auto built = build_calls({{"start", {{"playGotItemSound", {}}}}}, {});
+  for (std::uint32_t players : {1u, 2u}) {
+    sc::Host host;
+    host.set_player_currents_known(false);
+    host.start_single_player();
+    host.variables().memory.word(0x4d8ae0, players);
+    plant(host, built);
+    host.run_start();
+    check(host.counts().unknown_player_current_refusals == (players >= 2 ? 1u : 0u),
+          players >= 2 ? "two players: playGotItemSound refused for unknown currents"
+                       : "one player: playGotItemSound is not blocked by unknown currents");
+  }
+}
+
 // docs/script-session.md sections 3-5: the factory decides what is registered;
 // a built creature is readable by hideMonster, its hit points are not.
 void test_classified_objects() {
@@ -918,6 +986,9 @@ int main(int argc, char **argv) {
   test_seed_refused_without_session_seed();
   test_offline_seed_policy();
   test_single_player();
+  test_unknown_player_currents();
+  test_got_item_sound_unknown_currents();
+  test_check_alive_which_unknown_currents();
   test_classified_objects();
   test_entrance_grid_and_particle();
   test_routed_commands();

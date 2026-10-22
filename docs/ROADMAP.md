@@ -107,7 +107,10 @@ its own launch and rendering evidence.
    call.
    With the level script on, the real-data play scene attaches the
    [NPC dialog machine](DIALOG.md): the game folder's talkers can be talked
-   to, and choice actions reach the quest and item models.
+   to, and choice actions reach the quest and item models. The conversation
+   camera swoop, the box word, the cursor glyph and the `dialog_isOpen` gates of
+   `docs/spec/dialog-gaps.md` are ported (see [DIALOG.md](DIALOG.md)); openings
+   whose speaker has no complete `dialogOffset` stay refused.
    The [string table and text commands](STRINGS.md) port `ref_strings.py`:
    `gtext.uni`, `wstr_format`, `setInfo`, the help box, `showBust` and
    `showCompass`, drawn over the real-data play view.

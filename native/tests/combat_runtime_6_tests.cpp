@@ -48,6 +48,7 @@ struct Host {
     services.height_below = [this](const Vec3 &, Raw) { return ground; };
     services.height_at_point = [this](const Vec3 &) { return ground; };
     services.water_test = [](const Vec3 &, Raw) { return Raw(0); };
+    services.water_disturb = [](const Vec3 &, Raw, Raw) { return Raw(0); };
     services.animation_start = [](Raw, Raw, Raw, Raw, Raw) {};
     services.animation_advance = [](Raw, Raw) { return Raw(0); };
     services.animation_root = [](C::Address) { return std::array<Raw, 2>{0, 0}; };

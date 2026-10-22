@@ -169,6 +169,8 @@ public:
   // Base bodies a ported class setState calls (combat-world Gnaw_setState):
   // GameObject_rand on +0x44, Creature_clearPath, Creature_pickWanderDest.
   Raw own_draw(Address);
+  // Shared g_randSeed draw for executed helpers outside arena_monsters.cpp.
+  Raw draw_shared() { return shared_draw(); }
   void clear_path(Address);
   void pick_wander_dest(Address);
   void skelight_set_state(Address creature, std::uint32_t requested);

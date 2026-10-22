@@ -148,6 +148,7 @@ protected:
     ClassDB::bind_method(D_METHOD("options_loaded", "ok", "file"), &ChampionsFrontendService::options_loaded);
     ClassDB::bind_method(D_METHOD("save_result", "ok", "error"), &ChampionsFrontendService::save_result, DEFVAL(String()));
     ClassDB::bind_method(D_METHOD("recall_executed"), &ChampionsFrontendService::recall_executed);
+    ClassDB::bind_method(D_METHOD("set_dialog_open", "open"), &ChampionsFrontendService::set_dialog_open);
     ClassDB::bind_method(D_METHOD("return_to_frontend"), &ChampionsFrontendService::return_to_frontend);
     ClassDB::bind_method(D_METHOD("session_exit", "code"), &ChampionsFrontendService::session_exit);
     ClassDB::bind_method(D_METHOD("request_save"), &ChampionsFrontendService::request_save);
@@ -243,6 +244,9 @@ public:
     return guarded([&] { flow_->save_result(ok, text_of(error)); });
   }
   Dictionary recall_executed() { return guarded([&] { flow_->recall_executed(); }); }
+  // dialog_isOpen: offline the start button cannot open the pause menu and its recall and exit
+  // entries are not selectable (docs/spec/dialog-gaps.md 3).
+  Dictionary set_dialog_open(bool open) { return guarded([&] { flow_->set_dialog_open(open); }); }
   Dictionary return_to_frontend() { return guarded([&] { flow_->return_to_frontend(); }); }
   Dictionary session_exit(int64_t code) { return guarded([&] { flow_->session_exit(int(code)); }); }
   Dictionary request_save() { return guarded([&] { flow_->request_save(); }); }

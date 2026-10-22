@@ -208,7 +208,7 @@ inline void run(Check check, std::string &where) {
   level.level = "synth";
   level.files["npc.dbin"] = dl::build_dbin(nodes);
   level.stream["v0.vag"] = {0x800, 0x1000};
-  const auto objects = objects_ob({{"NPC", 0, {0, 0, 0}, {"name=npc", "showName=\"nm\"", "dialogScript=talk"}},
+  const auto objects = objects_ob({{"NPC", 0, {0, 0, 0}, {"name=npc", "showName=\"nm\"", "dialogScript=talk", "dialogOffset=0,0,0,0"}},
                                    {"TestLocation", 0, {0x43480000u, 0, 0}, {"name=far", "showName=nm", "dialogScript=talk"}}});
   // showName keeps its quotes; text_lookup drops them (docs/data-tables.md 6).
   auto services = world.services();
@@ -309,6 +309,69 @@ inline void run(Check check, std::string &where) {
   check(campaign.events().menu_opens == 0, "host: activateMissionMenu is refused while a dialog is open");
   // The silent line: v0 has a .vag, the others have none.
   check(c.voice_lines == 1 && c.silent_lines == 2, "host: one voiced line, two silent lines");
+
+  // ---- the conversation camera (docs/spec/dialog-gaps.md 2) ----
+  // The swoop takes 47 to 182 Camera_lookAt calls each way (the arrival is one call
+  // after the progress reaches the end), so the conversation cannot end in one tick.
+  check(c.camera_views == 1 && c.camera_steps >= 2 * 47, "host: the camera swoops in and out in 47 or more steps each");
+  check(host.dialog_camera_view() && host.dialog_camera_view()->progress == champions::simulation::rta::ZERO,
+        "host: the swoop out ends at progress 0");
+  check(host.dialog_camera_pose() != nullptr, "host: the camera pose was published");
+  {
+    // The speaker has no dialogOffset: the sideways offset would be a stack word nobody
+    // initialised (section 10), so the opening is refused and the mutex given back.
+    const auto bare = objects_ob({{"NPC", 0, {0, 0, 0}, {"name=npc", "showName=\"nm\"", "dialogScript=talk"}}});
+    sc::Host h;
+    check(load(h, script, bare), "host: script loads");
+    h.attach_dialog(level, services);
+    h.run_start();
+    h.use(0, front);
+    check(!h.dialog().is_open() && h.dialog().mutex == 0 && h.dialog_camera_view() == nullptr,
+          "host: no dialogOffset: the opening is refused, nothing is invented");
+    bool reasoned = false;
+    for (const auto &[reason, n] : h.dialog_counts().refused)
+      reasoned |= reason.find("uninitialised stack slot") != std::string::npos && n >= 1;
+    check(reasoned, "host: the refusal names the stack slot");
+  }
+  {
+    // dialog_loadBox: no box.tex word in "intro" unless an earlier level left one.
+    auto intro = level;
+    intro.level = "intro";
+    intro.files["npc.dbin"] = dl::build_dbin(nodes);
+    sc::Host h;
+    check(load(h, script, objects), "host: script loads");
+    h.attach_dialog(intro, services);
+    check(h.dialog_box_word() == 0, "host: intro writes no box word");
+    h.run_start();
+    h.use(0, front);
+    check(!h.dialog().is_open(), "host: a dialog in intro with word 0 is refused, not drawn");
+    intro.previous_box = true;
+    sc::Host h2;
+    check(load(h2, script, objects), "host: script loads");
+    h2.attach_dialog(intro, services);
+    h2.run_start();
+    check(h2.dialog_box_word() != 0 && h2.use(0, front) == "script" && h2.dialog().is_open(),
+          "host: intro keeps the previous level's box word");
+    auto modeb = level;
+    modeb.pvp_mode_b = true;
+    sc::Host h3;
+    check(load(h3, script, objects), "host: script loads");
+    h3.attach_dialog(modeb, services);
+    check(h3.dialog_box_word() == 0, "host: arena mode B writes no box word");
+  }
+  check(host.dialog_cursor_glyph() == 0x7e && host.dialog_cursor_glyph(0) == 0x7b, "host: the cursor glyph bytes");
+  {
+    sc::Host h;
+    check(load(h, script, objects), "host: script loads");
+    h.attach_dialog(level, services);
+    h.run_start();
+    check(h.dialog_gate("prop_draw") == "draw" && h.dialog_gate("compass", {{"compass_on", 1}}) == "go",
+          "host: nothing is gated with no dialog open");
+    h.use(0, front);
+    check(h.dialog().is_open() && h.dialog_gate("prop_draw") == "skip" && h.dialog_gate("phprop_draw") == "skip" &&
+              h.dialog_gate("compass", {{"compass_on", 1}}) == "skip" && h.dialog_gate("player_marker") == "skip",
+          "host: props, the compass and the player marker are not drawn while a dialog is open");
+  }
 
   // ---- item condition and refusals ----
   {

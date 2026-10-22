@@ -1,6 +1,12 @@
 #include "combat_runtime_internal.hpp"
+#include "champions/core_math.hpp"
 namespace champions::simulation::rta::combat_runtime {
 namespace {
+Value matrix_result(const Mat34 &matrix) {
+  std::vector<A::CallbackResult> words;
+  for (auto word:matrix) words.push_back(A::CallbackResult::unsigned_integer(word));
+  return A::CallbackResult::tuple(std::move(words));
+}
 // The stack descriptor AntQueen_run states 7, 9 and 10 build
 // (combat_ctors_2.cpp poison_descriptor): ("desc", ((0x17, v, v, 0), None,
 // None, None)). Every other argument is not one.
@@ -49,7 +55,8 @@ const std::set<std::string> FULL_PRESENTATION = {
     "hud_showMessage",   "fx_disintegrateModel", "light_link",
     "light_dtor",        "trail_addPoint",       "trail_release",
     "mat3_transpose",    "mat3_setIdentity",     "mat3_rotateAxis",
-    "mat3_mul",          "Player_blockSparks",   "water_disturb"};
+    "mat3_mul",          "Player_blockSparks",   "water_disturb",
+    "fx_modelStatusEffects", "model_drawPart", "model_draw"};
 const std::set<std::string> ROUND1_PRESENTATION = {
     "fx_spawn",          "particle_spawn",      "sound_playOnObject",
     "sound_playAtPos",   "decal_add",           "anim_releaseCaches",
@@ -200,8 +207,26 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     class_dtor(self, fn, ar(0));
     return iv(0);
   }
+  if (slot == 1 && combat_ctors::is_prop_dtor(fn)) {
+    note("destroy",{self});
+    combat_ctors::prop_dtor(model,fn,self,ar(0));
+    return iv(0);
+  }
+  if (slot == 1 && fn == 0x238750) {
+    note("destroy",{self});
+    combat_ctors::antwave_dtor(model,self,ar(0));
+    return iv(0);
+  }
+  if (slot == 5 && fn == 0x2387d0) {
+    combat_ctors::antwave_draw(model,self);
+    return iv(0);
+  }
   if (slot == 6 && fn == LOOSEFIRE_TOUCH) {
     loosefire_on_touch(self, ar(0));
+    return iv(0);
+  }
+  if (slot == 6 && fn == 0x157a9c) {
+    combat_ctors::gold_on_touch(model,self,ar(0));
     return iv(0);
   }
   switch (fn) {
@@ -312,13 +337,35 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Holder.v21", "Skeleton_shatter", "model_getSamplePoint", "AntWave_ctor",
-        "cxx_throwBadTypeid"}) {
+        "Skeleton_shatter", "GutChunk_ctor", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
+        "MissileWeapon_ctor",
+        "model_getSamplePoint", "AntWave_ctor",
+        "creature_getAttachMatrix0", "model_getAttachMatrix",
+        "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
+        "CT_type_info_equals"}) {
     std::string n = name;
     model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &a) {
       return service(n, a);
     };
   }
+  for (unsigned slot=1;slot<=24;++slot) {
+    auto n="Holder.v"+std::to_string(slot);
+    model.callbacks[n]=[this,n](A::Model &,const std::vector<Value> &a) {
+      return service(n,a);
+    };
+  }
+  model.callbacks["World_gameobject_prepare"]=[this](A::Model &,const std::vector<Value> &a)->Value {
+    auto obj=number(a.at(0));
+    auto p=std::make_unique<Actor>();
+    // The World's own bookkeeping (audit C3-5): the research's
+    // gameobject_ctor only zeroes the list heads and links the grid, so
+    // Kind::Effect is not an original class, only how the World tracks
+    // constructed props, chunks and gold.
+    p->id=obj;p->kind=Kind::Effect;
+    objects[obj]=std::move(p);
+    for (unsigned off:{0u,4u,8u}) head(obj+off);
+    return iv(0);
+  };
 }
 void World::State::install_services() {
   const char *names[] = {"handle_clear",
@@ -366,6 +413,25 @@ void World::State::install_services() {
                          "player_giveExp",
                          "world_notifyObjectsNear",
                          "model_getBounds",
+                         "model_getAttachPoint",
+                         "model_getAttachWorldMatrix",
+                         "isNearView",
+                         "fx_modelStatusEffects",
+                         "model_drawPart",
+                         "model_draw",
+                         "model_getMeshJoint",
+                         "anim_getJointMatrix",
+                         "anim_buildPose",
+                         "anim_advanceUnitSpeed",
+                         "AnimState_dtor",
+                         "sub_202500",
+                         "objNames_remove",
+                         "rigidbody_init",
+                         "quat_fromMat3",
+                         "quat_normalize",
+                         "rigidbody_updateDerived",
+                         "obj_stopRunning",
+                         "resref_get",
                          "model_getSamplePointCount",
                          "dialog_isOpen",
                          "game_isFrozen",
@@ -570,48 +636,75 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return std::int64_t(services.hide_mask(ar(0), ar(1)));
   }
   if (n == "Creature_setCharm") {
-    // Creature_setCharm 0x1189f0 (Observed, skills-35-68.md "Creature_setCharm";
-    // script.md charmMonster): nothing when +0x312 is -1 (a permanent charm),
-    // without object flag 0x20, or for a player (0x40). Otherwise the team
-    // byte +0x310, the charm timer +0x312, and the target handle cleared.
+    // Executed body: research-combat-ctors-3 soul-run.md section 4.
     auto c = ar(0);
     actor(c);
     note(n, {c, ar(1), ar(2)});
-    if (s16m(c + 0x312) == -1 || !(u(c + 0xc) & 0x20) || (u(c + 0xc) & 0x40))
-      return iv(0);
-    w(c + 0x310, 1, ar(2));
-    w(c + 0x312, 2, ar(1));
     if (full())
       list_head(c + 0x234);
-    clear(c + 0x234);
+    combat_ctors::creature_set_charm(model,c,ar(1),ar(2));
     return iv(0);
   }
-  if (n == "Holder.v1" || n == "Holder.v21") {
-    // Skeleton's weapon holder: slot 1 puts a model entry in a hand, slot 21
-    // is the per-frame update that only feeds fx_modelStatusEffects
-    // (docs/monsters-2.md 2.2; FINDINGS D37). The research records both as
-    // call-outs; their bodies are not executed. Recorded here.
-    std::vector<std::uint64_t> args;
-    for (const auto &x : a)
-      if (auto p = std::get_if<std::int64_t>(&x))
-        args.push_back(std::uint64_t(*p));
-    note(n, std::move(args));
-    return iv(0);
+  if (n == "Soul_isDemonNear")
+    return iv(is_demon_near(ar(0)));
+  if (n == "CT_type_id")
+    return iv(type_of(ar(0)));
+  if (n == "CT_type_info_equals")
+    return iv(same_type(ar(0),ar(1)) ? 1 : 0);
+  if (n.rfind("Holder.v",0)==0) {
+    auto slot=unsigned(std::stoul(n.substr(8)));
+    if (slot>=1&&slot<=24) {
+      std::vector<Value> rest(a.begin()+1,a.end());
+      return iv(combat_ctors::holder_slot(model,ar(0),slot,rest));
+    }
   }
-  if (n == "Holder.v2" || n == "Holder.v3" || n == "Holder.v4")
-    throw Unsupported(n + ": a Skeleton weapon element (creature_buildElementDamage "
-                          "draws the shared seed; docs/monsters-2.md) is not executed");
-  if (n == "Holder.v11")
-    throw Unsupported("Holder.v11: dropping a held part as a physics prop is not executed");
   if (n == "Skeleton_shatter")
-    throw Unsupported("Skeleton_shatter 0x2a7ef0 is a recording stub of the research");
+    { combat_ctors::skeleton_shatter(model,ar(0),ar(1));return iv(0); }
+  // The executed prop and gold table slots are installed when an
+  // instance is constructed. Older Full reference cases compare all memory
+  // and have none of these objects.
+  auto prop_slots = [&](Address table,Raw dtor,Raw run) {
+    for (auto pair:{std::pair<unsigned,Raw>{1,dtor},{4,run}}) {
+      w(table+8*pair.first,2,0);
+      w(table+8*pair.first+4,pair.second);
+    }
+  };
+  if (n == "GutChunk_ctor") {
+    if (a.size()!=5 || ar(4)!=ONE)
+      throw Unsupported("GutChunk_ctor outside the executed unit-scale chain");
+    gutchunk_ctor(ar(0),v(1),ar(2),ar(3));
+    return iv(0);
+  }
+  if (n == "PhProp_ctor") {
+    prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
+    auto parts=std::uint64_t(std::get<std::int64_t>(a.at(6)));
+    combat_ctors::phprop_ctor(model,ar(1),v(2),ar(3),ar(4),ar(5),parts,ar(7),ar(8),ar(0));
+    return iv(0);
+  }
+  if (n == "PhProp_ctor2")
+    { prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
+      combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
+        std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));return iv(0); }
+  if (n == "Gold_ctor2")
+    { for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},
+                                                     {6,0x157a9c}}) {
+        w(0x511a88+8*entry.first,2,0);
+        w(0x511a88+8*entry.first+4,entry.second);
+      }
+      combat_ctors::gold_ctor2(model,ar(0),v(1),ar(2));return iv(0); }
   if (n == "model_getSamplePoint")
     throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
                       "0x21, Soul_takeDamage with sample points) is not a World "
                       "service");
-  if (n == "AntWave_ctor")
-    throw Unsupported("AntWave_ctor 0x238654 is not executed (antqueen-run.md "
-                      "section 7; state 0x19 has no requester)");
+  if (n == "AntWave_ctor") {
+    // Install the executed table when the wave first exists. Older Full
+    // reference cases have no AntWave and compare their entire memory image.
+    const std::map<unsigned,Raw> slots{{1,0x238750},{4,0x238938},
+                                        {5,0x2387d0},{15,0x11fcd0}};
+    write_table(0x50d298,&slots);
+    combat_ctors::antwave_ctor(model,ar(0),ar(1),v(2),ar(3),ar(4));
+    return iv(0);
+  }
   if (n == "cxx_throwBadTypeid")
     return iv(0);
   if (n == "handle_clear") {
@@ -671,6 +764,11 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "obj_runEveryFrame" || n == "obj_runEvery60") {
     schedule(ar(0), n == "obj_runEveryFrame" ? 1 : 60);
+    return iv(0);
+  }
+  if (n == "obj_stopRunning") {
+    auto obj=ar(0);
+    if (head(obj+4).next) handles.remove(head(obj+4).next);
     return iv(0);
   }
   if (n == "obj_delete") {
@@ -784,6 +882,75 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getBounds")
     return A::Bounds{};
+  if (n == "MissileWeapon_ctor") {
+    // Skeleton_run state 8's plain-arrow argument vector, executed in
+    // research-combat-ctors-4 6baf4cd, arrow-run.md section 4.1.
+    if (!full() || a.size()!=17 || ar(1)!=0 || ar(8)!=0 || ar(9)!=0 ||
+        ar(12)!=0 || ar(13)!=0 || ar(15)!=4 || ar(16)!=0)
+      throw Unsupported("MissileWeapon_ctor outside the Skeleton bow release");
+    Missile arrow;
+    arrow.position=v(4);arrow.velocity=v(5);arrow.facing=ar(6);
+    arrow.models={ar(2),ar(3)};
+    arrow.minimum=ar(10);arrow.maximum=ar(11);arrow.attack=ar(14);
+    arrow.damage_flags=4;
+    missile_ctor(ar(0),arrow,ar(7));
+    return iv(0);
+  }
+  if (n == "creature_getAttachMatrix0")
+    return matrix_result(combat_ctors::creature_get_attach_matrix0(model,ar(0)));
+  if (n == "model_getAttachMatrix")
+    return matrix_result(combat_ctors::model_get_attach_matrix(model,ar(3),ar(0),ar(1),ar(2)));
+  if (n == "model_getAttachWorldMatrix")
+    return matrix_result(combat_ctors::model_get_attach_world_matrix(
+        model,ar(0),ar(1),v(2),ar(3),ar(4),ar(5)));
+  if (n == "anim_buildPose") {
+    note(n,{ar(0),ar(1)});
+    return iv(0);
+  }
+  if (n == "anim_advanceUnitSpeed") {
+    // The end bit is supplied by the loaded clip at runtime. Synthetic
+    // fixtures have no clip and preserve their anim-state bytes.
+    note(n,{ar(0),ar(1),ar(2),ar(3)});
+    return iv(0);
+  }
+  if (n == "AnimState_dtor") {
+    note(n,{ar(0),ar(1)});
+    return iv(0);
+  }
+  if (n == "sub_202500") {
+    note(n,{ar(0),ar(1)});
+    return iv(0);
+  }
+  if (n == "objNames_remove")
+    throw Unsupported("objNames_remove: the World keeps no object names");
+  if (n == "isNearView")
+    return iv(is_near_view(ar(0), ar(2)));
+  if (n == "model_getAttachPoint") {
+    if (!services.attach_point)
+      throw Unsupported("model_getAttachPoint service missing");
+    return services.attach_point(ar(4)-0x114,ar(1),v(2),ar(3),ar(5));
+  }
+  if (n == "model_getMeshJoint") {
+    // The joint byte of the loaded mesh record (model-texture.md); the
+    // research gives no modelled result, so there is no stand-in.
+    if (!services.mesh_joint)
+      throw Unsupported("model_getMeshJoint: no loaded mesh record service");
+    return iv(services.mesh_joint(ar(0), ar(1)));
+  }
+  if (n == "anim_getJointMatrix") {
+    return matrix_result(combat_ctors::anim_get_joint_matrix(model,ar(0),ar(1)));
+  }
+  if (n == "rigidbody_init" || n == "quat_fromMat3" || n == "quat_normalize" ||
+      n == "rigidbody_updateDerived") {
+    note(n,{ar(0)});
+    return iv(0);
+  }
+  if (n == "resref_get") {
+    // The cached pointer of a resource reference (engine.md); loaded data.
+    if (!services.resref)
+      throw Unsupported("resref_get: no loaded resource reference service");
+    return iv(services.resref(ar(0)));
+  }
   if (n == "model_getSamplePointCount") {
     if (!full())
       return iv(0);
@@ -1118,6 +1285,18 @@ void World::State::run(Address a) {
   if (fn == 0x1ee050) {
     note("run", {a});
     light_effect_run(a);
+    return;
+  }
+  if (fn == 0x157b58) {
+    note("run",{a});
+    combat_ctors::gold_run(model,a);
+    return;
+  }
+  if (fn == 0x1edb18 || fn == 0x155fcc)
+    throw Unsupported("PhProp_run needs the unmodelled rigidbody_init output and terrain sweep");
+  if (fn == 0x238938) {
+    note("run",{a});
+    combat_ctors::antwave_run(model,a);
     return;
   }
   if (fn == FIRE_RUN || fn == LOOSEFIRE_RUN) {

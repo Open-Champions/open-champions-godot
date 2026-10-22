@@ -269,7 +269,36 @@ void Host::bind_campaign() {
     throw amx::HostFault(name + " callback required");
   };
 }
-void Host::mirror() { quests::mirror_from_variables(*campaign_, *variables_); }
+void Host::mirror() { quests::mirror_from_variables(*campaign_, *variables_, player_currents_known_); }
+
+namespace {
+// Routes that read current HP/mana (record +0xac/+0xc0), copy the whole record
+// with its unknown currents, or write a current field. Unknown stays distinct
+// from a dead player or an empty mana pool. Sources, all research-menus
+// docs/script.md (built-in table, rows by name) and docs/player.md:
+//   checkPlayerAlive 0x1470ac  count of players with HP > 0 only when which == 0;
+//                              with which != 0 it reads no HP (script.md:688)
+//   healPlayer 0x1468ac, giveFullHealth 0x146950, planarSteel 0x1466d4
+//                              write +0xac from +0xb0
+//   zeroPlayerMana 0x142450, refillPlayerMana 0x142494   write +0xc0
+//   givePlayerExp 0x146278     player_giveExp refills HP and mana on a level
+//   savePlayer 0x141724, restorePlayer 0x141744   whole-record copy
+//   playGotItemSound 0x1464e8  reads +0xac only with two or more players
+//                              (script.md row 61 and P7); one player never does
+// giveFullHealth, zeroPlayerMana, refillPlayerMana and givePlayerExp read no
+// unknown field themselves (pure writes; givePlayerExp refills only on a level
+// gained). They are still refused: the host does not track a written current
+// as known, so a later read would otherwise see a half-known pair. This is a
+// conservative choice, not a documented read.
+bool needs_player_current(const char *name, std::int32_t players, bool which_zero) {
+  if (std::strcmp(name, "checkPlayerAlive") == 0) return which_zero;
+  for (const char *route : {"healPlayer", "giveFullHealth",
+                            "zeroPlayerMana", "refillPlayerMana", "givePlayerExp",
+                            "planarSteel", "savePlayer", "restorePlayer"})
+    if (std::strcmp(name, route) == 0) return true;
+  return players >= 2 && std::strcmp(name, "playGotItemSound") == 0;
+}
+}
 
 void Host::install() {
   const auto known = variables_->natives();
@@ -370,6 +399,15 @@ amx::NativeMap Host::command_map() {
       // The dialog built-ins run only while dialog is attached; item and quest
       // handlers retain their own routing and refusal rules.
       const bool dialog_route = dialog_cmd && dialog_attached_;
+      if (!player_currents_known_ &&
+          needs_player_current(kRows[i].name,
+                               static_cast<std::int32_t>(variables_->memory.word(script_items::G_NUM_PLAYERS)),
+                               std::strcmp(kRows[i].name, "checkPlayerAlive") == 0 &&
+                                   machine.cell(machine.params + 4) == 0)) {
+        counts_.unknown_player_current_refusals += 1;
+        refuse(i, machine);
+        return 0;
+      }
       if (!documented && !dialog_route && !quests::route_undocumented(kRows[i].name, *campaign_) &&
           !script_items::routes(kRows[i].name)) {
         refuse(i, machine);
@@ -893,7 +931,7 @@ void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
   mirror();
   auto result = quests::change_level(*campaign_, flow_, options, {});
-  quests::mirror_to_variables(*campaign_, *variables_);
+  quests::mirror_to_variables(*campaign_, *variables_, player_currents_known_);
   return result;
 }
 bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
@@ -916,7 +954,7 @@ std::vector<std::uint8_t> Host::save_campaign() {
 void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
   auto next = quests::Campaign::load(bytes);
   *campaign_ = std::move(next);
-  quests::restore_variables(*campaign_, *variables_);
+  quests::restore_variables(*campaign_, *variables_, player_currents_known_);
 }
 
 bool Host::load(const amx::ByteVector &image) {

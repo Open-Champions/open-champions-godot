@@ -5,6 +5,7 @@
 // read); docs/monsters-2.md AutoProp section 3 (AutoDoor states and
 // setPassable). No original assets or executable instructions are included.
 #include "champions/real_world.hpp"
+#include "champions/player_wading.hpp"
 #include "champions/core_math.hpp"
 #include "champions/terrain_file.hpp"
 #include <algorithm>
@@ -243,5 +244,48 @@ std::array<double, 12> pose_affine(const wg::Chunk &rest,
   return {m[0], m[1], 0, b[0] * dx + b[1] * dy,
           m[2], m[3], 0, b[2] * dx + b[3] * dy,
           0,    0,    1, dz};
+}
+
+bool Wader::step(Raw frame, std::uint32_t level_flags, const cw::Vec3 &position,
+                 bool moving) {
+  namespace pw = simulation::rta::player_wading;
+  pw::Host host;
+  host.water_test = [this](const pw::Vec3 &at, Raw radius) {
+    // Scratch result word below the image, as WaterImage::test reads it.
+    const auto t = image_.test(radius, {at[0], at[1], at[2]});
+    pw::TestResult r;
+    r.hit = t.in_water;
+    r.has_height = t.in_water;
+    r.height = t.height;
+    return r;
+  };
+  host.water_disturb = [this](const pw::Vec3 &at, Raw strength, Raw radius) {
+    ++totals_.disturbs;
+    const auto n = disturb_(strength, radius, {at[0], at[1], at[2]});
+    if (n)
+      ++totals_.touched;
+    return Raw(n);
+  };
+  host.hurt = [this] { ++totals_.hurts; };
+  host.draw = [this] { ++totals_.draws; };
+  host.splash = [this](Raw) { ++totals_.splashes; };
+  host.burst = [](const pw::Vec3 &, const pw::TestResult &) {};
+  pw::Input in;
+  in.frame = frame;
+  in.level_flags = level_flags;
+  in.speed = moving ? simulation::rta::ONE : 0;
+  in.position = {position[0], position[1], position[2]};
+  in.in_water = in_water_;
+  in.airborne = false;
+  const bool after = pw::step(in, host);
+  ++totals_.steps;
+  if (after && !in_water_)
+    ++totals_.entries;
+  if (!after && in_water_)
+    ++totals_.exits;
+  if (after)
+    ++totals_.ticks_in_water;
+  in_water_ = after;
+  return after;
 }
 } // namespace champions::real_world

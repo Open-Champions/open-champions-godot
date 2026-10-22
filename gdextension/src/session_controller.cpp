@@ -18,6 +18,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -100,6 +101,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("dialog_leave"), &ChampionsSessionController::dialog_leave);
   ClassDB::bind_method(D_METHOD("dialog_talk_to", "index"), &ChampionsSessionController::dialog_talk_to);
   ClassDB::bind_method(D_METHOD("dialog_status"), &ChampionsSessionController::dialog_status);
+  ClassDB::bind_method(D_METHOD("dialog_camera"), &ChampionsSessionController::dialog_camera);
+  ClassDB::bind_method(D_METHOD("dialog_gate", "site", "conditions"), &ChampionsSessionController::dialog_site_gate,
+                       DEFVAL(Dictionary()));
   ClassDB::bind_method(D_METHOD("dialog_events"), &ChampionsSessionController::dialog_events);
   ClassDB::bind_method(D_METHOD("dialog_voice_state", "voice"), &ChampionsSessionController::dialog_voice_state);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
@@ -107,6 +111,12 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
   bind_text_methods();
+  ClassDB::bind_method(D_METHOD("set_player_character", "character"),
+                       &ChampionsSessionController::set_player_character);
+  ClassDB::bind_method(D_METHOD("save_player_companion", "path"),
+                       &ChampionsSessionController::save_player_companion);
+  ClassDB::bind_method(D_METHOD("load_player_companion", "path"),
+                       &ChampionsSessionController::load_player_companion);
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
@@ -269,6 +279,39 @@ Dictionary ChampionsSessionController::present_observation(
   result["history_retained_counts"] = retained;
   result["history_retained_capacity"] = capacity;
   result["history_retired_counts"] = retired;
+  if (player_) {
+    const auto p = observed_player();
+    result["player_ready"] = true;
+    // The character record is not linked to the simulated player: the original
+    // mirrors record HP into the object inside Player_run (research-menus
+    // docs/player.md), and native play has no such mirror. So hp, max_hp, mana
+    // and max_mana above stay the simulation's own values, which are the ones
+    // the simulation uses and the HUD draws. The record's values are reported
+    // separately for menus and saves, never drawn as bars.
+    result["player_record_currents_known"] = p.current_known;
+    result["name"] = String::utf8(p.name.c_str());
+    result["player_class"] = p.player_class;
+    result["level"] = p.level;
+    result["acknowledged_level"] = p.acknowledged;
+    result["experience"] = p.experience;
+    result["gold"] = p.gold;
+    result["record_max_hp_raw"] = int64_t(p.max_hp);
+    result["record_max_hp"] = display_float(p.max_hp);
+    result["record_max_mana_raw"] = int64_t(p.max_mana);
+    result["record_max_mana"] = display_float(p.max_mana);
+    if (player_tables_ && p.acknowledged >= 1 && p.acknowledged <= 80) {
+      result["experience_base"] = player_tables_->experience[std::size_t(p.acknowledged - 1)];
+      result["experience_next"] = player_tables_->experience[std::size_t(p.acknowledged)];
+    }
+    if (p.current_known) {
+      result["record_hp_raw"] = int64_t(p.hp);
+      result["record_hp"] = display_float(p.hp);
+      result["record_mana_raw"] = int64_t(p.mana);
+      result["record_mana"] = display_float(p.mana);
+    }
+  } else {
+    result["player_ready"] = false;
+  }
   return result;
 }
 Dictionary ChampionsSessionController::get_observation() const {
@@ -589,6 +632,159 @@ struct ChampionsSessionController::DialogData {
   std::optional<champions::ui_layout::FontMetrics> font;
   std::vector<std::uint8_t> font_bytes;
 };
+
+void ChampionsSessionController::bind_player_to_scripts(rta::script_commands::Host &host,
+    const rta::player_state::Record &p) {
+  if (!player_tables_) return;
+  host.set_player_currents_known(p.current_known);
+  auto &v = host.variables();
+  auto &m = v.memory;
+  const auto rec = v.player_record(0);
+  m.string(rec, p.name);
+  m.word(rec + 0x50, static_cast<std::uint32_t>(p.player_class));
+  m.word(rec + 0x54, static_cast<std::uint32_t>(p.model));
+  m.byte(rec + 0x58, static_cast<std::uint8_t>(p.acknowledged));
+  m.byte(rec + 0x59, static_cast<std::uint8_t>(p.level));
+  m.word(rec + 0x5c, static_cast<std::uint32_t>(p.experience));
+  for (std::size_t n = 0; n < 4; ++n) {
+    m.word(rec + 0x78 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.base_stats[n]));
+    m.word(rec + 0x90 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.effective_stats[n]));
+  }
+  if (p.current_known) {
+    m.word(rec + 0xac, p.hp);
+    m.word(rec + 0xc0, p.mana);
+  }
+  m.word(rec + 0xb0, p.max_hp);
+  m.word(rec + 0xc4, p.max_mana);
+  m.word(rec + 0xe4, static_cast<std::uint32_t>(p.gold));
+  std::array<std::int32_t, rta::quests::XP_LEVELS> thresholds{};
+  std::copy(player_tables_->experience.begin(), player_tables_->experience.end(), thresholds.begin());
+  host.campaign().set_xp_table(thresholds);
+  auto campaign = host.campaign().record(0);
+  campaign.level = p.level; campaign.exp = p.experience; campaign.gold = p.gold;
+  if (p.current_known) campaign.hp = display_float(p.hp);
+  campaign.max_hp = display_float(p.max_hp);
+  if (p.current_known) campaign.mana = display_float(p.mana);
+  campaign.max_mana = display_float(p.max_mana);
+  host.campaign().set_record(0, campaign);
+}
+
+rta::player_state::Record ChampionsSessionController::observed_player() const {
+  auto p = *player_;
+  if (!scripts_) return p;
+  const auto &m = scripts_->variables().memory;
+  const auto rec = scripts_->variables().player_record(0);
+  p.acknowledged = static_cast<std::int8_t>(m.read(rec + 0x58));
+  p.level = static_cast<std::int8_t>(m.read(rec + 0x59));
+  p.experience = static_cast<std::int32_t>(m.word(rec + 0x5c));
+  p.gold = static_cast<std::int32_t>(m.word(rec + 0xe4));
+  for (std::size_t n = 0; n < 4; ++n) {
+    p.base_stats[n] = static_cast<std::int32_t>(m.word(rec + 0x78 + std::uint32_t(n * 4)));
+    p.effective_stats[n] = static_cast<std::int32_t>(m.word(rec + 0x90 + std::uint32_t(n * 4)));
+  }
+  p.max_hp = m.word(rec + 0xb0);
+  p.max_mana = m.word(rec + 0xc4);
+  if (p.current_known) {
+    p.hp = m.word(rec + 0xac);
+    p.mana = m.word(rec + 0xc0);
+  }
+  return p;
+}
+
+Dictionary ChampionsSessionController::set_player_character(const Dictionary &character) {
+  try {
+    if (!player_tables_) throw std::runtime_error("Select the RTA US v2.00 executable for player formulas and XP thresholds.");
+    const String name = character.get("name", "");
+    const std::string named = name.utf8().get_data();
+    const auto cls = static_cast<std::int32_t>(int64_t(character.get("class_index", -1)));
+    const bool imported = bool(character.get("imported", false));
+    const Array stats = character.get(imported ? "base_stats" : "stats", Array());
+    if (stats.size() != 4 || (!imported && !bool(character.get("base_known", false))))
+      throw std::runtime_error("Player start statistics are not known from the selected executable.");
+    std::array<std::int32_t, 4> base{};
+    for (int n = 0; n < 4; ++n) base[std::size_t(n)] = static_cast<std::int32_t>(int64_t(stats[n]));
+    rta::player_state::Record next;
+    if (imported) {
+      const Array effective = character.get("effective_stats", Array());
+      if (effective.size() != 4)
+        throw std::runtime_error("Imported player record lacks effective statistics +0x90.");
+      next.name = named; next.player_class = cls;
+      next.model = static_cast<std::int32_t>(int64_t(character.get("model_index", -1)));
+      next.base_stats = base;
+      for (int n = 0; n < 4; ++n)
+        next.effective_stats[std::size_t(n)] = static_cast<std::int32_t>(int64_t(effective[n]));
+      next.level = static_cast<std::int32_t>(int64_t(character.get("level", 0)));
+      next.acknowledged = static_cast<std::int32_t>(int64_t(character.get("acknowledged", 0)));
+      next.experience = static_cast<std::int32_t>(int64_t(character.get("experience", -1)));
+      next.gold = static_cast<std::int32_t>(int64_t(character.get("gold", -1)));
+      for (const char *key : {"hp_raw", "max_hp_raw", "mana_raw", "max_mana_raw"})
+        if (!character.has(key)) throw std::runtime_error("Imported player record lacks a documented current or maximum field.");
+      next.hp = static_cast<rta::Raw>(int64_t(character["hp_raw"]));
+      next.max_hp = static_cast<rta::Raw>(int64_t(character["max_hp_raw"]));
+      next.mana = static_cast<rta::Raw>(int64_t(character["mana_raw"]));
+      next.max_mana = static_cast<rta::Raw>(int64_t(character["max_mana_raw"]));
+      next = rta::player_state::import(std::move(next), *player_tables_);
+    } else {
+      if (!bool(character.get("ready", false))) throw std::runtime_error("Character creation has not finished.");
+      next = rta::player_state::create(named, cls,
+          static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
+    }
+    player_ = std::move(next);
+    if (scripts_) bind_player_to_scripts(*scripts_, *player_);
+    Dictionary result = observation(); result["ok"] = true;
+    return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::save_player_companion(const String &path) const {
+  const String dest = path + String(".player"), temp = dest + String(".tmp");
+  bool owns_temporary = false;
+  try {
+    if (!player_) {
+      if (FileAccess::file_exists(dest) && DirAccess::remove_absolute(dest) != OK)
+        throw std::runtime_error("An old player companion could not be removed.");
+      Dictionary result; result["ok"] = true; result["saved"] = false; return result;
+    }
+    if (!player_tables_) throw std::runtime_error("The selected executable is unavailable for the player save.");
+    const auto bytes = rta::player_state::save(observed_player(), *player_tables_);
+    if (FileAccess::file_exists(temp)) throw std::runtime_error("A player save temporary file already exists.");
+    Ref<FileAccess> file = FileAccess::open(temp, FileAccess::WRITE);
+    if (file.is_null()) throw std::runtime_error("The player companion could not be created.");
+    owns_temporary = true;
+    PackedByteArray packed; packed.resize(bytes.size());
+    std::copy(bytes.begin(), bytes.end(), packed.ptrw());
+    file->store_buffer(packed); file->flush();
+    const auto error = file->get_error(); file->close();
+    if (error != OK || DirAccess::rename_absolute(temp, dest) != OK)
+      throw std::runtime_error("The player companion could not be written.");
+    owns_temporary = false;
+    Dictionary result; result["ok"] = true; result["saved"] = true; return result;
+  } catch (const std::exception &e) {
+    if (owns_temporary) DirAccess::remove_absolute(temp);
+    return failure(e);
+  }
+}
+
+Dictionary ChampionsSessionController::load_player_companion(const String &path) {
+  try {
+    const String dest = path + String(".player");
+    if (!FileAccess::file_exists(dest)) {
+      player_.reset();
+      if (scripts_) scripts_->set_player_currents_known(true); // no created record is held any more
+      Dictionary result = observation(); result["ok"] = true; result["loaded"] = false; return result;
+    }
+    if (!player_tables_) throw std::runtime_error("Select the executable before loading a saved player record.");
+    Ref<FileAccess> file = FileAccess::open(dest, FileAccess::READ);
+    if (file.is_null() || file->get_length() > 256)
+      throw std::runtime_error("The player companion cannot be read or is too large.");
+    const auto packed = file->get_buffer(file->get_length());
+    const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
+    auto next = rta::player_state::load(bytes, *player_tables_);
+    player_ = std::move(next);
+    if (scripts_) bind_player_to_scripts(*scripts_, *player_);
+    Dictionary result = observation(); result["ok"] = true; result["loaded"] = true; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
@@ -611,12 +807,17 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                ? champions::audio::boot_music_volume(std::nullopt)
                                : std::uint32_t(music_volume_bits));
     next->set_fade_level(scripts_ ? scripts_->fade_level() : script_fade_);
+    const bool carried = carry_campaign && scripts_;
+    const auto live_player = player_ && carried
+        ? std::optional<rta::player_state::Record>(observed_player()) : player_;
+    if (live_player) next->set_player_currents_known(live_player->current_known);
     // A single-player game (docs/script-session.md section 2); a carried
     // campaign below brings its own values.
     next->start_single_player();
-    const bool carried = carry_campaign && scripts_;
     if (carried)
       next->load_campaign(scripts_->save_campaign());
+    if (live_player)
+      bind_player_to_scripts(*next, *live_player);
     // A fresh stream from the play session's configured shared seed; the
     // fixtures keep their own journaled seeds, so it is bound only while the
     // control session is the one that will play.
@@ -637,6 +838,11 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       data = std::make_shared<DialogData>();
       rta::script_commands::DialogLevel level;
       level.level = String(dialog.get("level", String())).utf8().get_data();
+      // dialog_loadBox 0x22f910 (docs/spec/dialog-gaps.md 4): whether box.tex was found, whether
+      // arena mode B is on, and whether an earlier level left the box word.
+      level.box_available = bool(dialog.get("box_available", true));
+      level.pvp_mode_b = bool(dialog.get("pvp_mode_b", false));
+      level.previous_box = dialog_box_loaded_;
       const Dictionary files = dialog.get("dbin", Dictionary());
       const Array keys = files.keys();
       for (int64_t i = 0; i < keys.size(); ++i)
@@ -674,6 +880,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
         };
       }
       next->attach_dialog(std::move(level), std::move(services));
+      dialog_box_loaded_ = next->dialog_box_word() != 0;
     }
     next->run_start();
     release_help_pause();
@@ -685,6 +892,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_pad_ = 0;
     scripts_ = std::move(next);
     script_fade_ = scripts_->fade_level();
+    if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
     script_world_.reset();
     script_seed_unpaired_ = false;
@@ -737,10 +945,18 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
   d["voice_lines"] = int64_t(c.voice_lines);
   d["silent_lines"] = int64_t(c.silent_lines);
   d["anm_reads"] = int64_t(c.anm_reads);
+  d["camera_views"] = int64_t(c.camera_views);
+  d["camera_steps"] = int64_t(c.camera_steps);
+  d["no_object_talker_records"] = int64_t(c.no_object_talker_records);
   int64_t refused = 0;
   for (const auto &entry : c.refused)
     refused += int64_t(entry.second);
   d["refused"] = refused;
+  // Refusals by reason (the reasons never carry level, object or text names).
+  Dictionary reasons;
+  for (const auto &entry : c.refused)
+    reasons[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+  d["refused_reasons"] = reasons;
   Dictionary interact;
   for (const auto &entry : c.interact)
     interact[String::utf8(entry.first.c_str())] = int64_t(entry.second);
@@ -777,6 +993,65 @@ Array ChampionsSessionController::dialog_events() {
     }
     item["args"] = args;
     out.push_back(item);
+  }
+  return out;
+}
+namespace {
+double raw_float(rta::Raw bits) {
+  float value;
+  static_assert(sizeof(value) == sizeof(bits));
+  std::memcpy(&value, &bits, sizeof(value));
+  return double(value);
+}
+} // namespace
+// The conversation camera: the words Camera_setupDialogView wrote and the pose of the
+// last Camera_apply (docs/spec/dialog-gaps.md 2). Positions are the console's floats.
+Dictionary ChampionsSessionController::dialog_camera() const {
+  Dictionary out;
+  const bool attached = scripts_ && scripts_->dialog_attached();
+  out["ok"] = attached;
+  if (!attached)
+    return out;
+  const auto *view = scripts_->dialog_camera_view();
+  const auto *pose = scripts_->dialog_camera_pose();
+  out["view"] = view != nullptr;
+  out["pose"] = pose != nullptr;
+  if (view) {
+    out["progress"] = raw_float(view->progress);
+    out["turn_factor"] = raw_float(view->k);
+    out["target"] = Vector3(float(raw_float(view->target[0])), float(raw_float(view->target[1])),
+                            float(raw_float(view->target[2])));
+    out["target_yaw"] = int64_t(view->target_yaw);
+    out["target_pitch"] = int64_t(view->target_pitch);
+  }
+  if (pose) {
+    out["position"] = Vector3(float(raw_float(pose->pos[0])), float(raw_float(pose->pos[1])),
+                              float(raw_float(pose->pos[2])));
+    out["yaw"] = int64_t(pose->yaw);
+    out["pitch"] = int64_t(pose->pitch);
+    out["forward_z"] = raw_float(pose->matrix[8]);
+  }
+  out["moving"] = scripts_->dialog().cam_move != 0;
+  out["open"] = scripts_->dialog().is_open();
+  return out;
+}
+// The outcome of one dialog_isOpen site with the other conditions it reads (integers).
+Dictionary ChampionsSessionController::dialog_site_gate(const String &site, const Dictionary &conditions) const {
+  Dictionary out;
+  out["ok"] = false;
+  if (!scripts_ || !scripts_->dialog_attached()) {
+    out["error"] = "No dialog is attached to the level script.";
+    return out;
+  }
+  try {
+    rta::dialog_gaps::Conditions c;
+    const Array keys = conditions.keys();
+    for (int i = 0; i < keys.size(); ++i)
+      c[String(keys[i]).utf8().get_data()] = int64_t(conditions[keys[i]]);
+    out["outcome"] = String::utf8(scripts_->dialog_gate(site.utf8().get_data(), c).c_str());
+    out["ok"] = true;
+  } catch (const std::exception &e) {
+    out["error"] = String::utf8(e.what());
   }
   return out;
 }
@@ -846,10 +1121,10 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     out["open"] = d.is_open();
     out["stalled"] = scripts_->dialog_stalled();
     out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
-    // g_uiFadeIn[0] is the host's stepped fade; the cursor glyph byte 0x41b978 is
-    // 0x7e for the observed button layout (docs/UI_TEXT_GAPS.md).
+    // The host's displayed-frame ramp supplies g_uiFadeIn[0]. The observed layout
+    // supplies the cursor and "more" glyph (docs/UI_TEXT_GAPS.md).
     const auto ops = scripts_->dialog_draw(scripts_->ui_ramps().fade[0], int(text_option),
-                                           int(champions::ui_text_gaps::confirmGlyph(champions::ui_text_gaps::LAYOUT_OBSERVED).value()), 0);
+                                           int(scripts_->dialog_cursor_glyph()), 0);
     Array sprites, glyphs, refusals;
     const auto *font = dialog_data_ && dialog_data_->font ? &*dialog_data_->font : nullptr;
     if (!ops.empty() && !font)
@@ -863,9 +1138,11 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         throw D::Refused("no text table");
       return dialog_data_->text->lookup(key);
     };
-    const auto emit = [&](int x, int y, const D::Wide &units, std::size_t count) {
+    std::int64_t cursor_quads = 0;
+    const auto emit = [&](int x, int y, const D::Wide &units, std::size_t count) -> std::size_t {
       if (!font)
-        return;
+        return 0;
+      std::size_t made = 0;
       T::TextState state;
       state.setColour(colour);
       for (const auto &g : T::glyphRun(*font, x, y, units, count, &state).glyphs) {
@@ -879,7 +1156,9 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         item["tint"] = int64_t(g.tint);
         item["clip"] = Rect2i(int(clip[0]), int(clip[1]), int(clip[2] - clip[0]), int(clip[3] - clip[1]));
         glyphs.push_back(item);
+        ++made;
       }
+      return made;
     };
     for (const auto &e : ops) {
       const auto &a = e.args;
@@ -907,11 +1186,10 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         const D::Wide units(v.begin(), v.end());
         emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])), units, std::size_t(num(a[3])));
       } else if (e.kind == "ascii") {
-        // text_drawAscii of sprintf("%c", 0x41b978): the single glyph byte, drawn
-        // with the dialog's own glyph tint 0x606060 (docs/ui-text-gaps.md 7).
+        // text_drawAscii of "%c" with the glyph byte: one character at (x, y).
         const auto code = std::uint16_t(num(a[2]) & 0xff);
         if (code != 0)
-          emit(int(num(a[0])), int(num(a[1])), D::Wide{code}, 1);
+          cursor_quads += std::int64_t(emit(int(num(a[0])), int(num(a[1])), D::Wide{code}, 1));
       } else if (e.kind == "sprite") {
         Dictionary box;
         box["x"] = num(a[0]);
@@ -927,6 +1205,7 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     }
     out["sprites"] = sprites;
     out["glyphs"] = glyphs;
+    out["cursor_glyph_quads"] = cursor_quads;
     out["refusals"] = refusals;
     out["ok"] = true;
   } catch (const std::exception &e) {
@@ -952,6 +1231,7 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
   result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
   result["callee_refusals"] = static_cast<int64_t>(counts.callee_refusals);
+  result["unknown_player_current_refusals"] = static_cast<int64_t>(counts.unknown_player_current_refusals);
 
   result["objects_built"] = static_cast<int64_t>(counts.objects_built);
   result["objects_unbuilt"] = static_cast<int64_t>(counts.objects_unbuilt);
@@ -1101,7 +1381,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     previous_position_ = current_position_ = position;
     previous_facing_ = current_facing_ = facing;
     clock_.reset();
-    return result;
+    return observation();
   } catch (const std::exception &e) {
     return failure(e);
   }
@@ -1552,10 +1832,12 @@ Dictionary ChampionsSessionController::load_arena_tables(const String &executabl
     if (!exe->load(std::move(input)))
       throw std::runtime_error("The executable is not an ELF32 image.");
     auto names = rta::arena_modes::read_names(*exe);
+    auto player_tables = rta::player_state::read_tables(*exe);
     arena_names_a_ = std::move(names.names_a);
     // Kept for level scripts' object factory (docs/SCRIPT_COMMANDS.md); the
     // bytes stay with the owner and nothing read is copied into the tree.
     executable_ = std::move(exe);
+    player_tables_ = std::move(player_tables);
     Dictionary result;
     result["ok"] = true;
     result["names_a"] = int64_t(arena_names_a_.size());

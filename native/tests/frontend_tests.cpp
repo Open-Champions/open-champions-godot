@@ -371,8 +371,33 @@ void pause_vectors() {
   expect(f.screen() == Screen::Playing && f.lockout() == RECALL_LOCKOUT - 1, "dummy pad while held");
   f.frame(0);
   expect(f.lockout() == 0, "released: lockout 0");
+  // A conversation is open (docs/spec/dialog-gaps.md 3): offline the start button cannot open the pause menu.
+  f.set_dialog_open(true);
+  tap(f, START);
+  expect(f.screen() == Screen::Playing && !f.paused(), "start does not open the pause menu while a dialog is open");
+  f.set_dialog_open(false);
   tap(f, START);
   expect(f.screen() == Screen::Pause, "pause again");
+  // An open pause menu (a scripted dialog can open under it online) cannot recall or exit.
+  f.set_dialog_open(true);
+  {
+    bool gate = true, exit_entry = true, load = false;
+    for (const auto &e : f.entries()) {
+      if (e.id == "gate") gate = e.enabled;
+      if (e.id == "exit") exit_entry = e.enabled;
+      if (e.id == "load") load = e.enabled;
+    }
+    expect(!gate && !exit_entry && load, "recall and exit are not selectable while a dialog is open; load is");
+  }
+  f.set_dialog_open(false);
+  {
+    bool gate = false, exit_entry = false;
+    for (const auto &e : f.entries()) {
+      if (e.id == "gate") gate = e.enabled;
+      if (e.id == "exit") exit_entry = e.enabled;
+    }
+    expect(gate && exit_entry, "recall and exit are selectable with no dialog open");
+  }
   // Options from pause preview mx_main_l.vag and return to the options entry.
   tap(f, DOWN); tap(f, DOWN); tap(f, DOWN);
   tap(f, CROSS);

@@ -102,6 +102,7 @@ struct Fixture {
       return step && le(step_x, p[0]) ? step_h : terrain_z;
     };
     s.water_test = [](const Vec3 &, Raw) { return Raw(0); };
+    s.water_disturb = [](const Vec3 &, Raw, Raw) { return Raw(0); };
     s.animation_start = [this](Raw a, Raw clip, Raw flags, Raw, Raw) {
       start(a, clip, flags);
     };

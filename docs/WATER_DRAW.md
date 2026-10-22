@@ -139,13 +139,14 @@ the velocity grid until the next step. The start value of the word at
 `0x404460` is not in the pin, so `set_level_flags` refuses `0x10` unless a
 seed was supplied (tests supply one). No disc row sets `0x10`.
 
-A player wading does not disturb the drawn water. `Player_move`'s
-`water_disturb` arguments are not published, and the creature water body
-(300/12, 1500/24) is the creature `water()` at `0x113d78`, not the player. The real-data
-harness has an opt-in `--wade-probe`: one labelled `water_disturb` with the
-Player jump-state strength and radius (`ref_player.py` `state_jump`, 3000 and
-24) at the player position, without the jump's 12-unit drop. It exists to show
-propagation in captures; the scene does not run that state.
+A wading player would disturb the drawn water through `real_world::Wader`
+(`Player_move` step (f), t3/research-wading 942a6ba; see
+[PLAYER_WADING.md](PLAYER_WADING.md)): 1000 or 3000 at radius 24 on entry and
+300 at radius 12 while wading, at `(x - 0.0, y, z - 12)`. The creature water body
+(300/12, 1500/24) is the creature `water()` at `0x113d78`, not the player.
+The `--wade-probe` harness stimulus (one labelled 3000/24 `water_disturb`) is
+kept for the captures. The scenes do not run `Wader` by default (the control
+walk has no frame counter or stick speed); `--wade-diagnostic` opts in.
 
 In the captures the player stands under the water blend. Players are layer 1
 and water is layer 3 with no depth test (research section 2, an inference
