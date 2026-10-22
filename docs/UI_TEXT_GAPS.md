@@ -33,7 +33,9 @@ call), sprite quads, woven lines, compass (matrix, angle, calls), sound-slot upd
 showName lookups. `ui-text-gaps-exact` replays every row and states the documented facts
 (the nine-value fade ramp, 0x7e, the inner frame height, one wrap per branch, two compass
 passes, the free rules) directly. `dialog_host_tests` runs a whole conversation with the
-host's stepped fade: message 3 comes nine displayed frames later than with a fade held at 1.0.
+host's stepped fade: the first tick that reads exactly 1.0 follows the ninth step after the
+closing restart (the dialog machine ends it within a tick of that), so the end runs later than
+with a fade held at 1.0.
 
 ## Wiring
 

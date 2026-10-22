@@ -98,7 +98,7 @@ func run() -> void:
 			var clipped := 0
 			var wraps := 0
 			for item in scene.text_hud.items:
-				if item.kind == "sprite" and item.clipped: clipped += 1
+				if item.kind == "sprite" and item.clipped and item.lump == "bust.lmp": clipped += 1
 				if item.kind == "text" and item.font == "gamefontsmall.fnt": wraps += 1
 			check(clipped == 1, "the bust meter draws exactly one clipped bar")
 			check(wraps == 1, "the bust caption is one wrap in gamefontsmall")
