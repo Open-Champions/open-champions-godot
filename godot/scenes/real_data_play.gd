@@ -21,6 +21,7 @@ var hud_art_counts: Dictionary = {}
 var hud_font_loaded := false
 const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
 var npc_dialog: Control
+var restoring_real_level := false
 # Talk to an NPC: E (use), Up / Down (choice), Enter or Space (confirm).
 const TALK_KEYS := {KEY_E: "use", KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40}
 
@@ -148,6 +149,131 @@ func load_real_level(index: int) -> bool:
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
 	return true
+
+# The OCPLAY image owns simulation and position. This small host association
+# identifies the level data the user selected; it never embeds disc content.
+func save_session_file(path: String) -> bool:
+	if real == null or real.current < 0:
+		return super.save_session_file(path)
+	var talk: Dictionary = controller.dialog_status()
+	if talk.get("open", false) or talk.get("mutex_held", false) or controller.text_hud().get("help_open", false):
+		status_label.text = "Save refused: finish the current dialog or help box first."
+		return false
+	var level: Dictionary = real.levels[real.current]
+	var source: String = str(real.cache_dir.path_join("level-%03d.world" % real.current))
+	var world_hash := FileAccess.get_sha256(source)
+	var tex_hash := FileAccess.get_sha256(str(level.tex))
+	if world_hash.is_empty() or tex_hash.is_empty():
+		status_label.text = "Save refused: this level's WORLD/TEX data cannot be verified."
+		return false
+	var scripted: bool = controller.get_play_capabilities().get("level_script_enabled", false)
+	var campaign := PackedByteArray()
+	if scripted:
+		var state: Dictionary = controller.save_campaign_bytes()
+		if not state.get("ok", false):
+			status_label.text = "Save refused: campaign state could not be captured."
+			return false
+		campaign = state.bytes
+	if not super.save_session_file(path): return false
+	var player_hash := FileAccess.get_sha256(path + ".player")
+	if player_hash.is_empty():
+		status_label.text = "Save refused: the player record companion is absent."
+		return false
+	if scripted and not _write_companion(path + ".campaign", campaign):
+		status_label.text = "Save refused: campaign companion could not be written."
+		return false
+	if not scripted and FileAccess.file_exists(path + ".campaign"):
+		DirAccess.remove_absolute(path + ".campaign")
+	var manifest := {"version": 1, "save_sha256": FileAccess.get_sha256(path),
+		"player_sha256": player_hash,
+		"level_index": real.current, "level_stem": str(level.stem),
+		"world_sha256": world_hash, "tex_sha256": tex_hash,
+		"scripted": scripted,
+		"campaign_sha256": FileAccess.get_sha256(path + ".campaign") if scripted else ""}
+	if manifest.save_sha256.is_empty() or (scripted and manifest.campaign_sha256.is_empty()) or \
+			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
+		status_label.text = "Save refused: level association could not be written."
+		return false
+	status_label.text = "Saved level, player, quests and position. Active world objects are not saved."
+	return true
+
+func _write_companion(path: String, bytes: PackedByteArray) -> bool:
+	var temporary := path + ".tmp"
+	if FileAccess.file_exists(temporary): return false
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	if file == null: return false
+	file.store_buffer(bytes)
+	file.flush()
+	var ok := file.get_error() == OK
+	file.close()
+	if not ok or DirAccess.rename_absolute(temporary, path) != OK:
+		DirAccess.remove_absolute(temporary)
+		return false
+	return true
+
+func load_session_file(path: String) -> bool:
+	if not FileAccess.file_exists(path + ".level"):
+		return super.load_session_file(path)
+	var file := FileAccess.open(path + ".level", FileAccess.READ)
+	if file == null or file.get_length() > 4096:
+		status_label.text = "Load refused: level association is unreadable or too large."
+		return false
+	var manifest = JSON.parse_string(file.get_as_text())
+	if not (manifest is Dictionary) or manifest.get("version", -1) != 1 or \
+			FileAccess.get_sha256(path) != manifest.get("save_sha256", ""):
+		status_label.text = "Load refused: level association does not match this native save."
+		return false
+	if FileAccess.get_sha256(path + ".player") != manifest.get("player_sha256", ""):
+		status_label.text = "Load refused: player companion is absent or differs."
+		return false
+	if real == null or real.levels.is_empty():
+		status_label.text = "Load refused: open the original game folder first."
+		return false
+	var index := int(manifest.get("level_index", -1))
+	if index < 0 or index >= real.levels.size() or str(real.levels[index].stem) != str(manifest.get("level_stem", "")):
+		status_label.text = "Load refused: saved level is absent from this game folder."
+		return false
+	var level: Dictionary = real.levels[index]
+	if FileAccess.get_sha256(str(level.tex)) != manifest.get("tex_sha256", ""):
+		status_label.text = "Load refused: saved level TEX differs from the selected folder."
+		return false
+	var scripted: bool = manifest.get("scripted", false)
+	var campaign := PackedByteArray()
+	if scripted:
+		var campaign_path := path + ".campaign"
+		var source := FileAccess.open(campaign_path, FileAccess.READ)
+		if source == null or source.get_length() > 1024 * 1024 or \
+				FileAccess.get_sha256(campaign_path) != manifest.get("campaign_sha256", ""):
+			status_label.text = "Load refused: campaign companion is absent or differs."
+			return false
+		campaign = source.get_buffer(source.get_length())
+	level_script.set_pressed_no_signal(scripted)
+	if not load_real_level(index): return false
+	var world_path: String = str(real.cache_dir.path_join("level-%03d.world" % index))
+	if FileAccess.get_sha256(world_path) != manifest.get("world_sha256", ""):
+		status_label.text = "Load refused: saved level WORLD differs from the selected folder."
+		return false
+	restoring_real_level = true
+	var loaded := super.load_session_file(path)
+	restoring_real_level = false
+	if not loaded: return false
+	if scripted:
+		var restored: Dictionary = controller.load_campaign_bytes(campaign)
+		if not restored.get("ok", false):
+			status_label.text = "Load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
+			return false
+		_observe(restored)
+	status_label.text = "Loaded level, player, quests and position. World objects restart from level data."
+	return true
+
+func _prepare_native_save(path: String) -> Dictionary:
+	return controller.prepare_save_file(path, restoring_real_level)
+
+func _prepare_level_restore(path: String) -> void:
+	if restoring_real_level and terrain_root.has_meta("level_texture_pair"):
+		level_textures.restore = terrain_root.get_meta("level_texture_pair")
+	else:
+		super._prepare_level_restore(path)
 
 func _level_script_toggled(on: bool) -> void:
 	if real == null or real.current < 0: return

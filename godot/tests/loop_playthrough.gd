@@ -260,6 +260,10 @@ func run() -> void:
 	var attack_handled := game_key(KEY_J)
 	advance(0, 120)
 	var after: Dictionary = scene.controller.get_observation()
+	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
+	var saved_hp := float(after.get("hp", -1.0))
+	var saved_gold := int(after.get("gold", -1))
+	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var actors_after: Array = after.get("combat_actors", [])
 	mark("enemy_fight", "combat_observed" if after.get("combat_enabled", false) else "refused",
 		{"attack_input_handled": attack_handled, "actors_before": actors_before.size(),
@@ -275,19 +279,23 @@ func run() -> void:
 	mark("pause", fe.screen())
 	await capture("06-pause")
 	var pause_save_entry := false
+	var pause_entries: int = fe.view.get("entries", []).size()
 	if fe.screen() == "pause":
 		for entry in fe.view.get("entries", []):
 			if str(entry.get("id", "")) == "save": pause_save_entry = true
-	mark("pause_save", "available" if pause_save_entry else "refused")
-	if fe.screen() == "pause": tap(0x20)
+	# Research gives the original pause exactly five entries, with no Save.
+	# The host's F5 route opens the documented in-game save screen.
+	var native_pause_intact: bool = fe.screen() == "pause" and not pause_save_entry
 	var save_path := out_dir.path_join("playthrough.ocplay")
-	for suffix in ["", ".player", ".menus"]:
+	for suffix in ["", ".player", ".menus", ".level", ".campaign"]:
 		if FileAccess.file_exists(save_path + suffix): DirAccess.remove_absolute(save_path + suffix)
 	fe.queue_path("save_session", save_path)
-	var save_request: Dictionary = fe.open_save_screen()
-	if save_request.get("ok", false) and fe.screen() == "save-game": tap(CROSS)
-	var saved := FileAccess.file_exists(save_path)
-	mark("host_save_fallback", "saved" if saved else "refused", {"screen": fe.screen()})
+	var route_handled := game_key(KEY_F5)
+	mark("pause_save", "routed" if native_pause_intact and route_handled and fe.screen() == "save-game" else "refused",
+		{"original_pause_entries": pause_entries})
+	if fe.screen() == "save-game": tap(CROSS)
+	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign")
+	mark("in_game_save", "saved" if saved else "refused", {"screen": fe.screen()})
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)
 	if fe.screen() == "playing": tap(START)
@@ -309,16 +317,41 @@ func run() -> void:
 			load_attempted = true
 			tap(CROSS)
 	var restored: Dictionary = scene.controller.get_observation()
+	var restored_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var quests_match := true
+	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
+		quests_match = quests_match and saved_campaign.get(key, -1) == restored_campaign.get(key, -2)
 	var carried: bool = quit_ok and load_attempted and fe.screen() == "playing" and scene.real.current == level_before \
-		and int(restored.get("gold", -1)) == gold_before \
-		and is_equal_approx(float(restored.get("hp", -1.0)), hp_before)
+		and scene.terrain_root.has_meta("level_texture_pair") \
+		and int(restored.get("gold", -1)) == saved_gold \
+		and is_equal_approx(float(restored.get("hp", -1.0)), saved_hp) \
+		and scene.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01 \
+		and quests_match
 	mark("load_and_carry", "restored" if carried else "refused",
 		{"screen": fe.screen(), "load_attempted": load_attempted,
 		"level_index_before": level_before,
-		"level_index_after": scene.real.current, "gold_before": gold_before,
-		"gold_after": int(restored.get("gold", -1)), "hp_before": hp_before,
-		"hp_after": float(restored.get("hp", -1.0))})
+		"level_index_after": scene.real.current, "gold_before": saved_gold,
+		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
+		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match})
 	await capture("09-loaded")
+	# A new scene has no in-memory WORLD/TEX save association. The load must
+	# recover the level from the selected folder and its saved identity.
+	var cold = load("res://scenes/real_data_play.tscn").instantiate()
+	cold.automatic_steps = false
+	root.add_child(cold)
+	await process_frame
+	cold.real.cache_dir = out_dir.path_join("cold-cache")
+	var cold_opened: bool = cold.open_game_folder(str(args["game-folder"]))
+	var cold_loaded: bool = cold_opened and cold.level_textures.saves.is_empty() and cold.load_session_file(save_path)
+	var cold_state: Dictionary = cold.controller.get_observation()
+	var cold_campaign: Dictionary = cold.controller.script_command_counts().get("campaign", {})
+	var cold_match: bool = cold_loaded and cold.real.current == level_before and cold.terrain_root.has_meta("level_texture_pair") and \
+		int(cold_state.get("gold", -1)) == saved_gold and is_equal_approx(float(cold_state.get("hp", -1.0)), saved_hp) and \
+		cold.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01
+	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
+		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
+	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded})
+	cold.queue_free()
 	var transition_before: int = scene.real.current
 	var pending_levels := int(scene.controller.dialog_status().get("counts", {}).get("pending_levels", 0))
 	if pending_levels > 0 and fe.screen() == "playing": advance(0, 180)

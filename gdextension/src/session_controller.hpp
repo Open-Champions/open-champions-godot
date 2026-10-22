@@ -217,6 +217,8 @@ public:
   godot::Dictionary set_player_character(const godot::Dictionary &character);
   godot::Dictionary save_player_companion(const godot::String &path) const;
   godot::Dictionary load_player_companion(const godot::String &path);
+  godot::Dictionary save_campaign_bytes();
+  godot::Dictionary load_campaign_bytes(const godot::PackedByteArray &bytes);
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);
@@ -229,7 +231,7 @@ public:
   godot::Dictionary get_terrain() const;
   godot::Dictionary save_file(const godot::String &path);
   godot::Dictionary save_snapshot_file(const godot::String &path);
-  godot::Dictionary prepare_save_file(const godot::String &path);
+  godot::Dictionary prepare_save_file(const godot::String &path, bool reuse_loaded_level = false);
   godot::Dictionary load_terrain_file(const godot::String &path);
   godot::Dictionary prepare_terrain_file(const godot::String &path, bool build_display = true);
   // Level-spawn story start for the next terrain prepared from exactly `path`:

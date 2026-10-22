@@ -18,7 +18,7 @@ const PAD_KEYS := {
 }
 # On the name page only these keys stay pad buttons; the rest type.
 const NAME_PAD_KEYS := [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE, KEY_TAB]
-const KEY_HELP := "Host keys: arrows = d-pad · Enter/Space/X = cross · Backspace/C/Esc = circle · T/Tab = triangle · P = start"
+const KEY_HELP := "Host keys: arrows = d-pad · Enter/Space/X = cross · Backspace/C/Esc = circle · T/Tab = triangle · P = start · F5 = Save screen in play"
 const PAUSE_TEXT := 0x80464646 # pauseMenu_task text_begin colour (Observed)
 const HOST_TEXT := 0x80707070  # host colour: front-end colours are not documented
 const MUSIC_FRONT := "mx_maintheme_l.vag"
@@ -149,6 +149,11 @@ func handle_key(event: InputEvent) -> bool:
 	if not event is InputEventKey or event.echo:
 		return false
 	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+	# Host route from the researched five-entry pause menu to the documented
+	# save screen. F5 is a client shortcut, not an original pause entry.
+	if key == KEY_F5 and screen() in ["playing", "pause"] and scene != null and scene.session_started and not scene.stopped:
+		if event.pressed: open_save_screen()
+		return true
 	if not active():
 		# In play only start (P) reaches the flow; everything else is the game's.
 		if key != KEY_P or scene == null or not scene.session_started or scene.stopped:
@@ -501,6 +506,8 @@ func _draw() -> void:
 			_host_text(Vector2(16, 80), "Type the name on the host keyboard; Backspace deletes. Then Done.", 12, muted, 608)
 	if name == "options" or name == "options-load":
 		_host_text(Vector2(16, 60), "music live 0x%08x · image 0x%08x · options file %s" % [int(view.get("music_live", 0)), int(view.get("music_image", 0)), "present" if view.get("options_file", false) else "absent"], 12, muted, 608)
+	if name == "pause":
+		_host_text(Vector2(16, 278), "Host shortcut: F5 opens the documented Save screen", 11, muted, 608)
 	var notes_y := maxi(300, bottom + 20)
 	var error := host_error if not host_error.is_empty() else str(view.get("error", ""))
 	if not error.is_empty():
