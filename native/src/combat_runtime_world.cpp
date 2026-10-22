@@ -64,7 +64,10 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
 };
 World::State::State(Services v, int mode, Composition c)
     : mem(), model(mem, creature_hp::Limits{1024 * 1024, 65536,
-                                            c == Composition::Full ? 512u : 128u,
+                                            // A host resource bound, not an RTA value:
+                                            // shared callback registration has over 128
+                                            // names even in the earlier compositions.
+                                            c == Composition::Full ? 512u : 256u,
                                             64}),
       movement(mem), services(std::move(v)), composition(c), camera_mode(mode) {
   if (mode != 0 && mode != 1)
@@ -406,6 +409,16 @@ void World::State::destroy(Address a) {
     note("destroy", {a});
     return class_dtor(a, fn, 3);
   }
+  if (combat_ctors::is_prop_dtor(fn)) {
+    note("destroy",{a});
+    combat_ctors::prop_dtor(model,fn,a,3);
+    return;
+  }
+  if (fn == 0x238750) {
+    note("destroy",{a});
+    combat_ctors::antwave_dtor(model,a,3);
+    return;
+  }
   if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);
@@ -571,6 +584,14 @@ void World::State::tick() {
   }
   w(0x403a08, 1, n);
   run_objects();
+  // Authored ordering (audit C3-6): gold-run.md has hud_tickGold run from
+  // hud_run, a run task, so its order against the object runs is not pinned;
+  // it is placed after them here. hud_flush_gold is never called, and the
+  // gore option 0x44fdc0 stays 0 (the research gives no host value), so
+  // gutchunk_ctor sets bit 1. None of the three is reached by the 300-tick
+  // Full trace.
+  if (full())
+    combat_ctors::hud_tick_gold(model);
   w(FRAME, u(FRAME) + 1);
   if (full())
     for (unsigned k = 0; k < 4; ++k) {
@@ -826,6 +847,7 @@ Services flat_fixture_services() {
   };
   s.height_below = [](const Vec3 &, Raw) { return Raw(0); };
   s.water_test = [](const Vec3 &, Raw) { return Raw(0); };
+  s.water_disturb = [](const Vec3 &, Raw, Raw) { return Raw(0); };
   s.skill_stat = [](const std::string &, Raw, Raw) { return Raw(0); };
   s.camera_yaw = [](Raw) { return Raw(0); };
   s.camera_flag = [](Raw) { return Raw(0); };

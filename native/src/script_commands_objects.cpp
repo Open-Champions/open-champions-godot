@@ -2,6 +2,7 @@
 // classes whose constructor chain is ported (research t3/research-script-session
 // 6841b8a, docs/script-session.md sections 3-5).
 #include "champions/arena_monsters.hpp"
+#include <cctype>
 #include "champions/monsters_1.hpp"
 #include "champions/script_commands.hpp"
 #include <cstring>
@@ -111,6 +112,18 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
     const auto outcome = level_factory::classify(record.cls, &record.props, *exe_);
     if (outcome.kind != level_factory::Kind::Object) {
       counts_.objects_not_created += 1;
+      // A record with a dialogScript that makes no object has no talker (the
+      // TestLocation records: docs/spec/dialog-gaps.md 6). Nothing is created and
+      // nothing is refused.
+      for (const auto &entry : record.props) {
+        std::string key = entry.substr(0, entry.find('='));
+        for (auto &c : key)
+          c = char(std::tolower(static_cast<unsigned char>(c)));
+        if (key == "dialogscript" && entry.find('=') != std::string::npos) {
+          dialog_counts_.no_object_talker_records += 1;
+          break;
+        }
+      }
       continue;
     }
     const auto address = variables_->world->pool.allocate(outcome.size);

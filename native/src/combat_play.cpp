@@ -12,9 +12,8 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  // Slot 3 is the optional one-per-session creature. Slots 4 and 6 are the
-  // Full fixture's AntQueen and Soul; slot 5 (Skeleton) stays empty
-  // (full_setup).
+  // Slot 3 is the optional one-per-session creature. Slots 4, 5 and 6 are
+  // the Full fixture's AntQueen, Skeleton and Soul.
   std::array<Raw, 7> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
@@ -260,10 +259,20 @@ struct Session::State {
     // Slot 6: a Soul on the placement the round-5 fixture used (-60, 100),
     // facing the player, 120 HP. Creature_setCharm puts it on team 0, and it
     // wanders in states 0 and 1 for the whole fight.
-    // Slot 5 stays empty: a Skeleton gets past Skeleton_isEnemy now, but stops
-    // at its first sighting of the player, in Skeleton_run state 3 and
-    // creature_allyInLineOfFire, which are not executed (full-placement.md
-    // section 4). It can still be built through spawn_creature.
+    // Slot 5: a Skeleton at (70, 100). FIXTURE DECISION, not a research
+    // value, like the AntQueen's (-110, 110). The research's round-5 probe
+    // placement is (70, 140) (research-combat-ctors-4 6baf4cd, full-placement.md
+    // 6.4); y = 140 is off this synthetic level's flat ground (+-128), which
+    // the placement check below requires. (70, 100) keeps that x, puts the
+    // Skeleton on the flat ground, and leaves it on the far side of the
+    // player from the AntQueen and the Soul. In this fixture it first enters
+    // state 3 at frame 282, after the authored 300-tick combat scenarios have
+    // done their work; the research's own timing (frame 123 on (70, 140)) is a
+    // different placement. The constructor draws and equipped holder draws of
+    // this actor shift the shared seed, so it changes FULL_TRACE and the
+    // other actors' seed-driven rolls; that is a consequence of choosing to
+    // place it, not a traced event. The run and ally-in-line-of-fire bodies
+    // are from research-combat-ctors-3 9ff6ae0.
     auto place = [&](unsigned slot, const char *cls, int x, int y) {
       C::Spawn s;
       s.position[0] = from_int(Raw(x));
@@ -275,6 +284,7 @@ struct Session::State {
       handles[slot] = world->retain(world->spawn_class(cls, s));
     };
     place(4, "AntQueen", -110, 110);
+    place(5, "Skeleton", 70, 100);
     place(6, "Soul", -60, 100);
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);

@@ -7,6 +7,7 @@
 #include "champions/level_play.hpp"
 #include "champions/native_save.hpp"
 #include "champions/play_fixture_save.hpp"
+#include "champions/player_state.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -51,6 +52,11 @@ class ChampionsSessionController : public godot::RefCounted {
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   void remember_script_fade();
+  std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
+  std::optional<champions::simulation::rta::player_state::Record> player_;
+  void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
+                              const champions::simulation::rta::player_state::Record &);
+  champions::simulation::rta::player_state::Record observed_player() const;
   void pump_scripts(std::size_t ready_ticks_before);
   // The level script's draws and the play session's World are one stream
   // (script_commands::SeedPolicy::OfflineSession, research
@@ -77,6 +83,8 @@ class ChampionsSessionController : public godot::RefCounted {
   // queue_count, status, position of voice stream 1 (dialog_voice_state).
   std::optional<std::array<int64_t, 3>> dialog_voice_;
   godot::String dialog_last_use_;
+  // dialog_loadBox's word 0x4fe538 survives from one level to the next (docs/spec/dialog-gaps.md 4).
+  bool dialog_box_loaded_ = false;
   uint32_t dialog_gate(uint32_t mask) const;
   // Text commands (session_controller_text.cpp, docs/STRINGS.md): the game
   // folder's GTEXT.LMP tables, the level lump's tables, the help chime group.
@@ -182,6 +190,9 @@ public:
   // Not in the original: leave a conversation a refused script stalled.
   godot::Dictionary dialog_leave();
   godot::Dictionary dialog_status() const;
+  // The conversation camera (docs/spec/dialog-gaps.md 2) and the outcome of one dialog_isOpen site.
+  godot::Dictionary dialog_camera() const;
+  godot::Dictionary dialog_site_gate(const godot::String &site, const godot::Dictionary &conditions) const;
   // Calls the dialog made outside its own state since the last take: the
   // voice (stream_play, stream_stop, clear_hold on stream 1), the shop, the
   // freeze and the camera words, for the presentation.
@@ -203,6 +214,9 @@ public:
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);
+  godot::Dictionary set_player_character(const godot::Dictionary &character);
+  godot::Dictionary save_player_companion(const godot::String &path) const;
+  godot::Dictionary load_player_companion(const godot::String &path);
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);

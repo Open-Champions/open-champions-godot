@@ -178,17 +178,23 @@ Address World::State::disease_attach(Address victim, Address attacker) {
     handle_link(victim + 0x364, block + 4, block);
   return block;
 }
-void World::State::gutchunk_ctor(Address, const Vec3 &, Raw, Raw) {
-  // GutChunk_ctor 0x201958 begins with PhProp_ctor 0x155a0c, a callback of
-  // ref_combat_round3. Its chain (0x153e54, GameObject_ctor: one shared draw
-  // and the grid link) is "bodies not read" (skills-01-34.md FrostShard,
-  // Draws), so the composed World cannot answer it. The executed tail (table
-  // 0x50f3b8, +0x248 bits, the gore bit, +0x250, +0x25c, +0x260) follows that
-  // call and is not reached.
-  throw Unsupported("PhProp_ctor 0x155a0c (GutChunk_ctor 0x201958): the prop "
-                    "constructor chain is not read");
+void World::State::gutchunk_ctor(Address obj, const Vec3 &pos, Raw kind, Raw bits) {
+  // Direct host spawning enters here without the service-level constructor
+  // dispatch used by the AntQueen bleed and Skeleton shatter paths.
+  for (auto pair:{std::pair<unsigned,Raw>{1,0x3c4d48},{4,0x1edb18}}) {
+    w(0x50f3b8+8*pair.first,2,0);
+    w(0x50f3b8+8*pair.first+4,pair.second);
+  }
+  for (auto pair:{std::pair<unsigned,Raw>{1,0x3c2fc8},{4,0x155fcc}}) {
+    w(0x511ba8+8*pair.first,2,0);
+    w(0x511ba8+8*pair.first+4,pair.second);
+  }
+  combat_ctors::gutchunk_ctor(model,obj,pos,kind,bits);
 }
 Address World::State::gutchunk_spawn(const Vec3 &pos, Raw kind, Raw bits) {
+  // Direct host entry has no earlier creature constructor to register the
+  // composed GameObject preparation callback used by the PhProp chain.
+  install_ctor_services();
   auto obj = pool_new(GUTCHUNK_SIZE);
   if (!obj)
     throw Unsupported("the pool refused a GutChunk");

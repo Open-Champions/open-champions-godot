@@ -120,7 +120,11 @@ const std::map<Raw, Raw> TYPE_DESC = {
     // their name words enter the image with the first such creature.
     {0x3c3c78, 0x908680}, {0x3cc7a0, 0x908e30},
     // LooseFire, Fire and poisonGasSpell (the potion endings).
-    {0x3c67e8, 0x908200}, {0x3c50b8, 0x908690}, {0x3c78e8, 0x908700}};
+    {0x3c67e8, 0x908200}, {0x3c50b8, 0x908690}, {0x3c78e8, 0x908700},
+    // research-combat-ctors-3 symbols/runtime.tsv: LightEffect_typeinfo.
+    {0x3c6908, 0x9085d0},
+    // research-combat-ctors-3 symbols/runtime.tsv: HolyStrike_typeinfo.
+    {0x3cf5bc, 0x909350}};
 } // namespace
 Raw World::State::type_of(Address obj) {
   auto fn = u(u(obj + 0x48) + 4);

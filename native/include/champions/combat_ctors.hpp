@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/arena_monsters.hpp"
+#include "champions/core_math.hpp"
 
 // AntQueen, Skeleton and Soul: the constructors, the set-states 0x237918,
 // 0x2a7768 and 0x2aac38, the run functions up to their state switch, and
@@ -61,11 +62,11 @@ void skeleton_ctor(A::Model &, Address c, const Vec3 &pos, Raw facing,
                    const Options & = {});
 void skeleton_set_state(A::Model &, Address c, Raw state);
 // false: the creature is inactive and the run returned before the switch.
-bool skeleton_run_prologue(A::Model &, Address c);
+bool skeleton_run_prologue(A::Model &, Address c, Raw *events = nullptr);
 void soul_ctor(A::Model &, Address c, Raw type_name, const Vec3 &pos,
                Raw facing, Raw props, Raw owner, const Options & = {});
 void soul_set_state(A::Model &, Address c, Raw state);
-bool soul_run_prologue(A::Model &, Address c);
+bool soul_run_prologue(A::Model &, Address c, Raw *events = nullptr);
 Raw soul_get_model(A::Model &, Address c);
 // The three set-states (slot 27) and Soul_getModel (slot 16) as class bodies
 // of the model's virtual calls.
@@ -137,4 +138,65 @@ void antqueen_update_bank(A::Model &, Address c);
 // The round-2 class bodies (isEnemy, the three takeDamage slots, the type-info
 // getters and the six destructors) as class bodies of the model.
 void install_round2(A::Model &);
+
+// Executed round-3 run bodies and helpers: research-combat-ctors-3 9ff6ae0.
+void skeleton_run(A::Model &, Address c);
+void soul_run(A::Model &, Address c);
+// Soul_isDemonNear 0x2ab2b4 as ref_soul_run.py soul_is_demon_near: the +-300 box,
+// typeid of every object, no skipping; refuses when a getter has no resolution.
+bool soul_is_demon_near(A::Model &, Address c);
+void creature_set_charm(A::Model &, Address c, Raw frames, Raw team);
+Raw skeleton_has_shield(A::Model &, Address c);
+void skeleton_on_nearby_event(A::Model &, Address c, Raw code,
+                              const Vec3 &position, Address other);
+Raw ally_in_line_of_fire(A::Model &, Address c, Address target, Raw previous,
+                         Raw reach, Raw distance);
+Raw count_living_nonplayer_in_box(A::Model &, const Vec3 &centre, Raw half_size);
+Raw creature_obj_in_arc_range(A::Model &, Address c, Address object, Raw arc,
+                              Raw range);
+Raw lead_target_point(A::Model &, Address c, Vec3 *out, Raw speed);
+void install_round3(A::Model &);
+// Weapon1/WeaponShield slots 1–17 at 9ff6ae0; slots 18–24 and Weapon2
+// element access at research-combat-ctors-4 6baf4cd.
+Raw holder_slot(A::Model &, Address holder, unsigned slot,
+                const std::vector<A::Value> &args);
+void draw_held_part(A::Model &, Address x, Raw part, Address creature);
+void build_element_damage(A::Model &, Address descriptor, Raw kind);
+Raw damage_desc_get_element(A::Model &, Address descriptor);
+void drop_held_part(A::Model &, Raw part, Address creature, Address definition,
+                    Raw flags);
+void skeleton_shatter(A::Model &, Address creature, Raw group);
+void gutchunk_ctor(A::Model &, Address chunk, const Vec3 &position, Raw kind,
+                   Raw bits);
+void phprop_ctor(A::Model &, Address prop, const Vec3 &position, Address lump,
+                 Address model_name, Address texture_name, std::uint64_t parts,
+                 Raw launch, Address item, Raw scale);
+void phprop_ctor2(A::Model &, Address prop, const Vec3 &position, Raw facing,
+                  Address model, Address anim, Address lump, Address model_name,
+                  Address texture_name, std::uint64_t parts, Raw launch,
+                  Address item, Raw scale);
+void gold_ctor2(A::Model &, Address gold, const Vec3 &position, Raw amount);
+void phprop_run(A::Model &, Address prop);
+void gutchunk_run(A::Model &, Address chunk);
+void gold_run(A::Model &, Address gold);
+void gold_on_touch(A::Model &, Address gold, Address toucher);
+void hud_add_gold_floater(A::Model &, Raw slot, const Vec3 &position, Raw amount);
+void hud_tick_gold(A::Model &);
+void hud_flush_gold(A::Model &);
+bool is_prop_dtor(Raw fn);
+void prop_dtor(A::Model &, Raw fn, Address prop, Raw flags);
+A::Value anim_advance_unit_speed(A::Model &, Address state, Address sound,
+                                 Address root, Address yaw);
+Mat34 anim_get_joint_matrix(A::Model &, Address state, Raw joint);
+Mat34 model_get_attach_matrix(A::Model &, Raw scale, Address model,
+                              Address state, Raw index);
+Mat34 model_get_attach_world_matrix(A::Model &, Raw scale, Address model,
+                                    const Vec3 &position, Raw facing,
+                                    Address state, Raw index);
+Mat34 creature_get_attach_matrix0(A::Model &, Address creature);
+void antwave_ctor(A::Model &, Address wave, Address target,
+                  const Vec3 &position, Raw facing, Raw lifetime);
+void antwave_run(A::Model &, Address wave);
+void antwave_draw(A::Model &, Address wave);
+void antwave_dtor(A::Model &, Address wave, Raw flags);
 } // namespace champions::simulation::rta::combat_ctors
