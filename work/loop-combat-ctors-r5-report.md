@@ -1,4 +1,4 @@
-STATUS: PARTIAL — audit fixes pass; 111-level sweep regresses against wave-24 base
+STATUS: PASS — audit fixes retained; arena sweep restored to 111/111
 
 # Combat constructors, round 5
 
@@ -166,11 +166,74 @@ summaries show 28+28+28+27 tried, loaded and played, 0 failures and empty
 refusal lists. Wave-24 report commit `3850dbb` is a documentation-only child
 of `2e57376`, so those recorded results describe that base code. The base
 reads the executable's mode-A name table and selects the documented arena
-start for those three levels. This branch diverged at `08dbc72` and lacks
-that later integration; the regression predates the four audit edits. Per
-Malik's direction, this fix does not port mode-A selection. Merge wave must
-retain the base's arena route and recheck the sweep after integration.
+start for those three levels. This branch diverged at `08dbc72` and lacked
+that later integration at the audit checkpoint. The following section records
+the parity repair.
 
-No new x86_64/Rosetta suite or full 214-case arm64 suite was run for these
-four fixes. The complete round-5 prop path remains refused without a loaded
-hull table, and `path_blockNodes` still refuses without a path-grid service.
+At the audit checkpoint, no new x86_64/Rosetta suite or full 214-case arm64
+suite had been run for those four fixes. The complete round-5 prop path remains
+refused without a loaded hull table, and `path_blockNodes` still refuses
+without a path-grid service.
+
+## Sweep regression (2026-10-22)
+
+The requested `2e57376..1a31536` bisect has no first bad commit:
+`git merge-base 2e57376 1a31536` is `08dbc72`, and a separately built
+`08dbc72` checkout, with a fresh Godot editor import, already tries 3,
+refuses 3 and plays 0 for sweep indices 69–71. The same restricted run on
+`1a31536` tries 3, refuses 3 and plays 0. None of the three branch-only
+commits changes the Godot start route or `level_flow`; the base gained its
+arena table route on its own line at `7be097c`. The earlier report's
+“regression relative to base” is an integration gap, not a regression
+introduced by the round-5 or audit commits.
+
+Restored the wave-24 base route in this branch: read the owner's ELF32
+file-backed mode-A and mode-B name tables at the research-pinned addresses,
+require their documented 13/7 sizes, and match the selected level's name
+case-insensitively. Only when its story snap has no ground **and** the
+owner's mode-A table lists it does the session call the already-ported
+`arena_mode_a_start_ground` and publish `start.arena_mode = "A"`.
+Absent, invalid, or unlisted tables retain the refusal. No retail names or
+bytes were embedded, and no record-only mode inference or new ground
+constant was added. The round-5 implementation and all four `1a31536` audit
+fixes are retained.
+`level-flow-exact` now checks the bounded reader with a synthetic ELF,
+including table size refusal and ASCII case matching.
+
+Verification on this branch:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`,
+  `cmake --build build/native -j 4`, and
+  `cmake --build build/godot-extension -j 4` passed (arm64 native and Godot
+  `template_debug`). The affected
+  arm64 CTest set (`level-flow-exact`, `combat-ctors-3-reference`, both
+  round-3 and round-4 combat-runtime host/exact cases, `fixture-save`)
+  passed 7/7; the newly rebuilt `level-flow-exact` passed again serially.
+- Full arm64 CTest excluding `player-exact`:
+  `ctest --test-dir build/native -j 3 --output-on-failure -E '^player-exact$'`
+  passed **213/213** in 623.52 seconds. Serial
+  `ctest --test-dir build/native -j 1 --output-on-failure -R '^player-exact$'`
+  passed **1/1** in 106.41 seconds: **214/214** arm64 cases across the two
+  invocations.
+- `python3 work/combat-ctors-5/run-godot.py` passed **45/45**. Full combat:
+  2,619 checks, 0 failures. `FULL_TRACE` is still 36,402 bytes, SHA-256
+  `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+  Godot `FULL_SAVE_LOAD` still has 300/300 matching presents, presentation
+  digest `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`.
+  The Full-combat case was repeated after the final extension rebuild with
+  the same trace and save/load digests.
+- `build/native/champions-fixture-save-tests
+  native/tests/fixtures/fx_skill_recipes_synthetic.json`: **93 checks,
+  0 failures**. Full mid-fight save is 422,756 bytes across 448 operations;
+  the test checks byte-exact restore and continuation.
+- Four headless private-disc sweep slices, each using the same read-only disc,
+  recipe/light inputs and `--all --levels=0 --ticks=60 --scripts` as the
+  audit (`--from/--to` pairs 0/28, 28/56, 56/84, 84/111): **111 tried,
+  111 loaded, 111 played, 0 failed checks**, all four commands exit 0.
+  The fixed branch's isolated indices 69–71 also load and play 3/3;
+  all three publish `marker_taken` and `pre_search`. The same 3/3 result
+  repeated after the final extension rebuild.
+
+The prop hull-table and `path_blockNodes` refusals above remain outside this
+arena-start parity repair. No new x86_64/Rosetta or console run was performed
+for this fix.
