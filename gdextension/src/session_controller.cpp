@@ -758,6 +758,7 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const String dest = path + String(".player");
     if (!FileAccess::file_exists(dest)) {
       player_.reset();
+      if (scripts_) scripts_->set_player_currents_known(true); // no created record is held any more
       Dictionary result = observation(); result["ok"] = true; result["loaded"] = false; return result;
     }
     if (!player_tables_) throw std::runtime_error("Select the executable before loading a saved player record.");

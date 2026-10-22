@@ -79,6 +79,9 @@ Tables read_tables(const arena_modes::Executable &exe) {
     for (auto raw : t.formulas[cls])
       if (!finite(raw)) throw Refusal("class formula is not finite");
   }
+  // Sanity check only: research-combat data-tables.md 4.4 documents table[80]
+  // as a far-above sentinel, not that every step increases. It holds on the
+  // retail table; a table that fails it is refused rather than indexed.
   for (std::size_t n = 1; n < t.experience.size(); ++n)
     if (t.experience[n] <= t.experience[n-1])
       throw Refusal("experience thresholds are not strictly increasing");
@@ -146,7 +149,10 @@ Record create(const std::string &name, std::int32_t cls, std::int32_t model,
 Record import(Record r, const Tables &tables) {
   // player_importCharacter 0x1bd458 clamps the level to 50 and the experience
   // to table[50] (research-combat docs/data-tables.md 4.4; docs/player.md
-  // +0x58 and +0x5c). A decoded record beyond them did not come from it.
+  // +0x58 and +0x5c). This function is the front-end character import path
+  // only (the session controller's character-import route, memcard_importScreen
+  // via player_importCharacter, research-menus docs/issues/draw-sim-leaks.md:196).
+  // A whole saved record is read by load(), which has no cap of 50.
   if (r.level > 50 || r.acknowledged > 50)
     throw Refusal("imported level exceeds player_importCharacter's cap of 50");
   if (r.experience > tables.experience[50])

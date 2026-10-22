@@ -39,3 +39,21 @@ Worktree `~/Projects/open-champions/worktrees/player-state`, branch `codex/playe
 - Real-character HUD elements listed above stay refused.
 
 Private game files remained read-only. This report holds aggregate counts only; no retail bytes, names or decoded content were added to tracked files.
+
+## audit-final — 2026-10-21
+
+Audit: `~/Projects/champions-re-wt/cursor-runs/audits/player-state-final.md` (verdict FIX: 0 HIGH, 1 MEDIUM, 4 LOW). No new research was started; refused paths: **0 new refusals added, 0 values refused for lack of research** (PS3-2's routes stay refused, now documented).
+
+| Finding | Resolution |
+|---|---|
+| PS3-1 MEDIUM | Fixed. `checkPlayerAlive` is refused for unknown currents only when its `which` argument (AMX param, `params + 4`) is 0, as research-menus docs/script.md:688 says (only `which == 0` calls `game_countPlayersWithHp()`). New test `test_check_alive_which_unknown_currents`: `(0)` refused and counted, `(1)` not refused. |
+| PS3-2 LOW | Documented, no behaviour change. `giveFullHealth`, `zeroPlayerMana`, `refillPlayerMana`, `givePlayerExp` read no unknown field (script.md:695-697, :700) but stay refused because the host does not track a written current as known. Comment says it is a conservative choice. |
+| PS3-3 LOW | Documented. `player_state::import` is the front-end character-import path only (`player_importCharacter` via `memcard_importScreen`, draw-sim-leaks.md:196); whole saved records go through `load()`, which has only the level-80 cap. |
+| PS3-4 LOW | Fixed. `load_player_companion` with no `.player` file now also calls `scripts_->set_player_currents_known(true)` so the host does not keep a binding to a record the controller dropped. |
+| PS3-5 LOW | Documented. The strictly-increasing check in `read_tables` is commented as a sanity check; data-tables.md 4.4 documents only the `table[80]` sentinel. It holds on the retail table (111/111). |
+
+Verification on this commit (logs `work/player-state-final-*.log`):
+- Native Release arm64 build and full CTest `-j 3`: **227/227 passed** (1217 s).
+- Godot 4.5.2 arm64 dev extension rebuilt; dev matrix `run-godot.py`: **53/53 exit 0**.
+- `FULL_TRACE {"bytes":31622,"renderer":"headless","sha256":"4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9"}`, unchanged.
+- 111-level sweep (read-only disc, counts only), scripts off and on: **111 tried / 111 loaded / 111 played** each, 230 checks passed, 0 failures; all eight slices exit 0.

@@ -376,6 +376,21 @@ void test_unknown_player_currents() {
         "campaign restore does not write unknown current fields");
 }
 
+// checkPlayerAlive reads HP only when which == 0 (script.md:688).
+void test_check_alive_which_unknown_currents() {
+  for (std::uint32_t which : {0u, 1u}) {
+    auto built = build_calls({{"start", {{"checkPlayerAlive", {static_cast<int>(which)}}}}}, {});
+    sc::Host host;
+    host.set_player_currents_known(false);
+    host.start_single_player();
+    plant(host, built);
+    host.run_start();
+    check(host.counts().unknown_player_current_refusals == (which == 0 ? 1u : 0u),
+          which == 0 ? "checkPlayerAlive(0) refused for unknown currents"
+                     : "checkPlayerAlive(1) reads no HP and is not refused");
+  }
+}
+
 // playGotItemSound reads +0xac only with two or more players (research-menus
 // docs/script.md row 61), so unknown currents refuse it only then.
 void test_got_item_sound_unknown_currents() {
@@ -966,6 +981,7 @@ int main(int argc, char **argv) {
   test_single_player();
   test_unknown_player_currents();
   test_got_item_sound_unknown_currents();
+  test_check_alive_which_unknown_currents();
   test_classified_objects();
   test_entrance_grid_and_particle();
   test_routed_commands();

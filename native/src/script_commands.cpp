@@ -274,7 +274,8 @@ namespace {
 // with its unknown currents, or write a current field. Unknown stays distinct
 // from a dead player or an empty mana pool. Sources, all research-menus
 // docs/script.md (built-in table, rows by name) and docs/player.md:
-//   checkPlayerAlive 0x1470ac  count of players with HP > 0 when which == 0
+//   checkPlayerAlive 0x1470ac  count of players with HP > 0 only when which == 0;
+//                              with which != 0 it reads no HP (script.md:688)
 //   healPlayer 0x1468ac, giveFullHealth 0x146950, planarSteel 0x1466d4
 //                              write +0xac from +0xb0
 //   zeroPlayerMana 0x142450, refillPlayerMana 0x142494   write +0xc0
@@ -282,8 +283,14 @@ namespace {
 //   savePlayer 0x141724, restorePlayer 0x141744   whole-record copy
 //   playGotItemSound 0x1464e8  reads +0xac only with two or more players
 //                              (script.md row 61 and P7); one player never does
-bool needs_player_current(const char *name, std::int32_t players) {
-  for (const char *route : {"checkPlayerAlive", "healPlayer", "giveFullHealth",
+// giveFullHealth, zeroPlayerMana, refillPlayerMana and givePlayerExp read no
+// unknown field themselves (pure writes; givePlayerExp refills only on a level
+// gained). They are still refused: the host does not track a written current
+// as known, so a later read would otherwise see a half-known pair. This is a
+// conservative choice, not a documented read.
+bool needs_player_current(const char *name, std::int32_t players, bool which_zero) {
+  if (std::strcmp(name, "checkPlayerAlive") == 0) return which_zero;
+  for (const char *route : {"healPlayer", "giveFullHealth",
                             "zeroPlayerMana", "refillPlayerMana", "givePlayerExp",
                             "planarSteel", "savePlayer", "restorePlayer"})
     if (std::strcmp(name, route) == 0) return true;
@@ -392,7 +399,9 @@ amx::NativeMap Host::command_map() {
       const bool dialog_route = dialog_cmd && dialog_attached_;
       if (!player_currents_known_ &&
           needs_player_current(kRows[i].name,
-                               static_cast<std::int32_t>(variables_->memory.word(script_items::G_NUM_PLAYERS)))) {
+                               static_cast<std::int32_t>(variables_->memory.word(script_items::G_NUM_PLAYERS)),
+                               std::strcmp(kRows[i].name, "checkPlayerAlive") == 0 &&
+                                   machine.cell(machine.params + 4) == 0)) {
         counts_.unknown_player_current_refusals += 1;
         refuse(i, machine);
         return 0;
