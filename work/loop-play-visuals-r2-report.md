@@ -1,0 +1,33 @@
+STATUS: PASS — audit PL-1..PL-5 fixed; the playthrough draws the traced class body in its static rest pose, with unresolved animation and selection state labelled.
+
+# Play visuals r2 — 2026-10-22
+
+Branch `codex/play-visuals`, starting at `b9f2ab4`; implementation commit `18fcd1e`. Research source: `t3/research-player-model` `7f13899`, `docs/spec/player-model-resources.md` and its ignored `work/player-model/resource-manifest.json`. This changes the native/Godot client only. No push or PR.
+
+## Implementation
+
+- `ChampionsArchiveInspector.player_model_resources` reads the 12 traced definition addresses in the owner-selected RTA US v2.00 executable at run time. It returns body codes, the animation lump, and all 111 clip slots in order, preserving repeats and checking the table terminator. No resource-name manifest or game bytes are tracked or exported.
+- `RealPlayer` displays the traced body VIF's rest-pose geometry through the existing bounded model reader at the constructor's scale 1.0. No ANM slot is chosen or advanced without the weapon-class idle dispatch and animation timing evidence.
+- `RealCreature.bind_named` accepts the explicit record-selected body texture rather than assuming a same-base companion. The PS2 import adapter passes through its decoded four appearance bytes, while the new-character flow currently has no such bytes: it draws the class body with a neutral material and labels that refusal. Hair/beard attachments and equipped item meshes are not drawn and are labelled when requested. The host camera frames the full body from mesh bounds.
+- The playthrough visual assertion now requires a ready player model matching the native record, a visible non-practice `ArrayMesh`, and changed actor pixels on a rendered viewport. Its `--visual-only` mode exits on this focused gate; the full journey still runs separately.
+
+## Verification
+
+- GDExtension: `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR=/Users/syndicatemike/Projects/open-champions/worktrees/integration/work/deps/godot-cpp -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`, then `cmake --build build/godot-extension --config Release --parallel 4`: pass. Godot 4.5.2 editor import with `--headless --path godot --editor --quit-after 120 --frame-delay 50`: pass.
+- arm64 native CTest: `ctest --test-dir build/native --output-on-failure -j 3 -R '^(player-state|ps2-save|model-texture-bind|skinning-positions)$'`: **4/4 pass**; all four executable files identify as Mach-O arm64.
+- Focused real-data resource acceptance: Godot `--headless --path godot --script res://tests/player_model_real.gd -- --game-folder=<owner disc>`: both documented selection archives, 12 indices each, with an authored skin-zero appearance: **24/24 class bodies drawn and textured**. This tests the presentation path, not original runtime appearance selection.
+- Godot dev matrix: `python3 work/play-visuals/r2-run-godot-matrix-final.py`: **54/54 pass**. Headless synthetic Full combat `FULL_TRACE`: **36,402 bytes**, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged from r1.
+- Scripts-on 111-level sweep: `zsh work/play-visuals/r2-run-sweep-final.sh`: **111 tried / 111 loaded / 111 played**, 230 checks passed, zero failures and zero refusals.
+- Focused playthrough visual checks: Godot `--script res://tests/loop_playthrough.gd -- --game-folder=<owner disc> --out=<ignored work path> --visual-only` with `--headless` and then rendered: both exit 0 on the final code. Headless class mesh gate passes without a pixel assertion; rendered class mesh and actor-pixel gate passes with 2,042 changed sampled pixels. The rendered image under ignored `work/play-visuals/r2-visual-verified/rendered/03-level.png` was inspected: full humanoid body visible in the level, not a sphere. Images, saves, and logs remain only under ignored `work/`.
+- Full journey: `python3 tools/run_loop_playthrough.py --godot <Godot 4.5.2> --game-folder <owner disc> --out work/play-visuals/r2-playthrough/final3` wrote both reports; rendered player visual is `class_mesh` with 2,042 changed sampled pixels and 11 screenshots, and dialog visual is `drawn`. Both variants exit 1 because the separate journey blockers below remain. The owner disc file count was **994 before and 994 after**.
+
+## Remaining limits
+
+The new-character flow does not carry +0x20..+0x23 appearance bytes, so its body texture, optional hair/beard, and item equipment are not asserted as retail-correct. Imported appearance choices are session-local and not yet preserved in the native companion save. The selection flag at 0x506040, original initial idle slot, animation timing, later action-to-slot dispatch, attach-part draw path, and equipped-item-to-mesh path need their own integration evidence. The full playthrough still reaches separate combat, pause Save, load/carry, and level-transition refusals; its overall exit remains 1 even when the player visual passes. The read-only disc had 994 files before and after the run.
+
+## Audit fixes
+
+- **PL-1/PL-2:** Removed the unsupported slot-73 idle choice and `ready_ticks` playback. The native model reader now supplies only static VIF rest-pose geometry; no animation clip or timing is inferred. The status label says “rest pose” and refuses original idle animation.
+- **PL-3/PL-4:** The single-player label identifies the unknown 0x506040 selection flag and calls `select.lmp` a host preview choice. Camera focus, distance, and direction are explicitly labelled host-viewer constants.
+- **PL-5:** Imported appearance is keyed to the session record revision plus name, class, and model. It clears on record replacement, session reset, and successful game-folder switch; a same-identity replacement cannot reuse an old skin. A native-authored synthetic import lifetime probe passed all 9 checks.
+- **Verification after fixes:** `ctest --test-dir build/native --output-on-failure -j 3 -R '^(player-state|ps2-save|model-texture-bind|skinning-positions)$'` passed **4/4** on Mach-O arm64 binaries. GDExtension Release build and Godot 4.5.2 editor import passed. The local Godot dev matrix passed **54/54**; `FULL_TRACE` remained **36,402 bytes**, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. Scripts-on level sweep remained **111/111 loaded and played**, 230 checks passed, zero failures/refusals. Owner-folder class-body acceptance remained **24/24 drawn and textured** with authored skin-zero appearance. Headless and rendered `--visual-only` checks both exited 0; rendered actor pixel check counted **2,046** changed pixels. The rendered screenshot was inspected and shows the full static humanoid body. Disc file count remained **994**.

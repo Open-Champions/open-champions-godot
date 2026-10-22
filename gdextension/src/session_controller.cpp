@@ -281,6 +281,7 @@ Dictionary ChampionsSessionController::present_observation(
   if (player_) {
     const auto p = observed_player();
     result["player_ready"] = true;
+    result["player_record_revision"] = static_cast<int64_t>(player_record_revision_);
     // The character record is not linked to the simulated player: the original
     // mirrors record HP into the object inside Player_run (research-menus
     // docs/player.md), and native play has no such mirror. So hp, max_hp, mana
@@ -727,6 +728,7 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
     }
     player_ = std::move(next);
+    ++player_record_revision_;
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true;
     return result;
@@ -767,6 +769,7 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const String dest = path + String(".player");
     if (!FileAccess::file_exists(dest)) {
       player_.reset();
+      ++player_record_revision_;
       if (scripts_) scripts_->set_player_currents_known(true); // no created record is held any more
       Dictionary result = observation(); result["ok"] = true; result["loaded"] = false; return result;
     }
@@ -778,6 +781,7 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
     auto next = rta::player_state::load(bytes, *player_tables_);
     player_ = std::move(next);
+    ++player_record_revision_;
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true; result["loaded"] = true; return result;
   } catch (const std::exception &e) { return failure(e); }

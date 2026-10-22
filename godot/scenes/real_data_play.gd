@@ -10,6 +10,7 @@ const TextHud = preload("res://ui/text_hud.gd")
 var real: Node
 var real_player: RefCounted
 var imported_appearance: Array = []
+var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
 var text_hud: Control
 var text_sources := {}
@@ -104,6 +105,7 @@ func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
 		status_label.text = "Game folder refused: " + real.last_error
 		return false
+	_clear_imported_appearance()
 	real_player.clear()
 	super.restore_default_actor()
 	real_level_choice.clear()
@@ -130,6 +132,11 @@ func open_game_folder(path: String) -> bool:
 		npc_dialog.set_font(real.dialog_font())
 		npc_dialog.set_box(real.dialog_box())
 	return true
+
+func reset_session() -> void:
+	_clear_imported_appearance()
+	super.reset_session()
+	if real != null and real.current >= 0: _install_player_model()
 
 # Loose LMPs that are not a level name; each is only an explicit candidate.
 func creature_archives() -> PackedStringArray:
@@ -160,8 +167,8 @@ func restore_default_actor() -> void:
 	super.restore_default_actor()
 	if real != null and real.current >= 0: _install_player_model()
 
-# Host camera framing follows the actual mesh bounds. The original level
-# camera is still unported; this only keeps the traced body inside the view.
+# Host-viewer camera constants below frame the mesh bounds. The original
+# level camera is unported; these values are presentation choices only.
 func _apply_presentation() -> void:
 	super._apply_presentation()
 	_frame_player_camera()
@@ -170,23 +177,35 @@ func _frame_player_camera() -> void:
 	if real_player == null or not real_player.body_drawn or actor_visual.mesh == null or camera == null: return
 	var height: float = actor_visual.mesh.get_aabb().size.y
 	if height <= 0.0: return
-	var focus := actor.position + Vector3(0, height * 0.5, 0)
+	var focus := actor.position + Vector3(0, height * 0.5, 0) # Host-viewer focus.
 	var half_fov := deg_to_rad(camera.fov * 0.5)
-	var distance := maxf(120.0, height * 0.7 / tan(half_fov))
-	camera.position = focus + Vector3(56, 70, 80).normalized() * distance
+	var distance := maxf(120.0, height * 0.7 / tan(half_fov)) # Host-viewer distance.
+	camera.position = focus + Vector3(56, 70, 80).normalized() * distance # Host-viewer direction.
 	camera.look_at(focus, Vector3.UP)
+
+func _clear_imported_appearance() -> void:
+	imported_appearance = []
+	imported_record = {}
+
+func _imported_record_matches(record: Dictionary) -> bool:
+	return not imported_record.is_empty() and record.get("player_ready", false) \
+		and int(record.get("player_record_revision", -1)) == int(imported_record.revision) \
+		and str(record.get("name", "")) == str(imported_record.name) \
+		and int(record.get("player_class", -1)) == int(imported_record.class_index) \
+		and int(record.get("player_model_index", -1)) == int(imported_record.model_index)
 
 func _install_player_model() -> void:
 	if real == null or real.current < 0 or real_player == null: return
 	var record: Dictionary = controller.get_observation()
 	if not record.get("player_ready", false):
+		_clear_imported_appearance()
 		asset_label.text = "Practice figure · no player record selected"
 		return
 	var model := int(record.get("player_model_index", -1))
 	var player_count := int(frontend.view.get("num_players", 1)) if frontend != null else 1
-	var appearance := imported_appearance
-	if frontend != null and frontend.view.get("character", {}).get("ready", false) and not frontend.view.character.get("imported", false):
-		appearance = []
+	if not imported_record.is_empty() and not _imported_record_matches(record):
+		_clear_imported_appearance()
+	var appearance := imported_appearance if _imported_record_matches(record) else []
 	if real_player.install(real, actor_visual, inspector, model, appearance, player_count,
 			int(record.get("player_class", -1))):
 		displayed_asset_name = "Class body model %d" % model
@@ -198,7 +217,15 @@ func _install_player_model() -> void:
 func _show_ps2_import(result: Dictionary) -> Dictionary:
 	var accepted: Dictionary = super._show_ps2_import(result)
 	if accepted.get("ok", false):
-		imported_appearance = accepted.get("appearance", [])
+		var record: Dictionary = controller.get_observation()
+		_clear_imported_appearance()
+		if record.get("player_ready", false) and str(record.get("name", "")) == str(accepted.get("name", "")) \
+				and int(record.get("player_class", -1)) == int(accepted.get("class_index", -1)) \
+				and int(record.get("player_model_index", -1)) == int(accepted.get("model_index", -1)):
+			imported_appearance = accepted.get("appearance", []).duplicate()
+			imported_record = {"revision": int(record.get("player_record_revision", -1)),
+				"name": str(record.name), "class_index": int(record.player_class),
+				"model_index": int(record.player_model_index)}
 		if real != null and real.current >= 0: _install_player_model()
 	return accepted
 
@@ -265,13 +292,13 @@ func start_play() -> void:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
+	var appearance_expired := not imported_record.is_empty() and not _imported_record_matches(raw_observation)
+	if appearance_expired: _clear_imported_appearance()
 	if real.current >= 0 and raw_observation.get("player_ready", false):
-		if real_player.model_index != int(raw_observation.get("player_model_index", -1)):
+		if appearance_expired or real_player.model_index != int(raw_observation.get("player_model_index", -1)):
 			_install_player_model()
-		if real_player.body_drawn:
-			real_player.observe(int(raw_observation.get("ready_ticks", 0)))
-			if asset_label.text != real_player.status: asset_label.text = real_player.status
-	# The preview rebuilds its mesh when it samples a new tick.
+		if real_player.body_drawn and asset_label.text != real_player.status: asset_label.text = real_player.status
+	# Creature preview playback remains separate from the static player rest pose.
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	_present_npc_dialog()

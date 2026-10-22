@@ -54,6 +54,8 @@ class ChampionsSessionController : public godot::RefCounted {
   void remember_script_fade();
   std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
   std::optional<champions::simulation::rta::player_state::Record> player_;
+  // Presentation identity: advances whenever a session player record is replaced.
+  std::uint64_t player_record_revision_ = 0;
   void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
                               const champions::simulation::rta::player_state::Record &);
   champions::simulation::rta::player_state::Record observed_player() const;

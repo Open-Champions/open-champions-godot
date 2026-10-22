@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Private opt-in acceptance: twelve documented class bodies in both selection
-# archives, one authored skin-zero appearance, and one mapped clip. Counts only.
+# archives, one authored skin-zero appearance, and the body rest pose. Counts only.
 const RealData = preload("res://real_data/real_data.gd")
 const RealPlayer = preload("res://real_data/real_player.gd")
 
