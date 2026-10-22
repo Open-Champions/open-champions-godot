@@ -3,6 +3,7 @@
 // 6841b8a, docs/script-session.md sections 3-5).
 #include "champions/monsters_1.hpp"
 #include "champions/script_commands.hpp"
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -13,10 +14,10 @@ namespace M1 = monsters_1;
 // GameObject_ctor 0x14cb10 (research docs/spec/object-system.md 2.2).
 constexpr std::uint32_t VT_GAMEOBJECT = 0x5122a8;
 constexpr std::uint32_t RADIUS_24 = 0x41c00000, HEIGHT_72 = 0x42900000;
-// ScriptGenerator_ctor 0x265f54 (disassembly at research items-gaps ecf9742
-// 0x265f54-0x265fbc): GameObject_ctor(this, position, 0, props), then table
-// 0x514e60 at +0x48, flags |= 9 and the facing halfword at +0x38. 'hide'
-// (string 0x5321a8) is read by GameObject_ctor.
+// ScriptGenerator_ctor 0x265f54: research-items-gaps ecf9742
+// docs/monsters-2.md:7660-7667 and symbols/monsters.tsv:262 pin table
+// 0x514e60, size 0x4c, facing and flags |= 9. GameObject_ctor's 'hide'
+// lookup (string 0x5321a8) is in docs/spec/hide-monster.md section 5.
 constexpr std::uint32_t VT_SCRIPT_GENERATOR = 0x514e60, KEY_HIDE = 0x5321a8;
 // Creature serial counter (zeroed at a level change, docs/issues/arena-entry.md
 // timeline row 7; Creature_ctor takes the next one).
@@ -175,7 +176,6 @@ void Host::receive_launch(const net_launch::Record &record0) {
   const auto got = net_launch::launch_receive(record0);
   auto &memory = variables_->memory;
   memory.word(script_items::G_DIFFICULTY, got.difficulty);
-  campaign_->set_difficulty(static_cast<std::int32_t>(got.difficulty));
   memory.byte(0x4f8408, got.kill_limit);
   memory.word(0x4f711c, got.pvp_mode_a ? 1u : 0u);
   memory.word(0x4f7120, got.pvp_mode_b ? 1u : 0u);
@@ -222,8 +222,21 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
     }
     if (result == Build::NotBuilt)
       stub(record, address, props, outcome.size);
-    // The factory row's answer for hideMonster / showMonster (creature flag).
-    stub_info_[address] = {level_factory::creature_kind(outcome), outcome.constructor()};
+    // Creature_ctor also applies hide/wait at load (hide-monster.md section
+    // 3.4). A stub has not run that constructor; keep hide/show refused if
+    // either property is present, including an unparsed value.
+    auto creature = level_factory::creature_kind(outcome);
+    bool load_property_refused = false;
+    if (creature == level_factory::Creature::Yes) {
+      load_property_refused = std::any_of(props.begin(), props.end(), [](const std::string &p) {
+        return p.rfind("hide=", 0) == 0 || p.rfind("wait=", 0) == 0;
+      });
+      if (load_property_refused) {
+        creature = level_factory::Creature::Unknown;
+        counts_.build_refusals["creature stub with hide/wait load property"] += 1;
+      }
+    }
+    stub_info_[address] = {creature, outcome.constructor(), load_property_refused};
     counts_.objects_unbuilt += 1;
     counts_.load_draws_unmodelled += 1;
     counts_.unbuilt_constructors[outcome.constructor()] += 1;

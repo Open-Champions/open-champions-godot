@@ -1,6 +1,5 @@
-// The ground item (ItemProp_ctor2 at launch 0) and its callers' pool, against
-// tools/ref_item_drops.py (t3/research-items-gaps ecf9742, docs/spec/item-drops.md):
-// 400 vectors of the whole 0x190-byte block, plus the contract's statements.
+// Ground-item refusal until resource and bounds services are available.
+// The 400 authored cases cover stale records, alignment and valid records.
 #include "champions/script_builtins.hpp"
 #include "champions/script_items.hpp"
 #include <fstream>
@@ -82,31 +81,26 @@ int main(int argc, char **argv) {
     const std::array<std::uint32_t, 3> pos{std::uint32_t(std::stoul(p0, nullptr, 16)),
                                            std::uint32_t(std::stoul(p1, nullptr, 16)),
                                            std::uint32_t(std::stoul(p2, nullptr, 16))};
-    s.call("ItemProp_ctor2", {at, pos});
-    check(memory->word(si::G_RAND_SEED) == std::uint32_t(std::stoul(after, nullptr, 16)), "shared seed: " + seed);
-    check(v.draws == 1, "exactly one shared draw");
-    const auto expected = bytes_of(image);
-    check(expected.size() == 0x190, "image size");
-    for (std::uint32_t k = 0; k < expected.size(); ++k) {
-      if (memory->u8(at + k) != expected[k]) {
-        check(false, "block byte +0x" + std::to_string(k) + " of case " + seed + " " + block);
-        break;
-      }
-      ++checks;
-    }
+    check(refuses(s, "ItemProp_ctor2", {at, pos}), "valid record refuses without resource and bounds services");
+    check(memory->word(si::G_RAND_SEED) == start && v.draws == 0,
+          "refused ground item draws no shared seed");
+    check(v.world->objects.find(at) == v.world->objects.end() && s.counts.ground_items == 0,
+          "refused ground item publishes no object");
     ++grounds;
   }
   check(grounds == 264 && faults == 136, "vector counts");
 
-  // pool_new(0x190) is the world's pool, and a full pool returns 0 (the item is lost).
+  // The pool model remains traced, but the item service refuses before
+  // allocation because a complete ItemProp cannot be built.
   {
     auto memory = std::make_shared<b::Memory>();
     b::Variables v(memory);
     si::Service s(v);
+    check(refuses(s, "pool_new", {400u}), "ground item refuses before pool allocation");
     std::uint32_t first = 0, last = 0;
     unsigned got = 0;
     for (;; ++got) {
-      const auto block = std::get<std::uint32_t>(s.call("pool_new", {400u}));
+      const auto block = v.world->pool.allocate(400u);
       if (!block)
         break;
       if (!first)
@@ -124,7 +118,7 @@ int main(int argc, char **argv) {
     check(refuses(s, "ItemProp_ctor2", {first, std::array<std::uint32_t, 3>{0, 0, 0}}), "an empty record refuses");
     check(memory->word(si::G_RAND_SEED) == 7 && s.counts.ground_items == 0, "and draws nothing");
   }
-  // The registered object: a ground item is an ItemProp in the object world, linked by name nowhere.
+  // Even a synthetically valid record cannot publish an incomplete ItemProp.
   {
     auto memory = std::make_shared<b::Memory>();
     b::Variables v(memory);
@@ -132,11 +126,11 @@ int main(int argc, char **argv) {
     std::vector<std::uint8_t> item(0x48, 0);
     item[0] = 0x00, item[1] = 0x10, item[2] = 0x10;
     load_record(s, item);
-    const auto block = std::get<std::uint32_t>(s.call("pool_new", {400u}));
-    s.call("ItemProp_ctor2", {block, std::array<std::uint32_t, 3>{0, 0, 0}});
-    check(s.counts.ground_items == 1 && v.obj_at(block) != nullptr, "the ground item is an object");
-    check(memory->word(block + 0x48) == 0x511c38u, "its table is ItemProp's");
-    check(memory->word(block + 0xc) == 0x102009u, "flags (0x1809 | 0x102000) & ~0x1800");
+    const auto block = v.world->pool.allocate(400u);
+    check(refuses(s, "ItemProp_ctor2", {block, std::array<std::uint32_t, 3>{0, 0, 0}}),
+          "ground item refuses with unbound resources and bounds");
+    check(s.counts.ground_items == 0 && v.world->objects.find(block) == v.world->objects.end(),
+          "no incomplete ItemProp is registered");
   }
   if (failed) {
     std::cerr << failed << " of " << checks << " checks failed\n";

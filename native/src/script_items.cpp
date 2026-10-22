@@ -545,21 +545,6 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
     if (rng.draws)
       memory.word(G_RAND_SEED, rng.seed);
     scratch_ = item.pack(scratch_);
-    // givePlayerRandom's special-level branch stores bytes +0x20/+0x21 of its record
-    // right after this parse (0x14601c-0x146098, docs/spec/item-drops.md 2). The
-    // binder's call sequence is pinned to the research's vectors, so the service
-    // applies the stores when the call is that parse: variant 0, no presets, the
-    // level name holds the special fragment and the text is the one for the
-    // current difficulty 1..3.
-    if (variant == 0 && use_presets == 0) {
-      const auto difficulty = items::s32(memory.word(G_DIFFICULTY));
-      if (difficulty >= 1 && difficulty <= 3 && memory.cstr(0x5312b8 + 0x50 * std::uint32_t(difficulty - 1)) == text &&
-          memory.cstr(0x41b721).find(memory.cstr(0x5312a8)) != std::string::npos) {
-        constexpr std::uint8_t special[3][2] = {{0x12, 0x33}, {0x33, 0x34}, {0x24, 0x35}};
-        scratch_[0x20] = special[difficulty - 1][0];
-        scratch_[0x21] = special[difficulty - 1][1];
-      }
-    }
     counts.parsed += 1;
     return item.definition ? item.definition->addr : 0u;
   }
@@ -629,15 +614,14 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
     const auto size = word_arg(args, 0, "pool");
     if (delegates.count(name))
       return static_cast<std::uint32_t>(delegate(name, {size}));
-    // pool_new(0x190) at every ground-item caller. A full pool returns 0 and the
-    // callers lose the item.
+    // Every native item caller requests 0x190 for a ground ItemProp. Its
+    // resource and bounds services are unbound, so refuse before consuming a
+    // pool block. The pool model itself is tested independently.
+    if (size == 0x190)
+      throw Refused("ground item: resource and model-bounds services are unbound");
     if (!variables_.world)
       throw Refused("pool_new: no object world");
-    try {
-      return variables_.world->pool.allocate(size);
-    } catch (const std::exception &) {
-      return 0u;
-    }
+    return variables_.world->pool.allocate(size); // full pool returns 0; corruption still throws
   }
   if (name == "ItemProp_ctor2") {
     const auto block = word_arg(args, 0, "ground item");
@@ -655,8 +639,9 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
   // blanks its stack record before its first draw; nothing reads the record
   // between that and this call, which is the first one after the draw.
   if (name == "level_monsterLevelTimesDifficulty") {
-    blank_record();
-    return static_cast<std::uint32_t>(random_game().level_times_difficulty());
+    // givePlayerRandom's stack record is unknown after ten failed generations
+    // (item-drops.md section 6). No native caller may run the handler.
+    throw Refused("givePlayerRandom: unmodelled stack record after generator failure");
   }
   if (name == "stack_record_store") {
     const auto offset = word_arg(args, 0, "record"), value = word_arg(args, 1, "record");
@@ -720,70 +705,12 @@ items::Game Service::random_game() const {
   return game;
 }
 
-// ItemProp_ctor2 0x1590ec at launch 0, the only launch every caller passes
-// (docs/spec/item-drops.md 1). GameObject_ctor makes ONE shared draw and stores
-// it as the prop's own generator +0x44; Prop_ctorNamedLaunch makes ONE own draw
-// for the facing +0x38; Prop_launch makes none at launch 0. The model, texture,
-// resource pointers and bounds (res_find, model_getBounds) are not part of this
-// state and are not written.
-void Service::ground_item(std::uint32_t block, const std::array<std::uint32_t, 3> &pos) {
-  if (!variables_.world)
-    throw Refused("ItemProp_ctor2: no object world");
-  // item_getResourceIndex reads definition +0x34: definition 0 reads address 0x34.
-  if (!scratch_definition())
-    throw Refused("ItemProp_ctor2: the record holds no definition (stale record)");
-  // The record is copied with ld/sd: the item and block + 0x148 must be 8-aligned.
-  if ((block + 0x148) & 7u)
-    throw Refused("ItemProp_ctor2: the block is not 8-aligned");
-  auto &memory = variables_.memory;
-  auto object = variables_.new_object({}, 0, pos, 0, "P8ItemProp", nullptr, block, GROUND_ITEM_BLOCK);
-  // GameObject_ctor 0x14cb10 with no definition and no properties.
-  for (std::uint32_t off : {0u, 4u, 8u, 0xcu, 0x34u, 0x24u, 0x2cu})
-    memory.word(block + off, 0);
-  memory.word(block + 0x1c, 0x41c00000u); // radius 24.0, then 4.0 in Prop_launch
-  memory.word(block + 0x20, 0x42900000u); // height 72.0
-  memory.byte(block + 0x28, 0x19);
-  memory.byte(block + 0x29, 0x49);
-  for (std::uint32_t k = 0; k < 3; ++k)
-    memory.word(block + 0x10 + 4 * k, pos[k]);
-  const auto shared = variables_.random_draw();
-  memory.word(block + 0x44, shared);
-  // Prop_ctorNamedLaunch 0x153e54: the part mask is -1 (all 64 bits), the facing
-  // is one draw of the prop's own generator.
-  memory.w64(block + 0xe8, ~std::uint64_t{0});
-  const auto own = memory.word(block + 0x44) * 0x19660du + 0x3c6ef35fu;
-  memory.word(block + 0x44, own);
-  memory.byte(block + 0x38, static_cast<std::uint8_t>((own >> 16) & 0xff));
-  memory.byte(block + 0x39, static_cast<std::uint8_t>((own >> 24) & 0xff));
-  memory.byte(block + 0x10c, 0);
-  memory.byte(block + 0x10d, 0);
-  for (std::uint32_t off : {0x30u, 0x100u, 0xfcu})
-    memory.word(block + off, 0);
-  // Prop_launch 0x1541a0, launch 0: flags |= 0x1809, radius 4.0, life 180.
-  memory.word(block + 0xc, memory.word(block + 0xc) | 0x1809u);
-  memory.word(block + 0x1c, 0x40800000u);
-  memory.byte(block + 0x10e, 0xb4);
-  memory.byte(block + 0x10f, 0);
-  // ItemProp_ctor2: table 0x511c38, the item record at +0x148, the flags.
-  memory.word(block + 0x48, 0x511c38u);
-  for (std::uint32_t k = 0; k < ITEM_SIZE; ++k)
-    memory.byte(block + 0x148 + k, scratch_[k]);
-  auto flags = (memory.word(block + 0xc) | 0x102000u) & ~0x1800u;
-  if (memory.u64(block + 0x150) & (std::uint64_t{0x8000} << 24))
-    flags &= ~0x3000u;
-  memory.word(block + 0xc, flags);
-  static_cast<objects::GameObject &>(*object).flags = flags;
-  // obj_updateGridCell (Prop_launch and again here): the object ends at the front
-  // of its cell's list.
-  variables_.world->update_grid_cell(*object);
-  // The matrix +0x110 = mat34_setPosRotZ(position, s16(facing + 0x4000)).
-  const auto facing = static_cast<std::uint32_t>(memory.u16(block + 0x38));
-  const auto angle = static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int16_t>((facing + 0x4000u) & 0xffffu)));
-  const auto matrix = mat34_set_pos_rot_z({memory.word(block + 0x10), memory.word(block + 0x14), memory.word(block + 0x18)}, angle);
-  for (std::uint32_t k = 0; k < 12; ++k)
-    memory.word(block + 0x110 + 4 * k, matrix[k]);
-  variables_.world->run_every_frame(*object);
-  counts.ground_items += 1;
+// The pinned constructor writes resource names, lookup pointers and model bounds
+// before it can publish an ItemProp (item-drops.md sections 1.2-1.3). This host
+// has no res_find/model_getBounds service, so it refuses before registering an
+// incomplete object or drawing from the shared seed.
+void Service::ground_item(std::uint32_t, const std::array<std::uint32_t, 3> &) {
+  throw Refused("ItemProp_ctor2: resource and model-bounds services are unbound");
 }
 
 std::uint32_t Service::generator_spawn(std::uint32_t generator, std::uint32_t type_name_at, const std::string &type_name) {

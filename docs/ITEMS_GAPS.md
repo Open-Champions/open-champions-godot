@@ -1,4 +1,4 @@
-# Item round, gaps closed
+# Item round, bounded gaps
 
 Research: `t3/research-items-gaps` at `ecf9742` (`docs/spec/items-gaps.md`,
 `docs/spec/item-drops.md`, `docs/spec/hide-monster.md`,
@@ -11,8 +11,8 @@ stays refused.
 |---|---|---|
 | 1. `0x4d8ae8` has no writer | `script_items::recalc_load_limits` | `script_items_tests.cpp` |
 | 2. the launch host bit and `+0xf4` | `net_launch.hpp`, `Host::receive_launch` | `net_launch_tests.cpp`, 1,612 vectors |
-| 3. the ground item (`ItemProp_ctor2`) | `Service::ground_item`, `pool_new` | `item_drops_tests.cpp`, 400 vectors |
-| 4. `givePlayerRandom` | binder handler + `Service` callees | `script_items_tests.cpp`, 120 vectors |
+| 3. the ground item (`ItemProp_ctor2`) | refused until resource and bounds services are bound; `pool_new` remains traced | `item_drops_tests.cpp`, 400 refusal cases |
+| 4. `givePlayerRandom` | refused before its first draw | `script_commands_tests.cpp` |
 | 5. generators | `Host::build_generator`, `Host::create_object` | `script_commands_tests.cpp` |
 | 6. `hideMonster` / `showMonster` on stubs | `creature_class_table.inc` | `level_factory_tests.cpp`, `script_commands_tests.cpp` |
 | 7. non-literal `generateMonster` names | no special case; see below | `script_commands_tests.cpp` |
@@ -43,45 +43,28 @@ The vectors come from `tools/generate_net_launch_vectors.py`, which runs
 
 ## 3. The ground item
 
-`pool_new(0x190)` takes a block from the world's pool (the 0x500 class of 512,
-spilling into the 3000-byte class of 32, then 0, which loses the item).
-`ItemProp_ctor2` at launch 0 (every caller) makes **one shared-seed draw**, which
-seeds the prop's own generator `+0x44`, and **one own draw**, the facing `+0x38`.
-It writes the block as `item-drops.md` section 1 lists: the empty prop fields, the
-table `0x511c38`, the item record at `+0x148`, flags `(f | 0x1809 | 0x102000) &
-~0x1800` (and `& ~0x3000` for item flag bit 39), radius 4.0, life 180, the matrix
-at `+0x110`, and the object registered in the world.
-
-Not written, because they are not simulation state: the model and texture names,
-the resource pointers (`res_find`) and the bounds centre (`model_getBounds`).
-A record with definition 0 (a stale record) and a block that is not 8-aligned
-refuse; the original reads address 0x34 or faults.
-
-`tools/generate_item_drops_vectors.py` runs `ref_item_drops.Ground` and stores the
-whole 0x190-byte block (264 cases; 136 refusals). The test compares every byte.
+The underlying `pool_new(0x190)` contract takes a block from the world's pool
+(the 0x500 class of 512, spilling into the 3000-byte class of 32, then 0).
+`item-drops.md` section 1.2 and `ref_item_drops.py:186-206` require model and
+texture names, `res_find` pointers and `model_getBounds` centre/height fields
+before the object is complete. This host has no bound source for those results.
+The item service therefore refuses at `pool_new` before allocating or drawing;
+direct `ItemProp_ctor2` calls also refuse before registering an object. The old
+zero-stub vectors did not test those fields: zero was
+both the generator's answer and the unwritten block's value. The authored 400
+cases now check that valid and faulting records publish no incomplete object.
+The reference's one shared and one own draw are documented, not claimed to run.
 
 ## 4. `givePlayerRandom`
 
-The binder already composed the handler. This round makes it run:
-
-- the record is blanked as the handler does it (on the first call after the draw);
-- the special-level difficulty items set bytes `+0x20/+0x21`;
-- `item_generateWithAffixes` is the native generator, with the weapon multipliers
-  (7) and loot quality rows (12) read from the image;
-- a record whose definition is 0 (the generator failed 10 times) refuses at the
-  give and at the drop;
-- the ground item is the one of section 3.
-
-`tools/generate_give_random_vectors.py` runs `ref_item_drops.RandomGiver` on the
-authored synthetic world of the first item round plus authored prefix and suffix
-rows: 120 cases, 100 completed (54 ground drops, 66 special-level items), 20
-stale-record faults. The test compares the result, the call log and every byte,
-including the shared seed and the ground blocks.
-
-The command stays gated in the host: it refuses until an executable is set and
-the session binds the level name (`Host::bind_level_name`) and the monster level
-(`Host::bind_monster_level`). The play session binds neither yet. The research
-found 0 shipped calls.
+The host refuses this command before its first random draw. `item-drops.md`
+section 6 explicitly leaves the handler's stack record `+0x00..+0x0f`
+unknown after ten failed generations. The service's old scratch record could
+retain an unrelated earlier definition. Its special-level byte store was also
+over-broad: `item_parseDescriptor` is shared by other give commands, while the
+research puts that store only in `givePlayerRandom` (`item-drops.md` section 2).
+That store is removed. The 120 authored reference vectors remain research
+fixtures, not executable native acceptance. The research found 0 shipped calls.
 
 ## 5. Generators and `generateMonster`
 
@@ -89,9 +72,9 @@ found 0 shipped calls.
   constructor `0x265f54` is built as the 0x4c-byte base object: `GameObject_ctor`
   (one shared draw, its own generator `+0x44`), table `0x514e60`, flags `|= 9`, the
   facing at `+0x38`. The property-list word `+0x2c` is the host's identity for the
-  list. (The constructor body is read from the pinned research repository's
-  disassembly, `0x265f54-0x265fbc`; `hide-monster.md` 4.1 and 5 give the class and
-  the 0x4c size.) A `hide` property would move it off the grid, so that record
+  list. Pinned `docs/monsters-2.md:7660-7667` states the constructor's table,
+  size, facing and flags; `symbols/monsters.tsv:262` pins the table and size.
+  A `hide` property would move it off the grid, so that record
   stays a stub.
 - **Spawn.** `ScriptGenerator_spawn` (already ported) calls `world_createObject`.
   The host answers it from the factory row and a ported constructor chain with
@@ -117,9 +100,9 @@ test string and one digit, nothing else. 201 object-building rows: 97 creature,
 A stub of a decided row runs both commands: the off-grid list with front
 insertion, flag `0x8000`, and, for a creature only, bit 3 of `+0x231`, keeping the
 other bits. The stub's flag word never gains `0x20` (so every other command that
-reads it still refuses). An undecided row stays refused. Not done: a stub of a
-creature row that has the `hide` property is not moved off the grid at load as
-`Creature_ctor` does; the first hide or show relinks it either way.
+reads it still refuses). An undecided row stays refused. A creature stub with
+`hide=` or `wait=` also refuses hide/show: `Creature_ctor` applies those
+properties at load (`hide-monster.md` section 3.4), but this stub has not run it.
 
 ## 7. Non-literal names
 
@@ -135,4 +118,7 @@ constructors; only the ported ones spawn.
 - classes whose constructors are not ported (spawn);
 - the Skeleton rise and the Skeleton and AntQueen states;
 - undecided factory rows for hide and show;
-- `givePlayerRandom` without a bound level name, monster level and executable.
+- `givePlayerRandom`, including with bound inputs (unknown stale stack record);
+- `ItemProp_ctor2` without resource and bounds services;
+- `bind_level_name` at 0x41b721 (allocation capacity unpinned);
+- hide/show on a creature stub with `hide=` or `wait=` load properties.

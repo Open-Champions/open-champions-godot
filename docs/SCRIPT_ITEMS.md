@@ -46,9 +46,9 @@ In the research's order of priority:
      The item is lost, and `Service::counts.lost` counts it.
    - **Equip after a −1:** the handler would equip the address 0x48 bytes
      before the bag. That path **refuses**.
-   - **Does not fit:** the ground item: `pool_new` takes a block from the
-     world's pool and `ItemProp_ctor2` builds it with one shared and one own
-     draw ([ITEMS_GAPS.md](ITEMS_GAPS.md) section 3).
+   - **Does not fit:** the ground-item path refuses before `pool_new` takes a
+     block. `ItemProp_ctor2` needs unbound resource names, pointers and model
+     bounds ([ITEMS_GAPS.md](ITEMS_GAPS.md) section 3).
 5. **`game_scanCm1Vars`.** `scan_cm1_vars(0, …, word)` returns the word at
    `0x4f7110`, which the host starts at the image's −1. With any other
    argument it scans this machine's profile names, and
@@ -90,14 +90,16 @@ the count weighs 1.0 in `recalc_load`.
 
 ## What stays refused
 
-The item-round gaps are closed by [ITEMS_GAPS.md](ITEMS_GAPS.md) (research
-`t3/research-items-gaps` `ecf9742`). What is still refused:
+The bounded item-round paths are in [ITEMS_GAPS.md](ITEMS_GAPS.md) (research
+`t3/research-items-gaps` `ecf9742`). What remains refused:
 
 | Command or path | Why |
 |---|---|
 | `generateMonster` for a class whose constructor chain is not ported | The factory row is decided, but only five creature constructors are ported. Any other row refuses before it takes a pool block. |
 | `hideMonster` / `showMonster` on a stub whose factory row the research probe did not decide | 4 rows are undecided; no shipped hide or show target is one. |
-| `givePlayerRandom` until the session binds the level name, the monster level and the executable | None is bound yet. 0 shipped calls. A stale record (the generator failed 10 times) refuses. |
+| `givePlayerRandom` | The record after ten failed generations is unknown in pinned research, so the host refuses before its first draw even if other inputs are bound. 0 shipped calls. |
+| Ground `ItemProp_ctor2` | Resource names, lookup pointers and model bounds are unbound; the host refuses before allocating a pool block. |
+| `hideMonster` / `showMonster` on a creature stub with `hide=` or `wait=` | Its constructor's load-time effects have not run. |
 | The Skeleton rise; the AntQueen and Skeleton states in the arena builder | combat-ctors keeps them refused. |
 | Weapon equips that run `*weaponEquipNotify` / `*bowEquipNotify` | They run a script inside `inventory_equipItem`, which is not composed here. `script_runByName` refuses. |
 | `dropItem`, `selectDropItem` | Not in this contract. |
@@ -126,7 +128,7 @@ The combat world's `combat_stats::recalc_stats` is the session's.
 - **`generateMonster` reads its generators' type names.** It stays on the stub-read
   list, but every `ScriptGenerator` record is now built ([ITEMS_GAPS.md](ITEMS_GAPS.md)
   section 5), so only a generator whose build refused is a stub that blocks it.
-- **A refusal part-way** (a ground item, an equip after −1, the Skeleton rise)
+- **A refusal part-way** (an equip after −1, the Skeleton rise)
   is counted as a refusal and stops the entry. What ran before it stays.
 
 `Host::items()` exposes the service.

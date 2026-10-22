@@ -369,6 +369,7 @@ bool Host::touches_stub(std::size_t index, amx::Machine &machine) {
       char at[32];
       std::snprintf(at, sizeof at, "0x%06x", info == stub_info_.end() ? 0u : info->second.constructor);
       counts_.stub_refusal_reasons[command + ": " + (info == stub_info_.end() ? "stub without a factory row" :
+          info->second.load_property_refused ? std::string("hide/wait load property, constructor ") + at :
           info->second.creature == level_factory::Creature::Unknown ? std::string("undecided row, constructor ") + at
                                                                     : std::string("constructor ") + at)] += 1;
       return true;
@@ -543,20 +544,9 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
     return reason.has_value();
   }
   if (name == "givePlayerRandom") {
-    // The handler compares the level name with a string of the executable and
-    // parses three more for difficulties 1..3 (docs/spec/item-drops.md 2).
-    if (!exe_ || !monster_level_bound_ || memory.cstr(0x41b721).empty())
-      return true;
-    try {
-      // An empty fragment would match every level name: the executable's is not empty.
-      if (exe_->string(0x5312a8u).empty())
-        return true;
-      for (const std::uint32_t at : {0x5312a8u, 0x5312b8u, 0x531308u, 0x531358u})
-        memory.string(at, exe_->string(at));
-    } catch (const std::exception &) {
-      return true;
-    }
-    return false;
+    // The stack's +0x00..+0x0f after ten failed generations are Unknown in
+    // item-drops.md section 6. Refuse before its first random draw.
+    return true;
   }
   if (name == "charmMonster" || name == "followPlayer") {
     // Creature_setCharm reaches handle_clear of +0x234 past these gates.
@@ -581,7 +571,11 @@ void Host::bind_monster_level(std::uint32_t raw) {
   variables_->memory.word(0x4f714c, raw);
   monster_level_bound_ = true;
 }
-void Host::bind_level_name(const std::string &name) { variables_->memory.string(0x41b721, name); }
+void Host::bind_level_name(const std::string &) {
+  // The allocation size of 0x41b721 is not pinned; copying any caller string
+  // there risks overwriting unrelated emulated memory.
+  throw script_items::Refused("level-name global capacity is unknown");
+}
 void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
 void Host::set_fade_level(std::uint32_t level) { variables_->memory.word(script_effects::G_FADE, level); }
 std::uint32_t Host::fade_level() const { return variables_->memory.word(script_effects::G_FADE); }

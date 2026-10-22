@@ -237,9 +237,9 @@ public:
   // machine, and in modes 2 and 3 game_set4f7110(+0xf4). Nothing in the play
   // session launches a net game yet; this is the contract's receiving half.
   void receive_launch(const net_launch::Record &record0);
-  // givePlayerRandom reads g_levelMonsterLevel 0x4f714c, the current level's
-  // name at 0x41b721 and four strings of the executable (docs/spec/item-drops.md
-  // 2). Until the session binds both, and an executable is set, it refuses.
+  // givePlayerRandom remains refused: its stack-record contents after ten failed
+  // generations are Unknown (item-drops.md 6). The level-name global at
+  // 0x41b721 has no pinned capacity, so bind_level_name also refuses.
   void bind_monster_level(std::uint32_t raw_float);
   void bind_level_name(const std::string &name);
   // The owner's executable, for the object factory's strings and the class
@@ -465,6 +465,7 @@ private:
   struct StubInfo {
     level_factory::Creature creature = level_factory::Creature::Unknown;
     std::uint32_t constructor = 0;
+    bool load_property_refused = false;
   };
   std::map<std::uint32_t, StubInfo> stub_info_;
   bool monster_level_bound_ = false;

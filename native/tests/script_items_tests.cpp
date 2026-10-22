@@ -564,14 +564,26 @@ void synthetic_tests() {
     check(host.counts().refused[index_of("givePlayerItem")] == 1, "a give with no item tables refuses");
     check(!host.stopped_on_refusal(), "an unused refused answer does not stop the entry");
   }
-  // Service defaults: the ground item is built (item_drops_tests.cpp), a bad equip address and missing
-  // complements refuse.
+  // Service defaults: a ground item without resource and bounds services,
+  // a bad equip address and missing complements refuse.
   {
     auto memory = std::make_shared<b::Memory>();
     b::Variables v(memory);
     si::Service s(v);
     bool refused = false;
-    check(std::get<std::uint32_t>(s.call("pool_new", {400u})) != 0, "pool_new hands out a block");
+    try {
+      s.call("pool_new", {400u});
+    } catch (const si::Refused &) {
+      refused = true;
+    }
+    check(refused, "ground item refuses before pool allocation");
+    refused = false;
+    try {
+      s.call("ItemProp_ctor2", {0x01300000u, std::array<std::uint32_t, 3>{0, 0, 0}});
+    } catch (const si::Refused &) {
+      refused = true;
+    }
+    check(refused, "ground item refuses without resource and bounds services");
     refused = false;
     try {
       s.call("inventory_equipItem", {0u, si::bag_entry(0, 0, -1), 0u});
@@ -713,24 +725,18 @@ int main(int argc, char **argv) {
   }
   synthetic_tests();
   if (argc > 3) {
-    // docs/spec/item-drops.md section 2: givePlayerRandom with its real callees.
-    const auto random = read(argv[3]);
-    const auto random_image = random.image;
-    auto random_tables = si::image_tables([&random_image](std::uint32_t at, std::size_t n) {
-      std::vector<std::uint8_t> out(n);
-      for (std::size_t k = 0; k < n; ++k) {
-        const auto found = random_image.find(at + static_cast<std::uint32_t>(k));
-        out[k] = found == random_image.end() ? 0 : found->second;
-      }
-      return out;
-    });
-    unsigned faults = 0, runs = 0;
-    for (const auto &c : random.cases) {
-      run_handler(random, c, random_tables);
-      ran["random:" + c.kind] += 1;
-      (c.fault ? faults : runs) += 1;
+    // The former random-giver vector set remains a research artifact, not a
+    // claim that the native handler can execute an unknown stack record.
+    auto memory = std::make_shared<b::Memory>();
+    b::Variables variables(memory);
+    si::Service service(variables);
+    bool refused = false;
+    try {
+      service.call("level_monsterLevelTimesDifficulty", {});
+    } catch (const si::Refused &) {
+      refused = true;
     }
-    check(random.cases.size() == 120 && runs == 100 && faults == 20, "givePlayerRandom case counts");
+    check(refused && service.record()[0] == 0, "random giver refuses before record mutation");
   }
   for (const auto &entry : ran)
     std::cout << entry.first << ' ' << entry.second << '\n';

@@ -4,6 +4,7 @@
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/script_effects.hpp"
+#include "champions/script_items.hpp"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -15,6 +16,7 @@
 
 namespace sc = champions::simulation::rta::script_commands;
 namespace se = champions::simulation::rta::script_effects;
+namespace si = champions::simulation::rta::script_items;
 namespace builtins = champions::simulation::rta::builtins;
 namespace a = champions::simulation::rta::amx;
 namespace audio = champions::audio;
@@ -149,7 +151,8 @@ std::vector<std::uint8_t> gate_objects(const char *cls = "Stub") {
 }
 
 // A synthetic objects.ob with several records (class, name). Authored strings.
-std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records) {
+std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records,
+                                       const std::vector<std::string> &extra_props = {}) {
   std::vector<std::uint8_t> strtab{0}, body, out;
   auto intern = [&](const std::string &text) {
     const auto at = static_cast<std::uint32_t>(strtab.size());
@@ -161,13 +164,17 @@ std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, 
     for (int k = 0; k < n; ++k)
       v.push_back(static_cast<std::uint8_t>(value >> (8 * k)));
   };
-  for (const auto &r : records) {
+  for (std::size_t i = 0; i < records.size(); ++i) {
+    const auto &r = records[i];
+    const bool extra = i < extra_props.size() && !extra_props[i].empty();
     put(body, intern(r.first), 4);
-    put(body, 28, 2);
+    put(body, extra ? 32 : 28, 2);
     put(body, 0, 2);
     for (int k = 0; k < 3; ++k)
       put(body, 0, 4);
     put(body, intern("name=" + r.second), 4);
+    if (extra)
+      put(body, intern(extra_props[i]), 4);
     put(body, 0, 4);
   }
   put(out, static_cast<std::uint32_t>(records.size()), 2);
@@ -461,6 +468,27 @@ void test_hide_show_on_stubs() {
   check(m2.u8(p2->addr + 0x231) == 0x01, "a non-creature's byte stays");
   check(off_grid(second, c2) && off_grid(second, p2), "both are on the off-grid list");
   check(second.counts().stub_refusals == 0, "no refusal");
+
+  auto gated = build_calls({{"start", {{"hideMonster", {2000}}, {"showMonster", {2100}}}}},
+                           {{2000, "hidden"}, {2100, "waiting"}});
+  sc::Host third;
+  SharedRandom live3(20973);
+  third.bind_seed(&live3);
+  third.set_executable(authored_executable());
+  plant(third, gated);
+  const auto blob3 = objects_blob({{creature, "hidden"}, {creature, "waiting"}}, {"hide=1", "wait=1"});
+  check(third.adopt_objects(blob3.data(), blob3.size()), "property-bearing stubs adopt");
+  third.run_start();
+  check(third.counts().refused[hide] == 1 && third.counts().refused[show] == 1 &&
+            third.counts().stub_refusals == 2,
+        "hide and wait load properties keep unconstructed creature stubs refused");
+  check(third.counts().build_refusals.at("creature stub with hide/wait load property") == 2,
+        "both load-property refusals are counted");
+  unsigned labelled = 0;
+  for (const auto &reason : third.counts().stub_refusal_reasons)
+    if (reason.first.find("hide/wait load property") != std::string::npos)
+      labelled += static_cast<unsigned>(reason.second);
+  check(labelled == 2, "command refusal reasons identify the load property");
 }
 
 // research t3/research-items-gaps ecf9742 docs/spec/hide-monster.md 4.1 and
@@ -544,9 +572,8 @@ void test_receive_launch() {
   check(memory.s32(0x4f7110) == 9, "-1 rescans the profile");
 }
 
-// docs/spec/item-drops.md section 2: givePlayerRandom reads the level name, the
-// monster level and four strings of the executable; without them it refuses
-// before anything is drawn.
+// docs/spec/item-drops.md section 6 leaves the stack record unknown after ten
+// failed generations. The command refuses before any draw even with inputs.
 void test_give_random_gate() {
   namespace LF = champions::simulation::rta::level_factory;
   const auto random = static_cast<std::size_t>(index_of("givePlayerRandom"));
@@ -559,20 +586,28 @@ void test_give_random_gate() {
   host.variables().memory.word(0x4d8ae0, 1);
   check(host.run("start") == sc::Stop::Complete && host.counts().refused[random] == 1 &&
             host.counts().callee_refusals == 1,
-        "refused: no executable, level name or monster level");
+        "givePlayerRandom stays refused without bound inputs");
   check(live.state == 20973u, "a gated refusal draws nothing");
-  // An executable whose fragment string is empty still refuses (it would match every level).
+  // Supplying the executable and monster level does not lift the refusal.
   sc::Host second;
   SharedRandom live2(20973);
   second.bind_seed(&live2);
   second.items().bind_tables(std::make_shared<champions::simulation::rta::items::Tables>());
   second.set_executable(authored_executable());
   plant(second, built);
-  second.bind_level_name("somewhere");
   second.bind_monster_level(0x40a00000);
+  bool level_name_refused = false;
+  try {
+    second.bind_level_name("somewhere");
+  } catch (const si::Refused &) {
+    level_name_refused = true;
+  }
+  check(level_name_refused && second.variables().memory.cstr(0x41b721).empty(),
+        "level-name global refuses without a traced capacity");
   second.variables().memory.word(0x4d8ae0, 1);
   second.run("start");
-  check(second.counts().callee_refusals == 1 && live2.state == 20973u, "an empty fragment string refuses");
+  check(second.counts().callee_refusals == 1 && live2.state == 20973u,
+        "random giver still refuses with an executable and monster level");
 }
 
 void test_entrance_grid_and_particle() {
