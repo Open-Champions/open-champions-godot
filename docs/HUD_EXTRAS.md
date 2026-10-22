@@ -67,10 +67,12 @@ record gold does not start the counter: it still requires an observed floater
 from `Gold_onTouch` or chest gold. The current play session has no such pickup
 producer, so the counter stays hidden and labelled as refused.
 
-Created characters now carry current HP and mana after the documented first
-recalculation with a live Player object: `firstLevelCurrent(max_hp, max_mana)`.
-Imported and loaded records retain their observed current values. The native
-play simulation's HP/mana remain separate from record HP/mana; the HUD bars
+Created records leave current HP and mana unestablished: the session has no
+live `Player` recalculation or record-to-object mirror. The standalone
+`firstLevelCurrent(max_hp, max_mana)` arithmetic remains tested, but it is not
+applied to created records. Imported and loaded records retain their observed
+current values. The native play simulation's HP/mana remain separate from
+record HP/mana; the HUD bars
 continue to draw the simulation's values because no original record-to-object
 mirror has been ported.
 
@@ -86,8 +88,9 @@ draw-script Unknowns.
 ### Player-state integration
 
 The merged record provides the XP and gold inputs and executable-backed
-thresholds. `set_player_character` applies `firstLevelCurrent` only to a newly
-created character. A native player respawn path is not present, so
+thresholds. `set_player_character` keeps created currents unknown and
+current-dependent script commands refused. A native player respawn path is not
+present, so
 `respawnHp` remains tested standalone and uncalled in play. Neither the raw
 pad nor bag-2 inventory is inferred from that record.
 

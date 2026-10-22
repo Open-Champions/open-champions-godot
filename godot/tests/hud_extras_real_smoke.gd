@@ -63,7 +63,7 @@ func run() -> void:
 	counts["xp_frames"] = frames.size()
 	# Pending rectangles without a health gate, in the real play observation.
 	var value := base.duplicate()
-	value.merge({"hp": 0.0, "pending_health": 8.0}, true)
+	value.merge({"hp": 0.0, "pending_health": 8.0, "dead": false}, true)
 	hud.observe_play(value, true)
 	check("pending_health" in hud.drawn, "pending health rectangle drawn at health 0 with the dead bit clear")
 	# Gold counter with the real HUD font: text glyphs appear while visible.

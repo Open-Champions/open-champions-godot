@@ -726,13 +726,8 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
       if (!bool(character.get("ready", false))) throw std::runtime_error("Character creation has not finished.");
       next = rta::player_state::create(named, cls,
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
-      // The first recalc with a live Player object clamps the init sentinel to
-      // the recalculated maxima (research-hud-gaps hud-xp.md part B). This
-      // created record represents that first playable state.
-      const auto current = champions::hud_extras::firstLevelCurrent(next.max_hp, next.max_mana);
-      next.hp = current.hp;
-      next.mana = current.mana;
-      next.current_known = true;
+      // Creation has no live Player recalc or record-to-object current mirror.
+      // Keep current-dependent script commands refused until that event exists.
     }
     player_ = std::move(next);
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);

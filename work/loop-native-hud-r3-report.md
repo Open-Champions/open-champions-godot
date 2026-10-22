@@ -1,4 +1,4 @@
-STATUS: MORE — wave 25 is merged, the full arm64 CTest and HUD/level gates pass, but the play session still has no faithful potion, selector, gold-floater or minimap input producer. No undocumented input was substituted.
+STATUS: MORE — the HUDX-1..6 audit fixes pass the arm64 CTest and HUD/level gates, but the play session still has no faithful potion, selector, gold-floater or minimap input producer. No undocumented input was substituted.
 
 # Native HUD round 3 — 2026-10-22
 
@@ -19,6 +19,16 @@ Sources: `t3/research-hud-gaps` `f7c3964` (`docs/spec/hud-quickslots.md`, `hud-g
 The read-only real-level HUD smoke now asserts the potion, minimap-tile and minimap-icon refusal labels as well as its existing XP, health, direct-gold, quick-slot and projector checks. This guards the evidence boundary after the wave 25 merge. No new gameplay producer is represented as working.
 
 The first full CTest exposed a reproducible `script-commands` teardown crash. AddressSanitizer identified a heap use-after-free: `Host` destroyed its target handle cells before `Variables` removed their paired world-list nodes. `Host::~Host` now clears those pairs while the cells and world are alive. The existing charm-live-target test passes under AddressSanitizer and in Release after this fix.
+
+## Audit fixes
+
+The read-only `native-hud-r3.md` audit found one medium and five low findings against `ec88525`. HUDX-1 and HUDX-2: created characters keep `current_known` false; the session has no live `Player` recalc or current mirror, so record-current script commands still refuse. The player-state comments and HUD extras guide now say this accurately. The standalone first-level clamp arithmetic remains tested but is not applied during character creation.
+
+HUDX-3: when the dead bit is absent and observed HP is at most zero, pending rectangles are refused; an explicitly clear dead bit can still draw them at zero HP. HUDX-4: the HUD advances the gold frame before adding a pickup, and direct record gold re-syncs the counter only when that slot has no floater or pending amount. HUDX-5: potion use refuses kinds outside 0..1; count-only kind 2 remains supported by the pinned `count_potions` vectors, while other kinds refuse. The selector refuses slots outside 0..3 and directions outside -1..7. HUDX-6: the committed sweep helper takes `RTA_DISC` from the environment. The round-3 `run-godot*.py` and `run-slices.sh` helpers are ignored local scripts, not committed artifacts. The AddressSanitizer host teardown fix remains in place.
+
+Audit-fix checks: arm64 Release focused `player-state`, `script-commands` and `hud-extras` CTest passed 3/3; full CTest passed 234/234 in 773.45 seconds without a timeout rerun. The AddressSanitizer `script-commands` executable passed again. The rebuilt Godot `template_debug` and archive extension passed the 54/54 dev matrix. `FULL_TRACE` stayed 36,402 bytes and SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`; `FULL_SAVE_LOAD` still matched at 300/300 presents. Scripts on and off each tried, loaded and played 111/111 levels, with 230 checks, zero failures and zero top-level refusals. The headless and GL rendered real-level HUD smokes each passed 15/15 checks, including refusal of unestablished record currents. I inspected the 1120×780 rendered frame: the HUD frame, health bar and XP bar appear over the level.
+
+The audit-fix runs used `bash work/native-hud-r3/audit-fixes/run-native.sh` and, with `RTA_DISC` set to the approved read-only game folder, `bash work/native-hud-r3/audit-fixes/run-godot-all.sh`. Those ignored local runners invoked the Release configure/build, focused and full CTest, arm64 Godot extension builds, 54-case matrix, both `work/native-hud-r1/run-slices.sh` sweeps, and headless and GL rendered `native_hud_play_real_smoke.gd`. Their counts-only logs and frame are under ignored `work/native-hud-r3/audit-fixes/` and `work/private/`.
 
 ## Verification
 
@@ -52,8 +62,8 @@ cmake --build build/mac-template_debug --parallel 2
 python3 work/native-hud-r3/run-godot-after-fix.py
 bash work/native-hud-r3/run-slices.sh hudon-r3-fix --scripts
 bash work/native-hud-r3/run-slices.sh hudoff-r3-fix
-../integration/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --script res://tests/native_hud_play_real_smoke.gd -- --disc=/Users/syndicatemike/Projects/open-champions/private-validation/rta-disc --cache=/Users/syndicatemike/Projects/open-champions/worktrees/native-hud/work/private/hud-r3-fix-cache
-../integration/work/runtime/Godot.app/Contents/MacOS/Godot --path godot --rendering-method gl_compatibility --script res://tests/native_hud_play_real_smoke.gd -- --disc=/Users/syndicatemike/Projects/open-champions/private-validation/rta-disc --cache=/Users/syndicatemike/Projects/open-champions/worktrees/native-hud/work/private/hud-r3-fix-cache --capture=/Users/syndicatemike/Projects/open-champions/worktrees/native-hud/work/private/hud-r3-fix-frame.png
+../integration/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --script res://tests/native_hud_play_real_smoke.gd -- --disc="$RTA_DISC" --cache="$PWD/work/private/hud-r3-fix-cache"
+../integration/work/runtime/Godot.app/Contents/MacOS/Godot --path godot --rendering-method gl_compatibility --script res://tests/native_hud_play_real_smoke.gd -- --disc="$RTA_DISC" --cache="$PWD/work/private/hud-r3-fix-cache" --capture="$PWD/work/private/hud-r3-fix-frame.png"
 ```
 
 Each long command wrote its counts-only log under `work/native-hud-r3/`.

@@ -105,9 +105,11 @@ func _run() -> void:
 		if key != "level_up_glow": check(not str(hud.refusals.get(key, "")).is_empty(), key + " refused with a reason")
 	for key in ["status_gates", "health_flash", "mana_cooldown", "pending_dead_bit"]:
 		check(not str(hud.assumed.get(key, "")).is_empty(), key + " listed as an unobserved gate")
-	# hud-status.md section 4: no health > 0 gate. Health 0 with the dead bit
-	# clear still draws the pending health rectangle; the dead bit hides it.
+	# Health 0 with an explicitly clear dead bit still draws pending health.
+	# Missing dead-bit timing at health 0 leaves the rectangle refused.
 	hud.observe_play({"hp": 0.0, "max_hp": 100.0, "pending_health": 5.0, "ready_ticks": 44}, true)
+	check(not "pending_health" in hud.drawn, "health 0 with no dead bit refuses pending health")
+	hud.observe_play({"hp": 0.0, "max_hp": 100.0, "pending_health": 5.0, "dead": false, "ready_ticks": 44}, true)
 	check(hud.drawn == ["status_frame", "pending_health", "health_bar"], "health 0, dead bit clear: pending health still drawn: %s" % [hud.drawn])
 	check(hud.records[0].resource == "bar_red00.tex", "tick 44 is animation frame 0")
 	check(not str(hud.refusals.get("mana_bar", "")).is_empty() and not hud.refusals.has("health_bar"), "unobserved mana refused, never fabricated")
@@ -152,6 +154,12 @@ func _run() -> void:
 	check(credited == 43, "gold arrives at tick 43, got %d" % credited)
 	var final_state: Dictionary = hud.extras.gold_state()
 	check(int(final_state.gold[0]) + int(final_state.pending[0]) == 600 and int(final_state.pending[0]) > 0, "the amount arrives in eighths: credited plus pending is the pickup")
+	var busy_sync: Dictionary = hud.extras.gold_sync(0, 777)
+	check(busy_sync.get("ok", false) and not busy_sync.get("synced", true), "record gold does not replace a pending pickup")
+	for tick in range(60, 150):
+		hud.observe_play({"hp": 50.0, "max_hp": 100.0, "ready_ticks": tick, "gold": 600}, true)
+	hud.observe_play({"hp": 50.0, "max_hp": 100.0, "ready_ticks": 150, "gold": 777}, true)
+	check(int(hud.extras.gold_state().gold[0]) == 777, "idle gold counter follows a direct record write")
 	check(not str(hud.refusals.get("gold_coin", "")).is_empty() or not hud.drawn.has("gold"), "the coin is refused with its reason when the counter shows")
 	check(str(hud.extras.format_gold(1234567, 0)) == "1,234,567" and str(hud.extras.format_gold(1234567, 1)) == "1.234.567", "separator by language byte")
 	check(not hud.extras.refusal("minimap_tiles").ok and str(hud.extras.refusal("minimap_icons").error).contains("script_runByName"), "minimap tiles and icons refused with reasons")
@@ -176,6 +184,12 @@ func _run() -> void:
 	var dead_selector: Dictionary = selector.duplicate()
 	dead_selector.hp = 0.0
 	check(not hud.extras.selector_input(dead_selector).get("readable", true), "zero-current selector returns before raw-pad read")
+	check(not hud.extras.selector_input(dict_with(selector, {"direction": 8})).get("ok", true), "selector refuses an undocumented direction")
+	check(not hud.extras.selector_input(dict_with(selector, {"slot": 4})).get("ok", true), "selector refuses an undocumented slot")
+	check(not hud.extras.potion_use(dict_with(potion, {"kind": 2})).get("ok", true), "potion use refuses count-only kind 2")
+	check(not hud.extras.selector_input(dict_with(selector, {"direction": 4294967296})).get("ok", true), "selector refuses a direction before integer narrowing")
+	check(not hud.extras.selector_input(dict_with(selector, {"slot": 4294967296})).get("ok", true), "selector refuses a slot before integer narrowing")
+	check(not hud.extras.potion_use(dict_with(potion, {"kind": 4294967296})).get("ok", true), "potion use refuses a kind before integer narrowing")
 	check(hud.potion_state.get("ok", false) and hud.potion_state.get("notices", []).size() == 1 and hud.potion_state.notices[0][0] == 1, "missing health potion starts line-1 notice")
 	check(hud.minimap_projection.get("ok", false) and hud.minimap_projection.get("gate", false) and not str(hud.refusals.get("minimap_tiles", "")).is_empty() and not str(hud.refusals.get("minimap_icons", "")).is_empty(), "projector runs while Unknown tiles and icons stay refused")
 	hud.observe_play(value, true)

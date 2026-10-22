@@ -1,10 +1,11 @@
 #!/bin/bash
 # Four parallel counts-only slices of the real-data scene sweep.
 # Usage: work/native-hud-r1/run-slices.sh TAG [extra driver args...]
+: "${RTA_DISC:?Set RTA_DISC to the read-only game folder}"
 cd "$(dirname "$0")/../.."
 TAG=$1; shift
 G=$PWD/../integration/work/runtime/Godot.app/Contents/MacOS/Godot
-D=$PWD/../../private-validation/rta-disc
+D=$RTA_DISC
 PI=$PWD/../playable-integration/work/private
 P=$PWD/work/private
 mkdir -p "$P"

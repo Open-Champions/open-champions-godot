@@ -15,7 +15,7 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
-	var counts := {"folder": 0, "level": 0, "player": 0, "current": 0,
+	var counts := {"folder": 0, "level": 0, "player": 0, "current_refused": 0,
 		"xp_thresholds": 0, "xp_bar": 0, "health_bar": 0, "mana_refused": 0,
 		"direct_gold_hidden": 0, "quick_refused": 0, "potion_refused": 0,
 		"minimap_refused": 0, "minimap_tiles_refused": 0, "minimap_icons_refused": 0,
@@ -57,7 +57,7 @@ func run() -> void:
 		var value: Dictionary = scene.controller.get_observation()
 		counts.level = int(scene.session_started and scene.real.current >= 0 and scene.play_mode and not scene.paused)
 		counts.player = int(value.get("player_ready", false))
-		counts.current = int(value.get("player_record_currents_known", false) and value.has("record_hp_raw") and value.has("record_mana_raw"))
+		counts.current_refused = int(not value.get("player_record_currents_known", true) and not value.has("record_hp_raw") and not value.has("record_mana_raw"))
 		counts.xp_thresholds = int(value.has("experience_base") and value.has("experience_next") and int(value.experience_next) > int(value.experience_base))
 		for key in ["experience", "health_bar"]:
 			counts["xp_bar" if key == "experience" else key] = int(key in scene.play_hud.drawn)

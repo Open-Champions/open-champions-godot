@@ -325,6 +325,8 @@ GoldDraw drawGold(GoldState &st, const std::array<bool, 4> &local,
 
 // ---- quick slots -----------------------------------------------------------
 int countPotions(const std::vector<Bag2Cell> &bag, int kind) {
+  // count_potions also documents kind 2; Player_usePotion documents only 0/1.
+  if (kind < 0 || kind > 2) throw Refusal("potion count kind outside 0..2");
   const int want = kind == 0 ? 0 : 1;
   int total = 0;
   for (const auto &c : bag)
@@ -343,6 +345,7 @@ int potionSize(Raw missing_plus_one, const std::array<int, 9> &found) {
   return -1;
 }
 PotionUse usePotion(const PotionInput &in) {
+  if (in.kind < 0 || in.kind > 1) throw Refusal("potion kind outside 0..1");
   PotionUse out;
   if (in.copy || F::le(in.hp, 0)) return out;
   out.regen = std::array<Raw, 2>{F::fmin(F::mul(in.max_hp, 0x3b088888u), 0x3effffffu),
@@ -408,6 +411,8 @@ int buttonGlyph(uint32_t config_mask) {
 }
 SelectorMessage selectorMessage(int slot, int dir, bool menu_mode, uint32_t pressed,
                                 const SelectorButtons &b, int kind, int value) {
+  if (slot < 0 || slot > 3) throw Refusal("selector slot outside 0..3");
+  if (dir < -1 || dir > 7) throw Refusal("selector direction outside -1..7");
   SelectorMessage m;
   if (dir == -1) return m;
   if (!menu_mode) {

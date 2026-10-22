@@ -37,7 +37,7 @@ const ASSUMED := {
 	"health_flash": "bit 0 of 0x41b930 is ORed by Player_takeDamage (docs/issues/draw-sim-leaks.md); the session's damage is not that call, so the health tint stays 0x80808080",
 	"gold_language": "the separator byte 0x44fddc is 0 here (a comma); its source in mainloop_runSession is not pinned for this build, only that 0 gives ',' and any other value '.' (hud-gold.md section 7)",
 	"mana_cooldown": "signed short player-object +0x4ae is not observed, so mana keeps tint 0x80acacac (alpha 42 only while it is > 0)",
-	"pending_dead_bit": "the pending overlays need the object's dead bit 0x8 clear and a local slot (hud-status.md section 4: there is no health > 0 gate); the dead bit is read from the observation key dead when present and otherwise taken as clear, never replaced by health",
+	"pending_dead_bit": "the pending overlays need the object's dead bit 0x8 clear and a local slot (hud-status.md section 4: there is no health > 0 gate); when dead is absent at HP <= 0, the overlays are refused because bit timing is unsettled",
 }
 const SLOT := 0
 var play_mode := false
@@ -124,7 +124,8 @@ func _add_status_extras(value: Dictionary) -> void:
 	var mana_ok := valid_bar(value, "mana", "max_mana")
 	var origins: Dictionary = layout_service.hud_origins(false, PackedInt32Array([SLOT]), 1)
 	var request := {
-		"slot": SLOT, "x": int(origins.origins[SLOT]), "local": true, "dead": bool(value.get("dead", false)),
+		"slot": SLOT, "x": int(origins.origins[SLOT]), "local": true,
+		"dead": bool(value.get("dead", false)) or (not value.has("dead") and float(value.hp) <= 0.0),
 		"health": float(value.hp), "max_health": float(value.max_hp),
 		"pending_health": _number(value, "pending_health"),
 		"mana": float(value.mana) if mana_ok else 0.0, "max_mana": float(value.max_mana) if mana_ok else 1.0,
@@ -183,11 +184,15 @@ func _observe_gold(value: Dictionary) -> void:
 	if not gold_seen:
 		gold_seen = true
 		extras.gold_reset(PackedInt64Array([int(value.get("gold", 0)), 0, 0, 0]))
+	if typeof(value.get("gold")) == TYPE_INT:
+		var synced: Dictionary = extras.gold_sync(SLOT, int(value.gold))
+		if not synced.get("ok", false): refusals["gold_record"] = str(synced.get("error", "record gold refused"))
+	# Set the observation frame before a new floater captures its start frame.
+	extras.gold_tick(int(value.get("ready_ticks", 0)))
 	for pickup in pickups:
 		if pickup is Dictionary and typeof(pickup.get("amount")) == TYPE_INT:
 			var added: Dictionary = extras.gold_add(int(pickup.get("slot", SLOT)), int(pickup.amount), float(pickup.get("x", 0)), float(pickup.get("y", 0)))
 			if not added.get("ok", false): refusals["gold_pickup"] = str(added.get("error", "gold floater refused"))
-	extras.gold_tick(int(value.get("ready_ticks", 0)))
 	var frame: Dictionary = extras.gold_draw(1, gold_language, font_bytes)
 	if not frame.get("ok", false):
 		refusals["gold"] = str(frame.get("error", "gold counter refused"))

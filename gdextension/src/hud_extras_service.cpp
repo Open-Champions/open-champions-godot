@@ -49,6 +49,7 @@ protected:
   static void _bind_methods() {
     ClassDB::bind_method(D_METHOD("status_draws", "input"), &ChampionsHudExtrasService::status_draws);
     ClassDB::bind_method(D_METHOD("gold_reset", "gold"), &ChampionsHudExtrasService::gold_reset);
+    ClassDB::bind_method(D_METHOD("gold_sync", "slot", "value"), &ChampionsHudExtrasService::gold_sync);
     ClassDB::bind_method(D_METHOD("gold_add", "slot", "amount", "screen_x", "screen_y"), &ChampionsHudExtrasService::gold_add);
     ClassDB::bind_method(D_METHOD("gold_tick", "frame"), &ChampionsHudExtrasService::gold_tick);
     ClassDB::bind_method(D_METHOD("gold_flush"), &ChampionsHudExtrasService::gold_flush);
@@ -123,6 +124,19 @@ public:
     gold_ = X::GoldState{};
     for (int i = 0; i < 4 && i < gold.size(); ++i) gold_.gold[std::size_t(i)] = uint32_t(gold[i]);
     return success();
+  }
+  // Direct record writes update the counter only when this slot has no
+  // outstanding pickup. Preserve the presentation hold and alpha timers.
+  Dictionary gold_sync(int slot, int64_t value) {
+    try {
+      if (slot < 0 || slot > 3) throw X::Refusal("gold slot outside 0..3");
+      if (value < 0 || value > X::GOLD_CAP) throw X::Refusal("record gold outside the documented counter range");
+      bool busy = gold_.pending[std::size_t(slot)] != 0;
+      for (const auto &f : gold_.floaters)
+        if (f.amount && f.slot == slot) busy = true;
+      if (!busy) gold_.gold[std::size_t(slot)] = uint32_t(value);
+      Dictionary out = success(); out["synced"] = !busy; return out;
+    } catch (const std::exception &e) { return failure(e); }
   }
   // The floater's screen start is approximated by the given point with no drift:
   // it changes no shared state (hud-gold.md section 5). The owed cosmetic seed
@@ -227,7 +241,9 @@ public:
       p.hp_pending = raw_float(getf(in, "pending_hp", 0));
       p.mana = raw_float(getf(in, "mana", 0)); p.max_mana = raw_float(getf(in, "max_mana", 0));
       p.mana_pending = raw_float(getf(in, "pending_mana", 0));
-      p.kind = int(geti(in, "kind", -1));
+      const int64_t kind = geti(in, "kind", -1);
+      if (kind < 0 || kind > 1) throw X::Refusal("potion kind outside 0..1");
+      p.kind = int(kind);
       p.copy = bool(in.get("copy", false)); p.local = bool(in.get("local", true));
       p.menu_open = bool(in.get("menu_open", false)); p.grid = bool(in.get("grid", false));
       const Array bag = in["bag"];
@@ -273,8 +289,12 @@ public:
       X::SelectorButtons buttons{uint32_t(geti(in, "a", 0)), uint32_t(geti(in, "b", 0)),
                                   uint32_t(geti(in, "use", 0)), uint32_t(geti(in, "accept", 0))};
       const auto mask = axes.any ? X::maskLocalButtons({}, buttons) : X::MaskEntry{};
-      const int direction = int(geti(in, "direction", -1));
-      const auto message = readable ? X::selectorMessage(int(geti(in, "slot", 0)), direction,
+      const int64_t raw_direction = geti(in, "direction", -1);
+      const int64_t raw_slot = geti(in, "slot", 0);
+      if (raw_slot < 0 || raw_slot > 3) throw X::Refusal("selector slot outside 0..3");
+      if (raw_direction < -1 || raw_direction > 7) throw X::Refusal("selector direction outside -1..7");
+      const int slot = int(raw_slot), direction = int(raw_direction);
+      const auto message = readable ? X::selectorMessage(slot, direction,
           bool(in.get("sheet", false)), uint32_t(geti(in, "pressed", 0)), buttons,
           int(geti(in, "kind", 0)), int(geti(in, "value", 0))) : X::SelectorMessage{};
       Dictionary out = success();

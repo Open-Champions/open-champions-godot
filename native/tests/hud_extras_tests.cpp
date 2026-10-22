@@ -407,6 +407,15 @@ void quickVectors(const std::string &dir) {
   // Authored: the potion buttons are not D-pad: pad axes ignore face bits.
   where = "quick invariants";
   expect(!H::padAxes(0x00ff).any, "face buttons are not direction bits");
+  auto refuses = [](const auto &f) {
+    try { f(); } catch (const H::Refusal &) { return true; }
+    return false;
+  };
+  expect(refuses([] { H::countPotions({}, 3); }), "potion count refuses kind above its documented range");
+  expect(refuses([] { H::PotionInput in; in.kind = 2; H::usePotion(in); }), "use potion refuses kind 2 even on early return");
+  const H::SelectorButtons buttons{};
+  expect(refuses([&] { H::selectorMessage(4, 0, false, 0, buttons, 0, 0); }), "selector refuses slot 4");
+  expect(refuses([&] { H::selectorMessage(0, 8, false, 0, buttons, 0, 0); }), "selector refuses direction 8");
   std::printf("quick: %d rows, %d potion uses, %d notices, %d messages\n", n, used, notices, msgs);
 }
 
