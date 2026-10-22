@@ -653,6 +653,9 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return iv(is_demon_near(ar(0)));
   if (n == "CT_type_id")
     return iv(type_of(ar(0)));
+  // StaticFire's getter 0x3c7318 and descriptor 0x9083c0 are pinned by
+  // research-combat-ctors-3 symbols/runtime.tsv:500. Descriptor identity here
+  // is a World adapter; the RTTI equality body was not executed in research.
   if (n == "CT_type_info_equals")
     return iv((ar(0)==0x9083c0 || ar(1)==0x9083c0)
         ? (ar(0)==ar(1)) : same_type(ar(0),ar(1)));
@@ -780,6 +783,9 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "obj_addToAlwaysDraw") {
     if (!full()) throw Unsupported("always-draw service outside Full");
     link(0x5db4e8,ar(0),ar(0));
+    // research-combat-5 tools/ref_objects.py:add_to_always_draw:
+    // the list insertion also marks the object as not grid drawn.
+    w(ar(0)+0xc,u(ar(0)+0xc)|2u);
     return iv(0);
   }
   if (n == "path_blockNodes")
@@ -1231,6 +1237,8 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
         throw Unsupported("Dodge statistics at a nonzero rank");
       return iv(0);
     }
+    // Descriptor address: research-combat-ctors-3 symbols/runtime.tsv:500.
+    // The equality rule using it is the World adapter documented above.
     if (n == "StaticFire_typeinfo") return iv(0x9083c0);
     if (n == "LightEffect_ctor") {
       if (a.size()!=16)

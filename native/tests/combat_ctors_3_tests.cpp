@@ -537,8 +537,10 @@ void demon_near_cases() {
   }
 }
 void rigidbody_round5_cases() {
-  // tools/test_ref_rigidbody.py and ref_rigidbody.py at research-combat-5
-  // f33d1a3: dirty init block, one cosmetic draw, exact orientation and inertia.
+  // Exact words below were produced by ref_rigidbody.py at research-combat-5
+  // f33d1a3, running rb_init on the dirty block with seed 12345, mass 2,
+  // factor 1, sizes (2,3,4). test_ref_rigidbody.py checks the same formulas
+  // approximately; it does not contain these exact bit-pattern goldens.
   constexpr A::Address body=0x100000;
   A::Memory mem; A::Model m(mem);
   for (unsigned off=0;off<0x98;off+=4) mem.poke(body+off,4,0xdeadbeef);
@@ -549,7 +551,8 @@ void rigidbody_round5_cases() {
   const Raw expected[]={0x3f000000,0x3e75c28f,0x3e999999,0x3eec4ec4};
   for (unsigned k=0;k<4;++k)
     check(mem.load(body+4*k,4)==expected[k],"rigid inverse mass and inertia");
-  check(mem.load(0x404460,4)==0x05391c44,"one cosmetic draw");
+  check(mem.load(0x404460,4)==((12345u*0x19660du+0x3c6ef35fu)&0xffffffffu),
+        "one cosmetic draw");
   check(mem.load(0x404464,4)==0x98765432&&m.draws==0,"shared draw unchanged");
   check(mem.load(body+0x24,4)==0x3f7ff25e&&
         mem.load(body+0x28,4)==0x3ca71719,"reference quaternion twice normalized");
@@ -570,7 +573,9 @@ void rigidbody_round5_cases() {
   check(mem.load(body+0x8c,4)==0x40000000,"derived angular velocity");
 }
 void arrow_hit_round5_cases() {
-  // tools/test_ref_combat5.py Timer and Light reference cases, f33d1a3.
+  // ref_arrow_hit.py at research-combat-5 f33d1a3 with the synthetic Light
+  // inputs below yields radius-step word 0xc07fffff. test_ref_combat5.py
+  // checks the same step approximately, not that exact word.
   constexpr A::Address creature=0x110000,light=0x120000,source=0x130000;
   A::Memory mem;A::Model m(mem);
   m.callbacks["handle_clear"] = [](A::Model &,const std::vector<A::Value> &)->A::Value {
@@ -614,7 +619,10 @@ void arrow_hit_round5_cases() {
         m.calls[prior+2].name=="obj_runEveryFrame","light constructor call order");
 }
 void staticfire_round5_cases() {
-  // tools/test_ref_combat5.py StaticFire reference, debris branch.
+  // ref_staticfire.py at research-combat-5 f33d1a3, with the synthetic
+  // GameObject callback below: shared seed 0, one shared draw copied into
+  // +0x44, then two own draws. test_ref_combat5.py checks this recurrence,
+  // not the exact 0xd1ccf6e9 word used here.
   constexpr A::Address fire=0x140000;
   A::Memory mem;A::Model m(mem);
   m.callbacks["GameObject_ctor"] = [](A::Model &self,const std::vector<A::Value> &a)->A::Value {

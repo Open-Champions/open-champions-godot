@@ -1,4 +1,4 @@
-STATUS: PARTIAL
+STATUS: PARTIAL — audit fixes pass; 111-level sweep regresses against wave-24 base
 
 # Combat constructors, round 5
 
@@ -77,9 +77,100 @@ fixtures are authored and synthetic. No changes to `~/champions-re`, push, or PR
   other suites; running another full fixed-timeout matrix at that load would
   not establish a meaningful pass/fail result.
 
-No private-disc acceptance or console/emulator execution is claimed. The
+At the original round-5 checkpoint, no private-disc acceptance or
+console/emulator execution was claimed. The audit-fix sweep below adds a
+private-disc load/play measurement. The
 remaining research-unexecuted bodies remain refused. To close verification,
 run full Release CTest in `build/native` and `build/native-x64` when host load
 is low, then check `player-exact` against its 240-second CTest and 180-second
 trace-child limits. The Full World elemental-arrow spawn route and loaded
 model hull/path-grid services remain outside this port.
+
+## Audit fixes (2026-10-22)
+
+Audit: `combat-ctors-r5.md` (FIX: one medium, three low). The fix starts from
+`5c27a2c` and retains the round-5 research pin above.
+
+- **R5-1:** The Full World `obj_addToAlwaysDraw` service now sets flag `0x2`
+  at object `+0xc` after linking it to `g_alwaysDrawList`. Source:
+  research-combat-5 `tools/ref_objects.py:add_to_always_draw` and
+  `docs/spec/object-system.md:37`. The `path_blockNodes` refusal is retained.
+- **R5-2:** The exact rigid-body words were regenerated from
+  research-combat-5 `tools/ref_rigidbody.py` at `f33d1a3`: `rb_init` on a
+  0x98-byte dirty block with cosmetic seed 12345, mass 2, factor 1, and box
+  sizes (2, 3, 4) yielded quaternion words `0x3f7ff25e`, `0x3ca71719`,
+  rotation words `0xbf7fc978`, `0xbd270e33`, and seed `0x05391c44`.
+  The C++ test now computes the seed from the documented LCG operands. The
+  StaticFire `+0x44` golden `0xd1ccf6e9` was reproduced with
+  `tools/ref_staticfire.py` using the C++ fixture's synthetic GameObject
+  callback: shared seed 0, one shared draw copied in full to `+0x44`, then
+  the two constructor own draws. The sibling `test_ref_*.py` tests verify
+  formulas and draw counts, not these exact words; the C++ comments now say so.
+  The Light `+0xb0` word `0xc07fffff` was also reproduced by
+  `test_ref_combat5.py`'s Light fixture through `ref_arrow_hit.py` with a
+  0.25-second life; its Python test uses an approximate float comparison.
+- **R5-3:** The missile kind 1/2/5/6 light's follow and tag zero values are
+  labeled as inference. `combat-round3.md:111-119` pins its colors and stack
+  floats; `arrow-hit.md` section 3 pins those zeros only for Explode.
+- **R5-4:** `symbols/runtime.tsv:500` pins `StaticFire_typeinfo` getter
+  `0x3c7318` and descriptor `0x9083c0`. The World comparison by descriptor
+  identity is explicitly labeled an adapter, since the RTTI equality body
+  was not executed.
+
+The optional arena-match VIF hull binding (`c1e157d`) was left for a later
+round. The current synthetic fixture still has no hull table, and adding
+that binding would require a separate model-table and prop-run validation.
+
+### Audit-fix verification
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4`: passed (arm64). A final rebuild of the
+  comment-only test change passed.
+- `ctest --test-dir build/native -j 3 --output-on-failure -R
+  '^(combat-ctors-3-reference|combat-runtime-3-host|combat-runtime-3-exact|combat-runtime-4-host|combat-runtime-4-exact|fixture-save)$'`:
+  **6/6 passed**. `ctest --test-dir build/native -j 1 --output-on-failure -R
+  '^player-exact$'`: **1/1 passed**, 204.24 seconds, after the earlier
+  round-5 parallel and isolated timeouts. This is an isolated pass, not a
+  clean rerun of the 214-case suite.
+- `build/native/champions-fixture-save-tests
+  native/tests/fixtures/fx_skill_recipes_synthetic.json`: 93 checks,
+  0 failures; Full mid-fight save 422,756 bytes across 448 operations and
+  byte-identical continuation.
+- `cmake --build build/godot-extension -j 4`: passed.
+  `python3 work/combat-ctors-5/run-godot.py`: **45/45** commands exit 0;
+  Full combat has 2,619 checks, 0 failures. `FULL_TRACE` remains 36,402
+  bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+  `FULL_SAVE_LOAD` matches the uninterrupted trace and the presentation
+  digest `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`
+  at 300/300 presents.
+
+**Sweep regression relative to base `2e57376`:** Four headless slices with
+`--all --levels=0 --ticks=60 --scripts`, the same read-only disc, light and
+recipe inputs as wave 24, tried **111**, loaded and played **108**, passed
+116 checks with 0 failed checks. All slices exited 0. The three refused
+arena levels are identified by sweep indices **69, 70, and 71** (the project
+rule keeps proprietary level names out of tracked reports). Each hits
+`story_start_ground`'s no-ground refusal; this branch's Godot session does
+not select mode A, so it must not call `arena_mode_a_start_ground` from the
+records alone. The sweep also records 108 stale `fx.runtime` "loaded level
+name unknown" refusals that do not stop level play.
+An isolated repeat of indices 69–71 with the same absolute private inputs
+tried 3, refused 3 at `level.library-load`, loaded 0 and played 0, with no
+failed checks. An initial targeted attempt used relative paths that Godot
+resolved under its project directory and failed to open the game folder; it
+was stopped by its exact PID and replaced with the absolute-path repeat.
+
+Base `2e57376` **does give 111/111** with the same four-slice driver
+arguments and private inputs: the recorded wave-24 `w24on --scripts` raw
+summaries show 28+28+28+27 tried, loaded and played, 0 failures and empty
+refusal lists. Wave-24 report commit `3850dbb` is a documentation-only child
+of `2e57376`, so those recorded results describe that base code. The base
+reads the executable's mode-A name table and selects the documented arena
+start for those three levels. This branch diverged at `08dbc72` and lacks
+that later integration; the regression predates the four audit edits. Per
+Malik's direction, this fix does not port mode-A selection. Merge wave must
+retain the base's arena route and recheck the sweep after integration.
+
+No new x86_64/Rosetta suite or full 214-case arm64 suite was run for these
+four fixes. The complete round-5 prop path remains refused without a loaded
+hull table, and `path_blockNodes` still refuses without a path-grid service.
