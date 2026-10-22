@@ -25,7 +25,7 @@ const OBSERVED_LAYOUT_BYTE := 1 # 0x41b69c holds 1 in the executable's data
 # docs/UI_TEXT_GAPS.md: research t3/research-ui-text-gaps settled the help box
 # frame, glyph and label, the bust meter, font and wraps; what stays refused:
 const REFUSED := {
-	"compass_mesh": "compass.vif needs the game camera's view matrix and a model path in the scene; the second pass's light state is Unknown (ui-text-gaps.md 13). Only the label is drawn, and the host does not model the gate words 0x4f8424 / 0x4f841c, so they are assumed open",
+	"compass_mesh": "the host has not supplied the 0x4f8424 gate, player slot, and player object: the mesh and label are refused. The mesh also needs the game camera's view matrix and model path; the second pass's light state is Unknown (ui-text-gaps.md 13)",
 	"button_layout_other": "a layout byte other than the observed 1 is inferred or unwritten (ui-text-gaps.md 7): its glyph is not drawn",
 	"help_notice_boxes": "the notice-box half of help_task (0x1dcff4 onward) was not re-executed (ui-text-gaps.md 13)",
 	"chime_slot_life": "the chime slot frees on its second update (Inferred): the sound cursor of anim_advance is refused by the native runtime, so SoundSeqs slots are not freed",
@@ -300,9 +300,12 @@ func build_bust() -> void:
 	interpret(plan.calls, texts, {"<portrait>": texture})
 	drawn.bust += 1
 
-# docs/ui-text-gaps.md 5: the label of hud_drawCompass. The mesh is refused (REFUSED).
+# docs/ui-text-gaps.md 5: the label plan of hud_drawCompass. The host must
+# supply all three researched gates before any compass draw is allowed.
 func build_compass() -> void:
 	if int(state.get("compass_shown", 0)) <= 0 or round3 == null: return
+	if not (state.has("compass_gate_word") and state.has("compass_player_slot") and state.has("compass_player_object")): return
+	if int(state.compass_gate_word) == 0 or int(state.compass_player_slot) == -1 or not bool(state.compass_player_object): return
 	var plan: Dictionary = round3.compass_plan(bool(state.get("dialog_open", false)), true)
 	if not plan.get("ok", false) or plan.calls.is_empty(): return
 	interpret(plan.calls, {COMPASS_LABEL_POINTER: state.get("compass_label", PackedInt32Array())})

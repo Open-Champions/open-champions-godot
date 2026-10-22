@@ -33,8 +33,8 @@ func check(ok: bool, what: String) -> bool:
 func frames(n: int) -> void:
 	for i in range(n): await process_frame
 
-func capture(label: String) -> void:
-	await frames(4)
+func capture(label: String, wait_frames := 4) -> void:
+	if wait_frames > 0: await frames(wait_frames)
 	if not args.has("capture-dir") or DisplayServer.get_name() == "headless": return
 	await RenderingServer.frame_post_draw
 	var image := root.get_texture().get_image()
@@ -87,7 +87,14 @@ func run() -> void:
 		print("text_level_index ", index, " message ", message, " help ", help, " bust ", bust, " meter ", meter)
 		# Let the overlay run its displayed frames, then look at it.
 		var drawn_before: Dictionary = scene.text_hud.drawn.duplicate()
-		await frames(12)
+		# Wait for the next 60 Hz text-HUD step. One process frame can leave the
+		# previous plan in place; a fixed 12-frame wait is costly on large levels.
+		if meter:
+			for draw_wait in range(12):
+				await process_frame
+				if int(scene.text_hud.drawn.bust) > int(drawn_before.bust): break
+		else:
+			await frames(12)
 		if message:
 			seen_message = true
 			check(int(scene.text_hud.drawn.message) > int(drawn_before.message), "a real setInfo message is drawn")
@@ -103,7 +110,7 @@ func run() -> void:
 			check(clipped == 1, "the bust meter draws exactly one clipped bar")
 			check(wraps == 1, "the bust caption is one wrap in gamefontsmall")
 			add("bust.meter_seen")
-			await capture("text-meter-%d" % index)
+			await capture("text-meter-%d" % index, 0)
 		if bust:
 			seen_bust = true
 			check(int(scene.text_hud.drawn.bust) > int(drawn_before.bust), "a real bust panel is drawn")
@@ -130,6 +137,13 @@ func run() -> void:
 			check(scene.raw_observation.get("paused", false), "the session observation is paused")
 			check(int(scene.raw_observation.get("ready_ticks", 0)) == before, "no ready tick runs while the box is up")
 			await capture("text-help-%d" % index)
+			# The prompt tint becomes visible only in the last 13 frames of the
+			# opening delay. Keep confirm released until its glyph and label appear.
+			var prompt_deadline := Time.get_ticks_msec() + 6000
+			while int(scene.controller.text_hud().get("help_close_delay", 0)) > 8 and Time.get_ticks_msec() < prompt_deadline:
+				await process_frame
+			check(int(scene.controller.text_hud().get("help_close_delay", 0)) <= 8, "the help prompt reaches its visible fade")
+			await capture("text-help-prompt-%d" % index)
 			# Hold confirm: the box closes once its 90-frame delay has run out.
 			scene.text_hud.confirm_override = 1
 			var waited := 0

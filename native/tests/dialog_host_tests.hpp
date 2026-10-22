@@ -255,15 +255,16 @@ inline void run(Check check, std::string &where) {
   const int ticks = run_to_close(host);
   check(!d.is_open() && d.cam_move == 0 && ticks < 4000, "host: the conversation closes through the swoop out");
   // The same conversation with the host's own g_uiFadeIn stepped once per displayed frame
-  // (docs/ui-text-gaps.md 1): the end's message 3 waits for the fade to reach exactly 1.0, so
-  // the tick that sends it is the first one after the ninth step since the closing restart.
+  // (docs/ui-text-gaps.md 1): the fade-gated leave message waits for exactly
+  // 1.0. Wave 24's conversation camera can then take additional swoop-out
+  // ticks before the end message closes the dialog.
   {
     sc::Host fading;
     check(load(fading, script, objects), "fade host: script loads");
     fading.attach_dialog(level, services);
     fading.run_start();
     check(fading.use(0, front) == "script", "fade host: the use button runs dialogScript");
-    int t = 0, steps = -1, steps_at_end = -1, steps_when_one = -1;
+    int t = 0, steps = -1, steps_at_leave = -1, steps_at_end = -1, steps_when_one = -1;
     for (; t < 4000 && (fading.dialog().is_open() || fading.dialog().cam_move != 0); ++t) {
       sc::DialogInputs in;
       in.pad = t % 4 == 3 ? 0x40u : 0u;
@@ -273,8 +274,10 @@ inline void run(Check check, std::string &where) {
         steps_when_one = steps; // the first tick that reads exactly 1.0 after the restart
       fading.dialog_tick(in);
       fading.on_ready_tick();
+      if (steps_at_leave < 0 && steps >= 0 && fading.dialog().end_sent != 0)
+        steps_at_leave = steps_before; // fade-gated MSG_LEAVE ran on this tick
       if (steps_at_end < 0 && steps >= 0 && !fading.dialog().is_open())
-        steps_at_end = steps_before; // message 3 ended the dialog on this tick
+        steps_at_end = steps_before; // the camera's final message ended it
       if (steps < 0 && fading.dialog().closing != 0)
         steps = 0; // ui_restartFadeIn ran inside this tick
       fading.ui_frame_step();
@@ -284,7 +287,10 @@ inline void run(Check check, std::string &where) {
     check(!fading.dialog().is_open() && t < 4000, "fade host: the conversation still closes");
     check(t > ticks, "fade host: message 3 comes later than with a fade held at 1.0");
     check(steps_when_one == 9, "fade host: the fade reads exactly 1.0 after the ninth step and not before");
-    check(steps_at_end >= 9 && steps_at_end <= 10, "fade host: the dialog ends within a tick of the fade reaching 1.0");
+    check(steps_at_leave >= 9 && steps_at_leave <= 10,
+          "fade host: the leave message follows the first tick that reads 1.0");
+    check(steps_at_end >= steps_at_leave,
+          "fade host: the camera's end message follows the fade-gated leave");
   }
   const auto &c = host.dialog_counts();
   check(c.start_messages == 1 && c.opens == 1 && c.ends == 1, "host: one message 0, one open, one end");

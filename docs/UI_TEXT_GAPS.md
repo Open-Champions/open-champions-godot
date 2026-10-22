@@ -27,7 +27,7 @@ an emulator; nothing here ran on a game. Words: **E** executed by the research,
 ## Contract tests
 
 `tools/generate_ui_text_gaps_vectors.py` imports the pinned research models (no game files)
-and writes `native/tests/vectors/ui_text_gaps.tsv`: 3,700 rows over seeds 20973 and 7 for
+and writes `native/tests/vectors/ui_text_gaps.tsv`: 3,698 data rows over seeds 20973 and 7 for
 ramps, layouts, pad glyphs, help task (every call and the closing state), bust draw (every
 call), sprite quads, woven lines, compass (matrix, angle, calls), sound-slot updates and
 showName lookups. `ui-text-gaps-exact` replays every row and states the documented facts
@@ -47,17 +47,21 @@ with a fade held at 1.0.
   frame drew with, then steps them. Until `set_ui_frame_driver(true)` every ready tick counts as
   one displayed frame (the documented one tick per frame). The play scene's text HUD drives it at
   60 Hz.
-- The dialog cursor and "more" glyph are drawn: the controller passes 0x7e (observed layout) and
+- The dialog cursor and "more" glyph are drawn: the controller reads 0x7e from the host's
+  observed button layout (also used by the wave-24 dialog-gaps port) and
   turns the dialog's `ascii` call into a glyph in the font, tinted by the dialog's own 0x606060.
-- `text_hud.gd` draws the help box (inner frame, glyph, label), the bust (both branches) and the
-  compass label from native plans (`help_plan`, `bust_plan`, `compass_plan`), replacing its own
-  colour scaling (which also scaled the alpha byte; the original copies it).
+- `text_hud.gd` draws the help box (inner frame, glyph, label) and bust (both branches) from
+  native plans (`help_plan`, `bust_plan`). It also uses the researched colour scaling,
+  which copies the alpha byte. The compass label plan is ported, but the scene refuses
+  it until the three researched gate inputs are supplied.
 
 ## Still refused or labelled
 
-- **Compass mesh.** Needs the game camera's view matrix and a model path in the scene; the second
-  pass's light state is **U**. Only the label is drawn, and the gate words 0x4f8424 and 0x4f841c are
-  not modelled by the host, so they are assumed open. All 3 disc calls are in levels outside the table.
+- **Compass mesh and scene label.** The scene does not know the 0x4f8424 gate, player slot
+  0x4f841c, or player object, and refuses drawing either part instead of assuming those
+  gates are open. The mesh also needs the game camera's view matrix and a model path in
+  the scene; the second pass's light state is **U**. The native label and two-pass plans
+  remain replayed against the research. All 3 disc calls are in levels outside the table.
 - **Chime slot life.** The two-update lifetime is **I**, and it needs the sound cursor of
   `anim_advance`, which the native runtime refuses. `soundSeqUpdateAll` is ported and replayed, but
   the play host's chime slots are not freed. The research's `chime_frames` rows are not replayed.
