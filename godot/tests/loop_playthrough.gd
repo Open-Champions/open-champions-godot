@@ -288,8 +288,16 @@ func run() -> void:
 	var fight_passed: bool = after.get("combat_enabled", false) and attack_handled \
 		and not enemy_hp_before.is_empty() and enemy_damaged and enemy_died \
 		and drops_after > drops_before and gold_after > gold_before
+	var missing_fight_steps := {}
+	if not after.get("combat_enabled", false): missing_fight_steps["campaign_combat_runtime"] = 1
+	if not attack_handled: missing_fight_steps["attack_input"] = 1
+	if enemy_hp_before.is_empty(): missing_fight_steps["live_enemy"] = 1
+	if not enemy_damaged: missing_fight_steps["enemy_damage"] = 1
+	if not enemy_died: missing_fight_steps["enemy_death"] = 1
+	if drops_after <= drops_before: missing_fight_steps["drop"] = 1
+	if gold_after <= gold_before: missing_fight_steps["gold_gain"] = 1
 	var object_counts: Dictionary = scene.controller.script_command_counts()
-	mark("enemy_fight", "passed" if fight_passed else "refused",
+	mark("enemy_fight", "passed" if fight_passed else "blocked_unported_combat",
 		{"attack_input_handled": attack_handled, "live_enemies_before": enemy_hp_before.size(),
 		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
 		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
@@ -298,7 +306,8 @@ func run() -> void:
 		"drops_before": drops_before, "drops_after": drops_after,
 		"objects_built": int(object_counts.get("objects_built", 0)),
 		"objects_unbuilt": int(object_counts.get("objects_unbuilt", 0)),
-		"factory_build_refusals": object_counts.get("build_refusals", {})})
+		"factory_build_refusals": object_counts.get("build_refusals", {}),
+		"missing_fight_steps": missing_fight_steps})
 	await capture("05-fight-attempt")
 	help_close()
 	if scene.controller.dialog_status().get("open", false):
@@ -362,6 +371,6 @@ func run() -> void:
 	save_json()
 	var incomplete := false
 	for row in rows:
-		if str(row.result) in ["refused", "blocked_by_walk_and_talk"]:
+		if str(row.result) in ["refused", "blocked_by_walk_and_talk", "blocked_unported_combat"]:
 			incomplete = true
 	quit(1 if incomplete else 0)
