@@ -70,7 +70,7 @@ func run() -> void:
 	if scene.components.has("art"):
 		fe.sync_font(scene.components.art)
 	fe.boot()
-	print("levels ", scene.real.levels.size(), " font_loaded ", font_ok, " game_font ", fe.font_texture != null, " start_stats_refused ", fe.log_lines.any(func(l): return str(l).begins_with("class start stats refused")))
+	print("levels ", scene.real.levels.size(), " font_loaded ", font_ok, " game_font ", fe.fonts_loaded(), " start_stats_refused ", fe.log_lines.any(func(l): return str(l).begins_with("class start stats refused")))
 	await shot("01-boot-card")
 	fe.tap(CROSS)
 	await shot("02-soe-logo")
