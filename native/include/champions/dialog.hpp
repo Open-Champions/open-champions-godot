@@ -175,6 +175,11 @@ struct Host {
   ScriptRunner runner;
   // A text table; without one the texts map answers.
   std::function<std::optional<Wide>(const std::string &)> text_source;
+  // Camera_setupDialogView 0x203bb8, called by message 0 where the reference logs
+  // "dialog_view" (docs/spec/dialog-gaps.md 2.2): the side byte, the focus object
+  // and the message's camera position, yaw and pitch. The hook may throw Refused.
+  // Without one only the log entry is made (the reference model).
+  std::function<void(int side, const Object &focus, const std::array<Raw, 3> &cam, int yaw, int pitch)> view;
 
   std::int32_t run_script(const std::string &name);
   bool is_local(int slot) const { return local.count(slot) != 0; }
@@ -196,6 +201,9 @@ struct TickIO {
   // of shown.
   std::function<std::int64_t(std::int64_t y, std::int64_t budget, int bottom)> measure;
   std::vector<std::pair<std::string, std::int64_t>> asked;
+  // Camera_lookAt itself (docs/spec/dialog-gaps.md 2.3); when set it answers
+  // instead of the camera list: 1 = arrived.
+  std::function<std::int64_t(int frames)> look_at;
 
   std::int64_t camera_step(int frames);
   std::int64_t held_ready();

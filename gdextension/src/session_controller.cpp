@@ -17,6 +17,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -99,6 +100,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("dialog_leave"), &ChampionsSessionController::dialog_leave);
   ClassDB::bind_method(D_METHOD("dialog_talk_to", "index"), &ChampionsSessionController::dialog_talk_to);
   ClassDB::bind_method(D_METHOD("dialog_status"), &ChampionsSessionController::dialog_status);
+  ClassDB::bind_method(D_METHOD("dialog_camera"), &ChampionsSessionController::dialog_camera);
+  ClassDB::bind_method(D_METHOD("dialog_gate", "site", "conditions"), &ChampionsSessionController::dialog_site_gate,
+                       DEFVAL(Dictionary()));
   ClassDB::bind_method(D_METHOD("dialog_events"), &ChampionsSessionController::dialog_events);
   ClassDB::bind_method(D_METHOD("dialog_voice_state", "voice"), &ChampionsSessionController::dialog_voice_state);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
@@ -830,6 +834,11 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       data = std::make_shared<DialogData>();
       rta::script_commands::DialogLevel level;
       level.level = String(dialog.get("level", String())).utf8().get_data();
+      // dialog_loadBox 0x22f910 (docs/spec/dialog-gaps.md 4): whether box.tex was found, whether
+      // arena mode B is on, and whether an earlier level left the box word.
+      level.box_available = bool(dialog.get("box_available", true));
+      level.pvp_mode_b = bool(dialog.get("pvp_mode_b", false));
+      level.previous_box = dialog_box_loaded_;
       const Dictionary files = dialog.get("dbin", Dictionary());
       const Array keys = files.keys();
       for (int64_t i = 0; i < keys.size(); ++i)
@@ -867,6 +876,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
         };
       }
       next->attach_dialog(std::move(level), std::move(services));
+      dialog_box_loaded_ = next->dialog_box_word() != 0;
     }
     next->run_start();
     release_help_pause();
@@ -931,10 +941,18 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
   d["voice_lines"] = int64_t(c.voice_lines);
   d["silent_lines"] = int64_t(c.silent_lines);
   d["anm_reads"] = int64_t(c.anm_reads);
+  d["camera_views"] = int64_t(c.camera_views);
+  d["camera_steps"] = int64_t(c.camera_steps);
+  d["no_object_talker_records"] = int64_t(c.no_object_talker_records);
   int64_t refused = 0;
   for (const auto &entry : c.refused)
     refused += int64_t(entry.second);
   d["refused"] = refused;
+  // Refusals by reason (the reasons never carry level, object or text names).
+  Dictionary reasons;
+  for (const auto &entry : c.refused)
+    reasons[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+  d["refused_reasons"] = reasons;
   Dictionary interact;
   for (const auto &entry : c.interact)
     interact[String::utf8(entry.first.c_str())] = int64_t(entry.second);
@@ -971,6 +989,65 @@ Array ChampionsSessionController::dialog_events() {
     }
     item["args"] = args;
     out.push_back(item);
+  }
+  return out;
+}
+namespace {
+double raw_float(rta::Raw bits) {
+  float value;
+  static_assert(sizeof(value) == sizeof(bits));
+  std::memcpy(&value, &bits, sizeof(value));
+  return double(value);
+}
+} // namespace
+// The conversation camera: the words Camera_setupDialogView wrote and the pose of the
+// last Camera_apply (docs/spec/dialog-gaps.md 2). Positions are the console's floats.
+Dictionary ChampionsSessionController::dialog_camera() const {
+  Dictionary out;
+  const bool attached = scripts_ && scripts_->dialog_attached();
+  out["ok"] = attached;
+  if (!attached)
+    return out;
+  const auto *view = scripts_->dialog_camera_view();
+  const auto *pose = scripts_->dialog_camera_pose();
+  out["view"] = view != nullptr;
+  out["pose"] = pose != nullptr;
+  if (view) {
+    out["progress"] = raw_float(view->progress);
+    out["turn_factor"] = raw_float(view->k);
+    out["target"] = Vector3(float(raw_float(view->target[0])), float(raw_float(view->target[1])),
+                            float(raw_float(view->target[2])));
+    out["target_yaw"] = int64_t(view->target_yaw);
+    out["target_pitch"] = int64_t(view->target_pitch);
+  }
+  if (pose) {
+    out["position"] = Vector3(float(raw_float(pose->pos[0])), float(raw_float(pose->pos[1])),
+                              float(raw_float(pose->pos[2])));
+    out["yaw"] = int64_t(pose->yaw);
+    out["pitch"] = int64_t(pose->pitch);
+    out["forward_z"] = raw_float(pose->matrix[8]);
+  }
+  out["moving"] = scripts_->dialog().cam_move != 0;
+  out["open"] = scripts_->dialog().is_open();
+  return out;
+}
+// The outcome of one dialog_isOpen site with the other conditions it reads (integers).
+Dictionary ChampionsSessionController::dialog_site_gate(const String &site, const Dictionary &conditions) const {
+  Dictionary out;
+  out["ok"] = false;
+  if (!scripts_ || !scripts_->dialog_attached()) {
+    out["error"] = "No dialog is attached to the level script.";
+    return out;
+  }
+  try {
+    rta::dialog_gaps::Conditions c;
+    const Array keys = conditions.keys();
+    for (int i = 0; i < keys.size(); ++i)
+      c[String(keys[i]).utf8().get_data()] = int64_t(conditions[keys[i]]);
+    out["outcome"] = String::utf8(scripts_->dialog_gate(site.utf8().get_data(), c).c_str());
+    out["ok"] = true;
+  } catch (const std::exception &e) {
+    out["error"] = String::utf8(e.what());
   }
   return out;
 }
@@ -1040,9 +1117,10 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     out["open"] = d.is_open();
     out["stalled"] = scripts_->dialog_stalled();
     out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
-    // g_uiFadeIn[0] is passed as 1.0 and the cursor glyph byte 0x41b978 as
-    // unknown (docs/DIALOG.md "Not modelled").
-    const auto ops = scripts_->dialog_draw(rta::ONE, int(text_option), -1, 0);
+    // g_uiFadeIn[0] is passed as 1.0 (its pattern is not documented, docs/DIALOG.md
+    // "Not modelled"). The cursor and "more" glyph is the byte game_initCamera leaves at
+    // 0x41b978: 0x7e with the executable's initial layout byte 1 (docs/spec/dialog-gaps.md 5).
+    const auto ops = scripts_->dialog_draw(rta::ONE, int(text_option), int(scripts_->dialog_cursor_glyph()), 0);
     Array sprites, glyphs, refusals;
     const auto *font = dialog_data_ && dialog_data_->font ? &*dialog_data_->font : nullptr;
     if (!ops.empty() && !font)
@@ -1056,9 +1134,11 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         throw D::Refused("no text table");
       return dialog_data_->text->lookup(key);
     };
-    const auto emit = [&](int x, int y, const D::Wide &units, std::size_t count) {
+    std::int64_t cursor_quads = 0;
+    const auto emit = [&](int x, int y, const D::Wide &units, std::size_t count) -> std::size_t {
       if (!font)
-        return;
+        return 0;
+      std::size_t made = 0;
       T::TextState state;
       state.setColour(colour);
       for (const auto &g : T::glyphRun(*font, x, y, units, count, &state).glyphs) {
@@ -1072,7 +1152,9 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         item["tint"] = int64_t(g.tint);
         item["clip"] = Rect2i(int(clip[0]), int(clip[1]), int(clip[2] - clip[0]), int(clip[3] - clip[1]));
         glyphs.push_back(item);
+        ++made;
       }
+      return made;
     };
     for (const auto &e : ops) {
       const auto &a = e.args;
@@ -1100,7 +1182,8 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         const D::Wide units(v.begin(), v.end());
         emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])), units, std::size_t(num(a[3])));
       } else if (e.kind == "ascii") {
-        refusals.push_back("cursor glyph: the byte at 0x41b978 is not documented");
+        // text_drawAscii of "%c" with the glyph byte: one character at (x, y).
+        cursor_quads += std::int64_t(emit(int(num(a[0])), int(num(a[1])), D::Wide{std::uint16_t(num(a[2]))}, 1));
       } else if (e.kind == "sprite") {
         Dictionary box;
         box["x"] = num(a[0]);
@@ -1116,6 +1199,7 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     }
     out["sprites"] = sprites;
     out["glyphs"] = glyphs;
+    out["cursor_glyph_quads"] = cursor_quads;
     out["refusals"] = refusals;
     out["ok"] = true;
   } catch (const std::exception &e) {

@@ -49,8 +49,19 @@ func frame_counts() -> void:
 	if not frame.get("glyphs", []).is_empty(): add("draw.frames_with_text")
 	add("draw.glyphs", frame.get("glyphs", []).size())
 	for why in frame.get("refusals", []): add("draw.refused " + str(why))
+	# The cursor and "more" glyph (docs/spec/dialog-gaps.md 5): quads made from the byte at 0x41b978.
+	add("draw.cursor_glyph_quads", int(frame.get("cursor_glyph_quads", 0)))
 
 # Voice stream 1 as the native mixer reports it (counts only).
+# The conversation camera (docs/spec/dialog-gaps.md 2): frames with a published pose, frames
+# with the swoop still moving, and the frontend gate that follows dialog_isOpen.
+func camera_counts() -> void:
+	var cam: Dictionary = scene.controller.dialog_camera()
+	if cam.get("pose", false): add("camera.pose_frames")
+	if cam.get("moving", false): add("camera.moving_frames")
+	var gate: Dictionary = scene.controller.dialog_gate("prop_draw", {})
+	if gate.get("ok", false) and gate.get("outcome", "") == "skip": add("gate.props_hidden_frames")
+
 func voice_counts() -> void:
 	var audio = scene.get("audio")
 	if audio == null or audio.get("bridge") == null: return
@@ -147,6 +158,7 @@ func run() -> void:
 				await process_frame # the view draws one dialog frame per displayed frame
 				frame_counts()
 				voice_counts()
+				camera_counts()
 				if not captured and args.has("capture-dir") and DisplayServer.get_name() != "headless" and scene.npc_dialog.frame.get("glyphs", []).size() > 40:
 					await RenderingServer.frame_post_draw
 					var image := root.get_texture().get_image()
@@ -169,7 +181,7 @@ func run() -> void:
 			if opened and not scene.controller.dialog_status().get("open", false): add("talk.closed")
 		var talk: Dictionary = scene.controller.dialog_status().get("counts", {})
 		for key in talk:
-			if key == "interact" or key == "mouth":
+			if key == "interact" or key == "mouth" or key == "refused_reasons":
 				for result in talk[key]: add("dialog.%s.%s" % [key, str(result)], int(talk[key][result]))
 			else:
 				add("dialog." + str(key), int(talk[key]))

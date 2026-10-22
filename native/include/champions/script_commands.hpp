@@ -6,6 +6,7 @@
 // counted refusal. The composition census stays the 9649e6b table.
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
+#include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_factory.hpp"
 #include "champions/level_flow.hpp"
@@ -152,6 +153,15 @@ struct DialogLevel {
   std::map<std::string, std::vector<std::uint8_t>> files;
   // The level stream directory (ntsc_dialog.bin): entry name -> offset, length.
   std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> stream;
+  // The box (docs/spec/dialog-gaps.md 4). dialog_loadBox 0x22f910 runs at level load and
+  // writes the word 0x4fe538 only outside "intro" and outside arena mode B
+  // (g_pvpModeB 0x4f7120), from res_find("dlgbox.lmp", "box.tex"): box_available is
+  // whether that lookup finds it. previous_box is whether an earlier level's load
+  // left a box.tex address in the word (the word is initialised to 0). A dialog
+  // that opens with the word 0 is refused: the original's draw reads address 0.
+  bool box_available = true;
+  bool pvp_mode_b = false;
+  bool previous_box = false;
 };
 struct DialogServices {
   // text_lookup. Required: a conversation is refused without it.
@@ -176,10 +186,27 @@ struct DialogInputs {
   int text_option = 1;     // 0x4fdcc8, options file default 1
   bool pause_menu = false; // task "pauseMenu"
   DialogVoice voice;
-  // Camera_lookAt's arrival and the float at 0x44f130 (unverified, see
-  // docs/DIALOG.md "Camera"). Without a camera the move arrives at once.
-  std::int64_t camera_arrived = 1;
-  Raw look = ZERO;
+  // Set: Camera_lookAt's answer from outside (1 = arrived), replacing the port's own
+  // conversation camera (a test or a presenter that owns the camera).
+  std::optional<std::int64_t> camera_arrived;
+  // Set: the float at 0x44f130 (the camera's forward z) from outside; otherwise it is
+  // taken from the last matrix the conversation camera built (docs/DIALOG.md "Camera").
+  std::optional<Raw> look;
+};
+// The conversation camera as Camera_apply last left it (docs/spec/dialog-gaps.md 2.5).
+struct DialogCameraPose {
+  std::array<Raw, 3> pos{};
+  std::int32_t yaw = 0, pitch = 0;
+  Raw h = ZERO;                 // the smoothstep of the last swoop step
+  std::array<Raw, 12> matrix{}; // the matrix passed to camera_setView
+};
+// What Camera_apply reads besides the pose: g_cameraShake 0x4f8488, the cosmetic seed
+// 0x404460 (the shake draws three words from it; null with a shake above 0 is refused)
+// and game_isFrozen() (the shake runs while frozen only with a dialog open).
+struct DialogCameraEnv {
+  Raw shake = ZERO;
+  std::uint32_t *cosmetic_seed = nullptr;
+  bool frozen = false;
 };
 struct DialogCounts {
   std::uint64_t uses = 0, use_no_candidate = 0, use_ambiguous = 0, use_blocked_open = 0;
@@ -191,6 +218,9 @@ struct DialogCounts {
   std::uint64_t deferred_shops = 0, shop_requests = 0;
   std::uint64_t stalls = 0, client_leaves = 0, ticks_open = 0, voice_lines = 0, silent_lines = 0;
   std::uint64_t anm_reads = 0, client_mutex_releases = 0;
+  // Camera steps (Camera_lookAt calls) taken by the conversation camera, and
+  // talker records (dialogScript) the object factory makes no object for.
+  std::uint64_t camera_steps = 0, camera_views = 0, no_object_talker_records = 0;
   std::map<std::string, std::uint64_t> mouth; // dialog_startTalkAnim paths
 };
 
@@ -364,6 +394,18 @@ public:
   // there is nothing to do.
   bool dialog_leave();
   bool dialog_stalled() const { return dialog_stalled_; }
+  // The conversation camera: the words Camera_setupDialogView wrote, and the
+  // pose of the last Camera_apply (nullptr before the first open).
+  const dialog_gaps::View *dialog_camera_view() const { return camera_view_ ? &*camera_view_ : nullptr; }
+  const DialogCameraPose *dialog_camera_pose() const { return camera_pose_ ? &*camera_pose_ : nullptr; }
+  DialogCameraEnv dialog_camera_env;
+  // The outcome of one dialog_isOpen site (docs/spec/dialog-gaps.md 3) with this
+  // host's dialog state: the caller passes the other conditions the site reads.
+  std::string dialog_gate(const std::string &site, dialog_gaps::Conditions conditions = {}) const;
+  // The cursor and "more" glyph byte 0x41b978 for the options layout byte 0x41b69c.
+  std::uint32_t dialog_cursor_glyph(std::int32_t layout = dialog_gaps::LAYOUT_INITIAL) const;
+  // The box word 0x4fe538 this level's load left (0 = none).
+  std::uint32_t dialog_box_word() const { return box_word_; }
   const std::string &dialog_stall_reason() const { return dialog_stall_reason_; }
 
 private:
@@ -375,6 +417,7 @@ private:
   dialog::Object *dialog_view(std::uint32_t address, const std::array<Raw, 3> *player);
   template <class F> bool dialog_guard(const char *what, F &&fn);
   void dialog_drain_log();
+  void dialog_camera_apply(const Vec3 &pos, int yaw, int pitch, Raw h, bool dialog_open);
   void dialog_complete_read();
 
   void install();
@@ -450,6 +493,9 @@ private:
   amx::Cell last_value_ = 0;
   std::string last_fault_;
   bool dialog_attached_ = false;
+  std::optional<dialog_gaps::View> camera_view_;
+  std::optional<DialogCameraPose> camera_pose_;
+  std::uint32_t box_word_ = 0;
   DialogLevel dialog_level_;
   DialogServices dialog_services_;
   dialog::Dialog dialog_;
