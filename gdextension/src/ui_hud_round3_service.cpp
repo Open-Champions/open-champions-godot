@@ -111,7 +111,7 @@ protected:
     ClassDB::bind_method(D_METHOD("ui_ramps_step", "pulse", "fade"), &ChampionsUiHudRound3Service::ui_ramps_step);
     ClassDB::bind_method(D_METHOD("help_plan", "delay", "pulse", "glyph_word", "wrap_height", "label_width", "has_title", "has_body"),
                          &ChampionsUiHudRound3Service::help_plan);
-    ClassDB::bind_method(D_METHOD("bust_plan", "latch", "fade", "value", "maximum", "sim_frame", "sizes"),
+    ClassDB::bind_method(D_METHOD("bust_plan", "latch", "fade", "value", "maximum", "sim_frame", "bar_frame_available", "sizes"),
                          &ChampionsUiHudRound3Service::bust_plan);
     ClassDB::bind_method(D_METHOD("compass_plan", "dialog_open", "shown"), &ChampionsUiHudRound3Service::compass_plan);
     ClassDB::bind_method(D_METHOD("confirm_glyph", "layout_byte"), &ChampionsUiHudRound3Service::confirm_glyph);
@@ -247,7 +247,8 @@ public:
   }
   // hud_drawBust (docs/ui-text-gaps.md 3). sizes maps a resource name to
   // [width, height]; a name the draw needs and the map lacks refuses.
-  Dictionary bust_plan(int latch, int64_t fade, int value, int maximum, int sim_frame, const Dictionary &sizes) const {
+  Dictionary bust_plan(int latch, int64_t fade, int value, int maximum, int sim_frame, bool bar_frame_available,
+                       const Dictionary &sizes) const {
     try {
       G::BustState st;
       st.latch = static_cast<int8_t>(latch);
@@ -255,6 +256,7 @@ public:
       st.value = value;
       st.maximum = maximum;
       st.sim_frame = sim_frame;
+      st.bar_frame_available = bar_frame_available;
       st.font_small = 0x4f7104;
       st.tex = [&](const std::string &name) {
         const Variant key = String::utf8(name.c_str());
@@ -276,7 +278,7 @@ public:
   }
   // The compass label (docs/ui-text-gaps.md 5). The world matrix and the mesh
   // need the game camera's view matrix: the label alone is planned here, and the
-  // gate words the host does not model are assumed open (reported by the caller).
+  // caller checks the researched gate words before requesting this label plan.
   Dictionary compass_plan(bool dialog_open, bool shown) const {
     try {
       G::CompassState st;

@@ -140,8 +140,8 @@ Dictionary ChampionsSessionController::text_hud() const {
     d["bust_value"] = int64_t(static_cast<std::int32_t>(hud.bust_value));
     d["bust_max"] = int64_t(static_cast<std::int32_t>(hud.bust_max));
     d["compass_shown"] = int64_t(hud.compass_shown);
-    // g_simFrame (0x44fdcc) is taken as the ready-tick count: bar frame (t / 2) % 4.
-    d["sim_frame"] = int64_t(current_.ready_ticks);
+    // g_simFrame (0x44fdcc) is not supplied by this host. The scene omits the
+    // animated bar until a real simulation-frame observation is available.
     d["dialog_open"] = scripts_->dialog_attached() && scripts_->dialog().is_open();
     d["compass_label"] = units(hud.compass_label);
     d["latch"] = int64_t(hud.latch);

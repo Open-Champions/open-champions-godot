@@ -1,4 +1,4 @@
-STATUS: PARTIAL — UI text implementation and requested Godot/real-level checks pass; the full arm64 CTest has one unresolved player-exact timeout under machine contention.
+STATUS: FIXED — all seven UI text audit findings are fixed and the focused arm64 CTest, Godot dev matrix, 111-level sweeps and FULL_TRACE pass; the earlier full arm64 CTest's player-exact timeout remains unverified.
 
 # Native UI text extras, round 2 — 2026-10-22
 
@@ -52,9 +52,10 @@ the mesh remains refused. `docs/UI_TEXT_GAPS.md` records the boundary.
   refusal counts were zero.
 - Rendered real-level help and bust smoke: one focused level passed 20
   checks, drew 70 inner-frame pieces, and captured the late-frame button
-  glyph and label. A meter-branch level passed 22 checks, with exactly one
-  clipped bar and one gamefontsmall caption. I inspected the actual captures
-  in the Godot play scene. The original-client pixels were not compared.
+  glyph and label. Before the audit fix, a meter-branch level passed 22 checks,
+  with one clipped bar and one gamefontsmall caption. The audit fix now omits
+  that bar until a real simulation frame is available; see below. The
+  original-client pixels were not compared.
 - Real-data dialog smoke: 111 levels loaded, 24 talks attempted, 22 opened
   and closed, 669 cursor-glyph quads, zero harness failures. Two talks are
   now refused by wave 24's documented uninitialised camera-offset case;
@@ -65,13 +66,53 @@ the mesh remains refused. `docs/UI_TEXT_GAPS.md` records the boundary.
 The compass mesh and scene label remain refused as described above. The
 chime's two-update slot life is Inferred and needs the sound cursor the native
 runtime refuses. The notice-box half and raster-exact odd-top sprite behavior
-remain outside executed evidence. The initial UI fade value, ready-tick proxy
-for `g_simFrame`, and bust hide latch are labelled host assumptions; no
-original value is claimed. The player-exact arm64 comparison remains
+remain outside executed evidence. The initial UI fade value and headless
+one-ready-tick-per-displayed-frame proxy are labelled host assumptions. The
+animated bar is refused without `g_simFrame`; the host's `Hud::tick_message`
+latch is passed to the bust plan. The player-exact arm64 comparison remains
 unverified in this round because its wall-clock limits were repeatedly
 exceeded under severe machine contention; no assertion mismatch was observed.
 Rosetta x64 CTest and exports were outside this round. No private bytes,
 names or decoded content were committed.
+
+## Audit fixes — 2026-10-22
+
+- **UTG-1:** `text_hud.gd` passes the host's exported `latch` to `bust_plan`
+  and refuses the bust if that key is absent. `Hud::tick_message` sets it for
+  four local players without network play (`native/src/strings.cpp:499`);
+  the `hud_spellSelect` path remains unmodelled. The stale documentation and
+  `UNVERIFIED` wording were corrected.
+- **UTG-2:** removed the unproven `ready_ticks == g_simFrame` mapping from
+  `text_hud()`. Without a real frame counter, the host plan omits the animated
+  bar but retains the caption, meter field, portrait and bust fade. The portable
+  exact plan still draws the bar when supplied a synthetic simulation frame.
+- **UTG-3–5:** `UNVERIFIED` now labels the assumed-passing 3,000-unit help
+  display-list gate; the compass-plan comment names the caller's actual gate
+  check; `docs/UI_TEXT_GAPS.md` labels the headless ready-tick/display-frame
+  proxy and its effect on dialog message 3.
+- **UTG-6:** built the Godot extension from an isolated archive of merge
+  `4e08b22` and ran the headless Full combat smoke. Its `FULL_TRACE` was
+  **36,402 bytes**, SHA-256
+  `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`,
+  2,620 checks and zero failures. The fixed tip produced the same hash, byte
+  count and checks. Thus this UI text branch's post-merge changes did not
+  change that trace; the wave-23 difference was already present at the merge.
+- **UTG-7:** force-added the 3,698-row authored synthetic TSV to the commit;
+  its SHA-256 `82853156fa60c7b65ddd0a7a396cf9fb3bd03a10553c327d1b1b1e7a3c412b2e`
+  matches the pinned contract. Documented the unresolved track-time offset:
+  research prose says `+0x20`, while its spec table says `+0x18`.
+
+Audit-fix verification: arm64 Release configure/build passed. Focused CTest
+`-R '^(ui-text-gaps-exact|dialog|dialog_gaps)$'` passed **3/3**, including
+the new no-bar/latch assertion. The Godot dev matrix passed **54/54**. Read-only
+scripts-on and scripts-off sweeps each tried, loaded and played **111/111**
+levels with **230** passed checks, zero failures and empty refusal lists.
+Scripts-on retained 14 refusal stops, 266 stubs and zero callee refusals;
+scripts-off retained zero of each. The rendered level-110 meter smoke passed
+**22** checks, drew no clipped bar and retained one gamefontsmall caption. I
+inspected its captured Godot play-scene frame. The original-client pixels
+remain unverified. Logs and captures are ignored local files under
+`work/native-ui-text/` and `work/private/`.
 
 ## Commands and records
 
@@ -93,3 +134,20 @@ Godot `real_data_text.gd` (rendered, focused help/bust and meter cases),
 `real_data_dialog.gd` (headless), and `playable_wave_smoke_full_combat.gd`
 (headless). Counts-only output and captures remain under ignored
 `work/private/` and `work/native-ui-text/`.
+
+Audit reruns: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`;
+`cmake --build build/native -j 4`;
+`ctest --test-dir build/native --output-on-failure -j 3 -R '^(ui-text-gaps-exact|dialog|dialog_gaps|strings)$'`
+(the checkout registers the first three names, **3/3**);
+`work/native-ui-text/build-ext.sh`;
+`python3 work/native-ui-text/run-godot.py`;
+`work/run-slices-r24.sh uitextauditon --scripts`;
+`work/run-slices-r24.sh uitextauditoff`.
+For the merge comparison, `git archive 4e08b22 native gdextension godot` was
+extracted under ignored `work/native-ui-text/merge-baseline/`; both baseline
+GDExtensions were configured and built for arm64 `template_debug` against the
+same pinned godot-cpp, then Godot imported and ran
+`res://tests/playable_wave_smoke_full_combat.gd -- --ready-ticks=640` there.
+The rendered meter check ran `res://tests/real_data_text.gd` with the
+read-only private disc, `--from=110 --to=111 --ticks=600`, and an ignored
+capture directory.

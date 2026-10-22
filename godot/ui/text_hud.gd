@@ -25,6 +25,7 @@ const OBSERVED_LAYOUT_BYTE := 1 # 0x41b69c holds 1 in the executable's data
 # docs/UI_TEXT_GAPS.md: research t3/research-ui-text-gaps settled the help box
 # frame, glyph and label, the bust meter, font and wraps; what stays refused:
 const REFUSED := {
+	"bust_bar_frame": "g_simFrame (0x44fdcc) is unavailable from the host: the animated meter bar is omitted",
 	"compass_mesh": "the host has not supplied the 0x4f8424 gate, player slot, and player object: the mesh and label are refused. The mesh also needs the game camera's view matrix and model path; the second pass's light state is Unknown (ui-text-gaps.md 13)",
 	"button_layout_other": "a layout byte other than the observed 1 is inferred or unwritten (ui-text-gaps.md 7): its glyph is not drawn",
 	"help_notice_boxes": "the notice-box half of help_task (0x1dcff4 onward) was not re-executed (ui-text-gaps.md 13)",
@@ -32,8 +33,8 @@ const REFUSED := {
 }
 # Presentation choices research does not settle; drawn, and reported as such.
 const UNVERIFIED := {
-	"sim_frame": "g_simFrame for the bar frame (t / 2) % 4 is taken as the ready-tick count",
-	"bust_latch": "the bust hide latch 0x4f66a9 is set by hud_tickMessage / hud_spellSelect, which the host does not model: it stays 0",
+	"bust_latch": "the host exposes Hud::tick_message's latch; hud_spellSelect is not modelled",
+	"help_display_list": "the display-list free-units gate is not modelled; the native help plan assumes at least 3000 units free",
 	"label_text": "the Affirmation label is the peeked text of the key; the original looks it up twice per frame and advances the miss ring only on a miss",
 	"ui_fade_initial": "the data value of g_uiFadeIn is not documented: the host starts at 1.0",
 }
@@ -286,12 +287,16 @@ func build_bust() -> void:
 	var maximum := int(state.get("bust_max", -1))
 	var texture := str(state.get("bust_texture", ""))
 	var sizes := {}
-	var needed := ["frame.tex", texture, "fieldnumber.tex"] if maximum == -1 else ["frame.tex", texture, "fieldmeter.tex"] + BUST_BARS
+	var has_sim_frame := state.has("sim_frame")
+	var needed := ["frame.tex", texture, "fieldnumber.tex"] if maximum == -1 else ["frame.tex", texture, "fieldmeter.tex"] + (BUST_BARS if has_sim_frame else [])
 	for name in needed:
 		var a := load_art("bust.lmp", name, true)
 		if a.is_empty(): return
 		sizes[name if name != texture else "<portrait>"] = [int(a.width), int(a.height)]
-	var plan: Dictionary = round3.bust_plan(int(state.get("bust_latch", 0)), bust_fade_raw, int(state.get("bust_value", 0)), maximum, int(state.get("sim_frame", 0)), sizes)
+	if not state.has("latch"):
+		last_error = "bust latch unavailable"
+		return
+	var plan: Dictionary = round3.bust_plan(int(state.latch), bust_fade_raw, int(state.get("bust_value", 0)), maximum, int(state.get("sim_frame", 0)), has_sim_frame, sizes)
 	if not plan.get("ok", false):
 		last_error = str(plan.get("error", ""))
 		return

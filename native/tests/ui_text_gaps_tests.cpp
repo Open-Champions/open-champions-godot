@@ -412,6 +412,15 @@ void hand() {
     const auto &last = b.calls.back();
     ok((std::get<std::uint32_t>(last.args[4]) & 0xffffff) == 0x808080, "sprite RGB is neutral 0x808080");
   }
+  bs.maximum = 50;
+  bs.bar_frame_available = false;
+  bs.latch = 1;
+  const auto without_bar = G::hudDrawBust(bs);
+  int clipped = 0;
+  for (const auto &c : without_bar.calls)
+    clipped += c.name == "sprite_clipped";
+  ok(clipped == 0 && without_bar.latch == 0 && without_bar.fade < bs.fade,
+     "unknown simulation frame omits bar while the real latch fades the bust");
   // 4. sprite fields: an odd top asks gfx_displayField twice and the woven picture sits at y for both parities.
   ok(G::fieldCalls(false, 1, 0) == 1 && G::fieldCalls(false, 1, 1) == 2 && G::fieldCalls(true, 1, 1) == 0 &&
          G::fieldCalls(false, 0, 1) == 0,

@@ -45,8 +45,9 @@ with a fade held at 1.0.
   `dialog_runTask`, so the end handler waits for exactly 1.0.
 - `ChampionsSessionController.ui_frame()` is session step 13: it returns the pulse and fade the
   frame drew with, then steps them. Until `set_ui_frame_driver(true)` every ready tick counts as
-  one displayed frame (the documented one tick per frame). The play scene's text HUD drives it at
-  60 Hz.
+  one displayed frame as a **headless host proxy**, not a recovered scheduler equivalence. This
+  proxy affects the nine-step delay of dialog message 3. The play scene's text HUD drives the
+  fade at 60 Hz.
 - The dialog cursor and "more" glyph are drawn: the controller reads 0x7e from the host's
   observed button layout (also used by the wave-24 dialog-gaps port) and
   turns the dialog's `ascii` call into a glyph in the font, tinted by the dialog's own 0x606060.
@@ -68,8 +69,17 @@ with a fade held at 1.0.
 - **Layout byte other than 1.** Layout 0 is inferred from code and others write nothing:
   `confirmGlyph` refuses them.
 - **Initial g_uiFadeIn.** Its data value is not documented; the host starts at 1.0.
-- **g_simFrame** for the bar frame is taken as the ready-tick count; the **bust hide latch** is not set
-  by the host (hud_tickMessage / hud_spellSelect are unmodelled).
+- **Help display-list gate.** Free display-list units are not observed by this host; `help_plan`
+  assumes the documented minimum of 3,000 is available. The plan's draw remains labelled.
+- **g_simFrame.** The host does not expose the simulation frame counter at 0x44fdcc. The play
+  scene refuses the animated meter bar while still drawing the caption, field and portrait.
+  The portable exact plan continues to replay the bar against synthetic frame inputs.
+- **Bust hide latch.** `Hud::tick_message` sets the host latch for four local players without
+  network play, and `text_hud()` exports it as `latch`; the scene passes that real value into
+  the bust fade. The `hud_spellSelect` latch path is not modelled.
+- **Sound slot time offset.** The pinned spec table calls the track time `+0x18`, while the
+  research prose says `+0x20`. This discrepancy remains unresolved; the sound-slot model is
+  test-only and the host does not free chime slots.
 - **Notice boxes** (help_task from 0x1dcff4) were not re-executed by the research.
 - **Odd tops of sprites on a raster-exact client** are not modelled: the client weaves, which is the
   research's inferred progressive rule.

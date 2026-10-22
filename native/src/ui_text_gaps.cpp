@@ -246,15 +246,17 @@ BustResult hudDrawBust(const BustState &in) {
   calls.push_back(call("res_find", {std::string("bust.lmp"), std::string("<portrait>")}));
   if (maximum != -1) {
     calls.push_back(call("res_find", {std::string("bust.lmp"), std::string("fieldmeter.tex")}));
-    const std::int32_t half = halfTowardZero(in.sim_frame);
-    const std::int32_t q = (half < 0 ? -1 : 1) * (std::abs(half) % 4); // C remainder
-    const std::string bar = "bar_yellow0" + std::to_string(q) + ".tex";
-    calls.push_back(call("res_find", {std::string("bust.lmp"), bar}));
-    const TexSize b = in.tex(bar);
-    const Raw ratio = F::div(F::from_int(u32(value)), F::from_int(u32(maximum)));
-    const std::int32_t fill = F::round_half_away(F::mul(ratio, F::from_int(u32(s16(b.w)))));
-    calls.push_back(call("sprite_clipped", {bar, 0x209u, 0x179u, 6u, tint, 0x209u, 0x179u, u32(0x209 + fill - 2),
-                                            u32(0x179 + s16(b.h)), 0u, 0u}));
+    if (in.bar_frame_available) {
+      const std::int32_t half = halfTowardZero(in.sim_frame);
+      const std::int32_t q = (half < 0 ? -1 : 1) * (std::abs(half) % 4); // C remainder
+      const std::string bar = "bar_yellow0" + std::to_string(q) + ".tex";
+      calls.push_back(call("res_find", {std::string("bust.lmp"), bar}));
+      const TexSize b = in.tex(bar);
+      const Raw ratio = F::div(F::from_int(u32(value)), F::from_int(u32(maximum)));
+      const std::int32_t fill = F::round_half_away(F::mul(ratio, F::from_int(u32(s16(b.w)))));
+      calls.push_back(call("sprite_clipped", {bar, 0x209u, 0x179u, 6u, tint, 0x209u, 0x179u,
+                                              u32(0x209 + fill - 2), u32(0x179 + s16(b.h)), 0u, 0u}));
+    }
     calls.push_back(call("sprite", {std::string("fieldmeter.tex"), 0x1ffu, 0x173u, 6u, tint}));
   } else {
     calls.push_back(call("res_find", {std::string("bust.lmp"), std::string("fieldnumber.tex")}));

@@ -121,6 +121,9 @@ struct BustState {
   std::int8_t shown = 1, latch = 0;
   Raw fade = ZERO;
   std::int32_t value = 0, maximum = -1, sim_frame = 0;
+  // Host refusal: omit the animated bar if g_simFrame is unavailable.
+  // Exact research/vector calls use the default and always draw it.
+  bool bar_frame_available = true;
   std::uint32_t font_small = 0;
   // Sizes of every res_find result the draw reads, by resource name:
   // "frame.tex", "<portrait>", "fieldnumber.tex", the bars.
@@ -192,7 +195,7 @@ struct SeqSlotView {
   std::vector<std::int32_t> events; // the table up to the terminator (excluded)
   std::uint16_t flags = 0;      // state flags +0x06
   std::int32_t duration = 0;    // clip +0x40
-  Raw time = ZERO;              // track +0x18
+  Raw time = ZERO;              // spec: track +0x18; research prose says +0x20 (unresolved)
   bool while_frozen = false;    // +0x3b
   std::optional<std::array<Raw, 3>> linked; // the object +0x28 links
   bool no_pos = false;          // +0x3a

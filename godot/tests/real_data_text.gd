@@ -107,7 +107,7 @@ func run() -> void:
 			for item in scene.text_hud.items:
 				if item.kind == "sprite" and item.clipped and item.lump == "bust.lmp": clipped += 1
 				if item.kind == "text" and item.font == "gamefontsmall.fnt": wraps += 1
-			check(clipped == 1, "the bust meter draws exactly one clipped bar")
+			check(clipped == 0, "the bust meter omits its animated bar without g_simFrame")
 			check(wraps == 1, "the bust caption is one wrap in gamefontsmall")
 			add("bust.meter_seen")
 			await capture("text-meter-%d" % index, 0)
