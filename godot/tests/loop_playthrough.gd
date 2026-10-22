@@ -252,6 +252,9 @@ func run() -> void:
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
+	help_close()
+	if fe.screen() == "pause": tap(START)
+	if scene.paused and scene.session_started and not scene.stopped: scene.resume_session()
 	var before: Dictionary = scene.controller.get_observation()
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
@@ -299,6 +302,7 @@ func run() -> void:
 	var object_counts: Dictionary = scene.controller.script_command_counts()
 	mark("enemy_fight", "passed" if fight_passed else "blocked_unported_combat",
 		{"attack_input_handled": attack_handled, "live_enemies_before": enemy_hp_before.size(),
+		"scene_paused": scene.paused, "frontend_screen": fe.screen(),
 		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
 		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
 		"hp_before": hp_before, "hp_after": float(after.get("hp", -1.0)),
