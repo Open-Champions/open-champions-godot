@@ -2,6 +2,7 @@
 
 #include "champions/items.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <variant>
 
@@ -118,6 +119,14 @@ std::uint32_t grid_address(std::uint32_t base, int column, int row) {
           static_cast<std::uint32_t>(row) * GRID_ROW) &
          0xffffffffu;
 }
+std::uint32_t page_grid_address(std::uint32_t base, int page, int column, int row) {
+  if (page < 0 || page >= BAGS) return 0;
+  return grid_address(base + static_cast<std::uint32_t>(page) * PAGE_BYTES, column, row);
+}
+std::uint32_t first_cell_bag_address(std::uint32_t record, int page) {
+  if (page < 0 || page >= BAGS) return 0;
+  return record + BAG_ITEMS + static_cast<std::uint32_t>(page) * BAG_STRIDE;
+}
 
 Action item_action(int mode, std::uint32_t edge, bool equipped, bool holdable, Masks masks) {
   const bool shop = (edge & masks.shop) != 0;
@@ -145,6 +154,12 @@ Action item_action(int mode, std::uint32_t edge, bool equipped, bool holdable, M
     return Action::None;
   }
   return Action::None;
+}
+
+std::uint32_t inventory_grid_tint(bool equipped, bool blocked, bool flag41) {
+  if (equipped) return 0x20008000u;
+  if (blocked && !flag41) return 0x20000080u;
+  return 0x20445558u;
 }
 
 Strip inventory_strip(int panel_x) {
@@ -229,8 +244,8 @@ int skill_points_for_level(int level_before) {
 
 std::vector<Gap> gaps() {
   return {
-      {"item-info-coordinates",
-       "itemList_drawItemInfo positions were not executed."},
+      {"item-info-frame",
+       "One category-dependent frame submission was executed; its second call site and full localized fields remain unexecuted."},
       {"stat-spend-input",
        "The edge bit and cursor value that reach the four stat-point sends were not executed."},
       {"skill-confirm-input",
@@ -255,6 +270,13 @@ std::vector<Gap> gaps() {
       {"analog-cursor-step", "The pointer writes the free-cursor position. itemList_analogCursor's step was not in this contract."},
       {"menu-open-start-bit", "Opening the inventory is start-without-select. The start bit value was not in this contract."},
       {"page-bag-stride", "A page adds 0xbdd8 to the grid. That is not the bag stride 0x1208, so another page is not treated as another bag."},
+      {"inventory-underbar", "INV-F1: the layer-5 texture argument is not established; the underbar sprite is not drawn."},
+      {"inventory-box-variants", "Only the reset zero-state 15-piece sequence is executed; other cosmetic states are refused."},
+      {"inventory-localized-fields", "The original text content and modifier/gem/requirement fields are unknown."},
+      {"inventory-icon-pulse", "The selected icon uses the observed frame-zero alpha; the running frame source is not wired."},
+      {"inventory-stat-input", "The stat-point edge and cursor gate are unknown."},
+      {"inventory-live-parity", "No original running-game pixel comparison has been made."},
+      {"inventory-live-drop", "World placement and item prop construction are not wired to the imported player record."},
   };
 }
 
@@ -366,9 +388,8 @@ Counts Ledger::counts() const {
 std::uint32_t Ledger::cell_address(int mode, int column, int row) const {
   if (page() >= 3)
     return 0;
-  const auto base = (mode == 0 ? stock_addr_ : record() + BAG_ITEMS) +
-                    static_cast<std::uint32_t>(page()) * PAGE_BYTES;
-  return grid_address(base, column, row);
+  const auto base = mode == 0 ? stock_addr_ : record() + BAG_ITEMS;
+  return page_grid_address(base, page(), column, row);
 }
 
 bool Ledger::bag_index(std::uint32_t addr, int &bag, int &index) const {
@@ -381,10 +402,21 @@ bool Ledger::bag_index(std::uint32_t addr, int &bag, int &index) const {
 }
 
 Action Ledger::press(int mode, std::uint32_t edge) {
+  if (live_record_ && mode != 2)
+    throw Refusal("live imported record supports inventory actions only");
   if (page() >= 3)
     return Action::None;
   const auto cell = cursor_cell(0, cursor_x_, cursor_y_);
-  const auto addr = cell_address(mode, cell.first, cell.second);
+  const auto hovered = cell_address(mode, cell.first, cell.second);
+  auto addr = hovered;
+  if (mode == 2 && page() > 0) {
+    // The executed first-cell sender reads the counted bag at +0x1208 per
+    // page, while hover reads the display grid at +0xbdd8 per page. Other
+    // page-1/2 sender cells have not been executed.
+    if (cell.first != 0 || cell.second != 0)
+      throw Refusal("page-1/2 action is established only for the first cell");
+    addr = first_cell_bag_address(record(), page());
+  }
   const bool filled = addr != 0 && machine_->u32(addr) != 0;
   bool equipped = false;
   bool holdable = false;
@@ -398,6 +430,8 @@ Action Ledger::press(int mode, std::uint32_t edge) {
     return mode == 3 ? Action::Workshop : Action::None;
   if (action == Action::None || action == Action::Workshop || action == Action::ConfirmBox)
     return action;
+  if (live_record_ && action == Action::Drop)
+    throw Refusal("live drop needs the documented world placement and item prop service");
   if (action == Action::Drag) {
     dragging_ = 1;
     drag_cell_ = addr;
@@ -471,6 +505,11 @@ std::uint32_t Ledger::equipment(int slot) const {
   const auto offset = slot < 17 ? 0x43f0 + slot * 4 : 0x4434 + (slot - 17) * 4;
   return machine_->u32(record() + static_cast<std::uint32_t>(offset));
 }
+std::uint32_t Ledger::record_word(std::uint32_t offset) const {
+  if (offset > 0x4c30u - 4u || (offset & 3u) != 0)
+    throw Refusal("player record word is outside the aligned record");
+  return machine_->u32(record() + offset);
+}
 std::int32_t Ledger::equipment_index(int slot) const {
   return item_ptr_to_index(equipment(slot), record(), counts());
 }
@@ -490,7 +529,89 @@ Frame Ledger::frame(const std::string &screen) {
   auto rect = [&](Hit hit, std::uint32_t colour, int layer) {
     out.rects.push_back({hit.x0, hit.y0, hit.x1, hit.y1, colour, layer});
   };
-  if (screen == "inventory" || screen == "shop") {
+  if (screen == "inventory" && page() < 3) {
+    // Bounded zero-state draw of itemList_draw. The general box variant
+    // recurrence is not established. The underbar lookup is established, but
+    // the audit did not establish its texture argument at the layer-5 draw.
+    constexpr int panel_x = 80;
+    constexpr int variants[15] = {3, 3, 2, 2, 1, 3, 3, 2, 1, 1, 1, 1, 3, 3, 2};
+    for (int row = 0; row < 5; ++row) {
+      for (int column = 0; column < 3; ++column)
+        out.sprites.push_back({panel_x + 15 + 96 * column, 116 + 68 * row, 0,
+                               0x80808080u, "inventry.lmp",
+                               "inventrybox" + std::to_string(variants[row * 3 + column]) + ".tex"});
+      out.sprites.push_back({panel_x + 303, 116 + 68 * row, 0, 0x80808080u,
+                             "inventry.lmp", "inventryboxend.tex"});
+    }
+    for (int n = 0; n < 65; ++n) {
+      const auto alpha = static_cast<std::uint32_t>(std::min(((2 * n + 1) * 127 + 64) / 128, 127));
+      out.rects.push_back({panel_x + 15, 413 + n, panel_x + 305, 414 + n,
+                           alpha << 24, 4});
+    }
+    // The visible grid uses its own page/column stride. Only addresses that
+    // resolve to a counted player item can supply a native picture or name.
+    const auto selected = cursor_cell(0, cursor_x_, cursor_y_);
+    for (int row = 0; row < 10; ++row) {
+      for (int column = 0; column < GRID_COLS; ++column) {
+      const auto addr = cell_address(2, column, row);
+      int bag = 0, index = 0;
+      if (!bag_index(addr, bag, index) || machine_->u32(addr) == 0) continue;
+      bool equipped = false;
+      for (int slot = 0; slot < 17 && !equipped; ++slot)
+        equipped = equipment(slot) == addr;
+      const bool blocked = live_record_ && !equipped && machine_->check_equip_allowed(0, addr) != 0;
+      const bool flag41 = (machine_->u64(addr + 8) & (1ull << 41)) != 0;
+      const auto colour = inventory_grid_tint(equipped, blocked, flag41);
+      const auto hit = hit_cell(panel_x, column, row);
+      rect(hit, colour, 5);
+      if (selected.first == column && selected.second == row) {
+        const auto selected_definition = tables_.by_addr(machine_->u32(addr));
+        if (selected_definition && selected_definition->category >= 0 && selected_definition->category <= 2)
+          out.frames.push_back({135, 230, 223, selected_definition->category == 0 ? 77 : 57,
+                                6, 0x80000000u});
+      }
+      if (live_record_) {
+        const auto definition = tables_.by_addr(machine_->u32(addr));
+        if (!definition) throw Refusal("live icon definition is absent");
+        champions::inventory_icons::PictureItem picture;
+        picture.definition.name = definition->name;
+        picture.definition.category = definition->category;
+        picture.definition.slot = definition->slot;
+        picture.definition.subtype = definition->subtype;
+        picture.definition.damage_min = definition->damage_min;
+        picture.definition.damage_max = definition->damage_max;
+        picture.definition.picture = definition->picture;
+        picture.definition.model_row = static_cast<std::size_t>(definition->model_row);
+        picture.flags = machine_->u64(addr + 8);
+        picture.prefix = machine_->u8(addr + 0x20);
+        const auto body = machine_->s32(record() + 0x54);
+        try {
+          std::optional<std::int32_t> value;
+          if (definition->category == 1 && definition->name.find('+') != std::string::npos)
+            value = machine_->item_value(addr);
+          out.icons.push_back({column, row, definition->category, definition->slot,
+                               selected.first == column && selected.second == row ? 0x8c8c8c8cu : 0x80808080u,
+                               champions::inventory_icons::picture_filename(
+                                   picture, body, pictures_, value)});
+        } catch (const std::exception &) {
+          out.gaps.push_back({"inventory-icon", "Picture association refused for an imported item."});
+        }
+      }
+      std::string name = "item";
+      const auto def = machine_->u32(addr);
+      for (const auto &row : tables_.defs)
+        if (row && row->addr == def) name = row->name;
+      const auto old_hit = hit_cell(0, column, row);
+      if (!live_record_) {
+        text(old_hit.x0, old_hit.y0, 0x80464646u, false, name);
+        if (selected.first == column && selected.second == row)
+          out.selected_texts.push_back({244, 229, 0x805c2913u, true, name});
+      }
+      }
+    }
+    return out;
+  }
+  if (screen == "shop") {
     const auto strip = inventory_strip(0);
     const auto above = inventory_strip_above(0);
     out.rects.push_back({strip.x0, strip.y0, strip.x1, strip.y1, 0x80808080u, strip.layer});
@@ -517,7 +638,7 @@ Frame Ledger::frame(const std::string &screen) {
       rect(drag, 0x34000000u, 7);
     }
   }
-  if (screen == "stats" || screen == "level-up") {
+  if (screen == "stats" || screen == "level-up" || (screen == "inventory" && page() >= 3)) {
     // Eight executed submissions, in that order. The original strings were not
     // captured, so these are the live level, gold and stat indices 0..2.
     const std::string shown[] = {
@@ -555,6 +676,7 @@ void Ledger::adopt(const Adopted &c) {
   }
   dragging_ = 0;
   drag_cell_ = 0;
+  live_record_ = false;
   machine_->w32(r + 0xe4, static_cast<std::uint32_t>(c.gold));
   machine_->w32(r + 0xe8, static_cast<std::uint32_t>(c.skill_points));
   machine_->w8(r + 0xec, static_cast<std::uint32_t>(c.stat_points));
@@ -563,6 +685,55 @@ void Ledger::adopt(const Adopted &c) {
   machine_->w32(r + 0x5c, static_cast<std::uint32_t>(c.experience));
   for (int i = 0; i < 4; ++i)
     machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(c.stats[i]));
+}
+
+void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables tables,
+                          champions::inventory_icons::PictureTables pictures,
+                          const std::function<std::uint8_t(std::uint32_t)> &image_byte) {
+  if (bytes.size() != 0x4c30u || !image_byte)
+    throw Refusal("live player record must be exactly 0x4c30 bytes with an executable reader");
+  auto word = [&](std::size_t at) {
+    return std::uint32_t(bytes[at]) | std::uint32_t(bytes[at + 1]) << 8 |
+           std::uint32_t(bytes[at + 2]) << 16 | std::uint32_t(bytes[at + 3]) << 24;
+  };
+  for (int bag = 0; bag < BAGS; ++bag) {
+    const auto count = word(BAG_COUNT + static_cast<std::size_t>(bag) * BAG_STRIDE);
+    if (count > 64) throw Refusal("live bag count exceeds 64 records");
+    for (std::uint32_t i = 0; i < count; ++i) {
+      const auto at = BAG_ITEMS + static_cast<std::size_t>(bag) * BAG_STRIDE + i * ITEM_SIZE;
+      if (!tables.by_addr(word(at)))
+        throw Refusal("live item definition is absent from the selected executable");
+    }
+  }
+  // Collect file-backed definition rows before changing the live ledger.
+  std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> image_rows;
+  for (const auto *rows : {&tables.defs, &tables.presets}) {
+    for (const auto &definition : *rows) {
+      if (!definition) continue;
+      std::vector<std::uint8_t> row(0x40);
+      for (std::uint32_t i = 0; i < 0x40; ++i) row[i] = image_byte(definition->addr + i);
+      image_rows.emplace_back(definition->addr, std::move(row));
+    }
+  }
+  tables_ = std::move(tables);
+  pictures_ = std::move(pictures);
+  for (const auto &[at, row] : image_rows)
+    for (std::uint32_t i = 0; i < row.size(); ++i) machine_->w8(at + i, row[i]);
+  // The existing passive-rank reader consults the file-backed class rows.
+  for (std::uint32_t i = 0; i < CLASS_STRIDE * 7u; ++i)
+    machine_->w8(CLASS_ROW + i, image_byte(CLASS_ROW + i));
+  for (std::uint32_t i = 0; i < bytes.size(); ++i) machine_->w8(record() + i, bytes[i]);
+  dragging_ = 0;
+  drag_cell_ = 0;
+  live_record_ = true;
+  set_page(0);
+}
+
+std::vector<std::uint8_t> Ledger::record_bytes() const {
+  std::vector<std::uint8_t> out(0x4c30);
+  for (std::uint32_t i = 0; i < out.size(); ++i)
+    out[i] = static_cast<std::uint8_t>(machine_->u8(record() + i));
+  return out;
 }
 
 std::vector<std::uint8_t> Ledger::save() const {
@@ -670,6 +841,7 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
     machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(bases[i]));
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
+  live_record_ = false;
 }
 
 } // namespace champions::menus

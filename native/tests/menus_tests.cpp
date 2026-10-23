@@ -1,4 +1,5 @@
 #include "champions/menus.hpp"
+#include "champions/items.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -72,6 +73,14 @@ void cursor_vectors() {
   expect(grid_address(0x2000, 9, 0) == 0, "grid past column");
   expect(grid_address(0x2000, 0, 75) == 0, "grid past row");
   expect(grid_address(0x2000, 8, 74) == 0x2000 + 8 * GRID_COL + 74 * GRID_ROW, "grid corner");
+  expect(page_grid_address(0x2000, 1, 0, 0) == 0x2000 + PAGE_BYTES, "page-one hover stride");
+  expect(page_grid_address(0x2000, 2, 0, 0) == 0x2000 + 2 * PAGE_BYTES, "page-two hover stride");
+  expect(first_cell_bag_address(PLAYER, 1) == PLAYER + BAG_ITEMS + BAG_STRIDE,
+         "page-one action bag stride");
+  expect(first_cell_bag_address(PLAYER, 2) == PLAYER + BAG_ITEMS + 2 * BAG_STRIDE,
+         "page-two action bag stride");
+  expect(page_grid_address(0x2000, 3, 0, 0) == 0 && first_cell_bag_address(PLAYER, 3) == 0,
+         "stat pages have no item cell");
   expect(cursor_cell(80, 80 + 17 + 4 * 32, 100) == std::make_pair(4, 0), "column 4");
   const auto hit = hit_cell(0, 0, 1);
   expect(cursor_cell(0, hit.x0, hit.y0) == std::make_pair(0, 1), "hit cell row");
@@ -109,6 +118,10 @@ void action_vectors() {
   for (const auto &row : rows)
     expect(item_action(row.mode, row.edge, row.equipped, row.holdable, row.masks) == row.want,
            "item action");
+  expect(inventory_grid_tint(false, false, false) == 0x20445558u, "free item underlay");
+  expect(inventory_grid_tint(false, true, false) == 0x20000080u, "blocked item underlay");
+  expect(inventory_grid_tint(false, true, true) == 0x20445558u, "flag-41 blocked underlay");
+  expect(inventory_grid_tint(true, true, false) == 0x20008000u, "equipped wins blocked");
 }
 
 void layout_vectors() {
@@ -156,7 +169,56 @@ void ledger_vectors() {
     expect(book.gold() == 500 && book.bag_count(0) == 2 && book.skill_points() == 4, "seed");
     expect(book.stat_points() == 3 && book.level() == 5 && book.acknowledged() == 4, "seed points");
     expect(book.press(2, 0x40) == Action::Equip && book.equipment_index(0) == 0, "equip");
+    expect(book.record_word(0x43f0) == PLAYER + BAG_ITEMS, "equip writes player record pointer");
     expect(book.press(2, 0x40) == Action::Unequip && book.equipment_index(0) == -1, "unequip");
+    expect(book.record_word(0x43f0) == 0, "unequip clears player record pointer");
+  }
+  {
+    Ledger authored;
+    champions::simulation::rta::items::Tables tables;
+    for (int i = 0; i < 2; ++i) {
+      auto def = std::make_shared<champions::simulation::rta::items::Definition>();
+      def->addr = champions::simulation::rta::items::A_DEFS + static_cast<std::uint32_t>(i) * 64;
+      def->name = i == 0 ? "blade" : "charm";
+      def->slot = i;
+      def->category = 0;
+      tables.defs.push_back(def);
+    }
+    const auto page_tables = tables;
+    Ledger copied;
+    copied.adopt_record(authored.record_bytes(), std::move(tables), {},
+                        [](std::uint32_t at) -> std::uint8_t {
+                          return at == champions::simulation::rta::items::A_DEFS + 64 + 0x1c ? 1 : 0;
+                        });
+    expect(copied.press(2, 0x40) == Action::Equip &&
+           copied.record_word(0x43f0) == PLAYER + BAG_ITEMS, "imported record equip pointer");
+    expect(copied.press(2, 0x40) == Action::Unequip &&
+           copied.record_word(0x43f0) == 0, "imported record unequip pointer");
+    reject([&] { copied.press(2, 0x10); }, "live drop refuses missing world placement");
+    auto page_record = authored.record_bytes();
+    const auto put_word = [&](std::size_t at, std::uint32_t value) {
+      for (int byte = 0; byte < 4; ++byte)
+        page_record[at + static_cast<std::size_t>(byte)] = static_cast<std::uint8_t>(value >> (byte * 8));
+    };
+    for (int bag = 1; bag < 3; ++bag) {
+      const auto base = static_cast<std::size_t>(bag) * BAG_STRIDE;
+      put_word(BAG_COUNT + base, 1);
+      for (std::size_t byte = 0; byte < ITEM_SIZE; ++byte)
+        page_record[BAG_ITEMS + base + byte] = page_record[BAG_ITEMS + byte];
+    }
+    Ledger pages;
+    pages.adopt_record(page_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
+    pages.set_page(1);
+    expect(pages.press(2, 0x40) == Action::Equip &&
+           pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 1),
+           "page-one first-cell action uses bag stride");
+    expect(pages.press(2, 0x40) == Action::Unequip, "page-one unequip");
+    pages.set_page(2);
+    expect(pages.press(2, 0x40) == Action::Equip &&
+           pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 2),
+           "page-two first-cell action uses bag stride");
+    pages.set_cursor(49, 100);
+    reject([&] { pages.press(2, 0x40); }, "page-two other action cell stays refused");
   }
   {
     Ledger book;
@@ -259,7 +321,18 @@ void ledger_vectors() {
   {
     Ledger book;
     const auto drawn = book.frame("inventory");
-    expect(!drawn.texts.empty() && drawn.texts[0].x == 17 && drawn.texts[0].y == 89, "name on hit cell");
+    expect(!drawn.texts.empty() && drawn.texts[0].x == 17 && drawn.texts[0].y == 89 &&
+           drawn.texts[0].colour == 0x80464646u, "documented small-font base colour");
+    expect(drawn.sprites.size() == 20 && drawn.sprites[0].resource == "inventrybox3.tex" &&
+           drawn.sprites[3].resource == "inventryboxend.tex", "bounded zero-state box sequence");
+    expect(drawn.rects.size() >= 65 && drawn.rects[0].colour == 0x01000000u &&
+           drawn.rects[64].colour == 0x7f000000u, "scrollbar gradient");
+    expect(drawn.selected_texts.size() == 1 && drawn.selected_texts[0].colour == 0x805c2913u,
+           "selected small-font colour");
+    expect(drawn.frames.size() == 1 && drawn.frames[0].x == 135 && drawn.frames[0].y == 230 &&
+           drawn.frames[0].width == 223 && drawn.frames[0].height == 77 &&
+           drawn.frames[0].style == 6 && drawn.frames[0].tint == 0x80000000u,
+           "observed selected weapon detail frame");
     expect(!drawn.rects.empty() && drawn.rects[0].y0 == 413, "scrollbar");
     const auto stats = book.frame("stats");
     expect(stats.texts.at(0).text == "5" && stats.texts.at(0).x == 160 && stats.texts.at(0).centred, "level line");

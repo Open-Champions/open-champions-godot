@@ -350,7 +350,11 @@ func _start_play(level_name: String) -> void:
 	scene.start_play()
 	var character: Dictionary = view.get("character", {})
 	if scene.session_started and scene.game_menus != null and scene.game_menus.service != null and character.get("ready", false):
-		var adopted: Dictionary = scene.game_menus.service.adopt(character)
+		var imported: bool = character.get("imported", false)
+		var has_executable: bool = real != null and real.files.has("slus_209.73")
+		# A saved character can still enter the built-in session without a selected
+		# disc. Its scalar HUD/menu state is available; live item actions remain refused.
+		var adopted: Dictionary = scene.game_menus.adopt_imported() if imported and has_executable else scene.game_menus.service.adopt(character)
 		if not adopted.get("ok", false):
 			_log("menu ledger refused the character: " + str(adopted.get("error", "")))
 	if scene.session_started:

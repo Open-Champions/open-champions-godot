@@ -60,6 +60,8 @@ protected:
         ClassDB::bind_method(D_METHOD("has_character"), &ChampionsPs2SaveImport::has_character);
         ClassDB::bind_method(D_METHOD("quest_value", "name"), &ChampionsPs2SaveImport::quest_value);
         ClassDB::bind_method(D_METHOD("record_word", "offset"), &ChampionsPs2SaveImport::record_word);
+        ClassDB::bind_method(D_METHOD("record_bytes"), &ChampionsPs2SaveImport::record_bytes);
+        ClassDB::bind_method(D_METHOD("replace_record", "bytes"), &ChampionsPs2SaveImport::replace_record);
         ClassDB::bind_static_method("ChampionsPs2SaveImport", D_METHOD("synthetic_slot", "name", "gold"),
                                     &ChampionsPs2SaveImport::synthetic_slot);
         ClassDB::bind_static_method("ChampionsPs2SaveImport", D_METHOD("file_size"), &ChampionsPs2SaveImport::file_size);
@@ -105,6 +107,27 @@ public:
         if (!imported_ || offset < 0 || size_t(offset) + 4 > P::RECORD_SIZE)
             return -1;
         return int64_t(imported_->memory->word(imported_->record_address + uint32_t(offset)));
+    }
+    PackedByteArray record_bytes() const {
+        PackedByteArray out;
+        if (!imported_) return out;
+        const auto bytes = imported_->memory->read(imported_->record_address, P::RECORD_SIZE);
+        out.resize(int64_t(bytes.size()));
+        std::memcpy(out.ptrw(), bytes.data(), bytes.size());
+        return out;
+    }
+    Dictionary replace_record(const PackedByteArray &bytes) {
+        if (!imported_) return refused("no imported character");
+        if (bytes.size() != int64_t(P::RECORD_SIZE)) return refused("player record size changed");
+        try {
+            imported_->memory->write(imported_->record_address,
+                                     std::vector<std::uint8_t>(bytes.ptr(), bytes.ptr() + bytes.size()));
+            Dictionary out;
+            out["ok"] = true;
+            return out;
+        } catch (const std::exception &error) {
+            return refused(String::utf8(error.what()));
+        }
     }
 
     // An authored synthetic slot image for smokes. Not a save from a card.
