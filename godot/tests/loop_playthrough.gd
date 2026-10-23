@@ -1,5 +1,8 @@
 extends SceneTree
 
+# Swing cycles of the fight step (6 ticks of J held, 24 released).
+const SWING_CYCLES := 120
+
 # Private, opt-in journey probe. The same script runs with --headless or a
 # rendered display. Only counts and generic refusal text leave the game folder.
 # --game-folder=ABS --out=ABS [--rendered]
@@ -377,33 +380,109 @@ func run() -> void:
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
 	var gold_before := int(before.get("gold", -1))
-	var actors_before: Array = before.get("combat_actors", [])
+	var actors_before: Array = before.get("fight_enemies", [])
 	var enemy_hp_before := {}
 	var enemy_hp_before_total := 0.0
 	for actor in actors_before:
-		if int(actor.get("slot", 0)) > 0 and actor.get("present", false) and not actor.get("dead", false):
+		if actor.get("present", false) and not actor.get("dead", false):
 			var enemy_hp := float(actor.get("hp", -1.0))
 			if int(actor.get("handle", 0)) > 0 and enemy_hp > 0.0:
 				enemy_hp_before[int(actor.handle)] = enemy_hp
 				enemy_hp_before_total += enemy_hp
+	var player_before: Vector3 = before.get("position", Vector3.ZERO)
+	await capture("04-fight-start")
+	# J goes through the ordinary key path to the shared-World player.
 	var attack_handled := false
-	# Exercise pressed edges throughout the fight window. A single tap cannot
-	# establish damage, a death, or a drop in the live session.
 	var attack_event := InputEventKey.new()
 	attack_event.keycode = KEY_J
 	attack_event.physical_keycode = KEY_J
-	for i in range(10):
-		attack_event.pressed = true
-		attack_handled = scene.handle_input_event(attack_event) or attack_handled
-		advance(0, 12)
-		attack_event.pressed = false
-		scene.handle_input_event(attack_event)
+	attack_event.pressed = true
+	attack_handled = scene.handle_input_event(attack_event)
+	attack_event.pressed = false
+	scene.handle_input_event(attack_event)
+	# Walk to the nearest live enemy with WASD only. The stick is camera
+	# relative, so measure what each key does first, then steer with the key
+	# set whose measured displacement points at the target.
+	var walk_ticks := 0
+	var start_distance := 1.0e9
+	var last_distance := 1.0e9
+	var reached := false
+	var target_handle := 0
+	var basis := {}
+	for bit in [1, 2, 4, 8]:
+		var p0: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		advance(bit, 8)
+		walk_ticks += 8
+		var p1: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		basis[bit] = Vector2(p1.x - p0.x, p1.y - p0.y)
+	var candidates := [1, 2, 4, 8, 5, 6, 9, 10]
+	for round in range(30):
+		var observed: Dictionary = scene.controller.get_observation()
+		var me: Vector3 = observed.get("position", Vector3.ZERO)
+		var nearest := 1.0e9
+		var aim := Vector2.ZERO
+		for actor in observed.get("fight_enemies", []):
+			if actor.get("dead", false): continue
+			var d := Vector2(actor.position.x - me.x, actor.position.y - me.y)
+			if d.length() < nearest:
+				nearest = d.length()
+				aim = d
+				target_handle = int(actor.handle)
+		if start_distance > 1.0e8: start_distance = nearest
+		last_distance = nearest
+		if nearest <= 45.0:
+			reached = true
+			break
+		var best := 1
+		var best_dot := -2.0
+		for cmd in candidates:
+			var v := Vector2.ZERO
+			for bit in [1, 2, 4, 8]:
+				if cmd & bit: v += basis[bit]
+			if v.length() < 0.01: continue
+			var dot := v.normalized().dot(aim.normalized())
+			if dot > best_dot:
+				best_dot = dot
+				best = cmd
+		advance(best, 12)
+		walk_ticks += 12
+		if observed.get("stopped", false) or observed.get("failed", false): break
+	var organic_reached := reached
+	var placed := false
+	if not reached:
+		# DIAGNOSTIC: the walk is blind to the level's walls, so a scripted run
+		# puts the player next to the nearest enemy (controller.fight_place_player
+		# is not an original routine). The organic result is reported above.
+		var snapshot: Dictionary = scene.controller.get_observation()
+		for actor in snapshot.get("fight_enemies", []):
+			if int(actor.handle) != target_handle: continue
+			var spot: Vector3 = actor.position
+			var put: Dictionary = scene.controller.fight_place_player(Vector3(spot.x - 40.0, spot.y, spot.z + 10.0), 0)
+			placed = bool(put.get("ok", false))
+			break
+		advance(0, 24)
+		var after_place: Dictionary = scene.controller.get_observation()
+		var me_now: Vector3 = after_place.get("position", Vector3.ZERO)
+		for actor in after_place.get("fight_enemies", []):
+			if int(actor.handle) == target_handle:
+				last_distance = Vector2(me_now.x - actor.position.x, me_now.y - actor.position.y).length()
+	await capture("04b-fight-approach")
+	# Swing: J held for a few ticks, then released for the rest of the cycle.
+	var swings := 0
+	var target_dead := false
+	for cycle in range(SWING_CYCLES):
+		advance(16, 6)
+		advance(0, 24)
+		swings += 1
+		for actor in scene.controller.get_observation().get("fight_enemies", []):
+			if int(actor.handle) == target_handle and actor.get("dead", false): target_dead = true
+		if target_dead or bool(scene.controller.get_observation().get("fight_failed", false)): break
 	var after: Dictionary = scene.controller.get_observation()
 	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var saved_hp := float(after.get("hp", -1.0))
 	var saved_gold := int(after.get("gold", -1))
 	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var actors_after: Array = after.get("combat_actors", [])
+	var actors_after: Array = after.get("fight_enemies", [])
 	var enemy_damaged := false
 	var enemy_died := false
 	var enemy_hp_after_total := 0.0
@@ -411,39 +490,33 @@ func run() -> void:
 	var matched_enemies := 0
 	var unmatched_enemies := 0
 	for actor in actors_after:
-		var slot := int(actor.get("slot", 0))
-		if slot > 0 and actor.get("present", false) and not actor.get("dead", false):
+		if actor.get("present", false) and not actor.get("dead", false):
 			live_enemies_after += 1
 		if enemy_hp_before.has(int(actor.get("handle", 0))):
 			var enemy_hp := float(actor.get("hp", -1.0))
-			if actor.has("hp"):
-				matched_enemies += 1
-				enemy_hp_after_total += enemy_hp
-				enemy_damaged = enemy_damaged or enemy_hp < float(enemy_hp_before[int(actor.handle)])
-				# The same handle had positive HP before the attack window.
-				# Require its nonpositive HP and dead state after the window;
-				# drop production is measured separately below.
-				enemy_died = enemy_died or (enemy_hp <= 0.0 and
-					bool(actor.get("dead", false)))
-			else:
-				unmatched_enemies += 1
-		elif slot > 0:
+			matched_enemies += 1
+			enemy_hp_after_total += enemy_hp
+			enemy_damaged = enemy_damaged or enemy_hp < float(enemy_hp_before[int(actor.handle)])
+			# The same handle had positive HP before the attack window.
+			enemy_died = enemy_died or (enemy_hp <= 0.0 and bool(actor.get("dead", false)))
+		else:
 			unmatched_enemies += 1
 	unmatched_enemies += maxi(0, enemy_hp_before.size() - matched_enemies)
-	var drops_before := int(before.get("combat_drops", 0))
-	var drops_after := int(after.get("combat_drops", 0))
+	var fight_counts: Dictionary = after.get("fight_counts", {})
+	var drops_before := 0
+	var drops_after := int(fight_counts.get("loot_calls", 0))
 	var gold_after := int(after.get("gold", -1))
 	# Round 8 traced Gold from AutoContainer, separate from the boar's
-	# zero-Gold drop. Require a runtime source witness before crediting Gold
-	# toward this gate; an unrelated balance change is insufficient.
+	# zero-Gold drop. Require a runtime source witness; none is built here.
 	var auto_container_gold := bool(after.get("gold_from_auto_container", false))
+	var fight_started: bool = bool(after.get("fight_started", false)) and bool(after.get("fight_player_ready", false))
 	var fight_passed: bool = fight_loaded and scene.real.current == fight_level \
-		and after.get("combat_enabled", false) and attack_handled \
+		and fight_started and attack_handled \
 		and not enemy_hp_before.is_empty() and enemy_damaged and enemy_died \
 		and auto_container_gold and gold_after > gold_before
 	var missing_fight_steps := {}
 	if not fight_loaded or scene.real.current != fight_level: missing_fight_steps["enemy_level_entry"] = 1
-	if not after.get("combat_enabled", false): missing_fight_steps["campaign_combat_runtime"] = 1
+	if not fight_started: missing_fight_steps["campaign_combat_runtime"] = 1
 	if not attack_handled: missing_fight_steps["attack_input"] = 1
 	if enemy_hp_before.is_empty(): missing_fight_steps["live_enemy"] = 1
 	if not enemy_damaged: missing_fight_steps["enemy_damage"] = 1
@@ -461,6 +534,15 @@ func run() -> void:
 		"scene_paused": scene.paused, "frontend_screen": fe.screen(),
 		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
 		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
+		"fight_started": fight_started, "fight_failed": bool(after.get("fight_failed", false)),
+		"fight_error": str(after.get("fight_error", "")),
+		"fight_counts": fight_counts, "fight_refusals": after.get("fight_refusals", {}),
+		"player_action_state": int(after.get("fight_player_action_state", -1)),
+		"player_weapon_class": int(after.get("fight_player_weapon_class", -1)),
+		"player_start": player_before, "player_end": after.get("position", Vector3.ZERO),
+		"walk_ticks": walk_ticks, "start_distance": start_distance, "end_distance": last_distance,
+		"reached_enemy_by_walking": organic_reached, "placed_for_swing": placed, "swing_cycles": swings,
+		"ready_ticks": int(after.get("ready_ticks", -1)), "session_stopped": bool(after.get("stopped", false)),
 		"hp_before": hp_before, "hp_after": float(after.get("hp", -1.0)),
 		"hp_change": float(after.get("hp", -1.0)) - hp_before,
 		"gold_before": gold_before, "gold_after": gold_after,

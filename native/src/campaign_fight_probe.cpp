@@ -174,6 +174,7 @@ int main(int argc, char **argv) {
               << " alive=" << w.read(0x4f8420) << " c8=" << w.read(0x6c88c0 + 0xc8) << " 2dc=" << w.read(0x6c88c0 + 0x2dc)
               << " rec_ac=" << w.read(0x4d8af0 + 0xac) << " obj228=" << w.read(0x6c88c0 + 0x228) << " obj_flags=" << w.read(0x6c88c0 + 12) << "\n";
   }
+  std::cout << "authority memory backing bytes=" << authority->memory.bytes().size() << "\n";
   const auto &c = host.counts();
   std::cout << "records built=" << c.objects_built << " unbuilt=" << c.objects_unbuilt << " not_created=" << c.objects_not_created
             << " fight_actors=" << fight.counts().actors_built << " start_error=" << (start_error.empty() ? "none" : start_error) << "\n";

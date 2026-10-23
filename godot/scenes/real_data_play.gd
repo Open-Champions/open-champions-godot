@@ -7,8 +7,10 @@ const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const RealPlayer = preload("res://real_data/real_player.gd")
 const TextHud = preload("res://ui/text_hud.gd")
+const FightEnemies = preload("res://real_data/real_fight_enemies.gd")
 var real: Node
 var real_player: RefCounted
+var fight_enemies: RefCounted
 var imported_appearance: Array = []
 var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
@@ -42,6 +44,7 @@ func _ready() -> void:
 	add_child(real)
 	real.configure(self, "user://real-data-cache")
 	real_player = RealPlayer.new()
+	fight_enemies = FightEnemies.new()
 	if viewport != null:
 		text_hud = TextHud.new()
 		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -116,6 +119,8 @@ func _update_menu() -> void:
 	super._update_menu()
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
+		if raw_observation.get("fight_player_ready", false):
+			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. Enemy AI past idle, hit reactions, loot objects, Gold and the Minotaurs remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -175,6 +180,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	if level_script != null and level_script.button_pressed: scripted = attach_level_script(carry_campaign)
 	else: controller.disable_level_script()
 	_refresh_exit_targets()
+	_install_fight_enemies()
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
@@ -189,6 +195,17 @@ func restore_default_actor() -> void:
 func _apply_presentation() -> void:
 	super._apply_presentation()
 	_frame_player_camera()
+	if fight_enemies != null and raw_observation.get("campaign_fight", false):
+		fight_enemies.update(raw_observation)
+
+# The shared-World fight's enemies: the class archive's rest-pose model.
+func _install_fight_enemies() -> void:
+	if fight_enemies == null: return
+	fight_enemies.clear()
+	if controller == null or not controller.get_observation().get("campaign_fight", false): return
+	var names: Array = controller.combat_resource_lump_names()
+	if names.is_empty() or _world == null: return
+	fight_enemies.install(real, inspector, _world, str(names[0]), "")
 
 func _frame_player_camera() -> void:
 	if real_player == null or not real_player.body_drawn or actor_visual.mesh == null or camera == null: return

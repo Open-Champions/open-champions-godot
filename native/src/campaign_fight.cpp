@@ -398,6 +398,13 @@ struct Fight::Impl {
     spawn.team = 0;
     spawn.session_record = true;
     level_globals(start.level_name);
+    if (!lt(0, read(PLAYERS + 0xac))) {
+      // No character record bound (the script host's binder wrote none): the
+      // scene's health stands in so the player is alive.
+      world->write(PLAYERS + 0xac, 4, start.hp);
+      world->write(PLAYERS + 0xb0, 4, start.hp);
+      refuse("no character record: player hit points taken from the scene");
+    }
     player = world->spawn_player(0, spawn);
     player_handle = world->retain(player);
     const Address def = read(player + 0x24);
@@ -594,6 +601,14 @@ void Fight::tick(std::uint32_t command) {
     p.error = e.what();
     p.refuse(std::string("World tick stopped: ") + e.what());
   }
+}
+std::string Fight::place_player(const Vec3 &position, Raw facing) {
+  auto &p = *p_;
+  if (!p.player_ok) return "no player";
+  for (unsigned k = 0; k < 3; ++k) p.world->write(p.player + 0x10 + 4 * k, 4, position[k]);
+  p.world->write(p.player + 0x38, 2, facing & 0xffff);
+  p.world->update_grid(p.player);
+  return {};
 }
 bool Fight::started() const { return p_->started; }
 bool Fight::player_ready() const { return p_->player_ok; }

@@ -264,11 +264,11 @@ int main(int argc, char **argv) {
             combat::World reuse_world(reuse_authority, combat::Services{});
             const auto actor = reuse_world.spawn_skelight();
             reuse_world.destroy(actor);
-            sc::Host reuse(reuse_authority);
+            auto reuse = std::make_unique<sc::Host>(reuse_authority);
             rta::SharedRandom reuse_seed(seed0);
-            reuse.bind_seed(&reuse_seed);
-            reuse.set_executable(image.view());
-            check(reuse.adopt_objects(bytes.data(), bytes.size()), "reuse adoption");
+            reuse->bind_seed(&reuse_seed);
+            reuse->set_executable(image.view());
+            check(reuse->adopt_objects(bytes.data(), bytes.size()), "reuse adoption");
             check(reuse_authority->objects->objects.size() == 1, "one reused object graph entry");
             const auto reused = reuse_authority->objects->objects.begin()->first;
             check(reused == actor, "factory object reuses the freed combat actor's block");
@@ -277,6 +277,12 @@ int main(int argc, char **argv) {
                       reuse_world.factory_object(reuse_handle) ==
                           reuse_authority->objects->objects.at(reused),
                   "handle on a reused block links the factory object's own head");
+            // Host teardown must unlink the node from the factory object's own
+            // head; a node left in the stale combat head would still resolve
+            // (audit WA-F2).
+            reuse.reset();
+            check(reuse_world.target(reuse_handle) == 0 && !reuse_world.factory_object(reuse_handle),
+                  "host teardown invalidates the retained handle");
           }
           shared_authority_checked = true;
         }

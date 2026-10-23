@@ -304,6 +304,8 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
       throw amx::HostFault("setup allocation arithmetic exceeds int64 domain");
     next_address+=step;
   }
+  // An address a combat actor already holds is refused before any byte is written.
+  if (authority_ && authority_->find(*address)) throw std::logic_error("World address already registered");
   auto obj=std::make_shared<Obj>(memory,*address,type);
   obj->flags(object_flags); obj->pos(position); obj->angle(facing);
   obj->props=props ? std::make_shared<std::vector<std::string>>(*props) : nullptr;

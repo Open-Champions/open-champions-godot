@@ -43,6 +43,7 @@ add_library(champions-archive-binding-core STATIC ../native/src/ui_font.cpp ../n
 target_include_directories(champions-archive-binding-core PUBLIC ../native/include)
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Link exactly the same deterministic target graph used by native tests.
+set(CHAMPIONS_ACTORS_ARCHIVE champions-archive-binding-core)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/simulation_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/player_state_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/level_flow_targets.cmake")

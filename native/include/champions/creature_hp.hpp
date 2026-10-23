@@ -92,7 +92,11 @@ public:
   // zero-backed store): no sparse budget, no read-only overlay refusal (the
   // overlay still wins every read), and a zero byte erases its backing entry
   // unless an underlying delegate is present. Unlogged; the span must lie
-  // within unsigned 32-bit space (the caller splits wrapping writes).
+  // within unsigned 32-bit space (the caller splits wrapping writes). On a
+  // byte the overlay covers (handle nodes, non-empty combat heads) the write
+  // reaches the backing but reads keep returning the overlay value, so a
+  // script's read-after-write there is lost where the old canonical path
+  // refused (world-authority audit WA-F1; no audited code touches them).
   void write_host_bytes(Address, const std::vector<std::uint8_t> &);
   // Actual sparse backing only; a covered backing byte may differ from its
   // effective read. Neither load nor effective_bytes materializes missing

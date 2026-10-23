@@ -75,6 +75,10 @@ public:
   // One ready tick of the shared World. `command` holds the session command
   // bits (POS_X, NEG_X, POS_Y, NEG_Y, DAMAGE-as-J).
   void tick(std::uint32_t command);
+  // DIAGNOSTIC, not an original routine: put the player at a point so a
+  // scripted run can start a fight without path finding through the level.
+  // Updates the grid cell; ground contact settles on the next ticks.
+  std::string place_player(const Vec3 &position, Raw facing);
   bool started() const;
   bool player_ready() const;
   bool failed() const;
