@@ -252,62 +252,66 @@ func run() -> void:
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
-	# Step 6: the same real-level script host exposes object-record exits and
-	# pending newWorld/newWorldPost. Execute only a documented script action.
+	# The opening choice and this hub PushTrigger are checked separately in
+	# research-story-route. Exercise their native integration in this session.
 	var transition_before: int = scene.real.current
-	var exit_targets: Array = scene.controller.script_exit_targets()
+	var at_hub: bool = transition_before >= 0 and str(scene.real.levels[transition_before].stem) == "hub"
+	var menu_before: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_1_unlock", "available" if at_hub and menu_before.get("first_story_available", false) else "refused",
+		{"at_hub": at_hub, "available": menu_before.get("first_story_available", false)})
+	var hub_trigger_found := false
+	for target in scene.controller.script_exit_targets():
+		if int(target.index) == 11 and str(target.kind) == "PushTrigger" and target.get("script_action", false):
+			hub_trigger_found = true
+			break
+	var trigger_result: Dictionary = scene.controller.script_run_exit(11) if at_hub and hub_trigger_found and not scene.controller.dialog_status().get("open", false) else {"ok": false}
+	var menu_open: bool = bool(scene.controller.script_mission_menu_state().get("open", false))
+	scene._refresh_mission_menu()
+	mark("hub_trigger_mission_menu", "opened" if trigger_result.get("ok", false) and menu_open else "refused",
+		{"hub_trigger_found": hub_trigger_found, "menu_open": menu_open,
+		"host_panel_visible": scene.mission_menu_panel.visible})
+	await capture("10-mission-menu")
+	var selected: bool = menu_open and scene.mission_menu_select_first_story()
 	var pending: Dictionary = scene.controller.script_level_request()
-	var exit_attempts := 0
-	var sources_examined := 1
-	if not pending.get("queued", false):
-		for target in exit_targets:
-			if not target.get("script_action", false): continue
-			exit_attempts += 1
-			var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
-			if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
-			pending = scene.controller.script_level_request()
-			if pending.get("queued", false): break
-	# The chosen first-level dialog is allowed to leave its exit locked. Search
-	# other real levels for a documented action that actually queues newWorld;
-	# this diagnostic selection never fabricates a destination or script value.
-	if not pending.get("queued", false):
-		for index in range(scene.real.levels.size()):
-			if index == transition_before: continue
-			if not scene.load_real_level(index, true): continue
-			scene.start_play()
-			sources_examined += 1
-			exit_targets = scene.controller.script_exit_targets()
-			pending = scene.controller.script_level_request()
-			if not pending.get("queued", false):
-				for target in exit_targets:
-					if not target.get("script_action", false): continue
-					exit_attempts += 1
-					var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
-					if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
-					pending = scene.controller.script_level_request()
-					if pending.get("queued", false): break
-			if pending.get("queued", false):
-				transition_before = index
-				break
+	mark("mission_1_story_request", "blood1" if selected and str(pending.get("name", "")) == "blood1" else "refused",
+		{"queued": pending.get("queued", false), "orientation": pending.get("orientation", -1)})
 	var record_before: Dictionary = scene.controller.get_observation()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var transition_ok: bool = selected and bool(scene._apply_level_change())
 	var record_after: Dictionary = scene.controller.get_observation()
 	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var mission1_still_available: bool = bool(scene.controller.script_mission_menu_state().get("first_story_available", false))
 	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
 		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("player_class", -1)) == int(record_before.get("player_class", -2)) \
 		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
 		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
-		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
-	mark("level_change", "changed" if record_carried and scene.real.current != transition_before else "refused",
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2)) \
+		and int(record_after.get("record_max_hp_raw", -1)) == int(record_before.get("record_max_hp_raw", -2)) \
+		and int(record_after.get("record_max_mana_raw", -1)) == int(record_before.get("record_max_mana_raw", -2))
+	var at_blood1: bool = scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "blood1"
+	mark("blood1_arrival", "arrived" if record_carried and at_blood1 and mission1_still_available else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
-		"exit_targets": exit_targets.size(), "exit_actions_attempted": exit_attempts,
-		"sources_examined": sources_examined,
 		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
 		"campaign_image_restored": scene.last_campaign_image_restored,
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
-		"quest_vars_after": int(quests_after.get("vars", 0))})
+		"quest_vars_after": int(quests_after.get("vars", 0)),
+		"mission1_still_available": mission1_still_available,
+		"mission_available_before": int(quests_before.get("mission_available_bits", 0)),
+		"mission_available_after": int(quests_after.get("mission_available_bits", 0))})
 	await capture("10-level-change")
+	if args.has("route-only"):
+		save_json()
+		quit(0 if at_hub and menu_open and selected and record_carried and at_blood1 and mission1_still_available else 1)
+		return
+	# Combat remains a separate diagnostic until blood1 hostile constructors
+	# yield live enemies. Direct selection of valor is not a campaign route.
+	var valor_index := -1
+	for index in range(scene.real.levels.size()):
+		if str(scene.real.levels[index].stem) == "valor": valor_index = index
+	var valor_loaded: bool = valor_index >= 0 and scene.load_real_level(valor_index)
+	if valor_loaded: scene.start_play()
+	mark("valor_fight_setup", "loaded" if valor_loaded else "refused")
 	var before: Dictionary = scene.controller.get_observation()
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
@@ -317,7 +321,7 @@ func run() -> void:
 	advance(0, 120)
 	var after: Dictionary = scene.controller.get_observation()
 	var actors_after: Array = after.get("combat_actors", [])
-	mark("enemy_fight", "combat_observed" if after.get("combat_enabled", false) else "refused",
+	mark("valor_fight", "combat_observed" if valor_loaded and after.get("combat_enabled", false) else "refused",
 		{"attack_input_handled": attack_handled, "actors_before": actors_before.size(),
 		"actors_after": actors_after.size(), "hp_before": hp_before,
 		"hp_after": float(after.get("hp", -1.0)), "gold_before": gold_before,
