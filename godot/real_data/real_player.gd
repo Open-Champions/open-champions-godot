@@ -11,12 +11,22 @@ var textured := false
 var body_drawn := false
 var binder: RefCounted
 var actor: MeshInstance3D
+var animation_archive := ""
+var clip_slots: Array = []
+var body_bytes := PackedByteArray()
+var archive_reader: RefCounted
+var rest_mesh: Mesh
 
 func clear() -> void:
 	model_index = -1
 	textured = false
 	body_drawn = false
 	binder = null
+	animation_archive = ""
+	clip_slots.clear()
+	body_bytes = PackedByteArray()
+	archive_reader = null
+	rest_mesh = null
 	if actor != null and is_instance_valid(actor): actor.material_override = null
 
 static func _row_index(rows: Array, name: String) -> int:
@@ -68,7 +78,18 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 	if not prepared.get("ok", false):
 		status = "Player model refused: " + str(prepared.get("error", "rest pose unavailable"))
 		return false
+	var body_read: Dictionary = reader.read_player_resource(selection, body_row,
+		str(listing.fingerprint), body_name)
+	if not body_read.get("ok", false):
+		status = "Player model refused: " + str(body_read.get("error", "body resource changed"))
+		return false
+	body_bytes = body_read.bytes
 	visual.mesh = prepared.mesh
+	rest_mesh = prepared.mesh
+	var animation_name := str(resources.animation_lump).to_lower()
+	animation_archive = str(real.files.get(animation_name, ""))
+	clip_slots = resources.clip_slots_1_to_111.duplicate()
+	archive_reader = reader
 	visual.scale = Vector3.ONE # Player_ctor leaves Creature_ctor's 1.0 scale.
 	visual.position = Vector3(0, -prepared.bounds.position.y, 0)
 	visual.material_override = null
@@ -81,7 +102,8 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 			var skin_name := "%s_bodyv%d.tex" % [code, skin + 1]
 			binder = RealCreature.new()
 			binder.environment = real.environment
-			var bound: Dictionary = binder.bind_named(selection, selection_rows, body_row, skin_name)
+			var bound: Dictionary = binder.bind_named(selection, selection_rows, body_row, skin_name,
+				reader, str(listing.fingerprint))
 			if bound.get("ok", false) and binder.apply(visual):
 				textured = true
 				status = "Class body rest pose and record-selected skin drawn; original idle animation refused."
@@ -103,3 +125,44 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 	if player_count < 2:
 		status += " Selection flag 0x506040 is unknown; select.lmp is a host preview choice."
 	return true
+
+# An explicit diagnostic sample. The real level session has no observed
+# weapon-animation class or Player_run state, so it must not call this as if
+# it were automatic player playback. Slots are one-based and retain repeats.
+func draw_selected_pose(weapon_class: int, role: int, tick: float) -> Dictionary:
+	if not body_drawn or actor == null or archive_reader == null or body_bytes.is_empty():
+		return {"ok": false, "error": "Player pose refused: selected body bytes are unavailable."}
+	if weapon_class < 0 or weapon_class > 7 or role < 0 or role > 12:
+		return {"ok": false, "error": "Player pose refused: class or role is outside the traced row."}
+	if animation_archive.is_empty():
+		return {"ok": false, "error": "Player pose refused: traced animation archive is absent."}
+	var slot := 8 + 13 * weapon_class + role
+	var clip_name := str(clip_slots[slot - 1]).to_lower()
+	if not clip_name.ends_with(".anm"):
+		return {"ok": false, "error": "Player pose refused: selected slot is not an animation."}
+	var listing: Dictionary = archive_reader.inspect_archive(animation_archive)
+	if not listing.get("ok", false):
+		return {"ok": false, "error": "Player pose refused: animation archive could not be inspected."}
+	var clip_row := _row_index(listing.rows, clip_name)
+	if clip_row < 0:
+		return {"ok": false, "error": "Player pose refused: selected clip is absent."}
+	var clip_read: Dictionary = archive_reader.read_player_resource(animation_archive,
+		clip_row, str(listing.fingerprint), clip_name)
+	if not clip_read.get("ok", false):
+		return {"ok": false, "error": "Player pose refused: " + str(clip_read.get("error", "selected clip changed"))}
+	var clip: PackedByteArray = clip_read.bytes
+	var sample: Dictionary = archive_reader.sample_skinned_resources(body_bytes, clip, tick)
+	var prepared: Dictionary = MeshBuilder.prepare(sample)
+	if not prepared.get("ok", false):
+		return {"ok": false, "error": "Player pose refused: " + str(prepared.get("error", "sample unavailable"))}
+	actor.mesh = prepared.mesh
+	actor.position = Vector3(0, -prepared.bounds.position.y, 0)
+	if binder != null: binder.apply(actor)
+	return {"ok": true, "slot": slot, "duration_ticks": int(sample.duration_ticks),
+		"visible_corners": int(prepared.visible_corners)}
+
+func restore_rest_pose() -> void:
+	if actor != null and rest_mesh != null:
+		actor.mesh = rest_mesh
+		actor.position = Vector3(0, -rest_mesh.get_aabb().position.y, 0)
+		if binder != null: binder.apply(actor)

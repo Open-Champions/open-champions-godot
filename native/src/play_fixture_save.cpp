@@ -177,6 +177,23 @@ CombatScene::~CombatScene() {
   effects_.reset(); // before the session it observes
 }
 
+Raw CombatScene::probe_walk_life_zero(const std::function<Raw()> &read_exposed) {
+  require(full(), "walk-cell probe requires the synthetic Full fixture");
+  const auto actors = session_->actors();
+  require(!actors.empty() && actors[0].present, "walk-cell probe requires the Full player");
+  auto &world = session_->world();
+  const auto life_address = world.target(actors[0].handle) + 0x14c;
+  const Raw saved_life = static_cast<Raw>(world.read(life_address));
+  struct Restore {
+    combat_runtime::World &world;
+    combat_runtime::Address address;
+    Raw value;
+    ~Restore() { world.write(address, 4, value); }
+  } restore{world, life_address, saved_life};
+  world.write(life_address, 4, 0);
+  return read_exposed();
+}
+
 template <class F> auto CombatScene::record(std::uint8_t op, std::uint32_t value, F &&f) -> decltype(f()) {
   if (!replaying_) {
     require(journal_.size() < MAX_ACTIONS, "fixture journal is full; save refused beyond this point");

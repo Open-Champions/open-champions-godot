@@ -184,6 +184,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::stop_session);
   ClassDB::bind_method(D_METHOD("get_observation"),
                        &ChampionsSessionController::get_observation);
+  ClassDB::bind_method(D_METHOD("probe_full_walk_weight_test"),
+                       &ChampionsSessionController::probe_full_walk_weight_test);
   ClassDB::bind_method(D_METHOD("get_terrain"),
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
@@ -355,6 +357,27 @@ Dictionary ChampionsSessionController::present_observation(
 Dictionary ChampionsSessionController::get_observation() const {
   try {
     return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::probe_full_walk_weight_test() {
+  try {
+    if (!combat_ || !combat_->full())
+      throw std::runtime_error("Walk-cell probe requires the synthetic Full fixture.");
+    const auto player = combat_->actors().at(0);
+    const auto address = combat_->world().target(player.handle);
+    const auto expected = combat_->world().read(address + 0x144);
+    const auto observed = combat_->probe_walk_life_zero([&] {
+      const Array actors = combat_observation()["combat_actors"];
+      const Dictionary row = actors[0];
+      return rta::Raw(int64_t(row["locomotion_walk_weight_raw"]));
+    });
+    Dictionary out;
+    out["ok"] = true;
+    out["expected_weight_raw"] = int64_t(expected);
+    out["observed_weight_raw"] = int64_t(observed);
+    return out;
   } catch (const std::exception &e) {
     return failure(e);
   }
@@ -2492,6 +2515,23 @@ Dictionary ChampionsSessionController::combat_observation() const {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));
       value["action_state"] = int64_t(combat_->world().read(address + 0x58c));
+      if (a.slot == 0) {
+        // These are the executed Player_move mode-0 cells, not a position
+        // delta inferred by presentation. Other play policies have no such
+        // cells and must not advertise original player locomotion.
+        value["locomotion_speed_raw"] = int64_t(combat_->world().read(address + 0x468));
+        value["locomotion_blend_raw"] = int64_t(combat_->world().read(address + 0x46c));
+        value["locomotion_walk_weight_raw"] = int64_t(combat_->world().read(address + 0x144));
+        value["locomotion_run1_weight_raw"] = int64_t(combat_->world().read(address + 0x164));
+        value["locomotion_run2_weight_raw"] = int64_t(combat_->world().read(address + 0x184));
+        const auto slot = combat_->world().read(address + 0x3c8);
+        if (slot < 4) {
+          const auto record = 0x4d8af0u + static_cast<std::uint32_t>(slot) * 0x4c30u;
+          value["player_model_index"] = int64_t(combat_->world().read(record + 0x54));
+          value["weapon_animation_class"] = int64_t(static_cast<std::int8_t>(
+              combat_->world().read(record + 0x4a86, 1)));
+        }
+      }
     }
     value["present"] = a.present;
     value["dead"] = a.dead;
