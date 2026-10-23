@@ -52,6 +52,26 @@ Dictionary failure(const std::exception &error) {
   out["error"] = String::utf8(error.what());
   return out;
 }
+// US v2.00 mission table, research-story-route and docs/QUESTS.md. Read the
+// owner's executable at run time; no retail table or text enters the project.
+std::vector<rta::quests::MissionRow> mission_rows(const rta::arena_modes::Executable &exe) {
+  constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
+  std::vector<rta::quests::MissionRow> rows;
+  rows.reserve(13);
+  for (std::uint32_t i = 0; i < 13; ++i) {
+    const auto base = table + i * stride;
+    auto name = [&](std::uint32_t offset) {
+      const auto ptr = exe.word(base + offset);
+      return ptr ? exe.string(ptr) : std::string();
+    };
+    rows.push_back({name(0x08), name(0x0c), name(0x10), name(0x14),
+                    std::int32_t(exe.word(base + 0x20)), std::int32_t(exe.word(base + 0x24)),
+                    std::int32_t(exe.word(base + 0x28))});
+  }
+  if (rows.front().story != "blood1")
+    throw std::runtime_error("The selected executable does not establish the first story mission.");
+  return rows;
+}
 void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
           double z) {
   for (const Vector3 p :
@@ -114,6 +134,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
   ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_state"), &ChampionsSessionController::script_mission_menu_state);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
+                       &ChampionsSessionController::script_mission_menu_tick);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
   bind_text_methods();
@@ -878,6 +901,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    if (executable_)
+      next->campaign().set_rows(mission_rows(*executable_));
     // Malformed statistics or WORLD are refused and counted; the script still
     // attaches without them.
     if (executable_ && !level_name.is_empty() && !balance.is_empty()) {
@@ -1413,6 +1438,39 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
   return result;
+}
+Dictionary ChampionsSessionController::script_mission_menu_state() const {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && scripts_->campaign().rows().size() == 13);
+  if (!bool(out["ok"])) return out;
+  const auto &campaign = scripts_->campaign();
+  const auto &menu = campaign.menu();
+  out["open"] = campaign.menu_open() && menu.pending.empty();
+  out["state"] = int64_t(menu.state);
+  out["row"] = int64_t(menu.row);
+  out["column"] = int64_t(menu.col);
+  out["chooser"] = int64_t(campaign.chooser());
+  out["first_story_available"] = bool(campaign.mission_available(1));
+  out["pending"] = String::utf8(menu.pending.c_str());
+  return out;
+}
+Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits, int64_t fade) {
+  try {
+    if (!scripts_ || scripts_->campaign().rows().size() != 13 || !scripts_->campaign().menu_open())
+      throw std::runtime_error("No documented mission menu is open.");
+    constexpr std::uint32_t allowed = rta::quests::BTN_CROSS | rta::quests::BTN_CIRCLE |
+                                      rta::quests::BTN_SELECT | rta::quests::BTN_UP |
+                                      rta::quests::BTN_DOWN | rta::quests::BTN_LEFT |
+                                      rta::quests::BTN_RIGHT;
+    if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 || fade < 0 || fade > 128)
+      throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
+    rta::quests::MenuInputs inputs;
+    inputs.fade = int(fade);
+    const bool launched = scripts_->tick_mission_menu(int(pad_bits), inputs);
+    auto out = script_mission_menu_state();
+    out["launched"] = launched;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
 }
 Array ChampionsSessionController::script_exit_targets() const {
   Array result;

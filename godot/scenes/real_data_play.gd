@@ -22,6 +22,9 @@ var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
 var real_exit_choice: OptionButton
+var mission_menu_panel: PanelContainer
+var mission_menu_status: Label
+var mission_first_story: Button
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -105,6 +108,27 @@ func _ready() -> void:
 	real_exit_choice.add_item("No level exit loaded", -1)
 	menu.add_child(real_exit_choice)
 	_add_action("real_exit", "Use selected level action", activate_selected_exit)
+	mission_menu_panel = PanelContainer.new()
+	mission_menu_panel.set_anchors_preset(Control.PRESET_CENTER)
+	mission_menu_panel.custom_minimum_size = Vector2(380, 160)
+	mission_menu_panel.offset_left = -190
+	mission_menu_panel.offset_top = -80
+	mission_menu_panel.offset_right = 190
+	mission_menu_panel.offset_bottom = 80
+	mission_menu_panel.visible = false
+	var mission_box := VBoxContainer.new()
+	mission_menu_panel.add_child(mission_box)
+	var mission_title := Label.new()
+	mission_title.text = "Mission menu · host layout"
+	mission_box.add_child(mission_title)
+	mission_menu_status = Label.new()
+	mission_box.add_child(mission_menu_status)
+	mission_first_story = Button.new()
+	mission_first_story.text = "Mission 1 · Story"
+	mission_first_story.pressed.connect(mission_menu_select_first_story)
+	mission_box.add_child(mission_first_story)
+	if viewport != null: viewport.add_child(mission_menu_panel)
+	else: add_child(mission_menu_panel)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -440,6 +464,39 @@ func activate_selected_exit() -> Dictionary:
 	if out.get("queued", false): _queue_level_change()
 	return out
 
+func mission_menu_select_first_story() -> bool:
+	var menu_state: Dictionary = controller.script_mission_menu_state()
+	if not menu_state.get("ok", false) or not menu_state.get("open", false) or not menu_state.get("first_story_available", false):
+		status_label.text = "Mission selection refused: mission 1 is not available."
+		return false
+	# The native state machine supplies the row, availability gate, fade and
+	# direct pending-world write. The host button submits its documented pad.
+	for i in range(17):
+		if int(menu_state.get("state", -1)) == 2: break
+		menu_state = controller.script_mission_menu_tick(0, 0)
+		if not menu_state.get("ok", false): return false
+	if int(menu_state.get("state", -1)) != 2 or int(menu_state.get("row", -1)) != 0 or int(menu_state.get("column", -1)) != 0:
+		status_label.text = "Mission selection refused: the first story row is not selected."
+		return false
+	menu_state = controller.script_mission_menu_tick(0x40, 0)
+	for i in range(4):
+		if not menu_state.get("ok", false): return false
+		menu_state = controller.script_mission_menu_tick(0, 128)
+	if not menu_state.get("launched", false) or str(menu_state.get("pending", "")) != "blood1":
+		status_label.text = "Mission selection refused: the documented first story request was not produced."
+		return false
+	mission_menu_panel.visible = false
+	_queue_level_change()
+	return true
+
+func _refresh_mission_menu() -> void:
+	if mission_menu_panel == null or controller == null: return
+	var state: Dictionary = controller.script_mission_menu_state()
+	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false))
+	if mission_menu_panel.visible:
+		mission_first_story.disabled = not bool(state.get("first_story_available", false))
+		mission_menu_status.text = "Mission 1 is available." if not mission_first_story.disabled else "Mission 1 is locked."
+
 func _queue_level_change() -> void:
 	if _level_change_queued or _level_change_loading: return
 	_level_change_queued = true
@@ -512,6 +569,7 @@ func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
 	if not _level_change_loading and controller != null:
+		_refresh_mission_menu()
 		var pending: Dictionary = controller.script_level_request()
 		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:
 			_queue_level_change()
