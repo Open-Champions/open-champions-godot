@@ -100,6 +100,13 @@ Address World::give_skill(int id, const SkillSetup &v) {
   require_full(*s_);
   auto &s = *s_;
   static const std::map<int, std::pair<Address, std::array<Raw, 16>>> tables = {
+      // US v2.00 pointer values, checked read-only; unmodelled bodies still
+      // refuse in skill_virtual.
+      {4,
+       {0x518468,
+        {0x3ccf60, 0x2cb368, 0x2cb1c0, 0x3c8248, 0x2cb264, 0x2cb33c,
+         0x3c82b8, 0x3ccfb0, 0x3c82e4, 0x2cb14c, 0x3c85fc, 0x3c8690,
+         0x3c87f0, 0x3c8864, 0x3c88dc, 0x3c88e4}}},
       {16,
        {0x51a108,
         {0x3cf4c0, 0x2ed20c, 0x2ecfcc, 0x3c8248, 0x2ed08c, 0x2ed1e4, 0x3c82b8,
@@ -138,6 +145,55 @@ Address World::give_skill(int id, const SkillSetup &v) {
   s.poke(G_SKILL_TABLE + 4 * Raw(id), 4, skill);
   s.skill_objects[id] = skill;
   return skill;
+}
+void World::select_disease_bolt(unsigned slot, Raw mana, Raw max_mana) {
+  require_full(*s_);
+  if (slot >= 4 || !lt(0, mana) || !le(mana, max_mana) ||
+      (mana & 0x7f800000u) == 0x7f800000u ||
+      (max_mana & 0x7f800000u) == 0x7f800000u)
+    throw Unsupported("Disease Bolt needs a player and supplied positive finite mana");
+  auto &s = *s_;
+  auto r = PLAYERS + slot * RECORD_SIZE;
+  if (!s.u(r + 0x43d8) || s.skill_objects.count(4) ||
+      s.s16m(r + 0x4b08) != -1)
+    throw Unsupported("Disease Bolt requires an unused Full player skill record");
+  SkillSetup bolt;
+  bolt.kind = 0;
+  bolt.recast = 30;
+  bolt.stats[0] = {1, 30, 0x41102484};
+  bolt.stats[1] = {5, 1, 0x3eaa7ef9};
+  give_skill(4, bolt);
+  // Keep the opt-in projectile table out of the default Full fixture's exact
+  // memory image. Pointers are checked read-only against the US v2.00 table;
+  // unmodelled destructor/drawing bodies still refuse when invoked.
+  constexpr std::array<Raw, 17> projectile_methods = {
+      0x3cd05c, 0x3ccfd4, 0x3c7e88, 0x3c7e90, 0x2ca1a8, 0x2ca09c,
+      0x2caec8, 0x3c7eb0, 0x3c7eb8, 0x3c7ec0, 0x3c7ec8, 0x3c7ef0,
+      0x3c7ef8, 0x3c7f20, 0x3c7f28, 0x11c7f8, 0x3c8120};
+  for (unsigned k = 0; k < projectile_methods.size(); ++k) {
+    s.poke(VT_DISEASEBOLT + 8 * k, 2, 0);
+    s.poke(VT_DISEASEBOLT + 8 * k + 4, 4, projectile_methods[k]);
+  }
+  // Ability record and quick-slot A are observed at R+0x4440 and R+0x4a84.
+  // Other quick slots remain untouched. This is a fixture assignment, not a
+  // substitute for the unported local HUD selector/message producer.
+  // The original compares these two C strings, but the research does not
+  // establish the literal bytes. Match them only inside this authored fixture.
+  constexpr char name[] = "fixture-skill";
+  for (unsigned k = 0; k < sizeof(name); ++k) {
+    s.poke(r + 0x4440 + k, 1, std::uint8_t(name[k]));
+    s.poke(0x535e30 + k, 1, std::uint8_t(name[k]));
+  }
+  s.poke(r + 0x4440 + 0x20, 2, 4);
+  s.poke(r + 0x4440 + 0x24, 1, 1);
+  s.poke(r + 0x4440 + 0x25, 1, 0);
+  s.poke(r + 0x4a84, 1, 0);
+  s.poke(r + 0x4a60, 2, 0);
+  s.poke(r + 0x4b08, 2, 4);
+  s.poke(r + 0x4b0a, 2, 1);
+  s.poke(r + 0x4b0c, 2, 0xffff);
+  s.poke(r + 0xc0, 4, mana);
+  s.poke(r + 0xc4, 4, max_mana);
 }
 void World::queue_cast(Address caster, int id, int level,
                        std::optional<Vec3> point, std::optional<Raw> facing) {

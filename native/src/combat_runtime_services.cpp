@@ -1114,9 +1114,15 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       return iv(move_with_collision(ar(0), v(1), ar(2), ar(3)));
     if (n == "obj_moveAndCollide")
       return iv(move_and_collide(ar(0), v(1)));
-    if (n == "world_collectObjectsInArc")
-      return A::Objects{collect_in_arc(v(0), ar(1), ar(2), ar(3), ar(4), ar(5),
-                                       ar(6))};
+    if (n == "world_collectObjectsInArc") {
+      // Player_castSkill supplies the six-argument form with no filter;
+      // projectile constructors also use the explicit seven-argument form.
+      if (a.size() == 6)
+        return A::Objects{collect_in_arc(v(0), ar(1), ar(2), 0, ar(3), ar(4), ar(5))};
+      if (a.size() == 7)
+        return A::Objects{collect_in_arc(v(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6))};
+      throw Unsupported("world_collectObjectsInArc argument count");
+    }
     if (n == "world_collectInSphere") {
       if (a.size() == 4)
         return A::Objects{collect_in_sphere(v(0), ar(2), ar(3))};

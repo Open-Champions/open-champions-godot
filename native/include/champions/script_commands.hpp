@@ -531,6 +531,9 @@ private:
   void mirror_hud();
   Cell *target_cell(std::uint32_t creature, bool create);
 
+  // Linked target cells must outlive Variables teardown, which unregisters
+  // external objects and unlinks their paired handle nodes.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
   std::unique_ptr<script_items::Service> items_;

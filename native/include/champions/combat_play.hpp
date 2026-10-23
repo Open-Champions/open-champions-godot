@@ -15,6 +15,7 @@ enum class Fixture : std::uint8_t { Combat, Animated, Full };
 // Client controller mapping for the Full fixture (combat_runtime leaves the
 // masks to the caller; these are the research fixture's authored words).
 inline constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
+inline constexpr Raw ABILITY_A_MASK = 0x40; // authored Full-fixture button
 // Holy Strike skill id (combat_runtime World::give_skill / cast).
 inline constexpr int HOLY_STRIKE = 16;
 // The own-state-machine classes World::spawn_class runs (creature-ai), in
@@ -67,6 +68,9 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike(); // made in the player's next run (World::queue_cast)
+  void select_disease_bolt(); // authored rank-1 Full-fixture quick-slot A
+  void press_disease_bolt(bool held = true); // original Player_run pad path
+  void release_disease_bolt();
   // ---- Wave-12 client extensions of the Full fixture (authored set-up) ----
   // Each runs merged executed bodies; placement and set-up values are the
   // fixture's own authored ones, not original spawn data. A refusal leaves
