@@ -13,6 +13,8 @@ and a local file picker. Selected RTA lump entries can preview the documented
 original materials, engine script commands and playable gameplay remain unimplemented. WORLD draw applies the documented environment rows, console layer order, automap tile UVs and chunk alpha and constant-light modes through the existing native-fx lighting model; automap atlas pixels and the HUD window remain unresolved. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
+The [UI text gaps port](UI_TEXT_GAPS.md) adds the help box inner frame, button glyph and label, the bust meter and its font, the dialog fade step, the cursor glyph and the compass label from executed research; the compass mesh and chime slot life stay refused.
+
 The standalone [Return to Arms UI layout service](HUD_LAYOUT.md) computes
 documented static frame, base HUD and font metrics for later scene integration.
 Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,
@@ -256,3 +258,5 @@ Round 4 adds thrown potions 1–3, the Holy Shield absorb stub and silent block 
 Round 5 follows the sample-point absorb, the processDamage and silent-0 block-spark angles, AntQueen states 0 and 1, Skeleton states 0 and 1, Soul's demon gate and MultiFireProjectile_run. PlanarSteel, HornOmen, SpellArena, Pustule, SmokeGen and DiseaseCorpse stay unexecuted.
 Round 6 executes poison gas, disease corpses, the multi-fire hit and end, SmokeGen, Pustule, SpellArena, and the HornOmen and PlanarSteel constructors and runs. Their destructors are not in the research and refuse.
 combat-ctors round 2 (research-combat-ctors-2 5b92837) runs AntQueen_run in every state with pickFlyDest, Skeleton_isEnemy, the take-damage slots, the AntQueen/Skeleton/Soul/Fire/LooseFire/poison-gas destructors and the fire entry of a touch; the AntQueen is back in the Full fight (slot 4). Skeleton_run past states 0 and 1, allyInLineOfFire, onNearbyEvent, GutChunk_ctor and the death path stay refused.
+
+The mounted Horsemen ([HORSEMEN_MOUNT.md](HORSEMEN_MOUNT.md), research `t3/research-horsemen-mount` 338d459) are ported: the Nightmare mount's constructor, set-state rider table, run, contact slots and charge picker replay 1,101 research-model cases exactly. Level load builds all four Rider variants with their observed named MiniBoss mounts and reciprocal handles, as well as a placed Nightmare. The play scene does not yet tick the pair; its run-list order remains a host decision.

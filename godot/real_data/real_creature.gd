@@ -36,6 +36,13 @@ func bind(archive: String, rows: Array, model: int) -> Dictionary:
 	if not ClassDB.class_exists("ChampionsRealWorld"): return {"ok": false, "error": "adapter unavailable"}
 	var vif: Dictionary = rows[model]
 	var want := str(ClassDB.class_call_static("ChampionsRealWorld", "companion_texture_name", str(vif.get("name", "")))).to_lower()
+	return bind_named(archive, rows, model, want)
+
+# The player constructor selects a variant texture independently of bodyv1.vif.
+func bind_named(archive: String, rows: Array, model: int, texture_name: String) -> Dictionary:
+	if not ClassDB.class_exists("ChampionsRealWorld"): return {"ok": false, "error": "adapter unavailable"}
+	var vif: Dictionary = rows[model]
+	var want := texture_name.to_lower()
 	var tex := {}
 	for row in rows:
 		if typeof(row) == TYPE_DICTIONARY and str(row.get("name", "")).to_lower() == want and str(row.get("parent", "")) == str(vif.get("parent", "")):

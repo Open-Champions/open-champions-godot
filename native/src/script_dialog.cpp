@@ -322,6 +322,10 @@ void Host::dialog_drain_log() {
         dialog_counts_.silent_lines += 1;
     } else if (e.kind == "shop") {
       dialog_counts_.deferred_shops += 1;
+    } else if (e.kind == "fade_restart" && !e.args.empty()) {
+      // ui_restartFadeIn(i) 0x320ec4: g_uiFadeIn[i] = 0.0 (docs/ui-text-gaps.md 1).
+      if (const auto *slot = std::get_if<std::int64_t>(&e.args[0]))
+        ui_ramps_.fade[static_cast<std::size_t>(*slot) & 3u] = ui_text_gaps::uiRestartFadeIn();
     }
     if (dialog_events_.size() < 4096)
       dialog_events_.push_back(std::move(e));
@@ -602,7 +606,14 @@ std::vector<dialog::Event> Host::dialog_draw(Raw fade, int text_option, int glyp
     return {};
   std::vector<dialog::Event> ops;
   try {
+    // The first draw restarts the fade before it reads it: alpha starts at 0.0.
+    if (dialog_.drawn == 0)
+      fade = ui_text_gaps::uiRestartFadeIn();
     ops = dialog_.draw(dialog_host_, fade, text_option, glyph, [status] { return status; });
+    for (const auto &e : ops)
+      if (e.kind == "fade_restart" && !e.args.empty())
+        if (const auto *slot = std::get_if<std::int64_t>(&e.args[0]))
+          ui_ramps_.fade[static_cast<std::size_t>(*slot) & 3u] = ui_text_gaps::uiRestartFadeIn();
   } catch (const dialog::Refused &error) {
     dialog_counts_.refused[std::string("draw: ") + head(error)] += 1;
   }

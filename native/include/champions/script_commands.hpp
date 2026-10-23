@@ -6,6 +6,7 @@
 // counted refusal. The composition census stays the 9649e6b table.
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
+#include "champions/ui_text_gaps.hpp"
 #include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_factory.hpp"
@@ -322,6 +323,8 @@ public:
   // commands are refused.
   bool register_text(const std::vector<std::uint8_t> &uni);
   bool has_text() const { return text_->entries() != 0; }
+  // The visible units a key would show, without advancing the miss ring.
+  strings::Units text_peek(const std::string &key) const { return text_->peek(key); }
   strings::TextTable &text() { return *text_; }
   const strings::TextTable &text() const { return *text_; }
   // The help chime: byte +0x3c (sound group) of fx.lmp/butn_message.anm from
@@ -336,6 +339,11 @@ public:
   strings::SoundSeqs &sound() { return *sound_; }
   // ui_startPulse(0) calls made by hud_showHelpMessage.
   std::uint64_t ui_pulse_starts() const { return ui_pulse_starts_; }
+  // g_uiPulse / g_uiFadeIn (docs/ui-text-gaps.md 1). The fade starts at 1.0: its
+  // data value is not documented, and a dialog's own restart sets it to 0.0.
+  // ui_frame_step is session step 13: once per displayed frame, after the draw.
+  const ui_text_gaps::Ramps &ui_ramps() const { return ui_ramps_; }
+  void ui_frame_step() { ui_ramps_ = ui_text_gaps::rampsStep(ui_ramps_); }
   // help_task 0x1dcc78 for one displayed frame. A close runs the post action
   // offline (script_runPostAction), within the play session's budget.
   strings::HelpFrame help_task(bool confirm);
@@ -357,6 +365,12 @@ public:
   void on_ready_tick();
   // One named public. Does not by itself mark the level as started.
   Stop run(const std::string &entry);
+  // Object-driven script starter (Trigger_run / obj_runActionScripts): sets
+  // the selected object and active player globals around a named public.
+  // The index is the original objects.ob record index; a record that made no
+  // object refuses instead of substituting another object's context.
+  Stop run_object_entry(std::size_t record_index, const std::string &entry,
+                        unsigned active_player = 0);
 
   const Counts &counts() const { return counts_; }
   // Records a refused optional input (the host carries on without it).
@@ -488,6 +502,12 @@ private:
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,
               std::uint32_t address, const std::vector<std::string> &props);
+  // The Horsemen rider rows (constructor 0x271c70, mounted 1) and the Nightmare row
+  // (0x270968), research docs/spec/horsemen-mount.md sections 1.1 and 2.2.
+  Build build_mounted(const level_flow::Record &, const level_factory::Outcome &,
+                      std::uint32_t address, const std::vector<std::string> &props);
+  // True when the last build_mounted made every shared-seed draw its record owes.
+  bool last_draws_complete_ = false;
   void stub(const level_flow::Record &, std::uint32_t address,
             std::vector<std::string> props, std::int64_t size);
   // The ScriptGenerator constructor 0x265f54: the base object with the
@@ -525,8 +545,11 @@ private:
   std::deque<strings::Units> formatted_;
   std::optional<std::uint8_t> chime_group_;
   std::uint64_t ui_pulse_starts_ = 0;
+  ui_text_gaps::Ramps ui_ramps_;
   // Host-owned handle cells for creature +0x234 words linked by link_target.
   std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
+  // Rider +0x3c8 and mount +0x3c8 are separate host handle-list heads.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> mounted_cells_;
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;
@@ -560,6 +583,7 @@ private:
   };
   std::map<std::uint32_t, StubInfo> stub_info_;
   bool monster_level_bound_ = false;
+  std::vector<std::uint32_t> record_addresses_;
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;

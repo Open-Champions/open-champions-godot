@@ -123,6 +123,10 @@ const std::map<Raw, Raw> TYPE_DESC = {
     {0x3c67e8, 0x908200}, {0x3c50b8, 0x908690}, {0x3c78e8, 0x908700},
     // research-combat-ctors-3 symbols/runtime.tsv: LightEffect_typeinfo.
     {0x3c6908, 0x9085d0},
+    // research-combat-ctors-3 symbols/runtime.tsv:500 pins getter 0x3c7318
+    // to descriptor 0x9083c0. Descriptor-identity equality is a World adapter,
+    // not an executed RTTI rule (see combat_runtime_services.cpp).
+    {0x3c7318, 0x9083c0},
     // research-combat-ctors-3 symbols/runtime.tsv: HolyStrike_typeinfo.
     {0x3cf5bc, 0x909350}};
 } // namespace

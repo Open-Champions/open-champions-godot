@@ -153,7 +153,8 @@ bool routed_command(const char *name) {
       "initScriptSetParams", "hudResetFadeScreen", "hudFadeScreen",     "charmMonster",
       "followPlayer",      "startMusic",          "endMusic",           "selectSetCFlag",
       "setInfo",           "addHelpMessage",      "addHelpMessageF",    "showBust",
-      "showCompass",
+      "showCompass",       "newWorld",            "newWorldAlways",    "simpleNewWorld",
+      "newWorldParameter", "setEntrance",
   };
   for (const char *item : names)
     if (std::strcmp(item, name) == 0)
@@ -245,7 +246,12 @@ Host::Host()
   // The executable image starts g_hudFade at zero (research-fade 197f52a).
   variables_->memory.word(script_effects::G_FADE, 0);
 }
-Host::~Host() = default;
+Host::~Host() {
+  // Variables unregisters external objects and their handle nodes. Their
+  // host-owned list heads must still exist while that teardown runs.
+  machine_.reset();
+  variables_.reset();
+}
 
 void Host::bind_campaign() {
   auto scene = variables_->scene_service;
@@ -773,6 +779,13 @@ std::uint32_t Host::scene(const std::string &name,
                           const std::vector<builtins::Variables::ServiceValue> &args) {
   auto &fx = *script_fx_;
   auto &memory = variables_->memory;
+  if (name == "net_closeLocalMenus") {
+    // The researched callee has no offline effect. Its network path needs
+    // menu/vehicle services this host does not provide.
+    if (memory.read(0x402791))
+      throw amx::HostFault("network menu close is not available in this offline host");
+    return 0;
+  }
   if (name == "hud_setFade") {
     if (args.empty())
       throw amx::HostFault("hud_setFade argument count");
@@ -879,6 +892,7 @@ std::uint32_t Host::scene(const std::string &name,
       // ui_startPulse(0): g_uiPulse[0] = 2.0 (research-ui docs/mainloop.md),
       // a presentation value the caller decays per displayed frame.
       ui_pulse_starts_ += 1;
+      ui_ramps_.pulse[0] = ui_text_gaps::uiStartPulse();
     }
     mirror_hud();
     return 0;
@@ -1042,7 +1056,9 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
     const auto records = level_flow::parse_objects(champions::Bytes{data, size});
     if (exe_)
       return adopt_classified(records);
-    for (const auto &record : records) {
+    record_addresses_.assign(records.size(), 0);
+    for (std::size_t index = 0; index < records.size(); ++index) {
+      const auto &record = records[index];
       auto props = std::make_shared<std::vector<std::string>>(record.props);
       // No factory class: nothing says what the record is. Not registered.
       if (record.cls.empty()) {
@@ -1050,6 +1066,7 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
         continue;
       }
       const auto obj = variables_->new_object({}, 0, record.position, record.angle, record.cls, props);
+      record_addresses_[index] = obj->addr;
       stubs_.insert(obj->addr);
       counts_.objects_registered += 1;
       counts_.objects_unclassified += 1;
@@ -1210,6 +1227,28 @@ Stop Host::run(const std::string &entry) {
     return stop;
   note_queue();
   return waiting_ ? Stop::Wait : Stop::Complete;
+}
+
+Stop Host::run_object_entry(std::size_t record_index, const std::string &entry,
+                            unsigned active_player) {
+  if (active_player >= 4 || record_index >= record_addresses_.size() ||
+      record_addresses_[record_index] == 0)
+    return Stop::Refused;
+  auto &memory = variables_->memory;
+  const auto previous = memory.word(SELECTED_WORD);
+  const auto previous_player = memory.word(0x4d8ae4);
+  memory.word(SELECTED_WORD, record_addresses_[record_index]);
+  memory.word(0x4d8ae4, active_player);
+  try {
+    const auto result = run(entry);
+    memory.word(SELECTED_WORD, previous);
+    memory.word(0x4d8ae4, previous_player);
+    return result;
+  } catch (...) {
+    memory.word(SELECTED_WORD, previous);
+    memory.word(0x4d8ae4, previous_player);
+    throw;
+  }
 }
 
 Queue Host::queue() const {

@@ -8,6 +8,7 @@
 #include "champions/native_save.hpp"
 #include "champions/play_fixture_save.hpp"
 #include "champions/player_state.hpp"
+#include "champions/level_flow.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -49,11 +50,16 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  // Parsed records belong to this level's script image and are replaced with it.
+  std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
+  bool ui_frame_driven_ = false;
   void remember_script_fade();
   std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
   std::optional<champions::simulation::rta::player_state::Record> player_;
+  // Presentation identity: advances whenever a session player record is replaced.
+  std::uint64_t player_record_revision_ = 0;
   void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
                               const champions::simulation::rta::player_state::Record &);
   champions::simulation::rta::player_state::Record observed_player() const;
@@ -114,6 +120,7 @@ class ChampionsSessionController : public godot::RefCounted {
   godot::String start_objects_path_;
   std::vector<uint8_t> start_objects_;
   std::string start_level_name_;
+  std::string start_previous_level_, start_entrance_;
   std::vector<std::string> arena_names_a_;
   godot::Dictionary terrain_;
   godot::String terrain_name_ = "Practice ground";
@@ -206,6 +213,9 @@ public:
   godot::Dictionary dialog_voice_state(const godot::Dictionary &voice);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
+  godot::Dictionary script_level_request() const;
+  godot::Array script_exit_targets() const;
+  godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
   // later level script, and to the current one.
@@ -214,12 +224,22 @@ public:
   godot::Dictionary set_level_text(const godot::Array &tables);
   // The HUD text state the five commands wrote, for drawing.
   godot::Dictionary text_hud() const;
+  // Session step 13 (docs/UI_TEXT_GAPS.md): once per displayed frame, after the
+  // draw. Returns the g_uiPulse / g_uiFadeIn the frame drew with (raw floats),
+  // then steps them. Until a presentation calls set_ui_frame_driver(true), every
+  // ready tick counts as one displayed frame (the documented one tick per frame).
+  godot::Dictionary ui_frame();
+  godot::Dictionary set_ui_frame_driver(bool driven);
+  // The visible units of a text key without advancing the miss ring.
+  godot::PackedInt32Array text_key_units(const godot::String &key) const;
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);
   godot::Dictionary set_player_character(const godot::Dictionary &character);
   godot::Dictionary save_player_companion(const godot::String &path) const;
   godot::Dictionary load_player_companion(const godot::String &path);
+  godot::Dictionary save_campaign_bytes();
+  godot::Dictionary load_campaign_bytes(const godot::PackedByteArray &bytes);
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);
@@ -232,7 +252,7 @@ public:
   godot::Dictionary get_terrain() const;
   godot::Dictionary save_file(const godot::String &path);
   godot::Dictionary save_snapshot_file(const godot::String &path);
-  godot::Dictionary prepare_save_file(const godot::String &path);
+  godot::Dictionary prepare_save_file(const godot::String &path, bool reuse_loaded_level = false);
   godot::Dictionary load_terrain_file(const godot::String &path);
   godot::Dictionary prepare_terrain_file(const godot::String &path, bool build_display = true);
   // Level-spawn story start for the next terrain prepared from exactly `path`:
@@ -242,7 +262,9 @@ public:
   // mode-A arena table read by load_arena_tables.
   godot::Dictionary set_terrain_start_objects(const godot::String &path,
                                               const godot::PackedByteArray &objects,
-                                              const godot::String &level_name = godot::String());
+                                              const godot::String &level_name = godot::String(),
+                                              const godot::String &previous = godot::String(),
+                                              const godot::String &entrance = godot::String());
   // The arena name tables from the owner's executable, read at run time
   // (arena_modes::read_names). Kept in memory only; the result is counts.
   godot::Dictionary load_arena_tables(const godot::String &executable_path);

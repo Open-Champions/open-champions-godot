@@ -289,7 +289,7 @@ func save_session_file(path: String) -> bool:
 func load_session_file(path: String) -> bool:
 	if controller == null:
 		return false
-	var prepared: Dictionary = controller.prepare_save_file(path)
+	var prepared: Dictionary = _prepare_native_save(path)
 	if not prepared.get("ok", false):
 		status_label.text = str(prepared.get("error", "Load failed."))
 		return false
@@ -309,6 +309,9 @@ func load_session_file(path: String) -> bool:
 	pending_damage = false
 	_observe(result)
 	return true
+
+func _prepare_native_save(path: String) -> Dictionary:
+	return controller.prepare_save_file(path)
 
 func select_asset_archive(path: String) -> Dictionary:
 	if inspector == null:

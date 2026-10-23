@@ -231,6 +231,27 @@ public:
   void zek_take_damage(Address, Raw attacker, Raw flags, Raw amount);
   // Horsemen construction, all mounted/on-foot state entries and four casts.
   void horsemen_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props, Raw variant, Raw mounted);
+  // The Nightmare mount and its rider link (research docs/spec/horsemen-mount.md,
+  // tools/ref_horsemen_mount.py). Off by default so Horsemen_ctor still records
+  // a "Nightmare_ctor" call-out; a host that sets it runs the constructor here
+  // (the call-out is then not recorded, as in the reference). Pass the name in
+  // `external` to delegate again.
+  bool nightmare_native = false;
+  void nightmare_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props);
+  void nightmare_set_state(Address mount, Raw requested);
+  void nightmare_run(Address mount);
+  void nightmare_draw(Address mount);
+  void nightmare_on_hit_terrain(Address mount);
+  void nightmare_on_touch_list(Address mount, const std::vector<Raw> &touched);
+  Raw nightmare_pick_charge_target(Address mount);
+  // Horsemen_mountSeatTransform: the matrix of attach point 10, written at `out`.
+  void nightmare_seat_transform(Address mount, Raw out);
+  Raw angle_to_target(Address);
+  // The object behind a mount's rider handle (or a rider's mount handle), or 0.
+  Raw linked_object(Address) const;
+  // Runs `body` as a reference contract call (virtual calls go through vcall and
+  // missing services shape like the reference when reference_defaults is set).
+  void in_reference_mode(const std::function<void()> &body);
   void horsemen_set_state(Address, Raw requested);
   void horsemen_cast(Address);
   // Complete standalone monster ticks; engine services remain required callbacks.
