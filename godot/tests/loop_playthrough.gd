@@ -163,6 +163,95 @@ func save_json() -> void:
 	if file != null: file.store_string(JSON.stringify(summary, "  ", true) + "\n")
 	print("PLAYTHROUGH_RESULT " + JSON.stringify(summary))
 
+func walk_exit_probe() -> void:
+	# Step 6: walk the native player into a real Trigger's inclusive x/y box.
+	var transition_before: int = scene.real.current
+	var exit_targets: Array = scene.controller.script_exit_targets()
+	var pending: Dictionary = scene.controller.script_level_request()
+	var walk_attempts := 0
+	var walked_into := false
+	var queued_by_walk := false
+	var entered_without_change := 0
+	var navigation_stalls := 0
+	var sources_examined := 1
+	var candidate_indices: Array[int] = []
+	for index in range(scene.real.levels.size()):
+		var level: Dictionary = scene.real.levels[index]
+		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+		if objects.is_empty(): continue
+		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
+		if inventory.get("ok", false) and int(inventory.get("triggers", 0)) >= 4:
+			candidate_indices.append(index)
+	var sources: Array[int] = [-1]
+	sources.append_array(candidate_indices)
+	for index in sources:
+		if index >= 0:
+			if index == transition_before: continue
+			if not scene.load_real_level(index, true): continue
+			scene.start_play()
+			help_close()
+			if scene.paused and scene.session_started: scene.resume_session()
+			sources_examined += 1
+			exit_targets = scene.controller.script_exit_targets()
+		pending = scene.controller.script_level_request()
+		if pending.get("queued", false): continue
+		var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
+		if walk_targets.size() < 4: continue
+		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
+		for target in walk_targets:
+			walk_attempts += 1
+			var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
+			var walk: Dictionary = walk_into_trigger(target, 45000)
+			if walk.get("navigation_stalled", false): navigation_stalls += 1
+			walked_into = bool(walk.get("entered", false))
+			pending = scene.controller.script_level_request()
+			var dispatch: Dictionary = scene.controller.script_trigger_status()
+			queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
+				int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
+				int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
+				str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
+			if walked_into and not pending.get("queued", false): entered_without_change += 1
+			if pending.get("queued", false): break
+		if queued_by_walk:
+			transition_before = scene.real.current
+			break
+	var record_before: Dictionary = scene.controller.get_observation()
+	var trigger_status: Dictionary = scene.controller.script_trigger_status()
+	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var record_after: Dictionary = scene.controller.get_observation()
+	var start: Dictionary = scene.controller.get_terrain().get("start", {})
+	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
+	var marker_position: Vector3 = start.get("position", Vector3.ZERO)
+	var arrival_at_marker: bool = transition_ok and start.has("position") and \
+		arrived_position.distance_to(marker_position) < 0.01
+	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
+		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
+		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
+	mark("level_change", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current,
+		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
+		"queued_by_walk": queued_by_walk,
+		"entered_without_change": entered_without_change,
+		"navigation_stalls": navigation_stalls,
+		"trigger_samples": int(trigger_status.get("samples", 0)),
+		"trigger_dispatches": int(trigger_status.get("dispatches", 0)),
+		"trigger_queued_dispatches": int(trigger_status.get("queued_dispatches", 0)),
+		"trigger_missing": int(trigger_status.get("missing", 0)),
+		"arrival_at_marker": arrival_at_marker,
+		"arrival_pre_search": bool(start.get("pre_search", false)),
+		"arrival_rank": int(start.get("rank", 0)),
+		"sources_examined": sources_examined,
+		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
+		"campaign_image_restored": scene.last_campaign_image_restored,
+		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
+		"quest_vars_after": int(quests_after.get("vars", 0))})
+	await capture("10-level-change")
+
 func run() -> void:
 	if not args.has("game-folder") or not args.has("out"):
 		printerr("--game-folder and --out are required")
@@ -393,6 +482,8 @@ func run() -> void:
 		save_json()
 		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
 		return
+	# Exercise physical Trigger entry after the hub story route has reached blood1.
+	await walk_exit_probe()
 	# Valor is a separate fight diagnostic; the story route above enters blood1.
 	var valor_index := -1
 	for index in range(scene.real.levels.size()):

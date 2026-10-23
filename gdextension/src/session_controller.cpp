@@ -138,6 +138,8 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
                        &ChampionsSessionController::script_mission_menu_tick);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
+  ClassDB::bind_method(D_METHOD("inspect_exit_records", "objects"), &ChampionsSessionController::inspect_exit_records);
+  ClassDB::bind_method(D_METHOD("script_trigger_status"), &ChampionsSessionController::script_trigger_status);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
   bind_text_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
@@ -636,6 +638,9 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
         std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
         dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
       }
+    }
+    run_level_triggers(); // the 15-list follows the every-frame player walk
+    if (scripts_->dialog_attached()) {
       rta::script_commands::DialogInputs in;
       in.pad = dialog_pad_;
       dialog_pad_ = 0;
@@ -651,6 +656,41 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     note_help_box();
     if (!ui_frame_driven_)
       scripts_->ui_frame_step();
+  }
+}
+void ChampionsSessionController::run_level_triggers() {
+  if (live_triggers_.empty()) return;
+  // obj_runEvery15 steps its cursor before linking; runObjects walks the
+  // selected list in reverse link order at priority 10.
+  const auto bucket = (++trigger_frame_) % 15;
+  const auto &list = trigger_lists_[bucket];
+  for (auto it = list.rbegin(); it != list.rend(); ++it) {
+    auto &live = live_triggers_[*it];
+    if (live.refused) continue;
+    ++trigger_samples_;
+    const rta::level_flow::TriggerPlayer player{0, current_.position};
+    live.body.run_exact({player}, false, nullptr, {},
+                        [this, &live](const std::string &name, unsigned slot) {
+      ++trigger_dispatches_;
+      const Dictionary before = script_level_request();
+      const auto stop = scripts_->run_object_entry(live.record, name, slot);
+      const Dictionary after = script_level_request();
+      if (stop == rta::script_commands::Stop::Complete && name == live.body.script &&
+          bool(after.get("queued", false)) &&
+          (!bool(before.get("queued", false)) || before.get("name", String()) != after.get("name", String()))) {
+        ++trigger_queued_dispatches_;
+        trigger_queued_record_ = live.record;
+        trigger_queued_destination_ = String(after.get("name", String())).utf8().get_data();
+      }
+      if (stop == rta::script_commands::Stop::Missing) {
+        ++trigger_missing_;
+        return -1;
+      }
+      if (stop == rta::script_commands::Stop::Refused ||
+          stop == rta::script_commands::Stop::Fault)
+        throw std::runtime_error("Automatic Trigger script was refused.");
+      return scripts_->last_value();
+    });
   }
 }
 // Player_run takes no input while a dialog is open and Player_move zeroes the
@@ -994,6 +1034,55 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_pad_ = 0;
     scripts_ = std::move(next);
     script_level_objects_ = std::move(next_objects);
+    if (carried && !trigger_level_name_.empty()) {
+      auto &saved = trigger_states_[trigger_level_name_];
+      saved.clear();
+      for (const auto &live : live_triggers_) saved.push_back(live.body.save());
+    }
+    live_triggers_.clear();
+    for (auto &list : trigger_lists_) list.clear();
+    trigger_list_cursor_ = 0;
+    trigger_frame_ = 0;
+    trigger_refusal_.clear();
+    trigger_samples_ = trigger_dispatches_ = trigger_missing_ = 0;
+    trigger_queued_dispatches_ = 0;
+    trigger_queued_destination_.clear();
+    const bool has_params = std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+        [](const auto &r) { return r.cls == "TriggerParams"; });
+    const bool has_unmodelled_slow = std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+        [](const auto &r) { return r.cls == "Shooter" || r.cls == "FallPlatform"; });
+    for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
+      const auto &record = script_level_objects_[i];
+      // FloorSwitch_ctor also joins the 15-list (research monsters-2).
+      // Its construction consumes a cursor position in record order.
+      if (record.cls == "FloorSwitch") {
+        trigger_list_cursor_ = (trigger_list_cursor_ + 1) % 15;
+        continue;
+      }
+      if (record.cls != "Trigger") continue;
+      const auto integer = [&](const char *name) {
+        const auto value = record.prop(name);
+        if (!value) return 0;
+        std::size_t consumed = 0;
+        const auto parsed = std::stoll(*value, &consumed, 10);
+        if (parsed < INT32_MIN || parsed > INT32_MAX)
+          throw std::runtime_error("Trigger dimension outside signed32.");
+        return int(parsed);
+      };
+      const auto script = record.prop("t").value_or("");
+      const bool refused = has_params || has_unmodelled_slow || script.empty();
+      if (refused) trigger_refusal_ =
+          "TriggerParams linking, another slow-list constructor, or missing script is unported.";
+      trigger_list_cursor_ = (trigger_list_cursor_ + 1) % 15;
+      live_triggers_.emplace_back(i, rta::level_flow::Trigger(
+          record.position[0], record.position[1], integer("w"), integer("h"), script), refused);
+      const auto saved = trigger_states_.find(start_level_name_);
+      if (carried && saved != trigger_states_.end() &&
+          live_triggers_.size() <= saved->second.size())
+        live_triggers_.back().body.restore(saved->second[live_triggers_.size() - 1]);
+      trigger_lists_[trigger_list_cursor_].push_back(live_triggers_.size() - 1);
+    }
+    trigger_level_name_ = start_level_name_;
     script_fade_ = scripts_->fade_level();
     if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
@@ -1017,6 +1106,14 @@ Dictionary ChampionsSessionController::disable_level_script() {
   release_help_pause();
   scripts_.reset();
   script_level_objects_.clear();
+  live_triggers_.clear();
+  for (auto &list : trigger_lists_) list.clear();
+  trigger_refusal_.clear();
+  trigger_samples_ = trigger_dispatches_ = trigger_missing_ = 0;
+  trigger_queued_dispatches_ = 0;
+  trigger_queued_destination_.clear();
+  trigger_states_.clear();
+  trigger_level_name_.clear();
   script_seed_.reset();
   script_world_.reset();
   dialog_data_.reset();
@@ -1484,6 +1581,17 @@ Array ChampionsSessionController::script_exit_targets() const {
     item["kind"] = String::utf8(kind.c_str());
     item["position"] = Vector3(display_float(record.position[0]), display_float(record.position[1]),
                                  display_float(record.position[2]));
+    if (kind == "Trigger") {
+      const auto live = std::find_if(live_triggers_.begin(), live_triggers_.end(),
+          [i](const auto &t) { return t.record == i; });
+      item["walk_in"] = live != live_triggers_.end() && !live->refused;
+      if (live != live_triggers_.end() && live->refused)
+        item["walk_in_refusal"] = String::utf8(trigger_refusal_.c_str());
+      if (live != live_triggers_.end()) {
+        item["min"] = Vector3(display_float(live->body.min[0]), display_float(live->body.min[1]), 0);
+        item["max"] = Vector3(display_float(live->body.max[0]), display_float(live->body.max[1]), 0);
+      }
+    }
     // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
     // Neither is a direct script action. The host exposes them without claiming
     // an undocumented interaction or gate destination.
@@ -1492,6 +1600,40 @@ Array ChampionsSessionController::script_exit_targets() const {
          : kind == "PushTrigger" ? record.prop("action").has_value() : false);
     result.push_back(item);
   }
+  return result;
+}
+Dictionary ChampionsSessionController::inspect_exit_records(const PackedByteArray &objects) const {
+  Dictionary result;
+  result["ok"] = false;
+  try {
+    const auto raw = raw_bytes(objects);
+    const auto records = rta::level_flow::parse_objects({raw.data(), raw.size()});
+    int64_t triggers = 0, pushes = 0, gates = 0, portals = 0;
+    for (const auto &record : records) {
+      triggers += record.cls == "Trigger";
+      pushes += record.cls == "PushTrigger";
+      gates += record.cls == "JumpGate";
+      portals += record.cls == "Portal" || record.cls == "PortalHurt";
+    }
+    result["ok"] = true;
+    result["triggers"] = triggers;
+    result["pushes"] = pushes;
+    result["gates"] = gates;
+    result["portals"] = portals;
+  } catch (const std::exception &e) {
+    result["error"] = String::utf8(e.what());
+  }
+  return result;
+}
+Dictionary ChampionsSessionController::script_trigger_status() const {
+  Dictionary result;
+  result["samples"] = int64_t(trigger_samples_);
+  result["dispatches"] = int64_t(trigger_dispatches_);
+  result["missing"] = int64_t(trigger_missing_);
+  result["queued_dispatches"] = int64_t(trigger_queued_dispatches_);
+  result["queued_record"] = int64_t(trigger_queued_record_);
+  result["queued_destination"] = String::utf8(trigger_queued_destination_.c_str());
+  result["refusal"] = String::utf8(trigger_refusal_.c_str());
   return result;
 }
 Dictionary ChampionsSessionController::script_run_exit(int64_t index) {

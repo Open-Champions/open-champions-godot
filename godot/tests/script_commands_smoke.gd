@@ -49,12 +49,47 @@ func run() -> void:
 	var fresh = ClassDB.instantiate("ChampionsSessionController")
 	check(fresh.start_play_session().get("ok", false), "a second play session starts")
 	run_tick_counter(fresh)
+	check_trigger_property(fresh)
 	var silent: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0)
 	check(silent.get("ok", false) and int(silent.get("music_volume", -1)) == 0, "options-file zero reaches the script host")
 	var loud: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0x3fc00000)
 	check(loud.get("ok", false) and int(loud.get("music_volume", -1)) == 0x3fc00000, "the unclamped options word reaches the script host")
 	print("script commands smoke ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
+
+func trigger_objects(position: Vector3, properties: Array[String]) -> PackedByteArray:
+	var size := 24 + 4 * properties.size()
+	var objects := PackedByteArray()
+	objects.resize(8 + size)
+	objects.encode_u16(0, 1)
+	objects.encode_u32(4, objects.size())
+	objects.encode_u16(12, size)
+	objects.encode_float(16, position.x - 100.0)
+	objects.encode_float(20, position.y + 100.0)
+	objects.encode_float(24, position.z)
+	var strings := PackedByteArray([0])
+	objects.encode_u32(8, strings.size())
+	strings.append_array("Trigger".to_utf8_buffer())
+	strings.append(0)
+	for i in range(properties.size()):
+		objects.encode_u32(28 + 4 * i, strings.size())
+		strings.append_array(properties[i].to_utf8_buffer())
+		strings.append(0)
+	objects.append_array(strings)
+	return objects
+
+func check_trigger_property(controller) -> void:
+	var position: Vector3 = controller.get_observation().get("position", Vector3.ZERO)
+	var both := trigger_objects(position, ["script=absent", "t=tick", "w=200", "h=200"])
+	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), both).get("ok", false), "synthetic Trigger with both properties loads")
+	for i in range(32): controller.advance(0)
+	var status: Dictionary = controller.script_trigger_status()
+	check(int(status.get("dispatches", 0)) > 0 and int(status.get("missing", -1)) == 0,
+		"walk-in dispatch uses documented t when script alias is also present")
+	var alias_only := trigger_objects(position, ["script=tick", "w=200", "h=200"])
+	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), alias_only).get("ok", false), "synthetic alias-only Trigger loads")
+	var targets: Array = controller.script_exit_targets()
+	check(targets.size() == 1 and not targets[0].get("walk_in", true), "missing t refuses automatic dispatch")
 
 func run_tick_counter(controller) -> void:
 	var ticks_before := int(controller.get_observation().get("ready_ticks", -1))
