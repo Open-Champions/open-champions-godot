@@ -233,45 +233,23 @@ func activate_selected_exit() -> Dictionary:
 	if out.get("queued", false): _queue_level_change()
 	return out
 
-func mission_menu_select_first_story() -> bool:
-	var menu_state: Dictionary = controller.script_mission_menu_state()
-	if not menu_state.get("ok", false) or not menu_state.get("open", false) or not menu_state.get("first_story_available", false):
-		status_label.text = "Mission selection refused: mission 1 is not available."
-		return false
-	# The native state machine supplies the row, availability gate, fade and
-	# direct pending-world write. The host button submits its documented pad.
-	for i in range(17):
-		if int(menu_state.get("state", -1)) == 2: break
-		menu_state = controller.script_mission_menu_tick(0, 0)
-		if not menu_state.get("ok", false): return false
-	if int(menu_state.get("state", -1)) != 2 or int(menu_state.get("row", -1)) != 0 or int(menu_state.get("column", -1)) != 0:
-		status_label.text = "Mission selection refused: the first story row is not selected."
-		return false
-	menu_state = controller.script_mission_menu_tick(0x40, 0)
-	for i in range(4):
-		if not menu_state.get("ok", false): return false
-		menu_state = controller.script_mission_menu_tick(0, 128)
-	if not menu_state.get("launched", false) or str(menu_state.get("pending", "")) != "blood1":
-		status_label.text = "Mission selection refused: the documented first story request was not produced."
-		return false
-	mission_menu_panel.visible = false
-	_queue_level_change()
-	return true
-
 func _refresh_mission_menu() -> void:
 	if mission_menu_panel == null or controller == null: return
 	var state: Dictionary = controller.script_mission_menu_state()
-	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false))
+	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false) and mission_menu_panel.assets_valid)
 	if mission_menu_panel.visible:
+		if status_label.text.begins_with("Mission art refused:"):
+			status_label.text = ""
 		mission_menu_panel.present(state)
-		if not mission_menu_panel.assets_valid:
-			status_label.text = "Mission art refused: " + mission_menu_panel.last_error
+	elif state.get("open", false) and not mission_menu_panel.assets_valid:
+		status_label.text = "Mission art refused: " + mission_menu_panel.last_error
 
 func _process(_delta: float) -> void:
 	super._process(_delta)
 	if mission_menu_panel == null or not mission_menu_panel.visible or controller == null: return
 	var state: Dictionary = controller.script_mission_menu_state()
-	if int(state.get("state", -1)) in [0, 1, 4]:
+	# State 6 reads an external fade value that this client cannot supply yet.
+	if int(state.get("state", -1)) in [0, 1, 4, 5]:
 		controller.script_mission_menu_tick(0, 0)
 		_refresh_mission_menu()
 
@@ -318,6 +296,11 @@ func _apply_level_change() -> bool:
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
+	if controller != null and mission_menu_panel != null and not mission_menu_panel.assets_valid:
+		var refused_menu: Dictionary = controller.script_mission_menu_state()
+		if refused_menu.get("open", false) and event is InputEventKey:
+			status_label.text = "Mission art refused: " + mission_menu_panel.last_error
+			return true
 	# The offline help box owns confirmation while it holds the session.
 	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:
 		return true
@@ -326,13 +309,10 @@ func handle_input_event(event: InputEvent) -> bool:
 			var mission_key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
 			if MISSION_KEYS.has(mission_key):
 				var menu_state: Dictionary = controller.script_mission_menu_state()
-				for i in range(17):
-					if int(menu_state.get("state", -1)) == 2: break
-					menu_state = controller.script_mission_menu_tick(0, 0)
-				menu_state = controller.script_mission_menu_tick(int(MISSION_KEYS[mission_key]), 0)
-				if int(menu_state.get("state", -1)) == 5:
-					for i in range(4): menu_state = controller.script_mission_menu_tick(0, 128)
-					if menu_state.get("launched", false): _queue_level_change()
+				if int(menu_state.get("state", -1)) == 2:
+					menu_state = controller.script_mission_menu_tick(int(MISSION_KEYS[mission_key]), 0)
+					if int(menu_state.get("state", -1)) == 5:
+						status_label.text = "Mission transition refused: external fade completion is unavailable."
 				_refresh_mission_menu()
 			return true
 		return true

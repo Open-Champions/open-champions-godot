@@ -24,9 +24,7 @@ const SIZES := {
 }
 const BRIGHT := 0x7f808080
 const DARK := 0x7f3c3c3c
-const DETAIL := 0x0049616a
 const PROMPT := 0x64464646
-const SUFFIX := ["_mis", "_med", "_bon"]
 
 var real: Node
 var controller: Object
@@ -39,6 +37,9 @@ var state := {}
 var last_error := ""
 var assets_valid := false
 var frames_drawn := 0
+var submitted_sprites: Array[String] = []
+var submitted_tints := {}
+var submitted_text_keys: Array[String] = []
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
@@ -105,6 +106,8 @@ func _colour(tint: int) -> Color:
 func _sprite(name: String, x: float, y: float, tint: int, src := Rect2()) -> void:
 	var texture: ImageTexture = art.get(name)
 	if texture == null: return
+	submitted_sprites.append(name)
+	submitted_tints[name] = tint
 	var region := src if src.has_area() else Rect2(Vector2.ZERO, texture.get_size())
 	var dest := Rect2(x, y + 1.0, region.size.x, region.size.y)
 	var clipped := dest.intersection(Rect2(0, 0, 640, 448))
@@ -116,8 +119,10 @@ func _sprite(name: String, x: float, y: float, tint: int, src := Rect2()) -> voi
 func _text(key: String, x: int, y: int, tint: int, width := 0, top := 0, bottom := 448, line := 21) -> void:
 	if font_texture == null or controller == null: return
 	# The detail call carries zero in its high byte; the font renderer's blend
-	# interpretation was not captured. Keep the documented RGB visible here.
-	var render_tint := tint | 0x7f000000 if (tint >> 24) == 0 else tint
+	# interpretation was not captured; refuse this text.
+	if (tint >> 24) == 0: return # Detail alpha and blend are unresolved.
+	submitted_text_keys.append(key)
+	var render_tint := tint
 	var found: Dictionary = controller.text_lookup(key)
 	if not found.get("ok", false): return
 	var units: PackedInt32Array = found.units
@@ -147,17 +152,13 @@ func _text(key: String, x: int, y: int, tint: int, width := 0, top := 0, bottom 
 		draw_texture_rect_region(font_texture, clipped, source, _colour(render_tint), false)
 
 func _draw() -> void:
+	submitted_sprites.clear()
+	submitted_tints.clear()
+	submitted_text_keys.clear()
 	if not assets_valid or not state.get("open", false): return
 	var factor := minf(size.x / 640.0, size.y / 448.0)
 	draw_set_transform(Vector2((size.x - 640.0 * factor) * 0.5, (size.y - 448.0 * factor) * 0.5), 0, Vector2(factor, factor))
-	# The four original calls for each backdrop are presented as static quarters.
-	# Their moving rectangles require the external float service's scroll frames.
-	for y in range(2):
-		for x in range(2):
-			var region := Rect2(x * 320, y * 224, 320, 224)
-			_sprite("cosmiclines.tex", region.position.x, region.position.y, 0x14808080, region)
-			_sprite("starfield.tex", region.position.x, region.position.y, BRIGHT, region)
-	_sprite("starsparkle.tex", 0, 0, BRIGHT)
+	# Backdrop rectangles and sparkle placement await an executed draw capture.
 	var selected := clampi(int(state.get("row", 0)), 0, 11)
 	var rows: Array = state.get("rows", [])
 	if rows.size() != 12: return
@@ -165,12 +166,12 @@ func _draw() -> void:
 	for i in range(selected, mini(selected + 3, 12)):
 		var row: Dictionary = rows[i]
 		var picture := str(row.evil_image) if state.get("evil", false) and not str(row.evil_image).is_empty() else str(row.image)
-		_sprite(picture.to_lower(), int(row.x), int(row.y) - selected * 200, BRIGHT if row.available else DARK)
+		_sprite(picture.to_lower(), int(row.x), int(row.y) - selected * 200, BRIGHT if row.draw_present else DARK)
 		if selected == 0 and i < 3:
 			var link_y := int(row.y) - selected * 200 + 141
 			var next: Dictionary = rows[i + 1]
-			_sprite("pipe1.tex" if i % 2 == 0 else "pipe2.tex", 186, link_y, BRIGHT if next.available else DARK)
-	# The documented row-zero icon and glow placements. Other-row placements
+			_sprite("pipe1.tex" if i % 2 == 0 else "pipe2.tex", 186, link_y, BRIGHT if next.draw_present else DARK)
+	# The documented row-zero icon placements. Other-row placements
 	# are refused until their draw submissions are captured.
 	if selected == 0:
 		var first: Dictionary = rows[0]
@@ -182,20 +183,16 @@ func _draw() -> void:
 			_sprite("amulet2.tex", 215, 91, DARK)
 		if int(first.medal) >= 3:
 			_sprite("bonus.tex", 167, 99, BRIGHT)
-		if first.available:
-			match int(state.get("column", 0)):
-				0: _sprite("mainglow.tex", 300, 44, BRIGHT)
-				1: _sprite("amuletglow.tex", 198, 73, BRIGHT)
-				2: _sprite("bonusglow.tex", 152, 85, BRIGHT)
+		# Glow pulse/fade tint is unresolved; no fixed-tint substitute.
 	for strip in range(4):
 		_sprite("frame.tex", 0, strip * 128, BRIGHT)
 		_sprite("frame.tex", 608, strip * 128, BRIGHT)
 	# The original submits the detail frame at (25,230,590,215); its style and
-	# raster result were not captured. The two resolved text keys are still drawn.
-	var chosen: Dictionary = rows[selected]
-	var base := str(chosen.evil_key) if state.get("evil", false) and not str(chosen.evil_key).is_empty() else str(chosen.key)
-	var suffix: String = SUFFIX[clampi(int(state.get("column", 0)), 0, 2)]
-	_text(base + suffix + "_title", 320, 267, DETAIL, 550, 262, 365, 21)
-	_text(base + suffix, 320, 235, DETAIL, 550, 230, 262, 14)
-	if not state.get("network", false): _text("AcceptBack", 320, 410, PROMPT)
+	# raster result were not captured. The detail text blend is also unresolved.
+	# Detail glyph alpha/blend is unresolved; keep both calls refused.
+	if not state.get("network", false):
+		_text("AcceptBack", 320, 410, PROMPT)
+	elif state.has("prompt_first_active") and state.has("prompt_paused"):
+		if state.prompt_first_active: _text("AcceptBack", 320, 410, PROMPT)
+		elif not state.prompt_paused: _text("clientMissionSelect", 320, 410, PROMPT)
 	frames_drawn += 1

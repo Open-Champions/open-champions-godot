@@ -22,6 +22,7 @@ var refusal_counts := {}
 var seen := {}
 var out_dir := ""
 var screenshots := 0
+var audit_menu_checks := true
 
 func _initialize() -> void:
 	for argument in OS.get_cmdline_user_args():
@@ -65,6 +66,7 @@ func collect(stage: String) -> void:
 		refusal(stage, key)
 
 func mark(stage: String, result: String, extra := {}) -> void:
+	if stage.begins_with("mission_menu_") and result == "refused": audit_menu_checks = false
 	collect(stage)
 	var row := {"step": stage, "result": result,
 		"fps": Engine.get_frames_per_second(),
@@ -82,11 +84,13 @@ func capture(label: String) -> void:
 	RenderingServer.force_draw()
 	var image := root.get_texture().get_image()
 	if image == null or image.is_empty():
+		if label.begins_with("10-mission-menu"): audit_menu_checks = false
 		refusal(label, "rendered viewport has no image")
 		return
 	if image.save_png(out_dir.path_join(label + ".png")) == OK:
 		screenshots += 1
 	else:
+		if label.begins_with("10-mission-menu"): audit_menu_checks = false
 		refusal(label, "screenshot write failed")
 
 func tap(bits: int) -> void:
@@ -275,6 +279,11 @@ func run() -> void:
 	var menu_open: bool = bool(menu_after.get("ok", false) and menu_after.get("open", false))
 	var trigger_opened_menu: bool = hub_trigger_found and menu_was_closed and trigger_result.get("ok", false) and menu_open
 	scene._refresh_mission_menu()
+	var opening_before: Dictionary = scene.controller.script_mission_menu_state()
+	var early_key := game_key(KEY_ENTER)
+	var opening_after: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_menu_opening_gate", "checked" if early_key and int(opening_after.get("state", -1)) == int(opening_before.get("state", -2)) and not opening_after.get("pending", "") else "refused")
+	await capture("10-mission-menu-opening-gate")
 	mark("hub_trigger_mission_menu", "opened" if trigger_opened_menu else "refused",
 		{"hub_trigger_found": hub_trigger_found, "dialog_choice_completed": dialog_choice_completed,
 		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false), "menu_open": menu_open,
@@ -293,6 +302,47 @@ func run() -> void:
 	mark("mission_menu_assets", "checked" if mission_art.assets_valid and mission_art.art.size() == 32 else "refused",
 		{"textures": mission_art.art.size(), "small_font": mission_art.font_texture != null})
 	await capture("10-mission-menu")
+	var unsupported := false
+	for name in ["cosmiclines.tex", "starfield.tex", "starsparkle.tex", "mainglow.tex", "amuletglow.tex", "bonusglow.tex"]:
+		if mission_art.submitted_sprites.has(name): unsupported = true
+	mark("mission_menu_unsupported_art", "checked" if not unsupported and mission_art.submitted_text_keys == ["AcceptBack"] else "refused")
+	var missing_row: Dictionary = table_state.duplicate(true)
+	missing_row.rows[0].available = false
+	mission_art.present(missing_row)
+	for i in range(2): await process_frame
+	await capture("10-mission-menu-row-zero-missing-bit")
+	mark("mission_menu_row_zero_draw", "checked" if missing_row.rows[0].draw_present and not missing_row.rows[0].available and int(mission_art.submitted_tints.get("misswar.tex", 0)) == 0x7f808080 else "refused")
+	mission_art.present(table_state)
+	var prior_art_valid: bool = mission_art.assets_valid
+	var config_refused: bool = not mission_art.configure(scene.real, scene.controller, scene.inspector, PackedByteArray())
+	scene._refresh_mission_menu()
+	await capture("10-mission-menu-art-refused")
+	var refused_before: Dictionary = scene.controller.script_mission_menu_state()
+	var refused_input := game_key(KEY_ENTER)
+	var refused_after: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_menu_art_gate", "checked" if prior_art_valid and config_refused and not mission_art.visible and refused_input and refused_before == refused_after else "refused",
+		{"input_handled": refused_input})
+	mission_art.configure(scene.real, scene.controller, scene.inspector, scene.real.hud_font_bytes())
+	scene._refresh_mission_menu()
+	for first_active in [false, true]:
+		for pause_open in [false, true]:
+			var prompt_state: Dictionary = table_state.duplicate(true)
+			prompt_state.network = true
+			prompt_state.prompt_first_active = first_active
+			prompt_state.prompt_paused = pause_open
+			mission_art.present(prompt_state)
+			for i in range(2): await process_frame
+			await capture("10-mission-menu-network-%d-%d" % [int(first_active), int(pause_open)])
+			var expected_key := "AcceptBack" if first_active else ("" if pause_open else "clientMissionSelect")
+			mark("mission_menu_network_prompt", "checked" if mission_art.submitted_text_keys == ([] if expected_key.is_empty() else [expected_key]) else "refused",
+				{"first_active": first_active, "paused": pause_open})
+	var unknown_prompt: Dictionary = table_state.duplicate(true)
+	unknown_prompt.network = true
+	mission_art.present(unknown_prompt)
+	for i in range(2): await process_frame
+	await capture("10-mission-menu-network-unknown")
+	mark("mission_menu_network_unknown", "checked" if mission_art.submitted_text_keys.is_empty() else "refused")
+	mission_art.present(table_state)
 	if DisplayServer.get_name() != "headless":
 		var menu_view = scene.mission_menu_panel
 		var actual: Dictionary = scene.controller.script_mission_menu_state()
@@ -302,6 +352,7 @@ func run() -> void:
 		if altered_rows.size() == 12:
 			var second_row: Dictionary = altered_rows[1]
 			second_row.available = true
+			second_row.draw_present = true
 			menu_view.present(altered)
 			await capture("10-mission-menu-second-available")
 		menu_view.present(actual)
@@ -332,7 +383,21 @@ func run() -> void:
 	var locked_move_state: Dictionary = scene.controller.script_mission_menu_state()
 	mark("mission_menu_locked_navigation", "checked" if locked_move_handled and int(locked_move_state.get("row", -1)) == 0 and int(locked_move_state.get("column", -1)) == 0 else "refused",
 		{"handled": locked_move_handled, "row": locked_move_state.get("row", -1), "column": locked_move_state.get("column", -1)})
-	var selected: bool = trigger_opened_menu and scene.mission_menu_select_first_story()
+	var selected := false
+	if trigger_opened_menu:
+		var ready: Dictionary = scene.controller.script_mission_menu_state()
+		if int(ready.get("state", -1)) == 2 and ready.get("first_story_available", false):
+			var confirm_handled := game_key(KEY_ENTER)
+			var confirm: Dictionary = scene.controller.script_mission_menu_state()
+			for i in range(4): await process_frame
+			var waiting: Dictionary = scene.controller.script_mission_menu_state()
+			await capture("10-mission-menu-fade-gate")
+			mark("mission_menu_fade_gate", "checked" if confirm_handled and int(confirm.get("state", -1)) == 5 and int(waiting.get("state", -1)) == 6 and not waiting.get("pending", "") else "refused")
+			# Controlled test fade; the live client refuses until its source is ported.
+			var after_fade: Dictionary = scene.controller.script_mission_menu_tick(0, 128)
+			if after_fade.get("ok", false): after_fade = scene.controller.script_mission_menu_tick(0, 128)
+			if after_fade.get("ok", false): after_fade = scene.controller.script_mission_menu_tick(0, 128)
+			selected = after_fade.get("launched", false) and str(after_fade.get("pending", "")) == "blood1"
 	var pending: Dictionary = scene.controller.script_level_request()
 	mark("mission_1_story_request", "blood1" if selected and str(pending.get("name", "")) == "blood1" else "refused",
 		{"queued": pending.get("queued", false), "orientation": pending.get("orientation", -1)})
@@ -363,7 +428,7 @@ func run() -> void:
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()
-		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
+		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available and audit_menu_checks else 1)
 		return
 	# Combat remains a separate diagnostic until blood1 hostile constructors
 	# yield live enemies. Direct selection of valor is not a campaign route.

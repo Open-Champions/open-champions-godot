@@ -1409,6 +1409,7 @@ Dictionary ChampionsSessionController::script_mission_menu_state() const {
       row["x"] = int64_t(std::int32_t(executable_->word(base + 0x2c)));
       row["y"] = int64_t(std::int32_t(executable_->word(base + 0x30)));
       row["available"] = available;
+      row["draw_present"] = i == 0 || available;
       row["complete"] = complete;
       row["medal"] = int64_t(medal);
       row["medal_column"] = bool(rta::quests::helper_value(6, info, available, complete, medal));
