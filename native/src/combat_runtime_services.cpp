@@ -363,6 +363,7 @@ void World::State::install_ctor_services() {
     // constructed props, chunks and gold.
     p->id=obj;p->kind=Kind::Effect;
     objects[obj]=std::move(p);
+    authority->register_object(*objects.at(obj));
     for (unsigned off:{0u,4u,8u}) head(obj+off);
     return iv(0);
   };

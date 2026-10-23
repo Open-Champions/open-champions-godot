@@ -78,16 +78,18 @@ struct World::State {
     std::optional<Vec3> point;
     std::optional<Raw> facing;
   };
-  Pool pool;
-  HandlePool handles;
+  std::shared_ptr<WorldAuthority> authority;
+  Pool &pool;
+  HandlePool &handles;
   SharedRandom shared; // borrowed by damage_apply; synchronised with memory
-  std::map<Address, std::unique_ptr<Cell>> heads;
+  std::map<Address, Cell *> heads;
+  std::map<Address, std::unique_ptr<Cell>> owned_heads;
   std::map<const Link *, Address> links;
   std::map<Address, std::unique_ptr<Actor>> objects;
   std::map<Address, std::unique_ptr<Actor>> spells; // spell records (no object)
   std::vector<std::unique_ptr<Actor>> retired;
   std::shared_ptr<Overlay> overlay;
-  creature_hp::Memory mem;
+  creature_hp::Memory &mem;
   A::Model model;
   creature_movement::Model movement;
   Services services;
@@ -118,7 +120,7 @@ struct World::State {
   std::vector<std::unique_ptr<Cell>> retired_cells;
   std::vector<std::pair<Address, unsigned>> arena_stack;
   std::shared_ptr<player::Tick::NamedCallbacks> tick_callbacks;
-  explicit State(Services, int, Composition);
+  explicit State(std::shared_ptr<WorldAuthority>, Services, int, Composition);
   ~State();
   bool full() const { return composition == Composition::Full; }
   Raw u(Address a) const { return Raw(mem.load(a, 4)); }

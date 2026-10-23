@@ -246,6 +246,10 @@ Variables::Variables(std::shared_ptr<Memory> mem,
   // silently replaced by the standalone World's cached base fields.
   if(!host->game) host->game = &host_owner;
 }
+Variables::Variables(std::shared_ptr<WorldAuthority> authority)
+    : Variables(std::make_shared<Memory>(authority->memory), authority->objects) {
+  authority_ = std::move(authority);
+}
 Variables::~Variables() {
   for (const auto &object : setup_objects) {
     try {
@@ -254,6 +258,7 @@ Variables::~Variables() {
       // HandlePool::clear rejects live iterators/paired nodes. Teardown must
       // not throw from this implicitly noexcept destructor.
     }
+    if (authority_) authority_->unregister_object(*object);
   }
   if(host && host->game==&host_owner) host->game=nullptr;
 }
@@ -318,6 +323,7 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
   if(obj->props) for(const auto &entry:*obj->props)
     if(entry.compare(0,5,"name=")==0) object_names.add(entry.substr(5),obj.get());
   world->objects[*address]=obj.get();
+  if (authority_) authority_->register_object(*obj);
   named_objects[*address]=obj;
   object_properties[*address]=obj->props ? std::optional<std::vector<std::string>>(*obj->props) : std::nullopt;
   return obj;
@@ -403,11 +409,13 @@ Memory::Page &Memory::ensure_page(std::uint32_t index) const {
   return result;
 }
 Memory::Page &Memory::page(std::uint32_t index) {
+  if (canonical) throw amx::HostFault("shared World memory has no mutable page alias");
   auto &result = ensure_page(index);
   if (std::find(exposed.begin(),exposed.end(),index)==exposed.end()) exposed.push_back(index);
   return result;
 }
 const std::map<std::uint32_t,std::uint8_t> &Memory::nonzero_bytes() const {
+  if (canonical) return canonical->bytes();
   for (auto index : exposed) {
     const auto &data=pages.at(index);
     auto base=index<<12;
@@ -420,11 +428,19 @@ const std::map<std::uint32_t,std::uint8_t> &Memory::nonzero_bytes() const {
   return bytes;
 }
 std::uint8_t Memory::read(std::uint32_t address) const {
+  if (canonical) return std::uint8_t(canonical->load(address, 1));
   const auto &data=ensure_page(address >> 12);
   auto offset=address & 4095;
   return offset<data.size() ? data[offset] : 0;
 }
 std::vector<std::uint8_t> Memory::read(std::uint32_t address, std::size_t size) const {
+  if (canonical) {
+    std::vector<std::uint8_t> result;
+    result.reserve(size);
+    for (std::size_t i = 0; i < size; ++i)
+      result.push_back(std::uint8_t(canonical->load(std::uint64_t(address) + i, 1)));
+    return result;
+  }
   std::vector<std::uint8_t> result;
   result.reserve(size);
   while(size) {
@@ -481,6 +497,13 @@ std::string Memory::cstr(std::uint32_t address,std::size_t limit) const {
 }
 void Memory::write(std::uint32_t address,const std::vector<std::uint8_t> &data) {
   if(data.empty()) return;
+  if (canonical) {
+    if (std::uint64_t(address) + data.size() > UINT64_C(0x100000000))
+      throw amx::HostFault("shared World memory write exceeds address space");
+    canonical->write_bytes(address, data);
+    writes.emplace_back(address, data.size());
+    return;
+  }
   writes.emplace_back(address,data.size());
   std::size_t pos=0;
   while(pos<data.size()) {

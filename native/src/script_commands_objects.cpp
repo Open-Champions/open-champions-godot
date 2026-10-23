@@ -197,7 +197,7 @@ Host::Build Host::build_generator(const level_factory::Outcome &outcome, const l
   memory.byte(c + 0x38, static_cast<std::uint8_t>(record.angle & 0xff));
   memory.byte(c + 0x39, static_cast<std::uint8_t>(record.angle >> 8));
   static_cast<objects::GameObject &>(*obj).flags = memory.word(c + 0x0c);
-  built_.insert(c);
+  mark_built(c);
   counts_.objects_registered += 1;
   return Build::Built;
 }
@@ -535,7 +535,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       }
       external_seed_->state = world.shared.state;
     }
-    built_.insert(c);
+    mark_built(c);
     counts_.objects_registered += 1;
     return Build::Built;
     } catch (const std::exception &error) {
@@ -865,7 +865,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // for every earlier object. Creature_init does not write it.
   static_cast<objects::GameObject &>(*obj).flags = variables_->memory.word(c + 0x0c);
   static_cast<objects::GameObject &>(*obj).radius = variables_->memory.word(c + 0x1c);
-  built_.insert(c);
+  mark_built(c);
   if (stats_ready_ && seed_gate_observed_ && !counts_.item_load_gate_refusals &&
       !counts_.load_draws_unmodelled) stats_built_.insert(c);
   counts_.objects_registered += 1;
@@ -1102,7 +1102,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
       if (!skipped(off))
         variables_->memory.byte(self + off, static_cast<std::uint8_t>(mem.load(self + off, 1)));
     static_cast<objects::GameObject &>(*entry.second).flags = variables_->memory.word(self + 0x0c);
-    built_.insert(self);
+    mark_built(self);
   }
   variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
   counts_.objects_registered += objects.size();

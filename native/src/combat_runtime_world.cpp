@@ -62,8 +62,10 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
     return std::uint8_t(word >> shift);
   }
 };
-World::State::State(Services v, int mode, Composition c)
-    : mem(), model(mem, creature_hp::Limits{1024 * 1024, 65536,
+World::State::State(std::shared_ptr<WorldAuthority> owner, Services v, int mode, Composition c)
+    : authority(std::move(owner)), pool(authority->objects->pool),
+      handles(authority->objects->handles), mem(authority->memory),
+      model(mem, creature_hp::Limits{1024 * 1024, 65536,
                                             // A host resource bound, not an RTA value:
                                             // shared callback registration has over 128
                                             // names even in the earlier compositions.
@@ -98,7 +100,11 @@ World::State::State(Services v, int mode, Composition c)
     tables();
   install_services();
 }
-World::State::~State() { overlay->s = nullptr; }
+World::State::~State() {
+  overlay->s = nullptr;
+  mem.detach_overlay(overlay);
+  for (const auto &entry : objects) authority->unregister_object(*entry.second);
+}
 void World::State::note(std::string n, std::vector<std::uint64_t> a) {
   if (trace.size() >= 1000000)
     throw Error("combat trace budget exceeded");
@@ -118,10 +124,27 @@ Cell &World::State::head(Address a) {
     return *i->second;
   if (mem.load(a, 4) != 0)
     throw Error("handle head holds a raw value");
-  auto p = std::make_unique<Cell>();
-  auto *cell = p.get();
+  Cell *cell = nullptr;
+  auto &world = *authority->objects;
+  if (a >= GRID && a < GRID + 4 * world.grid.size())
+    cell = &world.grid[(a - GRID) / 4];
+  else if (a >= GRID_B && a < GRID_B + 4 * world.grid_b.size())
+    cell = &world.grid_b[(a - GRID_B) / 4];
+  else if (a == ACTIVE) cell = &world.run_active;
+  else if (a == DELETED) cell = &world.delete_list;
+  else if (a == OFF_GRID) cell = &world.off_grid;
+  else if (a == 0x5db4e8u) cell = &world.always_draw;
+  else if (a >= RUN15 && a < RUN15 + 4 * world.run15.size())
+    cell = &world.run15[(a - RUN15) / 4];
+  else if (a >= RUN60 && a < RUN60 + 4 * world.run60.size())
+    cell = &world.run60[(a - RUN60) / 4];
+  else {
+    auto p = std::make_unique<Cell>();
+    cell = p.get();
+    owned_heads.emplace(a, std::move(p));
+  }
   links[cell] = a;
-  heads.emplace(a, std::move(p));
+  heads.emplace(a, cell);
   return *cell;
 }
 Address World::State::ptr(const Link *p) const {
@@ -133,6 +156,10 @@ Address World::State::ptr(const Link *p) const {
   auto i = links.find(p);
   if (i != links.end())
     return i->second;
+  for (const auto &entry : authority->objects->objects)
+    for (unsigned k = 0; k < 3; ++k)
+      if (p == &entry.second->heads[k])
+        return entry.first + 4 * k;
   throw Error("iterator is not a readable node");
 }
 Address World::State::target(Address a) const {
@@ -143,19 +170,26 @@ Address World::State::target(Address a) const {
   return o ? o->id : 0;
 }
 void World::State::link(Address a, Address back, Address obj) {
-  auto &o = actor(obj);
+  auto *o = authority->find(obj);
+  if (!o || (!objects.count(obj) && !authority->is_factory(obj)))
+    throw Error("not a registered combat or ported factory object");
   auto i = heads.find(back);
-  if (i == heads.end())
-    throw Error("back reference is not a registered head");
-  handles.link(head(a), *i->second, &o);
+  Cell *back_cell = i == heads.end() ? nullptr : i->second;
+  if (!back_cell && back == obj) {
+    auto external = authority->objects->objects.find(obj);
+    if (external != authority->objects->objects.end())
+      back_cell = &external->second->heads[0];
+  }
+  if (!back_cell) throw Error("back reference is not a registered head");
+  handles.link(head(a), *back_cell, o);
 }
 void World::State::clear(Address a) {
   handles.clear(head(a));
   mem.poke(a, 4, 0);
 }
 void World::State::relink(Address a, Address to) {
-  if (to)
-    actor(to);
+  if (to && !objects.count(to) && !authority->is_factory(to))
+    throw Error("not a registered combat or ported factory object");
   clear(a);
   if (to)
     link(a, to, to);
@@ -221,6 +255,7 @@ Address World::State::construct(Address a, const Vec3 &pos, Kind kind) {
   p->kind = kind;
   p->player = kind == Kind::Player;
   objects[a] = std::move(p);
+  authority->register_object(*objects.at(a));
   for (unsigned off : {0, 4, 8})
     head(a + off);
   vec(a + 16, pos);
@@ -239,7 +274,11 @@ void World::State::forget_heads(Address lo, Address hi) {
       ++i;
       continue;
     }
-    retired_cells.push_back(std::move(i->second));
+    auto owned = owned_heads.find(i->first);
+    if (owned == owned_heads.end())
+      throw Error("shared World list head lies in a reused pool block");
+    retired_cells.push_back(std::move(owned->second));
+    owned_heads.erase(owned);
     i = heads.erase(i);
   }
 }
@@ -311,6 +350,7 @@ Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
     p->player = player;
     p->kind = player ? Kind::Player : Kind::Creature;
     objects[a] = std::move(p);
+    authority->register_object(*objects.at(a));
   }
   for (unsigned off : {0, 4, 8, 0x234, 0x238, 0x2e4, 0x360, 0x364})
     head(a + off);
@@ -449,6 +489,7 @@ void World::State::gameobject_dtor_call(Address a, Raw flags) {
     auto extent = Pool::CLASSES[pool.class_of(a)][0];
     pool.free(a);
     o.alive = false;
+    authority->unregister_object(o);
     retired.push_back(std::move(objects.at(a)));
     objects.erase(a);
     forget_heads(a, a + extent);
@@ -473,6 +514,7 @@ void World::State::destroy_round1(Address a) {
   }
   pool.free(a);
   o.alive = false;
+  authority->unregister_object(o);
   retired.push_back(std::move(objects.at(a)));
   objects.erase(a);
 }
@@ -488,7 +530,8 @@ std::vector<Address> World::State::box(const Vec3 &lo, const Vec3 &hi,
         if (!n->obj)
           continue;
         auto a = n->obj->id;
-        actor(a);
+        if (!objects.count(a) && !authority->is_factory(a))
+          throw Error("grid node outside the shared World registry");
         auto f = u(a + 12);
         if (f & (mask | 0x20000))
           continue;
@@ -725,7 +768,9 @@ void World::State::full_fixtures() {
   // digest still expects those addresses to stay zero.
 }
 World::World(Services s, int m, Composition c)
-    : s_(std::make_unique<State>(std::move(s), m, c)) {}
+    : World(std::make_shared<WorldAuthority>(), std::move(s), m, c) {}
+World::World(std::shared_ptr<WorldAuthority> authority, Services s, int m, Composition c)
+    : s_(std::make_unique<State>(std::move(authority), std::move(s), m, c)) {}
 Composition World::composition() const { return s_->composition; }
 World::~World() = default;
 const creature_hp::Memory &World::memory() const { return s_->mem; }
@@ -751,7 +796,9 @@ Address World::spawn_class(const std::string &name, const Spawn &v) {
 Address World::spawn_player(unsigned n, const Spawn &v, int str, int level) {
   return s_->spawn(v, true, n, str, level);
 }
-bool World::contains(Address a) const { return s_->objects.count(a) != 0; }
+bool World::contains(Address a) const {
+  return s_->objects.count(a) != 0 || s_->authority->is_factory(a);
+}
 std::vector<Address> World::actors() const {
   std::vector<Address> out;
   for (auto &p : s_->objects)
@@ -759,7 +806,7 @@ std::vector<Address> World::actors() const {
   return out;
 }
 Address World::retain(Address a) {
-  s_->actor(a);
+  if (!contains(a)) throw Error("not a registered combat or ported factory object");
   if (s_->external_next >= 0x90040000)
     throw Error("external handle budget exceeded");
   auto h = s_->external_next;
@@ -770,6 +817,15 @@ Address World::retain(Address a) {
 void World::relink(Address h, Address a) { s_->relink(h, a); }
 void World::clear_handle(Address h) { s_->clear(h); }
 Address World::target(Address h) const { return s_->target(h); }
+const objects::GameObject *World::factory_object(Address h) const {
+  const auto address = target(h);
+  if (!address) return nullptr;
+  const auto found = s_->authority->objects->objects.find(address);
+  return s_->authority->is_factory(address) &&
+                 found != s_->authority->objects->objects.end() &&
+                 found->second == s_->authority->find(address)
+             ? found->second : nullptr;
+}
 void World::destroy(Address a) { s_->destroy(a); }
 void World::delete_object(Address a) { s_->erase_later(a); }
 void World::update_grid(Address a) { s_->grid(a); }

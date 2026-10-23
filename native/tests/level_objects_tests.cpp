@@ -7,6 +7,8 @@
 // readable by hideMonster; hit points need the selected level's balance data.
 #include "champions/objects.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/combat_runtime.hpp"
+#include "champions/session_combat_runtime_adapter.hpp"
 #include <array>
 #include <cstring>
 #include <tuple>
@@ -164,6 +166,7 @@ int main(int argc, char **argv) {
     check(!cases.empty() && seed0, "vectors read");
     rta::SharedRandom seed(seed0);
     unsigned built = 0, stubs = 0;
+    bool shared_authority_checked = false;
     for (const auto &c : cases) {
       const auto pos_words = split(c[2], ',');
       const std::array<std::uint32_t, 3> pos{hex(pos_words[0]), hex(pos_words[1]), hex(pos_words[2])};
@@ -182,6 +185,47 @@ int main(int argc, char **argv) {
       const std::string where = "record " + c[1] + " " + c[4];
       check(counts.objects_registered == 1, where + " registered");
       if (c[5] == "built") {
+        if (!shared_authority_checked) {
+          namespace combat = rta::combat_runtime;
+          auto authority = std::make_shared<rta::WorldAuthority>();
+          combat::World combat_world(authority, combat::Services{});
+          combat::SessionAdapter adapter(combat_world);
+          combat::Address handle = 0, address = 0;
+          {
+            sc::Host factory(authority);
+            rta::SharedRandom factory_seed(seed0);
+            factory.bind_seed(&factory_seed);
+            factory.set_executable(image.view());
+            check(factory.adopt_objects(bytes.data(), bytes.size()), "shared factory adoption");
+            check(factory.counts().objects_built == 1, "ported factory constructor");
+            check(authority->objects->objects.size() == 1, "one shared object graph entry");
+            address = authority->objects->objects.begin()->first;
+            const auto free_nodes = authority->objects->handles.count_free();
+            handle = combat_world.retain(address);
+            check(authority->objects->handles.count_free() < free_nodes,
+                  "combat retain uses the host's handle pool");
+            check(combat_world.target(handle) == address &&
+                      adapter.factory_object(handle) == authority->objects->objects.at(address),
+                  "factory object reachable by the combat adapter handle");
+            check(combat_world.read(address + 0x44) == factory.variables().memory.word(address + 0x44),
+                  "factory bytes visible in combat memory");
+            combat_world.write(address + 0x34, 4, 0x1234);
+            check(factory.variables().memory.word(address + 0x34) == 0x1234,
+                  "combat write visible in script memory");
+          }
+          check(!combat_world.target(handle) && !adapter.factory_object(handle) &&
+                    !authority->find(address), "host removal invalidates shared handle");
+          {
+            sc::Host replacement(authority);
+            rta::SharedRandom replacement_seed(seed0);
+            replacement.bind_seed(&replacement_seed);
+            replacement.set_executable(image.view());
+            check(replacement.adopt_objects(bytes.data(), bytes.size()), "replacement adoption");
+            check(!combat_world.target(handle) && !adapter.factory_object(handle),
+                  "retired handle does not alias replacement generation");
+          }
+          shared_authority_checked = true;
+        }
         // Size, then the non-zero bytes as offset:value.
         const auto semi = c[6].find(';');
         const auto n = hex(c[6].substr(0, semi));
@@ -216,7 +260,7 @@ int main(int argc, char **argv) {
           check(!host.variables().find(name, 0x200).empty(), where + " found by name");
         }
     }
-    check(built > 200 && stubs > 0, "case coverage");
+    check(built > 200 && stubs > 0 && shared_authority_checked, "case coverage");
     rta::SharedRandom gate_seed(20973), expected_gate_seed(20973);
     sc::Host gate_host;
     gate_host.bind_seed(&gate_seed);

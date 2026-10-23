@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/amx.hpp"
 #include "champions/objects.hpp"
+#include "champions/world_authority.hpp"
 #include <array>
 #include <memory>
 #include <cstdint>
@@ -27,6 +28,7 @@ struct Memory {
   // store takes its two's complement modulo the requested width.
   struct Integer { std::vector<std::uint8_t> magnitude; bool negative = false; };
   explicit Memory(Backing backing = {}) : under(std::move(backing)) {}
+  explicit Memory(creature_hp::Memory &shared) : canonical(&shared) {}
   Backing under;
   std::vector<std::pair<std::uint32_t, std::size_t>> writes;
   Page &page(std::uint32_t index);
@@ -54,6 +56,7 @@ struct Memory {
   void word(std::uint32_t, std::uint32_t);
   void string(std::uint32_t, const std::string &);
 private:
+  creature_hp::Memory *canonical = nullptr;
   Page &ensure_page(std::uint32_t) const;
   mutable std::map<std::uint32_t, Page> pages;
   mutable std::map<std::uint32_t, std::uint8_t> bytes;
@@ -182,6 +185,7 @@ private:
 };
 class Variables {
   std::shared_ptr<Memory> memory_owner;
+  std::shared_ptr<WorldAuthority> authority_;
   Host::Game host_owner;
   std::vector<std::shared_ptr<Obj>> setup_objects;
   std::int64_t next_address = 0x01000000;
@@ -287,6 +291,7 @@ public:
   amx::Cell count_players_with_hp() const;
   explicit Variables(std::shared_ptr<Memory> = {},
                      std::shared_ptr<objects::World> = {}, std::shared_ptr<Host> = {});
+  explicit Variables(std::shared_ptr<WorldAuthority>);
   ~Variables();
   // Supplied worlds and named objects must not outlive this memory-backed owner.
   Host::Value ext(const std::string &, const Host::Arguments & = {});

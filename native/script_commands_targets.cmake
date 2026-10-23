@@ -69,7 +69,7 @@ if(BUILD_TESTING AND TARGET champions-archive)
     add_test(NAME level-factory COMMAND champions-level-factory-tests
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/level_factory.tsv")
     add_executable(champions-level-objects-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/level_objects_tests.cpp")
-    target_link_libraries(champions-level-objects-tests PRIVATE champions-script-commands)
+    target_link_libraries(champions-level-objects-tests PRIVATE champions-script-commands champions-combat-runtime)
     if(MSVC)
         target_compile_options(champions-level-objects-tests PRIVATE /W4 /utf-8 /fp:strict)
     else()

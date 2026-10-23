@@ -243,6 +243,7 @@ struct DialogCounts {
 class Host {
 public:
   Host();
+  explicit Host(std::shared_ptr<WorldAuthority>);
   Host(const Host &) = delete;
   Host &operator=(const Host &) = delete;
   Host(Host &&) = delete;
@@ -536,7 +537,9 @@ private:
   void refresh_hud_inputs();
   void mirror_hud();
   Cell *target_cell(std::uint32_t creature, bool create);
+  void mark_built(std::uint32_t);
 
+  std::shared_ptr<WorldAuthority> authority_;
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
   std::unique_ptr<script_items::Service> items_;

@@ -16,6 +16,9 @@ public:
   void ready_tick(Raw frame);
   void hit_test_event(Address actor_handle, Raw mask);
   bool failed() const { return failed_; }
+  const objects::GameObject *factory_object(Address handle) const {
+    return world_.factory_object(handle);
+  }
 
   // ---- Full composition input (round 2) -----------------------------------
   // The lockstep pad of a player slot for the next ready tick: stick, then

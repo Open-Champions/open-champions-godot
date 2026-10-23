@@ -207,8 +207,11 @@ const Row &row(std::size_t index) {
   return kRows[index];
 }
 
-Host::Host()
-    : variables_(std::make_unique<builtins::Variables>()),
+Host::Host() : Host(nullptr) {}
+Host::Host(std::shared_ptr<WorldAuthority> authority)
+    : authority_(std::move(authority)),
+      variables_(authority_ ? std::make_unique<builtins::Variables>(authority_)
+                           : std::make_unique<builtins::Variables>()),
       campaign_(std::make_unique<quests::Campaign>()),
       effects_(std::make_unique<champions::rta::fx::sim::EffectWorld>()),
       audio_(std::make_unique<champions::audio::Playback>()),
@@ -245,6 +248,10 @@ Host::Host()
   variables_->memory.word(script_items::G_CM1_WORD, static_cast<std::uint32_t>(script_items::CM1_IMAGE));
   // The executable image starts g_hudFade at zero (research-fade 197f52a).
   variables_->memory.word(script_effects::G_FADE, 0);
+}
+void Host::mark_built(std::uint32_t address) {
+  built_.insert(address);
+  if (authority_) authority_->register_factory(address);
 }
 Host::~Host() {
   // Variables unregisters external objects and their handle nodes. Their

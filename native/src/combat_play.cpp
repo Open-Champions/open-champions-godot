@@ -6,6 +6,7 @@
 namespace champions::simulation::rta::combat_play {
 namespace C = combat_runtime;
 struct Session::State {
+  std::shared_ptr<WorldAuthority> authority = std::make_shared<WorldAuthority>();
   world_queries::Level terrain;
   std::map<Raw, std::pair<Raw, Raw>> animations;
   std::unique_ptr<C::World> world;
@@ -159,7 +160,7 @@ struct Session::State {
       if (e.flags || e.z || e.cos != 32767 || e.sin)
         throw C::Unsupported("combat fixture requires unmodified dry ground");
     if (which == Fixture::Full) { full_setup(); return; }
-    world = std::make_unique<C::World>(services(), 0);
+    world = std::make_unique<C::World>(authority, services(), 0);
     C::Spawn spawn;
     spawn.team = 0;
     auto player = world->spawn_player(0, spawn);
@@ -214,7 +215,7 @@ struct Session::State {
     status.ready_tick_limit = animated ? 90 : 4096; // Explicit fixture budget; no save/replay.
   }
   void full_setup() {
-    world = std::make_unique<C::World>(full_services(), 0, C::Composition::Full);
+    world = std::make_unique<C::World>(authority, full_services(), 0, C::Composition::Full);
     // Authored set-up from the composed research runtime's walk-and-combo
     // scenario (player strength 40, weapon 30..40 / attack 50 / type 8, a
     // 120-HP Skelight at 80 facing the player), plus a second 120-HP

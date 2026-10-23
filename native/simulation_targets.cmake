@@ -3,7 +3,7 @@ include_guard(GLOBAL)
 set(CHAMPIONS_SIMULATION_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 # Standalone RTA quest/profile script built-ins; remaining engine commands refuse.
 add_library(champions-script-builtins "${CHAMPIONS_SIMULATION_ROOT}/src/script_builtins.cpp")
-target_link_libraries(champions-script-builtins PUBLIC champions-amx champions-core champions-objects)
+target_link_libraries(champions-script-builtins PUBLIC champions-amx champions-core champions-objects champions-creature-hp)
 if(MSVC)
     target_compile_options(champions-script-builtins PRIVATE /W4 /utf-8)
 else()
@@ -316,7 +316,7 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-play)
 
 include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")
 
-target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines champions-creature-anim)
+target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines champions-creature-anim champions-objects)
 
 target_sources(champions-combat-play PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/play_animation.cpp")
 target_link_libraries(champions-combat-play PUBLIC champions-creature-anim)

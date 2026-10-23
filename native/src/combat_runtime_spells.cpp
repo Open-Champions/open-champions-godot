@@ -347,6 +347,7 @@ void World::State::pool_free(Address a) {
   auto i = objects.find(a);
   if (i != objects.end()) {
     i->second->alive = false;
+    authority->unregister_object(*i->second);
     retired.push_back(std::move(i->second));
     objects.erase(i);
   }

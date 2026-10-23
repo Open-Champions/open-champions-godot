@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/core_math.hpp"
 #include "champions/creature_hp.hpp"
+#include "champions/world_authority.hpp"
 #include <array>
 #include <functional>
 #include <memory>
@@ -180,6 +181,8 @@ private:
 public:
   explicit World(Services services, int camera_mode = 1,
                  Composition composition = Composition::Round1);
+  World(std::shared_ptr<WorldAuthority> authority, Services services,
+        int camera_mode = 1, Composition composition = Composition::Round1);
   ~World();
   World(const World &) = delete;
   World &operator=(const World &) = delete;
@@ -201,6 +204,9 @@ public:
   void relink(Address head, Address target);
   void clear_handle(Address head);
   Address target(Address head) const;
+  // A level-factory object remains owned by the script host. Its handle can
+  // be resolved here without claiming an unported combat constructor or run.
+  const objects::GameObject *factory_object(Address head) const;
   void destroy(Address);       // slot 1 with 3 through the executed chain
   void delete_object(Address); // unlink run list now; grid/handles persist
   void update_grid(Address);
