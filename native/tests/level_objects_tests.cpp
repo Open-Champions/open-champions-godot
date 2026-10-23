@@ -458,7 +458,7 @@ int main(int argc, char **argv) {
          std::array<std::tuple<std::string, std::uint32_t, std::string>, 3>{{
              {"FootVariant", 0x478, "Holder.v1 table slot 1 is untraced"},
              {"ZekVariant", 0x480, "Holder.v1 table slot 1 is untraced"},
-             {"MountedVariant", 0x478, "mounted Horsemen needs Nightmare_ctor"}}}) {
+             {"MountedVariant", 0x478, ""}}}) {
       rta::SharedRandom class_seed(20973);
       sc::Host class_host;
       class_host.bind_seed(&class_seed);
@@ -468,9 +468,13 @@ int main(int argc, char **argv) {
       const auto record = blob({{cls, {0, 0, 0}, 0, {}}});
       check(class_host.adopt_objects(record.data(), record.size()), cls + " adopted");
       rta::Pool class_pool;
-      check(!class_host.is_built(class_pool.allocate(size)) &&
-            class_host.counts().build_refusals.count(reason) == 1,
-            cls + " has a counted constructor refusal");
+      const auto built = class_host.is_built(class_pool.allocate(size));
+      if (cls == "MountedVariant")
+        check(built && class_host.counts().build_refusals.empty(),
+              "mounted Horseman builds through its audited constructor");
+      else
+        check(!built && class_host.counts().build_refusals.count(reason) == 1,
+              cls + " has a counted constructor refusal");
     }
     std::cout << "PASS level-objects: " << checks << " checks, " << built << " built, " << stubs
               << " stubs\n";

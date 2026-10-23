@@ -772,11 +772,13 @@ void test_mounted_records() {
   // Shared draws: each rider record two (rider, then mount), the placed Nightmare one; the
   // undocumented on-foot row (same constructor, rows 0x532dc8..) keeps the old accounting.
   SharedRandom expect(20973);
-  for (int i = 0; i < 9; ++i) expect.draw();
-  check(live.state == expect.state, "four rider records drew twice each and the Nightmare once");
+  for (int i = 0; i < 10; ++i) expect.draw();
+  check(live.state == expect.state, "four rider records drew twice each, the on-foot stub and Nightmare once");
   const std::array<std::string, 4> mount_names = {
       "horsedisease", "horsewar", "horsepestilence", "horsedeath"};
-  check(counts.build_refusals.empty(), "all four documented mount lists build");
+  check(counts.build_refusals.size() == 1 &&
+        counts.build_refusals.count("Holder.v1 table slot 1 is untraced") == 1,
+        "mounted lists build; the separately ported on-foot row retains its Holder refusal");
   for (int i = 0; i < 4; ++i) {
     auto *rider = host.variables().find_first("rider" + std::to_string(i));
     auto *mount = host.variables().find_first(mount_names[i]);
