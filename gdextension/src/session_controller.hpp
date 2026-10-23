@@ -2,6 +2,7 @@
 #include "champions/frame_clock.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/combat_play.hpp"
+#include "champions/session_combat_runtime_adapter.hpp"
 #include "champions/core_state.hpp"
 #include "champions/combat_play_effects.hpp"
 #include "champions/level_play.hpp"
@@ -31,6 +32,12 @@ class Host;
 class ChampionsSessionController : public godot::RefCounted {
   GDCLASS(ChampionsSessionController, godot::RefCounted)
   std::unique_ptr<champions::simulation::rta::native_save::Scene> control_;
+  // The ordinary play session owns the one native address authority. Its
+  // combat adapter is prepared for registered level-factory objects, but
+  // gameplay ticks still require the separately ported production services.
+  std::shared_ptr<champions::simulation::rta::WorldAuthority> world_authority_;
+  std::unique_ptr<champions::simulation::rta::combat_runtime::World> world_runtime_;
+  std::unique_ptr<champions::simulation::rta::combat_runtime::SessionAdapter> world_adapter_;
   // Combat and level fixtures behind the journaled fixture-continuation facades
   // (play_fixture_save.hpp); the Full fixture's EffectSimulation lives in the
   // combat scene and runs in every ready tick.

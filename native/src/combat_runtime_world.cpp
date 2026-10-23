@@ -62,6 +62,8 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
     return std::uint8_t(word >> shift);
   }
 };
+World::State::State(Services v, int mode, Composition c)
+    : State(std::make_shared<WorldAuthority>(), std::move(v), mode, c) {}
 World::State::State(std::shared_ptr<WorldAuthority> owner, Services v, int mode, Composition c)
     : authority(std::move(owner)), pool(authority->objects->pool),
       handles(authority->objects->handles), mem(authority->memory),

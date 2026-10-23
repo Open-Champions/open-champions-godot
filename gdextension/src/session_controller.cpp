@@ -857,7 +857,18 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
-    auto next = std::make_unique<rta::script_commands::Host>();
+    auto next_authority = (!combat_ && !level_)
+        ? std::make_shared<rta::WorldAuthority>() : nullptr;
+    auto next_runtime = next_authority
+        ? std::make_unique<rta::combat_runtime::World>(next_authority,
+                                                       rta::combat_runtime::Services{})
+        : nullptr;
+    auto next_adapter = next_runtime
+        ? std::make_unique<rta::combat_runtime::SessionAdapter>(*next_runtime)
+        : nullptr;
+    auto next = next_authority
+        ? std::make_unique<rta::script_commands::Host>(next_authority)
+        : std::make_unique<rta::script_commands::Host>();
     apply_text(*next);
     rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
     std::memcpy(image.data(), script.ptr(), image.size());
@@ -995,6 +1006,9 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
     scripts_ = std::move(next);
+    world_adapter_ = std::move(next_adapter);
+    world_runtime_ = std::move(next_runtime);
+    world_authority_ = std::move(next_authority);
     script_level_objects_ = std::move(next_objects);
     script_fade_ = scripts_->fade_level();
     if (carried && live_player) player_ = *live_player;
@@ -1541,6 +1555,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       // The fixture's seed is its own journaled one: a level script's
       // draws no longer share the session's stream.
       unpair_script_seed();
+      world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
       level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
       terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
       cache_state(state, true); clock_.reset();
@@ -1554,6 +1569,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
                                : std::make_unique<rta::fixture_save::CombatScene>(setup.initial_terrain, which);
       auto state = next->observation();
       unpair_script_seed();
+      world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
       combat_setup_ = setup;
       combat_ = std::move(next);
       attach_effects();
@@ -1588,10 +1604,23 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
                            display_float(state.position[2]));
     const double facing =
         double(state.facing & 0xffffu) * (6.283185307179586 / 65536.0);
+    auto new_authority = world_authority_ ? nullptr : std::make_shared<rta::WorldAuthority>();
+    auto new_runtime = new_authority
+        ? std::make_unique<rta::combat_runtime::World>(new_authority,
+                                                       rta::combat_runtime::Services{})
+        : nullptr;
+    auto new_adapter = new_runtime
+        ? std::make_unique<rta::combat_runtime::SessionAdapter>(*new_runtime)
+        : nullptr;
     // All allocations/validation precede publication. Terrain and visual owners
     // remain untouched. The remaining native moves and scalar stores cannot
     // fail.
     control_.swap(next);
+    if (new_authority) {
+      world_authority_ = std::move(new_authority);
+      world_runtime_ = std::move(new_runtime);
+      world_adapter_ = std::move(new_adapter);
+    }
     combat_.reset();
     level_.reset();
     pending_.reset();
@@ -1612,6 +1641,7 @@ Dictionary ChampionsSessionController::reset_session() {
   try {
     remember_script_fade();
     scripts_.reset();
+    world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
     help_paused_ = false;
     loaded_presentation_.reset();
     pending_.reset();
@@ -1626,6 +1656,12 @@ Dictionary ChampionsSessionController::reset_session() {
     } else if (level_) {
       auto next = std::make_unique<rta::fixture_save::LevelScene>(); level_.swap(next);
     } else control_->reset();
+    if (!combat_ && !level_) {
+      world_authority_ = std::make_shared<rta::WorldAuthority>();
+      world_runtime_ = std::make_unique<rta::combat_runtime::World>(
+          world_authority_, rta::combat_runtime::Services{});
+      world_adapter_ = std::make_unique<rta::combat_runtime::SessionAdapter>(*world_runtime_);
+    }
     snap();
     return observation();
   } catch (const std::exception &e) {
@@ -1654,6 +1690,7 @@ Dictionary ChampionsSessionController::stop_session() {
   try {
     remember_script_fade();
     scripts_.reset();
+    world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
     help_paused_ = false;
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap();

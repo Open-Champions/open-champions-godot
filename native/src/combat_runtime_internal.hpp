@@ -121,6 +121,7 @@ struct World::State {
   std::vector<std::pair<Address, unsigned>> arena_stack;
   std::shared_ptr<player::Tick::NamedCallbacks> tick_callbacks;
   explicit State(std::shared_ptr<WorldAuthority>, Services, int, Composition);
+  explicit State(Services, int, Composition);
   ~State();
   bool full() const { return composition == Composition::Full; }
   Raw u(Address a) const { return Raw(mem.load(a, 4)); }
