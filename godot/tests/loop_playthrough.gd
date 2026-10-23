@@ -245,6 +245,20 @@ func run() -> void:
 		var direct: bool = scene.load_real_level(0)
 		mark("direct_level_diagnostic", "loaded" if direct else "refused", {"level_index": scene.real.current})
 		if direct and not scene.play_mode: scene.start_play()
+	# The first story level can have one terrain element. Select a real level
+	# with multiple elements for the save probe; the level loader supplies its
+	# WORLD collision and textured display independently of the save image.
+	var terrain_elements := int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+	if terrain_elements <= 1:
+		for index in range(scene.real.levels.size()):
+			if index == scene.real.current: continue
+			if not scene.load_real_level(index): continue
+			terrain_elements = int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+			if terrain_elements > 1:
+				if not scene.play_mode: scene.start_play()
+				break
+	mark("multi_surface_level", "loaded" if scene.real.current >= 0 and terrain_elements > 1 and scene.play_mode else "refused",
+		{"terrain_elements": terrain_elements})
 	if scene.real.current >= 0 and not scene.controller.get_play_capabilities().get("level_script_enabled", false):
 		mark("level_script", "enabled" if scene.attach_level_script() else "refused")
 	else:
@@ -403,6 +417,7 @@ func run() -> void:
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		quests_match = quests_match and saved_campaign.get(key, -1) == restored_campaign.get(key, -2)
 	var carried: bool = quit_ok and load_attempted and fe.screen() == "playing" and scene.real.current == level_before \
+		and int(scene.controller.get_play_capabilities().get("terrain_elements", 0)) == terrain_elements \
 		and scene.terrain_root.has_meta("level_texture_pair") \
 		and int(restored.get("gold", -1)) == saved_gold \
 		and is_equal_approx(float(restored.get("hp", -1.0)), saved_hp) \
@@ -410,6 +425,7 @@ func run() -> void:
 		and quests_match
 	mark("load_and_carry", "restored" if carried else "refused",
 		{"screen": fe.screen(), "load_attempted": load_attempted,
+		"terrain_elements": terrain_elements,
 		"level_index_before": level_before,
 		"level_index_after": scene.real.current, "gold_before": saved_gold,
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
@@ -491,11 +507,13 @@ func run() -> void:
 	var cold_state: Dictionary = cold.controller.get_observation()
 	var cold_campaign: Dictionary = cold.controller.script_command_counts().get("campaign", {})
 	var cold_match: bool = cold_loaded and cold.real.current == level_before and cold.terrain_root.has_meta("level_texture_pair") and \
+		int(cold.controller.get_play_capabilities().get("terrain_elements", 0)) == terrain_elements and \
 		int(cold_state.get("gold", -1)) == saved_gold and is_equal_approx(float(cold_state.get("hp", -1.0)), saved_hp) and \
 		cold.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
-	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded})
+	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded,
+		"terrain_elements": int(cold.controller.get_play_capabilities().get("terrain_elements", 0))})
 	# A displayed level with different collision must not be reused for this save.
 	var other_index := 0 if level_before != 0 else 1
 	var other_loaded: bool = cold.load_real_level(other_index)
