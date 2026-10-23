@@ -3,6 +3,7 @@
 #include "champions/messages.hpp"
 #include "champions/inventory_icon_assoc.hpp"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -156,7 +157,7 @@ int skill_points_for_level(int level_before);
 
 struct Gap {
   const char *id;
-  const char *reason;
+  std::string reason;
 };
 // Stable refusals. Asking for a missing coordinate throws Refusal.
 std::vector<Gap> gaps();
@@ -184,6 +185,14 @@ struct DrawIcon {
   std::uint32_t tint = 0x80808080u;
   std::string picture;
 };
+struct HeldIcon {
+  int x = 0, y = 0, layer = 7;
+  std::uint32_t tint = 0;
+  std::string picture;
+};
+struct IconSize {
+  int width = -1, height = -1;
+};
 struct DrawFrame {
   int x = 0, y = 0, width = 0, height = 0, style = 0;
   std::uint32_t tint = 0;
@@ -195,6 +204,7 @@ struct Frame {
   std::vector<DrawRect> rects;
   std::vector<DrawSprite> sprites;
   std::vector<DrawIcon> icons;
+  std::vector<HeldIcon> held_icons;
   std::vector<DrawFrame> frames;
   std::vector<Gap> gaps;
 };
@@ -257,6 +267,9 @@ public:
                     champions::simulation::rta::items::Tables tables,
                     champions::inventory_icons::PictureTables pictures,
                     const std::function<std::uint8_t(std::uint32_t)> &image_byte);
+  std::array<std::vector<std::string>, BAGS> bag_picture_names();
+  void build_display_grid(const std::array<std::vector<IconSize>, BAGS> &sizes);
+  int display_bag_slot(int page, int column, int row) const;
   std::vector<std::uint8_t> record_bytes() const;
 
   Frame frame(const std::string &screen);
@@ -277,6 +290,12 @@ private:
   int drag_column_ = 0, drag_row_ = 0;
   bool live_record_ = false;
   std::uint32_t stock_addr_ = STOCK;
+  struct DisplayCell {
+    int slot = -1;
+    std::array<std::uint8_t, ITEM_SIZE> bytes{};
+  };
+  std::array<std::vector<DisplayCell>, BAGS> display_cells_;
+  std::array<std::string, BAGS> display_refusals_;
 
   std::uint32_t record() const { return PLAYER; }
   void seed();
@@ -285,6 +304,7 @@ private:
   Counts counts() const;
   std::uint32_t cell_address(int mode, int column, int row) const;
   bool bag_index(std::uint32_t addr, int &bag, int &index) const;
+  std::string picture_name(std::uint32_t addr);
 };
 
 } // namespace champions::menus

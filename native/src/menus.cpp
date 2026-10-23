@@ -385,6 +385,104 @@ Counts Ledger::counts() const {
   return out;
 }
 
+std::string Ledger::picture_name(std::uint32_t addr) {
+  const auto definition = tables_.by_addr(machine_->u32(addr));
+  if (!definition) throw Refusal("item picture definition is absent");
+  champions::inventory_icons::PictureItem picture;
+  picture.definition.name = definition->name;
+  picture.definition.category = definition->category;
+  picture.definition.slot = definition->slot;
+  picture.definition.subtype = definition->subtype;
+  picture.definition.damage_min = definition->damage_min;
+  picture.definition.damage_max = definition->damage_max;
+  picture.definition.picture = definition->picture;
+  picture.definition.model_row = static_cast<std::size_t>(definition->model_row);
+  picture.flags = machine_->u64(addr + 8);
+  picture.prefix = machine_->u8(addr + 0x20);
+  std::optional<std::int32_t> value;
+  if (definition->category == 1 && definition->name.find('+') != std::string::npos)
+    value = machine_->item_value(addr);
+  return champions::inventory_icons::picture_filename(
+      picture, machine_->s32(record() + 0x54), pictures_, value);
+}
+
+std::array<std::vector<std::string>, BAGS> Ledger::bag_picture_names() {
+  std::array<std::vector<std::string>, BAGS> names;
+  const auto counted = counts();
+  for (int bag = 0; bag < BAGS; ++bag) {
+    if (counted.n[bag] < 0 || counted.n[bag] > 64)
+      throw Refusal("bag count is outside the bounded display builder");
+    for (int slot = 0; slot < counted.n[bag]; ++slot) {
+      try {
+        names[bag].push_back(picture_name(cell_of(record(), bag, slot)));
+      } catch (const std::exception &) {
+        names[bag].emplace_back();
+      }
+    }
+  }
+  return names;
+}
+
+void Ledger::build_display_grid(const std::array<std::vector<IconSize>, BAGS> &sizes) {
+  const auto counted = counts();
+  for (int bag = 0; bag < BAGS; ++bag) {
+    auto &cells = display_cells_[bag];
+    cells.assign(GRID_COLS * GRID_ROWS, {});
+    auto &refusal = display_refusals_[bag];
+    refusal.clear();
+    if (counted.n[bag] < 0 || counted.n[bag] > 64 ||
+        sizes[bag].size() != static_cast<std::size_t>(counted.n[bag])) {
+      refusal = "Display-grid dimensions are unavailable.";
+      continue;
+    }
+    for (int slot = 0; slot < counted.n[bag]; ++slot) {
+      const auto size = sizes[bag][static_cast<std::size_t>(slot)];
+      if (size.width < 0 || size.height <= 0 || size.height > CURSOR_ROW) {
+        refusal = "Taller or unknown item footprint refused; later placements depend on it.";
+        break;
+      }
+      const int columns = size.width / CURSOR_COL + 1;
+      if (columns < 1 || columns > GRID_COLS) {
+        refusal = "Oversized item footprint refused; later placements depend on it.";
+        break;
+      }
+      bool placed = false;
+      for (int row = 0; row < GRID_ROWS && !placed; ++row) {
+        for (int column = 0; column + columns <= GRID_COLS; ++column) {
+          bool vacant = true;
+          for (int offset = 0; offset < columns; ++offset)
+            vacant &= cells[static_cast<std::size_t>((column + offset) * GRID_ROWS + row)].slot < 0;
+          if (!vacant) continue;
+          const auto addr = cell_of(record(), bag, slot);
+          DisplayCell copy;
+          copy.slot = slot;
+          for (std::uint32_t byte = 0; byte < ITEM_SIZE; ++byte)
+            copy.bytes[byte] = static_cast<std::uint8_t>(machine_->u8(addr + byte));
+          copy.bytes[0x22] = static_cast<std::uint8_t>(slot);
+          copy.bytes[0x23] = static_cast<std::uint8_t>(slot >> 8);
+          for (int offset = 0; offset < columns; ++offset)
+            cells[static_cast<std::size_t>((column + offset) * GRID_ROWS + row)] = copy;
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        refusal = "Overflowing item footprint refused; later placements depend on it.";
+        break;
+      }
+    }
+  }
+}
+
+int Ledger::display_bag_slot(int page, int column, int row) const {
+  if (page < 0 || page >= BAGS || column < 0 || column >= GRID_COLS ||
+      row < 0 || row >= GRID_ROWS || display_cells_[page].empty())
+    return -1;
+  const auto &cell = display_cells_[page][static_cast<std::size_t>(column * GRID_ROWS + row)];
+  if (cell.slot < 0) return -1;
+  return int(cell.bytes[0x22]) | (int(cell.bytes[0x23]) << 8);
+}
+
 std::uint32_t Ledger::cell_address(int mode, int column, int row) const {
   if (page() >= 3)
     return 0;
@@ -548,36 +646,50 @@ Frame Ledger::frame(const std::string &screen) {
       out.rects.push_back({panel_x + 15, 413 + n, panel_x + 305, 414 + n,
                            alpha << 24, 4});
     }
-    // Hover uses the separate display-grid address. The selected runtime
-    // supplies only the copied player record, so its researched page-1/2
-    // first-cell sender is the sole established bag-to-screen association.
-    // Other cells on those pages remain unrendered until the display grid is
-    // supplied; do not read page*bdd8 out of the player record.
+    // Pages 1/2 draw the retained display copies built from dimension-indexed
+    // bag records. Their action pointer remains the separate counted bag cell.
     const auto selected = cursor_cell(0, cursor_x_, cursor_y_);
-    if (page() > 0 && counts().n[page()] > 1)
-      out.gaps.push_back({"inventory-page-grid", "Only the page's first counted item has a documented bag-to-screen association."});
+    if (page() > 0 && display_cells_[page()].empty())
+      out.gaps.push_back({"inventory-page-grid", "Display-grid dimensions are unavailable."});
+    if (page() > 0 && !display_refusals_[page()].empty())
+      out.gaps.push_back({"inventory-grid-footprint", display_refusals_[page()]});
     for (int row = 0; row < 10; ++row) {
       for (int column = 0; column < GRID_COLS; ++column) {
+      const DisplayCell *copy = nullptr;
+      if (page() > 0 && !display_cells_[page()].empty()) {
+        const auto &cell = display_cells_[page()][static_cast<std::size_t>(column * GRID_ROWS + row)];
+        if (cell.slot >= 0) copy = &cell;
+      }
       const auto addr = page() == 0 ? cell_address(2, column, row)
-                                    : (column == 0 && row == 0 ? first_cell_bag_address(record(), page()) : 0);
+                                    : (copy ? cell_of(record(), page(), copy->slot) : 0);
       int bag = 0, index = 0;
-      if (!bag_index(addr, bag, index) || machine_->u32(addr) == 0) continue;
+      if (!bag_index(addr, bag, index)) continue;
+      const auto copy_word = [&](std::size_t offset) {
+        std::uint32_t value = 0;
+        for (int byte = 0; byte < 4; ++byte)
+          value |= std::uint32_t(copy->bytes[offset + static_cast<std::size_t>(byte)]) << (8 * byte);
+        return value;
+      };
+      const auto definition_word = copy ? copy_word(0) : machine_->u32(addr);
+      if (definition_word == 0) continue;
       bool equipped = false;
       for (int slot = 0; slot < 17 && !equipped; ++slot)
         equipped = equipment(slot) == addr;
       const bool blocked = live_record_ && !equipped && machine_->check_equip_allowed(0, addr) != 0;
-      const bool flag41 = (machine_->u64(addr + 8) & (1ull << 41)) != 0;
+      const auto flags = copy ? std::uint64_t(copy_word(8)) | (std::uint64_t(copy_word(12)) << 32)
+                              : machine_->u64(addr + 8);
+      const bool flag41 = (flags & (1ull << 41)) != 0;
       const auto colour = inventory_grid_tint(equipped, blocked, flag41);
       const auto hit = hit_cell(panel_x, column, row);
       rect(hit, colour, 5);
       if (selected.first == column && selected.second == row) {
-        const auto selected_definition = tables_.by_addr(machine_->u32(addr));
+        const auto selected_definition = tables_.by_addr(definition_word);
         if (selected_definition && selected_definition->category >= 0 && selected_definition->category <= 2)
           out.frames.push_back({135, 230, 223, selected_definition->category == 0 ? 77 : 57,
                                 6, 0x80000000u});
       }
       if (live_record_) {
-        const auto definition = tables_.by_addr(machine_->u32(addr));
+        const auto definition = tables_.by_addr(definition_word);
         if (!definition) throw Refusal("live icon definition is absent");
         champions::inventory_icons::PictureItem picture;
         picture.definition.name = definition->name;
@@ -588,8 +700,8 @@ Frame Ledger::frame(const std::string &screen) {
         picture.definition.damage_max = definition->damage_max;
         picture.definition.picture = definition->picture;
         picture.definition.model_row = static_cast<std::size_t>(definition->model_row);
-        picture.flags = machine_->u64(addr + 8);
-        picture.prefix = machine_->u8(addr + 0x20);
+        picture.flags = flags;
+        picture.prefix = copy ? copy->bytes[0x20] : machine_->u8(addr + 0x20);
         const auto body = machine_->s32(record() + 0x54);
         try {
           std::optional<std::int32_t> value;
@@ -604,7 +716,7 @@ Frame Ledger::frame(const std::string &screen) {
         }
       }
       std::string name = "item";
-      const auto def = machine_->u32(addr);
+      const auto def = definition_word;
       for (const auto &row : tables_.defs)
         if (row && row->addr == def) name = row->name;
       const auto old_hit = hit_cell(0, column, row);
@@ -621,6 +733,37 @@ Frame Ledger::frame(const std::string &screen) {
                            "inventry.lmp", "mousecursor.tex"});
     out.sprites.push_back({panel_x + cursor_x_, cursor_y_, 7, 0x34000000u,
                            "inventry.lmp", "mousecursor.tex"});
+    if (dragging_) {
+      const auto definition = tables_.by_addr(machine_->u32(drag_cell_));
+      if (live_record_ && definition) {
+        champions::inventory_icons::PictureItem picture;
+        picture.definition.name = definition->name;
+        picture.definition.category = definition->category;
+        picture.definition.slot = definition->slot;
+        picture.definition.subtype = definition->subtype;
+        picture.definition.damage_min = definition->damage_min;
+        picture.definition.damage_max = definition->damage_max;
+        picture.definition.picture = definition->picture;
+        picture.definition.model_row = static_cast<std::size_t>(definition->model_row);
+        picture.flags = machine_->u64(drag_cell_ + 8);
+        picture.prefix = machine_->u8(drag_cell_ + 0x20);
+        try {
+          std::optional<std::int32_t> value;
+          if (definition->category == 1 && definition->name.find('+') != std::string::npos)
+            value = machine_->item_value(drag_cell_);
+          const auto filename = champions::inventory_icons::picture_filename(
+              picture, machine_->s32(record() + 0x54), pictures_, value);
+          out.held_icons.push_back({panel_x + cursor_x_ + 22, cursor_y_ + 22,
+                                    7, 0x80808080u, filename});
+          out.held_icons.push_back({panel_x + cursor_x_ + 22, cursor_y_ + 25,
+                                    7, 0x34000000u, filename});
+        } catch (const std::exception &) {
+          out.gaps.push_back({"inventory-drag-picture", "Held-item picture association refused."});
+        }
+      } else {
+        out.gaps.push_back({"inventory-drag-picture", "Held-item picture is unavailable for this drag state."});
+      }
+    }
     return out;
   }
   if (screen == "shop") {
@@ -689,6 +832,8 @@ void Ledger::adopt(const Adopted &c) {
   dragging_ = 0;
   drag_cell_ = 0;
   live_record_ = false;
+  for (auto &cells : display_cells_) cells.clear();
+  for (auto &reason : display_refusals_) reason.clear();
   machine_->w32(r + 0xe4, static_cast<std::uint32_t>(c.gold));
   machine_->w32(r + 0xe8, static_cast<std::uint32_t>(c.skill_points));
   machine_->w8(r + 0xec, static_cast<std::uint32_t>(c.stat_points));
@@ -738,6 +883,8 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
   dragging_ = 0;
   drag_cell_ = 0;
   live_record_ = true;
+  for (auto &cells : display_cells_) cells.clear();
+  for (auto &reason : display_refusals_) reason.clear();
   set_page(0);
 }
 
@@ -854,6 +1001,8 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
   live_record_ = false;
+  for (auto &cells : display_cells_) cells.clear();
+  for (auto &reason : display_refusals_) reason.clear();
 }
 
 } // namespace champions::menus

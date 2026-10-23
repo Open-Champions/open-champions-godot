@@ -99,7 +99,8 @@ func adopt_imported() -> Dictionary:
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null or file.get_length() > 8 * 1024 * 1024:
 		return {"ok": false, "error": "Selected executable is unavailable or outside the bounded reader."}
-	var result: Dictionary = service.adopt_record(imported.record_bytes(), file.get_buffer(file.get_length()))
+	sync_font(null)
+	var result: Dictionary = service.adopt_record(imported.record_bytes(), file.get_buffer(file.get_length()), icon_index)
 	live_imported = result.get("ok", false)
 	_refresh_status()
 	queue_redraw()
@@ -317,8 +318,16 @@ func _refresh_status() -> void:
 	var font_note := "" if small_font_texture != null else "\nGame font unavailable; item text hidden."
 	var drop_note := "\nDrop unavailable for imported play." if row.get("live_record", false) else ""
 	var detail_note := "\nItem detail fields unavailable." if screen == "inventory" else ""
-	status.text = "%s · Page %d\nGold %d · Level %d\nJ equip/unequip · U drop\n%s controls are host keys.%s%s%s" % [
-		source, int(row.page), int(row.gold), int(row.level), str(row.scheme).capitalize(), drop_note, detail_note, font_note]
+	var page_note := ""
+	if screen == "inventory" and int(row.page) in [1, 2]:
+		var page_frame: Dictionary = service.frame("inventory")
+		for gap in page_frame.get("gaps", []):
+			if str(gap.id) == "inventory-page-grid":
+				page_note = "\nPAGE ITEMS REFUSED: display grid unavailable."
+			elif str(gap.id) == "inventory-grid-footprint":
+				page_note = "\nITEM FOOTPRINT REFUSED: later placement unknown."
+	status.text = "%s · Page %d\nGold %d · Level %d\nJ equip/unequip · U drop\n%s controls are host keys.%s%s%s%s" % [
+		source, int(row.page), int(row.gold), int(row.level), str(row.scheme).capitalize(), drop_note, detail_note, font_note, page_note]
 
 func _gui_input(event: InputEvent) -> void:
 	if not open or service == null:
@@ -410,6 +419,26 @@ func _draw() -> void:
 			_glyphs(int(row_text.x), int(row_text.y), str(row_text.text), int(row_text.colour), bool(row_text.centred), true)
 		for selected in drawn.get("selected_texts", []):
 			_glyphs(int(selected.x), int(selected.y), str(selected.text), int(selected.colour), true, true)
+		for gap in drawn.get("gaps", []):
+			if str(gap.id) == "inventory-page-grid":
+				draw_string(ThemeDB.fallback_font, Vector2(98, 160), "PAGE ITEMS REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+			elif str(gap.id) == "inventory-grid-footprint":
+				draw_string(ThemeDB.fallback_font, Vector2(98, 160), "ITEM FOOTPRINT REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+		var held_icons: Array = drawn.get("held_icons", [])
+		# The UI queue paints later layer-7 submissions first.
+		for index in range(held_icons.size() - 1, -1, -1):
+			var held: Dictionary = held_icons[index]
+			var held_art: Dictionary = _icon(str(held.picture))
+			if held_art.get("miss", false) and inventory_art != null:
+				held_art = inventory_art.load_art("equipmnt.lmp", "pic_dagger1.tex", true)
+			if held_art.has("texture"):
+				# The plain-sprite callee adds one to y.
+				draw_texture(held_art.texture, Vector2(int(held.x), int(held.y) + 1), _word(int(held.tint)))
+			elif index == 0:
+				draw_string(ThemeDB.fallback_font, Vector2(int(held.x), int(held.y) + 20), "DRAG REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+		for gap in drawn.get("gaps", []):
+			if str(gap.id) == "inventory-drag-picture":
+				draw_string(ThemeDB.fallback_font, Vector2(98, 180), "DRAG REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
 		for sprite in drawn.get("sprites", []):
 			if int(sprite.layer) != 7 or inventory_art == null:
 				continue

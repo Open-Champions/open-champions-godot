@@ -1,8 +1,8 @@
-STATUS: PARTIAL — the inventory audit fixes are implemented and verified for the researched first cell on each bag page. Further page-1/2 cell placement and live drop remain refused until their runtime contracts are supplied.
+STATUS: PARTIAL — pages 1–2 draw bounded one-row display-grid items and drag draws the held picture; taller or unsupported footprints and live drop remain refused.
 
 ## Evidence and scope
 
-- Branch `codex/play-inventory`, starting at `33fbf20`; research `t3/research-inventory-screen` at `fe9e910`.
+- Branch `codex/play-inventory`, starting at `33fbf20`; research `t3/research-inventory-screen` at `fe9e910`, extended and audit-passed at `4a8a78a`.
 - The prior research fixup INV-F1 found that the layer-5 draw's texture argument does not establish the underbar sprite, so it remains omitted. The subsequent `native-inventory-r1.md` audit found one HIGH and two MEDIUM issues addressed below.
 - The selected read-only US v2.00 disc supplies inventory box art, small font, executable item/picture tables and picture-cache payloads at runtime. No game bytes or decoded images are tracked.
 
@@ -13,7 +13,7 @@ STATUS: PARTIAL — the inventory audit fixes are implemented and verified for t
 - Importing a player record copies its 0x4c30 bytes into the menu machine and loads item definitions from the selected executable. Equip/unequip changes the native equipment pointer, and the Godot bridge writes the changed record back to the imported player. A no-disc built-in session keeps scalar menu state without claiming live item actions.
 - A native test covers imported-record equip and unequip pointer changes; the rendered capture test covers box submission, underbar absence, hover image change, runtime icon association and imported-record unequip writeback.
 
-## Audit fixes
+## Audit fixes (first round; page-item claim superseded by Audit fixes (2))
 
 - INV-R1-1: A copied player record does not contain the separate page-1/2 display grid. The frame now draws the researched first-cell bag record on each page, while the hover helper retains its separate `page*0xbdd8` address and the first-cell action uses `page*0x1208`. Additional page-1/2 cells remain explicitly unrendered with `inventory-page-grid` gap when counted; their display-grid state has not been supplied.
 - INV-R1-2: The inventory frame submits both `inventry.lmp/mousecursor.tex` copies on layer 7 with the documented `0x80808080` and `0x34000000` tints. Godot paints them after lower-layer inventory content. The cursor resource loads in the rendered capture.
@@ -27,7 +27,17 @@ STATUS: PARTIAL — the inventory audit fixes are implemented and verified for t
 - Rendered `menu_capture.gd` with the selected read-only disc passed **13 captures**, including first items on pages 1 and 2, the loaded cursor sprites, and the visible icon refusal. The final page and refusal images were inspected. They are host renders, not original-game pixel comparisons.
 - `bash work/inventory-r1/run-slices.sh inventory-audit-final --scripts` completed four successful slices: **111/111** tried, loaded and played; **230** checks; **0** failures, refusals and script faults. These aggregate counts match `inventory-r1-final`.
 
-## Verification
+## Audit fixes (2)
+
+- INV-R1F-1 (HIGH): Audit-passed `4a8a78a:docs/spec/inventory-screen.md` now establishes the separate page-1/2 display copies and a bounded one-row first-fit builder, including a move to row 1. The native ledger builds retained display cells from the selected disc's picture-index dimensions, copies each occupied 0x48-byte record with its +0x22 bag-slot stamp, and draws pages 1–2 from those cells. The first-cell equip/unequip sender still uses its separate counted-bag address. Missing dimensions or taller/unsupported footprints label the affected page `ITEM FOOTPRINT REFUSED`; no guessed placement follows them.
+- INV-R1F-2 (MEDIUM): The same research records the held item's pointer and two layer-7 picture submissions at free cursor offsets `(22,22)` and `(22,25)`, tints `0x80808080` and `0x34000000`. Native frame data submits both; Godot paints them in reverse queue order beneath the two cursor copies. Missing picture association or cache data shows `DRAG REFUSED` instead of guessed art.
+- Native regression covers pages 1 and 2, unchanged first-cell action pointers, the six-item next-row placement, and a tall-footprint refusal. The rendered capture covers a runtime-selected one-row item on page 1 and page 2, a taller-item refusal label, the held picture and shadow, page-0 art, and `ICON REFUSED`. The runtime candidate is selected from the user's disc without tracking its name or definition address. Captures are native host renders, not original-game pixel comparisons.
+- Release `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`, `cmake --build build/native -j4`, and `cmake --build build/godot-extension -j2` passed on arm64. Focused `ctest --test-dir build/native -R '^(menus-exact|inventory-icon-assoc|messages-exact|player-host)$' --output-on-failure -j2` passed **4/4**. Rendered `menu_capture.gd` passed **15 captures**; the final page-1 item, tall-footprint label and drag images were inspected.
+- `python3 -u work/inventory-r1/run-godot.py` passed **54/54**. `FULL_TRACE` remained **31,622 bytes**, SHA-256 `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`.
+- Background `bash work/inventory-r1/run-slices.sh inventory-grid-final --scripts` completed all four slices: **111/111** levels tried, loaded and played; **230** checks, **0** failures, **0** summary refusals and **0** script faults. Its **14** bounded script refusal stops match the prior sweep.
+- A final full `ctest --test-dir build/native --output-on-failure -j3` attempt was stopped under machine contention after five completed cases: three passed, `player-exact` hit its 240-second CTest timeout, and `session-facing-exact` reported a 600-second trace subprocess timeout. No assertion mismatch was reported. Isolated `ctest --test-dir build/native -R '^session-facing-exact$' --output-on-failure -j1` passed **1/1** in 565.54 seconds; isolated `player-exact` reached its 240-second timeout again. This is **incomplete full-suite verification**, separate from the passing focused 4/4 menu gate.
+
+## Verification (initial implementation; superseded by Audit fixes (2))
 
 - Release CMake configure and full native build passed. The tested binaries and extension are arm64. Commands: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`; `cmake --build build/native -j3`; `cmake -S gdextension -B build/godot-extension -DCMAKE_BUILD_TYPE=Release -DGODOT_CPP_DIR=<local godot-cpp> -DGODOTCPP_TARGET=template_debug`; `cmake --build build/godot-extension -j2`.
 - Focused `ctest --test-dir build/native -R '^(menus-exact|inventory-icon-assoc|messages-exact|player-host)$' --output-on-failure -j2`: 4/4 passed after the final native frame change.

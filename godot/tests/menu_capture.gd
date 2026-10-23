@@ -162,12 +162,18 @@ func run() -> void:
 		quit(1)
 		return
 	var original_record: PackedByteArray = scene.ps2_import.record_bytes()
+	var one_row_definition: int = int(adopted.get("one_row_definition", 0))
+	if one_row_definition == 0:
+		printerr("no runtime one-row item definition was found for the rendered probe")
+		quit(1)
+		return
 	for page in [1, 2]:
 		var page_record := original_record.duplicate()
 		var base: int = page * 0x1208
 		page_record.encode_u32(0x1330 + base, 1)
 		for byte in range(0x48):
 			page_record[0x130 + base + byte] = original_record[0x130 + byte]
+		page_record.encode_u32(0x130 + base, one_row_definition)
 		if not scene.ps2_import.replace_record(page_record).get("ok", false) or not scene.game_menus.adopt_imported().get("ok", false):
 			printerr("page %d counted item could not be loaded" % page)
 			quit(1)
@@ -175,16 +181,22 @@ func run() -> void:
 		scene.game_menus.service.set_page(page)
 		scene.game_menus._refresh_status()
 		var page_frame: Dictionary = scene.game_menus.service.frame("inventory")
-		if not page_frame.get("ok", false) or page_frame.get("icons", []).size() != 1 or page_frame.get("frames", []).size() != 1 or page_frame.get("rects", []).size() != 66:
-			printerr("page %d counted item did not submit its picture and frame" % page)
+		var refused_grid := false
+		for gap in page_frame.get("gaps", []):
+			if str(gap.id) in ["inventory-page-grid", "inventory-grid-footprint"]:
+				refused_grid = true
+		var first_icon: Dictionary = page_frame.get("icons", [])[0] if not page_frame.get("icons", []).is_empty() else {}
+		var art: Dictionary = scene.game_menus._icon(str(first_icon.get("picture", "")))
+		var columns: int = floori(float(art.get("width", -1)) / 32.0) + 1
+		if not page_frame.get("ok", false) or refused_grid or columns < 1 or page_frame.get("icons", []).size() != columns or page_frame.get("frames", []).size() != 1 or page_frame.get("rects", []).size() != 65 + columns or not art.has("texture"):
+			printerr("page %d verified display-grid item was not drawn" % page)
 			quit(1)
 			return
-		if not scene.game_menus._icon(str(page_frame.icons[0].picture)).has("texture"):
-			printerr("page %d item picture load refused" % page)
+		if scene.game_menus.status.text.contains("REFUSED"):
+			printerr("page %d one-row item was incorrectly labelled refused" % page)
 			quit(1)
 			return
-		# Move the cursor off the first item for an unobscured picture capture.
-		scene.game_menus.service.set_cursor(49, 100)
+		scene.game_menus.service.set_cursor(200, 100)
 		scene.game_menus.queue_redraw()
 		for _frame in range(4):
 			await process_frame
@@ -194,6 +206,65 @@ func run() -> void:
 			printerr("page %d item capture failed" % page)
 			quit(1)
 			return
+	var tall_record := original_record.duplicate()
+	tall_record.encode_u32(0x1330 + 0x1208, 1)
+	for byte in range(0x48):
+		tall_record[0x130 + 0x1208 + byte] = original_record[0x130 + byte]
+	if not scene.ps2_import.replace_record(tall_record).get("ok", false) or not scene.game_menus.adopt_imported().get("ok", false):
+		printerr("tall-footprint probe record could not be loaded")
+		quit(1)
+		return
+	scene.game_menus.service.set_page(1)
+	scene.game_menus._refresh_status()
+	var tall_frame: Dictionary = scene.game_menus.service.frame("inventory")
+	var tall_refused := false
+	for gap in tall_frame.get("gaps", []):
+		if str(gap.id) == "inventory-grid-footprint":
+			tall_refused = true
+	if not tall_refused or not tall_frame.get("icons", []).is_empty() or not scene.game_menus.status.text.contains("ITEM FOOTPRINT REFUSED"):
+		printerr("tall-footprint draw was not labelled refused")
+		quit(1)
+		return
+	scene.game_menus.queue_redraw()
+	for _frame in range(4):
+		await process_frame
+		await RenderingServer.frame_post_draw
+	var tall_image: Image = scene.viewport.get_texture().get_image()
+	if tall_image == null or tall_image.save_png(capture_dir.path_join("inventory-page-1-tall-refused.png")) != OK:
+		printerr("tall-footprint refusal capture failed")
+		quit(1)
+		return
+	var drag_record := original_record.duplicate()
+	for byte in range(4):
+		drag_record[0x43f0 + equipment_slot * 4 + byte] = 0
+	drag_record.encode_u64(0x130 + 8, drag_record.decode_u64(0x130 + 8) | (1 << 35))
+	if not scene.ps2_import.replace_record(drag_record).get("ok", false) or not scene.game_menus.adopt_imported().get("ok", false):
+		printerr("authored drag record could not be loaded")
+		quit(1)
+		return
+	scene.game_menus.service.set_page(0)
+	scene.game_menus.service.set_cursor(17, 100)
+	var drag_action: Dictionary = scene.game_menus.service.press(2, int(scene.game_menus.service.state().equip_mask))
+	var held_frame: Dictionary = scene.game_menus.service.frame("inventory")
+	if not drag_action.get("ok", false) or str(drag_action.get("action", "")) != "drag" or held_frame.get("held_icons", []).size() != 2:
+		printerr("held-item picture was not submitted on drag")
+		quit(1)
+		return
+	var held: Dictionary = held_frame.held_icons[0]
+	var shadow: Dictionary = held_frame.held_icons[1]
+	if int(held.x) != 119 or int(held.y) != 122 or int(held.layer) != 7 or int(held.tint) != 0x80808080 or int(shadow.x) != 119 or int(shadow.y) != 125 or int(shadow.layer) != 7 or int(shadow.tint) != 0x34000000 or str(shadow.picture) != str(held.picture) or not scene.game_menus._icon(str(held.picture)).has("texture"):
+		printerr("held-item picture placement or loading refused")
+		quit(1)
+		return
+	scene.game_menus.queue_redraw()
+	for _frame in range(4):
+		await process_frame
+		await RenderingServer.frame_post_draw
+	var drag_image: Image = scene.viewport.get_texture().get_image()
+	if drag_image == null or drag_image.save_png(capture_dir.path_join("inventory-drag.png")) != OK:
+		printerr("held-item picture capture failed")
+		quit(1)
+		return
 	if not scene.ps2_import.replace_record(original_record).get("ok", false) or not scene.game_menus.adopt_imported().get("ok", false):
 		printerr("baseline imported record could not be restored")
 		quit(1)
@@ -227,5 +298,5 @@ func run() -> void:
 		quit(1)
 		return
 	scene.ps2_import.replace_record(original_record)
-	print("captures ", saved + 5)
+	print("captures ", saved + 7)
 	quit(0 if saved == 8 else 1)

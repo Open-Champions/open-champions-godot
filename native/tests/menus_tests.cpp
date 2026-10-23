@@ -1,6 +1,7 @@
 #include "champions/menus.hpp"
 #include "champions/items.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -208,31 +209,72 @@ void ledger_vectors() {
     }
     Ledger pages;
     pages.adopt_record(page_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
+    std::array<std::vector<IconSize>, BAGS> page_sizes;
+    for (int bag = 0; bag < BAGS; ++bag)
+      page_sizes[bag].assign(static_cast<std::size_t>(pages.bag_count(bag)), {32, 32});
+    pages.build_display_grid(page_sizes);
     pages.set_page(1);
     const auto page_one = pages.frame("inventory");
-    expect(page_one.rects.size() == 66 && page_one.frames.size() == 1 &&
-           page_one.rects.back().layer == 5,
-           "page-one counted first item draws an underlay and detail frame");
+    expect(page_one.rects.size() == 67 && page_one.frames.size() == 1 &&
+           page_one.selected_texts.empty(), "page-one display copies draw two occupied cells");
+    expect(std::none_of(page_one.gaps.begin(), page_one.gaps.end(), [](const Gap &gap) {
+      return std::string(gap.id) == "inventory-page-grid" ||
+             std::string(gap.id) == "inventory-grid-footprint";
+    }), "page-one display grid is ready");
     expect(pages.press(2, 0x40) == Action::Equip &&
            pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 1),
            "page-one first-cell action uses bag stride");
     expect(pages.press(2, 0x40) == Action::Unequip, "page-one unequip");
     pages.set_page(2);
     const auto page_two = pages.frame("inventory");
-    expect(page_two.rects.size() == 66 && page_two.frames.size() == 1,
-           "page-two counted first item draws an underlay and detail frame");
+    expect(page_two.rects.size() == 67 && page_two.frames.size() == 1,
+           "page-two display copies draw two occupied cells");
     expect(pages.press(2, 0x40) == Action::Equip &&
            pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 2),
            "page-two first-cell action uses bag stride");
     pages.set_cursor(49, 100);
     reject([&] { pages.press(2, 0x40); }, "page-two other action cell stays refused");
+    page_sizes[1][0] = {32, 132};
+    pages.build_display_grid(page_sizes);
+    pages.set_page(1);
+    const auto tall = pages.frame("inventory");
+    expect(tall.rects.size() == 65 && tall.frames.empty() &&
+           std::any_of(tall.gaps.begin(), tall.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-grid-footprint";
+           }), "taller footprint is labelled and not drawn");
+    auto next_row_record = page_record;
+    for (int slot = 1; slot < 6; ++slot)
+      for (std::size_t byte = 0; byte < ITEM_SIZE; ++byte)
+        next_row_record[BAG_ITEMS + BAG_STRIDE + static_cast<std::size_t>(slot) * ITEM_SIZE + byte] =
+            next_row_record[BAG_ITEMS + BAG_STRIDE + byte];
+    for (int byte = 0; byte < 4; ++byte)
+      next_row_record[BAG_COUNT + BAG_STRIDE + byte] = static_cast<std::uint8_t>(6u >> (8 * byte));
+    Ledger packed;
+    packed.adopt_record(next_row_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
+    page_sizes[1] = {{0, 32}, {32, 32}, {0, 32}, {64, 32}, {0, 32}, {32, 32}};
+    packed.build_display_grid(page_sizes);
+    packed.set_page(1);
+    const auto packed_frame = packed.frame("inventory");
+    const auto row_one = hit_cell(80, 0, 1);
+    expect(packed_frame.rects.size() == 75 &&
+           packed_frame.rects[73].x0 == row_one.x0 &&
+           packed_frame.rects[73].y0 == row_one.y0 &&
+           packed.display_bag_slot(1, 0, 1) == 5 &&
+           packed.display_bag_slot(1, 1, 1) == 5 &&
+           packed.display_bag_slot(1, 8, 0) == -1,
+           "two-column item moves to next display row");
   }
   {
     Ledger book;
     const auto row = hit_cell(0, 0, 1);
     book.set_cursor(row.x0, row.y0);
     expect(book.press(2, 0x40) == Action::Drag && book.dragging() && book.bag_count(0) == 2, "drag");
-    expect(book.frame("inventory").texts.size() == 2, "drag does not copy");
+    const auto drag_frame = book.frame("inventory");
+    expect(drag_frame.texts.size() == 2, "drag does not copy");
+    expect(drag_frame.held_icons.empty() &&
+           std::any_of(drag_frame.gaps.begin(), drag_frame.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-drag-picture";
+           }), "fixture without picture association labels drag refusal");
   }
   {
     Ledger book;
