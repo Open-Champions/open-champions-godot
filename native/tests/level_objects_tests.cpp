@@ -215,12 +215,15 @@ int main(int argc, char **argv) {
           }
           check(!combat_world.target(handle) && !adapter.factory_object(handle) &&
                     !authority->find(address), "host removal invalidates shared handle");
+          authority->objects->pool.free(address); // Force the same pool slot's next generation.
           {
             sc::Host replacement(authority);
             rta::SharedRandom replacement_seed(seed0);
             replacement.bind_seed(&replacement_seed);
             replacement.set_executable(image.view());
             check(replacement.adopt_objects(bytes.data(), bytes.size()), "replacement adoption");
+            check(authority->objects->objects.count(address) == 1,
+                  "factory allocation reuses the shared pool address");
             check(!combat_world.target(handle) && !adapter.factory_object(handle),
                   "retired handle does not alias replacement generation");
           }
