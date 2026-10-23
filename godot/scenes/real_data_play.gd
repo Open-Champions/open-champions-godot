@@ -199,6 +199,7 @@ func _frame_player_camera() -> void:
 	var distance := maxf(120.0, height * 0.7 / tan(half_fov)) # Host-viewer distance.
 	camera.position = focus + Vector3(56, 70, 80).normalized() * distance # Host-viewer direction.
 	camera.look_at(focus, Vector3.UP)
+	_capture_player_camera()
 
 func _clear_imported_appearance() -> void:
 	imported_appearance = []
