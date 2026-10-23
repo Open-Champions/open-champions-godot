@@ -51,6 +51,9 @@ public:
   Bundle &operator=(const Bundle &) = delete;
   void set_camera(Raw slot, Camera camera);
   void set_local_slot(Raw slot) { local_slot_ = slot; }
+  // The resolver maps the model-definition resource pointer to a registered
+  // clip. research-player-model 7f13899 requires slot order from the selected
+  // model's animation lump; duplicate names must not collapse table slots.
   void bind_animation(creature_anim::Runtime &runtime,
                       std::function<creature_anim::ClipId(Address, Raw)> clips);
   void bind_actor(Address actor, creature_anim::StateId state);
