@@ -143,6 +143,30 @@ func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
 		if command == 0 and ticks % 15 == 0 and not scene.controller.script_level_request().get("queued", false): break
 	return {"entered": entered, "ticks": ticks, "navigation_stalled": without_progress >= 600}
 
+func approach_use(target: Dictionary, max_ticks: int) -> Dictionary:
+	var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+	var goal: Vector3 = target.get("position", Vector3.ZERO)
+	var best := origin.distance_to(goal)
+	var stale := 0
+	var ticks := 0
+	while ticks < max_ticks and not scene.stopped:
+		var at: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if absf(at.x - goal.x) <= 48.0 and absf(at.y - goal.y) <= 48.0 and goal.z >= at.z and goal.z <= at.z + 60.0:
+			game_key(KEY_E)
+			advance(0, 2)
+			return {"pressed": true, "ticks": ticks}
+		var command := 0
+		if absf(at.x - goal.x) > 24.0: command = 1 if at.x < goal.x else 2
+		elif absf(at.y - goal.y) > 24.0: command = 4 if at.y < goal.y else 8
+		if command == 0: break
+		advance(command)
+		ticks += 1
+		var distance: float = scene.controller.get_observation().get("position", Vector3.ZERO).distance_to(goal)
+		if distance < best - 0.25: best = distance; stale = 0
+		else: stale += 1
+		if stale >= 600: break
+	return {"pressed": false, "ticks": ticks, "navigation_stalled": stale >= 600}
+
 func help_close() -> void:
 	for i in range(200):
 		if not scene.controller.text_hud().get("help_open", false): return
@@ -384,6 +408,104 @@ func run() -> void:
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
 		"quest_vars_after": int(quests_after.get("vars", 0))})
 	await capture("10-level-change")
+	# Normal E/use on an owner-supplied level record; the selected action is
+	# never invoked by the diagnostic menu.
+	var push_sources: Array[int] = []
+	var portal_sources: Array[int] = []
+	for index in range(scene.real.levels.size()):
+		var level: Dictionary = scene.real.levels[index]
+		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+		if objects.is_empty(): continue
+		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
+		if not inventory.get("ok", false): continue
+		if int(inventory.get("pushes", 0)) > 0: push_sources.append(index)
+		if int(inventory.get("portals", 0)) > 0: portal_sources.append(index)
+	var physical_push := false
+	var push_attempts := 0
+	for index in push_sources:
+		if push_attempts >= 6 or physical_push: break
+		if index != scene.real.current:
+			if not scene.load_real_level(index, true): continue
+			scene.start_play()
+			help_close()
+			if scene.paused and scene.session_started: scene.resume_session()
+		var targets: Array = scene.controller.script_exit_targets().filter(func(t): return t.get("physical_use", false))
+		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
+		for target in targets:
+			push_attempts += 1
+			var count_before := int(scene.controller.script_use_status().get("uses", 0))
+			var approach: Dictionary = approach_use(target, 2500)
+			var use: Dictionary = scene.controller.script_use_status()
+			physical_push = bool(approach.get("pressed", false)) and int(use.get("uses", 0)) > count_before and \
+				int(use.get("record", -1)) == int(target.get("index", -2))
+			if physical_push or push_attempts >= 6: break
+	mark("push_trigger_use", "used" if physical_push else "refused",
+		{"candidate_levels": push_sources.size(), "attempts": push_attempts, "physical_use": physical_push,
+		"use_refusal": scene.controller.script_use_status().get("refusal", "")})
+	await capture("11-push-use")
+	# Discover two real gate levels, then request travel from the second to a
+	# discovered destination. The host menu exposes explicit destination choice;
+	# the research did not dynamically compare its full pad input machine.
+	var gate_discoveries := 0
+	var gate_pressed := 0
+	var gate_menu := false
+	var portal_arrived := false
+	var portal_rank := -1
+	var portal_at_spot := false
+	var gate_request_at_181 := false
+	var gate_advance_calls := 0
+	var gate_ready_before := -1
+	var gate_ready_after := -1
+	for index in portal_sources:
+		if gate_discoveries >= 2: break
+		if not scene.load_real_level(index, true): continue
+		scene.start_play()
+		help_close()
+		if scene.paused and scene.session_started: scene.resume_session()
+		var targets: Array = scene.controller.script_exit_targets().filter(func(t): return t.get("kind", "") in ["Portal", "PortalHurt"])
+		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
+		for target in targets:
+			var approach: Dictionary = approach_use(target, 2500)
+			if not approach.get("pressed", false): continue
+			gate_pressed += 1
+			var gate: Dictionary = scene.controller.script_gate_status()
+			if str(gate.get("prompt", "")) == "JumpGateVirgin" or gate.get("menu_open", false) or int(gate.get("travel_ticks", 0)) > 0:
+				gate_discoveries += 1
+				gate_menu = bool(gate.get("menu_open", false))
+				break
+	if gate_menu:
+		var gate: Dictionary = scene.controller.script_gate_status()
+		var choices: Array = gate.get("destinations", [])
+		if not choices.is_empty() and scene.controller.script_gate_confirm(str(choices[0])).get("ok", false):
+			gate_ready_before = int(scene.controller.get_observation().get("ready_ticks", -1))
+			while gate_advance_calls < 360 and not scene.controller.script_gate_status().get("request_written", false):
+				advance()
+				gate_advance_calls += 1
+			gate_ready_after = int(scene.controller.get_observation().get("ready_ticks", -1))
+			var pending_gate: Dictionary = scene.controller.script_level_request()
+			var travel: Dictionary = scene.controller.script_gate_status()
+			gate_request_at_181 = pending_gate.get("queued", false) and \
+				int(travel.get("travel_ticks", -1)) == 181 and travel.get("request_written", false) and \
+				int(pending_gate.get("orientation", -1)) == 255
+			if gate_request_at_181 and scene._apply_level_change():
+				if not scene.session_started: scene.start_play()
+				if scene.session_started and not scene.stopped: scene.set_paused(false)
+				var arrival: Dictionary = scene.controller.get_terrain().get("start", {})
+				portal_rank = int(arrival.get("rank", -1))
+				portal_at_spot = scene.controller.get_observation().get("position", Vector3.ZERO).distance_to(
+					arrival.get("position", Vector3.ZERO)) < 0.01
+				portal_arrived = bool(arrival.get("portal_free_spot", false)) and portal_rank == 3 and portal_at_spot
+	mark("portal_arrival", "arrived" if portal_arrived else "refused",
+		{"candidate_levels": portal_sources.size(), "gate_discoveries": gate_discoveries,
+		"physical_gate_presses": gate_pressed, "menu_opened": gate_menu,
+		"request_at_181": gate_request_at_181, "gate_advance_calls": gate_advance_calls,
+		"gate_ready_ticks": gate_ready_after - gate_ready_before,
+		"portal_free_spot": portal_arrived, "rank": portal_rank,
+		"position_matches_start": portal_at_spot,
+		"object_grid_verified": false, "constructor_seed_verified": false})
+	await capture("12-portal-arrival")
 	var before: Dictionary = scene.controller.get_observation()
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))

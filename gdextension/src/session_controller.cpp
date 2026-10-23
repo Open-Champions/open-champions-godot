@@ -5,10 +5,12 @@
 #include "champions/ui_text_layout.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
+#include "champions/objects.hpp"
 #include "champions/arena_executable.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/dir_access.hpp>
@@ -114,6 +116,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("inspect_exit_records", "objects"), &ChampionsSessionController::inspect_exit_records);
   ClassDB::bind_method(D_METHOD("script_trigger_status"), &ChampionsSessionController::script_trigger_status);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
+  ClassDB::bind_method(D_METHOD("script_use_status"), &ChampionsSessionController::script_use_status);
+  ClassDB::bind_method(D_METHOD("script_gate_status"), &ChampionsSessionController::script_gate_status);
+  ClassDB::bind_method(D_METHOD("script_gate_confirm", "destination"), &ChampionsSessionController::script_gate_confirm);
   bind_text_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
                        &ChampionsSessionController::set_player_character);
@@ -588,6 +593,19 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       control_->shared_seed() != *script_world_)
     unpair_script_seed();
   for (auto tick = before; tick < current_.ready_ticks; ++tick) {
+    if (gate_clear_next_tick_) {
+      gate_travel_.arrived();
+      gate_clear_next_tick_ = false;
+    }
+    if (gate_travel_.ticks && !gate_travel_.request_written && scripts_) {
+      if (gate_travel_.tick(scripts_->level().pending)) {
+        scripts_->variables().memory.string(0x41b6d0, gate_travel_.destination);
+        scripts_->variables().memory.byte(0x41b720, rta::level_flow::ORIENT_NONE);
+        gate_arrival_pending_ = true;
+      }
+    }
+    const bool exit_used = exit_use_pending_ && run_level_use();
+    exit_use_pending_ = false;
     if (scripts_->dialog_attached()) {
       // Priority 10 runObjects (Player_interact), then the dialog run task
       // at 110, before the Script task at 125 (research docs/script.md 2.6).
@@ -601,8 +619,10 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       }
       if (dialog_use_pending_) {
         dialog_use_pending_ = false;
-        std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
-        dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+        if (!exit_used) {
+          std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
+          dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+        }
       }
     }
     run_level_triggers(); // the 15-list follows the every-frame player walk
@@ -620,6 +640,108 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     scripts_->on_ready_tick();
     note_help_box();
   }
+}
+bool ChampionsSessionController::run_level_use() {
+  if (!scripts_ || script_level_objects_.empty()) return false;
+  // The original box query considers object extents and grid order. This
+  // bridge has records, so only centres inside the documented box can be
+  // offered; missing grid extents/order remain an explicit acceptance limit.
+  const auto &p = current_.position;
+  std::vector<rta::level_flow::UseCandidate> candidates;
+  for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
+    const auto &r = script_level_objects_[i];
+    if (r.cls != "PushTrigger" && r.cls != "Portal" && r.cls != "PortalHurt" &&
+        r.cls != "JumpGate") continue;
+    if (i < used_once_exits_.size() && used_once_exits_[i]) continue;
+    if (!rta::level_flow::use_query_contains_centre(p, r.position)) continue;
+    candidates.push_back({i, r.position, 0x100000u});
+  }
+  const auto nearest = rta::level_flow::nearest_use_candidate(p, candidates);
+  if (!nearest) return false;
+  const auto &record = script_level_objects_[*nearest];
+  const auto nonzero = [&](const char *name) {
+    return std::strtol(record.prop(name).value_or("0").c_str(), nullptr, 10) != 0;
+  };
+  exit_use_refusal_.clear();
+  if (record.cls != "PushTrigger") {
+    if (record.cls == "PortalHurt" || nonzero("hurt")) {
+      gate_prompt_refusal_ = "Hurt gate has no interaction prompt.";
+      return true;
+    }
+    if (gate_travel_.menu_open || gate_travel_.ticks) {
+      gate_prompt_refusal_ = "Gate task already running.";
+      return true;
+    }
+    if (const auto script = record.prop("script")) {
+      const auto stop = scripts_->run_object_entry(*nearest, *script, 0);
+      if (stop != rta::script_commands::Stop::Complete || !scripts_->last_value()) {
+        gate_prompt_refusal_ = "Gate script predicate refused interaction.";
+        return true;
+      }
+    }
+    std::string hub;
+    if (start_level_name_.find("hub") != std::string::npos)
+      hub = start_level_name_;
+    else
+      for (const auto &name : gate_destinations_.names)
+        if (name.find("hub") != std::string::npos) { hub = name; break; }
+    gate_destinations_.add_current(start_level_name_, hub);
+    const auto prompt = rta::level_flow::gate_prompt(true, false, true,
+                                                    gate_destinations_.names.size(), {});
+    gate_prompt_refusal_ = prompt.text.value_or("");
+    if (!prompt.usable) return true;
+    gate_travel_.open(false);
+    if (const auto fixed = record.prop("destination")) {
+      if (!gate_travel_.confirm(*fixed, start_level_name_, gate_destinations_, true))
+        gate_prompt_refusal_ = "Gate fixed destination was refused.";
+    }
+    return true;
+  }
+  // Slot-13 needs a nonempty prompt. A failed key selects lockMessage and
+  // never reaches slot-14. Offline slot 0 uses the pressed E/use event.
+  for (const auto &property : record.props) {
+    if (property.rfind("key=", 0) != 0) continue;
+    const auto stop = scripts_->run_object_entry(*nearest, property.substr(4), 0);
+    if (stop != rta::script_commands::Stop::Complete) {
+      exit_use_refusal_ = "PushTrigger key predicate was not completed.";
+      return true;
+    }
+    if (!scripts_->last_value()) {
+      exit_use_refusal_ = record.prop("lockMessage").value_or("PushTrigger locked");
+      return true;
+    }
+  }
+  if (record.prop("message").value_or("").empty()) {
+    exit_use_refusal_ = "PushTrigger has no usable prompt.";
+    return true;
+  }
+  if (nonzero("shop")) {
+    exit_use_refusal_ = "PushTrigger shop alive-player flag is unported.";
+    return true;
+  }
+  const bool off_only = nonzero("offOnly");
+  bool ran = false;
+  for (const auto &property : record.props) {
+    if (property.rfind("action=", 0) != 0 || property.size() == 7) continue;
+    const auto name = property.substr(7);
+    const auto stop = scripts_->run_object_entry(*nearest,
+        off_only ? "off" + name : name, 0);
+    if (stop == rta::script_commands::Stop::Missing ||
+        stop == rta::script_commands::Stop::Fault ||
+        stop == rta::script_commands::Stop::Refused) {
+      exit_use_refusal_ = "PushTrigger action script was refused.";
+      return true;
+    }
+    ran = true;
+  }
+  if (!ran) {
+    exit_use_refusal_ = "PushTrigger has no action property.";
+    return true;
+  }
+  if (nonzero("once")) used_once_exits_[*nearest] = true;
+  ++exit_use_count_;
+  exit_use_record_ = *nearest;
+  return true;
 }
 void ChampionsSessionController::run_level_triggers() {
   if (live_triggers_.empty()) return;
@@ -833,11 +955,6 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
-    // A pending post action belongs to the destination's script load. This
-    // bounded host does not carry it, so keep the current level intact.
-    if (carry_campaign && scripts_ &&
-        !scripts_->variables().memory.cstr(0x86fa80).empty())
-      throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
     auto next = std::make_unique<rta::script_commands::Host>();
@@ -853,6 +970,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                : std::uint32_t(music_volume_bits));
     next->set_fade_level(scripts_ ? scripts_->fade_level() : script_fade_);
     const bool carried = carry_campaign && scripts_;
+    const std::string post_action = carried
+        ? scripts_->variables().memory.cstr(0x86fa80) : std::string();
     const auto live_player = player_ && carried
         ? std::optional<rta::player_state::Record>(observed_player()) : player_;
     if (live_player) next->set_player_currents_known(live_player->current_known);
@@ -865,6 +984,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->load_campaign(campaign_image);
       campaign_image_restored = next->save_campaign() == campaign_image;
     }
+    if (!post_action.empty()) next->variables().set_post_action(post_action);
     if (live_player)
       bind_player_to_scripts(*next, *live_player);
     // A fresh stream from the play session's configured shared seed; the
@@ -945,7 +1065,17 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
     scripts_ = std::move(next);
+    if (!carried) {
+      gate_destinations_ = {};
+      gate_travel_ = {};
+      gate_arrival_pending_ = false;
+      gate_clear_next_tick_ = false;
+    }
     script_level_objects_ = std::move(next_objects);
+    used_once_exits_.assign(script_level_objects_.size(), false);
+    exit_use_pending_ = false;
+    exit_use_count_ = 0;
+    exit_use_refusal_.clear();
     if (carried && !trigger_level_name_.empty()) {
       auto &saved = trigger_states_[trigger_level_name_];
       saved.clear();
@@ -1018,6 +1148,12 @@ Dictionary ChampionsSessionController::disable_level_script() {
   release_help_pause();
   scripts_.reset();
   script_level_objects_.clear();
+  gate_destinations_ = {};
+  gate_travel_ = {};
+  gate_arrival_pending_ = false;
+  gate_clear_next_tick_ = false;
+  used_once_exits_.clear();
+  exit_use_pending_ = false;
   live_triggers_.clear();
   for (auto &list : trigger_lists_) list.clear();
   trigger_refusal_.clear();
@@ -1084,9 +1220,11 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
 } // namespace
 Dictionary ChampionsSessionController::dialog_use() {
   Dictionary out;
-  out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open);
-  if (out["ok"])
+  out["ok"] = bool(scripts_ && !scripts_->hud().help_open);
+  if (out["ok"]) {
+    exit_use_pending_ = true;
     dialog_use_pending_ = true;
+  }
   return out;
 }
 Array ChampionsSessionController::dialog_events() {
@@ -1463,6 +1601,12 @@ Array ChampionsSessionController::script_exit_targets() const {
         item["max"] = Vector3(display_float(live->body.max[0]), display_float(live->body.max[1]), 0);
       }
     }
+    if (kind == "PushTrigger") {
+      item["physical_use"] = record.prop("action").has_value() &&
+          !record.prop("message").value_or("").empty();
+      item["physical_use_refusal"] =
+          "Object grid ordering, network prompts, and the shop flag are bounded separately.";
+    }
     // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
     // Neither is a direct script action. The host exposes them without claiming
     // an undocumented interaction or gate destination.
@@ -1506,6 +1650,32 @@ Dictionary ChampionsSessionController::script_trigger_status() const {
   result["queued_destination"] = String::utf8(trigger_queued_destination_.c_str());
   result["refusal"] = String::utf8(trigger_refusal_.c_str());
   return result;
+}
+Dictionary ChampionsSessionController::script_use_status() const {
+  Dictionary result;
+  result["uses"] = int64_t(exit_use_count_);
+  result["record"] = int64_t(exit_use_record_);
+  result["refusal"] = String::utf8(exit_use_refusal_.c_str());
+  return result;
+}
+Dictionary ChampionsSessionController::script_gate_status() const {
+  Dictionary out;
+  out["menu_open"] = gate_travel_.menu_open;
+  out["travel_ticks"] = int64_t(gate_travel_.ticks);
+  out["request_written"] = gate_travel_.request_written;
+  out["prompt"] = String::utf8(gate_prompt_refusal_.c_str());
+  Array destinations;
+  for (const auto &name : gate_destinations_.choosable(start_level_name_))
+    destinations.push_back(String::utf8(name.c_str()));
+  out["destinations"] = destinations;
+  return out;
+}
+Dictionary ChampionsSessionController::script_gate_confirm(const String &destination) {
+  Dictionary out;
+  const std::string name = destination.utf8().get_data();
+  out["ok"] = gate_travel_.confirm(name, start_level_name_, gate_destinations_);
+  if (!bool(out["ok"])) out["error"] = "Gate destination is current, unknown, or its menu is closed.";
+  return out;
 }
 Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   Dictionary result;
@@ -1977,7 +2147,52 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
       const auto records = rta::level_flow::parse_objects(
           {start_objects_.data(), start_objects_.size()});
       rta::level_flow::StoryGround story;
-      if (start_previous_level_.empty() && start_entrance_.empty()) {
+      if (gate_arrival_pending_ && !gate_travel_.fixed) {
+        // JumpGate_ctor searches each destination Portal in record order.
+        // The owner-selected WORLD supplies both terrain tests. The native
+        // bridge has no complete live object grid or constructor draws, so
+        // this is an explicitly bounded terrain free spot, not a retail
+        // coordinate parity claim.
+        rta::objects::World finder;
+        finder.shared.state = script_seed_ && !script_seed_unpaired_
+            ? script_seed_->state
+            : control_ ? control_->shared_seed() : active_setup().config.shared_seed;
+        rta::level_flow::StartEntry entry;
+        entry.prev = start_previous_level_;
+        entry.entrance = start_entrance_;
+        entry.gate = true;
+        rta::level_flow::Placement placement;
+        placement.players = 1;
+        auto spot = [&](const rta::level_flow::Vec3 &at, rta::Raw spread,
+                        rta::Raw radius, bool any) {
+          return finder.find_free_spot(at, int(display_float(spread)),
+                                       int(display_float(radius)), any,
+              [&](rta::Raw r, const rta::level_flow::Vec3 &p) {
+                return rta::world_queries::terrain_test_flag1(query, r, p);
+              },
+              [&](rta::Raw r, const rta::level_flow::Vec3 &p) {
+                return rta::world_queries::terrain_height(query, r, p);
+              }).first;
+        };
+        const auto resolved = rta::level_flow::resolve_start(
+            {}, records, entry, placement,
+            [&](rta::Raw r, const rta::level_flow::Vec3 &p) {
+              return rta::world_queries::terrain_height(query, r, p);
+            }, spot, [&]() { return std::uint16_t(finder.shared.draw() >> 16); });
+        const bool took_portal = std::any_of(resolved.took.begin(), resolved.took.end(),
+            [&](std::size_t i) { return records[i].cls == "Portal" || records[i].cls == "PortalHurt"; });
+        if (!took_portal) throw std::runtime_error("Gate destination has no Portal arrival record.");
+        story.position = resolved.spawn.pos[0];
+        story.object_z = resolved.object_z[0];
+        story.rank = resolved.spawn.rank;
+        story.marker_taken = true;
+        story.ground = resolved.ground[0];
+        story.facing = resolved.spawn.facing[0];
+        gate_arrival_seed_ = finder.shared.state;
+        start_info["portal_free_spot"] = true;
+        start_info["portal_object_grid_verified"] = false;
+        start_info["portal_seed_after_constructors_verified"] = false;
+      } else if (start_previous_level_.empty() && start_entrance_.empty()) {
         story = rta::level_flow::story_start_ground({}, records, query);
       } else {
         rta::level_flow::StartEntry entry;
@@ -2039,6 +2254,8 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
                            ? current_config
                            : scene_config();
     next_config.start = start;
+    if (gate_arrival_pending_ && !gate_travel_.fixed && bool(start_info.get("portal_free_spot", false)))
+      next_config.shared_seed = gate_arrival_seed_;
     prepared->control =
         std::make_unique<rta::native_save::Scene>(next_config, data);
     prepared->name = path.get_file();
@@ -2159,6 +2376,8 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     terrain_ = pending_->terrain;
     std::swap(terrain_name_, pending_->name);
     pending_.reset();
+    gate_clear_next_tick_ = gate_arrival_pending_;
+    gate_arrival_pending_ = false;
     // No observation allocation or numeric validation after publication.
     // A loaded state starts a fresh interpolation pair with no elapsed debt.
     current_ = std::move(restored);

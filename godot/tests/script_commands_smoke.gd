@@ -50,6 +50,8 @@ func run() -> void:
 	check(fresh.start_play_session().get("ok", false), "a second play session starts")
 	run_tick_counter(fresh)
 	check_trigger_property(fresh)
+	check_push_use(fresh)
+	check_hurt_gate(fresh)
 	var silent: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0)
 	check(silent.get("ok", false) and int(silent.get("music_volume", -1)) == 0, "options-file zero reaches the script host")
 	var loud: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0x3fc00000)
@@ -57,19 +59,19 @@ func run() -> void:
 	print("script commands smoke ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)
 
-func trigger_objects(position: Vector3, properties: Array[String]) -> PackedByteArray:
+func trigger_objects(position: Vector3, properties: Array[String], kind := "Trigger") -> PackedByteArray:
 	var size := 24 + 4 * properties.size()
 	var objects := PackedByteArray()
 	objects.resize(8 + size)
 	objects.encode_u16(0, 1)
 	objects.encode_u32(4, objects.size())
 	objects.encode_u16(12, size)
-	objects.encode_float(16, position.x - 100.0)
-	objects.encode_float(20, position.y + 100.0)
+	objects.encode_float(16, position.x - 100.0 if kind == "Trigger" else position.x)
+	objects.encode_float(20, position.y + 100.0 if kind == "Trigger" else position.y)
 	objects.encode_float(24, position.z)
 	var strings := PackedByteArray([0])
 	objects.encode_u32(8, strings.size())
-	strings.append_array("Trigger".to_utf8_buffer())
+	strings.append_array(kind.to_utf8_buffer())
 	strings.append(0)
 	for i in range(properties.size()):
 		objects.encode_u32(28 + 4 * i, strings.size())
@@ -90,6 +92,31 @@ func check_trigger_property(controller) -> void:
 	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), alias_only).get("ok", false), "synthetic alias-only Trigger loads")
 	var targets: Array = controller.script_exit_targets()
 	check(targets.size() == 1 and not targets[0].get("walk_in", true), "missing t refuses automatic dispatch")
+
+func check_push_use(controller) -> void:
+	var position: Vector3 = controller.get_observation().get("position", Vector3.ZERO)
+	var objects := trigger_objects(position, ["message=Use", "action=tick", "once=1"], "PushTrigger")
+	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), objects).get("ok", false),
+		"synthetic PushTrigger loads")
+	check(controller.dialog_use().get("ok", false), "E/use is accepted without dialog data")
+	for i in range(3): controller.advance(0)
+	var use: Dictionary = controller.script_use_status()
+	check(int(use.get("uses", 0)) == 1 and int(use.get("record", -1)) == 0,
+		"proximity use runs selected PushTrigger action")
+	controller.dialog_use()
+	for i in range(3): controller.advance(0)
+	check(int(controller.script_use_status().get("uses", 0)) == 1, "once removes PushTrigger from use")
+
+func check_hurt_gate(controller) -> void:
+	var position: Vector3 = controller.get_observation().get("position", Vector3.ZERO)
+	var objects := trigger_objects(position, [], "PortalHurt")
+	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), objects).get("ok", false),
+		"synthetic hurt gate loads")
+	controller.dialog_use()
+	for i in range(3): controller.advance(0)
+	var gate: Dictionary = controller.script_gate_status()
+	check(not gate.get("menu_open", false) and gate.get("prompt", "") == "Hurt gate has no interaction prompt.",
+		"hurt gate does not open interaction menu")
 
 func run_tick_counter(controller) -> void:
 	var ticks_before := int(controller.get_observation().get("ready_ticks", -1))

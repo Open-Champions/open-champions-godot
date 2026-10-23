@@ -870,6 +870,34 @@ GateArrival portal_arrival(bool travelling, bool fixed_destination,
   out.seed = shared_seed;
   return out;
 }
+bool use_query_contains_centre(const Vec3 &player, const Vec3 &candidate) {
+  ScopedFpu scope(Fpu{});
+  const auto xy = from_int(48), z = from_int(60);
+  return le(sub(player[0], xy), candidate[0]) &&
+         le(candidate[0], add(player[0], xy)) &&
+         le(sub(player[1], xy), candidate[1]) &&
+         le(candidate[1], add(player[1], xy)) &&
+         le(player[2], candidate[2]) &&
+         le(candidate[2], add(player[2], z));
+}
+std::optional<std::size_t> nearest_use_candidate(
+    const Vec3 &player, const std::vector<UseCandidate> &query_results) {
+  ScopedFpu scope(Fpu{});
+  std::optional<std::size_t> selected;
+  Raw best = from_int(10000000);
+  for (const auto &candidate : query_results) {
+    if (!(candidate.flags & 0x100000u)) continue;
+    const auto dx = sub(candidate.position[0], player[0]);
+    const auto dy = sub(candidate.position[1], player[1]);
+    const auto dz = sub(candidate.position[2], player[2]);
+    const auto distance = add(add(mul(dx, dx), mul(dy, dy)), mul(dz, dz));
+    if (lt(distance, best)) {
+      best = distance;
+      selected = candidate.record;
+    }
+  }
+  return selected;
+}
 Trigger::Trigger(Raw x, Raw y, std::int32_t w, std::int32_t h, std::string t)
     : script(std::move(t)) {
   ScopedFpu scope(Fpu{});

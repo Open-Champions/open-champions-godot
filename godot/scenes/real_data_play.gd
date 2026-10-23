@@ -18,6 +18,8 @@ var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
 var real_exit_choice: OptionButton
+var gate_destination_choice: OptionButton
+var _gate_menu_was_open := false
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -98,6 +100,10 @@ func _ready() -> void:
 	real_exit_choice.add_item("No level exit loaded", -1)
 	menu.add_child(real_exit_choice)
 	_add_action("real_exit", "Use selected level action", activate_selected_exit)
+	gate_destination_choice = OptionButton.new()
+	gate_destination_choice.add_item("Gate destinations", -1)
+	menu.add_child(gate_destination_choice)
+	_add_action("gate_travel", "Confirm gate destination", confirm_gate_destination)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -109,7 +115,7 @@ func _ready() -> void:
 func _update_menu() -> void:
 	super._update_menu()
 	if mode_label != null and play_mode and real != null and real.current >= 0:
-		mode_label.text = "Play mode · walk-in triggers can change real levels; combat and other campaign paths remain incomplete."
+		mode_label.text = "Play mode · walk-in triggers and E/use can open exits; gate destinations use the menu."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -210,8 +216,25 @@ func _refresh_exit_targets() -> void:
 		var kind: String = str(target.get("kind", "unknown"))
 		var suffix := " · walk-in" if target.get("walk_in", false) else \
 			(" · walk-in refused" if target.has("walk_in_refusal") else \
-			(" · script action" if target.get("script_action", false) else " · arrival/prompt only"))
+			(" · E/use" if target.get("physical_use", false) else \
+			(" · script action" if target.get("script_action", false) else " · arrival/prompt only")))
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
+	_refresh_gate_destinations()
+
+func _refresh_gate_destinations() -> void:
+	if gate_destination_choice == null or controller == null: return
+	gate_destination_choice.clear()
+	gate_destination_choice.add_item("Gate destinations", -1)
+	for destination in controller.script_gate_status().get("destinations", []):
+		gate_destination_choice.add_item(str(destination))
+
+func confirm_gate_destination() -> Dictionary:
+	if gate_destination_choice == null or gate_destination_choice.selected <= 0:
+		return {"ok": false, "error": "Choose a discovered gate destination."}
+	var name: String = gate_destination_choice.get_item_text(gate_destination_choice.selected)
+	var result: Dictionary = controller.script_gate_confirm(name)
+	if not result.get("ok", false): status_label.text = str(result.get("error", "Gate travel refused."))
+	return result
 
 func activate_selected_exit() -> Dictionary:
 	var out := {"ok": false, "error": "Select a documented level script action."}
@@ -235,10 +258,6 @@ func _apply_level_change() -> bool:
 	if not pending.get("queued", false): return false
 	var requested: String = str(pending.get("name", ""))
 	if requested == _refused_level_request: return false
-	if pending.get("post_action_pending", false):
-		_refused_level_request = requested
-		status_label.text = "Level change refused: a pending post action cannot be carried."
-		return false
 	# level_flow::split_request uses the first underscore for a subname. The
 	# resource lookup takes the base; no guessed destination is substituted.
 	var base: String = requested.get_slice("_", 0).to_lower()
@@ -272,7 +291,7 @@ func handle_input_event(event: InputEvent) -> bool:
 		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
-		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
+		if TALK_KEYS.has(key) and controller.script_level_request().get("ok", false):
 			var open: bool = controller.dialog_status().get("open", false)
 			if TALK_KEYS[key] is String:
 				if not open: controller.dialog_use()
@@ -302,6 +321,13 @@ func _observe(result: Dictionary) -> void:
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	_present_npc_dialog()
+	var gate: Dictionary = controller.script_gate_status()
+	if gate.get("menu_open", false) and not _gate_menu_was_open: _refresh_gate_destinations()
+	_gate_menu_was_open = bool(gate.get("menu_open", false))
+	if gate.get("menu_open", false):
+		status_label.text = "Gate open · choose a discovered destination in the menu."
+	elif int(controller.script_use_status().get("uses", 0)) > 0 and not controller.dialog_status().get("open", false):
+		status_label.text = "Nearby level action used."
 	if real.world == null: return
 	real.world.observe(raw_observation)
 	var extra: String = real.world.label()

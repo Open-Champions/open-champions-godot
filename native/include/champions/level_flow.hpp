@@ -348,6 +348,16 @@ struct TriggerPlayer {
   unsigned slot;
   Vec3 position;
 };
+// Player_interact 0x1b26b8-0x1b27e0: the box query supplies candidates in
+// grid order. Preserve that order for equal distances.
+struct UseCandidate {
+  std::size_t record = 0;
+  Vec3 position{};
+  std::uint32_t flags = 0;
+};
+bool use_query_contains_centre(const Vec3 &player, const Vec3 &candidate);
+std::optional<std::size_t> nearest_use_candidate(
+    const Vec3 &player, const std::vector<UseCandidate> &query_results);
 struct TriggerEvent {
   std::optional<std::string> entry;
   std::optional<unsigned> active;
