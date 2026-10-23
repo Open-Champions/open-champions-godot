@@ -912,6 +912,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "player_giveExp") {
     note(n, {ar(0), ar(1)});
     exp_awards.push_back({ar(0), ar(1)});
+    if (services.give_exp) services.give_exp(ar(0), ar(1));
     return iv(0);
   }
   if (n == "world_notifyObjectsNear") {

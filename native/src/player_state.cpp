@@ -105,6 +105,20 @@ void validate(const Record &r, const Tables &t) {
     if (!finite(raw)) throw Refusal("player health or mana is not finite");
 }
 
+Maxima maxima(const Tables &tables, std::int32_t cls, std::int32_t level,
+              const std::array<std::int32_t, 4> &stats) {
+  if (cls < 0 || cls >= 7) throw Refusal("class is outside 0..6");
+  const auto &f = tables.formulas[std::size_t(cls)];
+  // player_recalcStats 0x1b6458, exact order from research-combat 4.3.
+  Maxima m;
+  m.max_mana = combat::fadd(
+      combat::fmul(combat::fsub(combat::itof(stats[1]), f[0]), f[1]),
+      combat::fmul(combat::itof(level), f[2]));
+  m.max_hp = combat::fsub(
+      combat::fadd(combat::fmul(combat::itof(level), f[3]),
+                   combat::fmul(combat::itof(stats[3]), f[4])), f[5]);
+  return m;
+}
 // Provenance of a created character's values (research-menus docs/player.md,
 // research-combat docs/data-tables.md 4.1-4.4, plus an executed difftest of
 // player_initNewCharacter 0x1b1d70 with tools/ee_emu.py, summarised in
@@ -131,14 +145,9 @@ Record create(const std::string &name, std::int32_t cls, std::int32_t model,
   r.name = name; r.player_class = cls; r.model = model;
   r.base_stats = r.effective_stats = stats;
   r.level = r.acknowledged = 1; r.experience = 0; r.gold = 500;
-  const auto &f = tables.formulas[std::size_t(cls)];
-  // player_recalcStats 0x1b6458, exact order from research-combat 4.3.
-  r.max_mana = combat::fadd(
-      combat::fmul(combat::fsub(combat::itof(stats[1]), f[0]), f[1]),
-      combat::fmul(combat::itof(r.level), f[2]));
-  r.max_hp = combat::fsub(
-      combat::fadd(combat::fmul(combat::itof(r.level), f[3]),
-                   combat::fmul(combat::itof(stats[3]), f[4])), f[5]);
+  const auto m = maxima(tables, cls, r.level, stats);
+  r.max_mana = m.max_mana;
+  r.max_hp = m.max_hp;
   // Current values are not established by the cited new-character contract.
   // Their raw storage is not a claim of zero health or mana: current_known
   // stays false, and the session refuses current-dependent script commands.

@@ -40,6 +40,15 @@ struct Record {
 // gold 500, effective = base, and the maxima in recalcStats' exact operation
 // order. init alone leaves max HP 0 and max mana 10 (see player_state.cpp).
 // Current HP/mana remain unknown (current_known false).
+// Maximum mana and hit points player_recalcStats 0x1b6458 stores for a class,
+// level (record +0x59) and effective statistics (record +0x90: strength,
+// intelligence, dexterity, stamina), in the research's exact operation order
+// (research-combat docs/data-tables.md 4.3). Item modifiers and figurines add to
+// the statistics before this and are not modelled: for a record with neither,
+// effective equals base. Used by create() and by a level-up.
+struct Maxima { Raw max_hp = 0, max_mana = 0; };
+Maxima maxima(const Tables &tables, std::int32_t player_class, std::int32_t level,
+              const std::array<std::int32_t, 4> &effective_stats);
 Record create(const std::string &name, std::int32_t player_class,
               std::int32_t model, const std::array<std::int32_t, 4> &stats,
               const Tables &tables);

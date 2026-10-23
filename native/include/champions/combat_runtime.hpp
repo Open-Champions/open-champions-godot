@@ -96,6 +96,10 @@ struct Services {
       animation_advance; // actor, speed -> mask (hit=1)
   std::function<void(Address, Raw, Raw, Raw, Raw)> animation_start;
   std::function<Raw(const std::string &, Raw, Raw)> skill_stat;
+  // player_giveExp 0x1d3150 (slot, amount), called where Creature_processDamage
+  // awards a kill. The award is always recorded (World::exp_awards); a host that
+  // owns a real player record applies it here. Optional.
+  std::function<void(Raw slot, Raw amount)> give_exp;
   // Full composition. Each is called where the executed bodies call it.
   std::function<Raw(Raw slot)> camera_yaw;  // net_getCamYaw
   std::function<Raw(Raw slot)> camera_flag; // net_getCamFlag

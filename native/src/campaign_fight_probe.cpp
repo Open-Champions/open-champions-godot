@@ -251,6 +251,14 @@ int main(int argc, char **argv) {
             << "attack_edges=" << n.attack_edges << " swings=" << n.player_swings << " hits=" << n.player_hits << " damage_events=" << n.damage_events
             << " deaths=" << n.deaths << " loot_calls=" << n.loot_calls << " dead=" << dead << " enemy_hp " << hp0 << " -> " << hp1
             << " factory_runs_skipped=" << n.factory_runs_skipped << "\n";
+  for (const auto &a : fight.awards())
+    std::cout << "xp award: slot " << a.slot << " amount " << a.amount << " level " << a.level_before << " -> " << a.level_after
+              << " exp " << a.experience_before << " -> " << a.experience_after << " levels_gained " << a.levels_gained << "\n";
+  std::cout << "player level=" << player.level << " exp=" << player.experience << " skill_points=" << player.skill_points
+            << " stat_points=" << player.stat_points << " max_hp=" << as_float(player.max_hp) << " mana=" << as_float(player.mana)
+            << "/" << as_float(player.max_mana) << " loot_items=" << n.loot_items << " loot_shared_draws=" << n.loot_shared_draws << "\n";
+  for (const auto &g : fight.ground_drops())
+    std::cout << "ground drop: kind " << g.kind << " category " << g.category << " count " << g.count << " spawned " << g.spawned << "\n";
   for (const auto &kv : fight.refusals()) std::cout << "  refusal x" << kv.second << ": " << kv.first << "\n";
   return 0;
 }

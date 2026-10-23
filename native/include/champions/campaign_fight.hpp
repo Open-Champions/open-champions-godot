@@ -32,6 +32,22 @@ struct PlayerView {
   std::int32_t action_state = 0;
   std::int32_t weapon_class = 0;
   std::uint32_t gold = 0;
+  // Experience record (shared bytes): earned level +0x59, experience +0x5c,
+  // skill points +0xe8, stat points +0xec, current/maximum mana +0xc0/+0xc4.
+  std::int32_t level = 0, experience = 0, skill_points = 0, stat_points = 0;
+  Raw mana = 0, max_mana = 0;
+};
+// One player_giveExp the kill made (kill-XP formula, levelup.md).
+struct AwardView {
+  std::int32_t slot = 0, amount = 0, levels_gained = 0;
+  std::int32_t level_before = 0, level_after = 0, experience_before = 0, experience_after = 0;
+};
+// One item the loot roll generated. No ground object exists for it (see
+// Fight::refusals); `spawned` stays false.
+struct GroundDrop {
+  std::string kind;
+  std::int32_t category = 0, count = 0;
+  bool spawned = false;
 };
 struct Counts {
   std::size_t ticks = 0;
@@ -42,6 +58,11 @@ struct Counts {
   std::size_t damage_events = 0;     // of those, results that dealt damage
   std::size_t deaths = 0;            // enemy death transitions
   std::size_t loot_calls = 0;        // Creature_dropLoot -> loot_generateDrops calls
+  std::size_t loot_items = 0;        // item records those calls generated
+  std::uint64_t loot_shared_draws = 0; // shared-seed draws the loot rolls took
+  std::size_t xp_awards = 0;         // player_giveExp calls from kills
+  std::uint64_t xp_gained = 0;       // experience those awards added
+  std::size_t levels_gained = 0;     // level-ups they caused
   std::size_t factory_runs_skipped = 0;
 };
 
@@ -90,6 +111,8 @@ public:
   PlayerView player() const;
   std::vector<EnemyView> enemies() const;
   const Counts &counts() const;
+  const std::vector<AwardView> &awards() const;
+  const std::vector<GroundDrop> &ground_drops() const;
   // Labelled refusals by reason (what was needed, and why it stayed refused).
   const std::map<std::string, std::size_t> &refusals() const;
   combat_runtime::World &world();

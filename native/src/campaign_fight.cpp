@@ -1,5 +1,8 @@
 #include "champions/campaign_fight.hpp"
 #include "champions/campaign_actors.hpp"
+#include "champions/campaign_rewards.hpp"
+#include "champions/player_state.hpp"
+#include "champions/script_items.hpp"
 #include "champions/creature_anim/runtime.hpp"
 #include "champions/model.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
@@ -75,6 +78,15 @@ struct Fight::Impl {
   bool attack_was_held = false;
   std::uint32_t gold_start = 0;
   std::size_t base_events = 0;
+  // rewards of a kill (campaign_rewards)
+  std::optional<player_state::Tables> player_tables;
+  std::unique_ptr<campaign_rewards::Loot> loot;
+  std::vector<GroundDrop> ground_drops;
+  std::vector<AwardView> awards;
+  campaign_rewards::Memory shared_memory() {
+    return {[this](Address a, unsigned n) { return std::uint64_t(world->read(a, n)); },
+            [this](Address a, unsigned n, std::uint64_t v) { world->write(a, n, v); }};
+  }
 
   Impl(std::shared_ptr<WorldAuthority> a, std::shared_ptr<const arena_modes::Executable> e,
        player_services::Bundle &b, std::function<bool()> d)
@@ -164,15 +176,59 @@ struct Fight::Impl {
     return it == states.end() ? 0 : it->second;
   }
 
+  // ---- rewards -------------------------------------------------------------
+  // player_giveExp for the session player's record in the shared bytes.
+  void award_exp(Raw slot, Raw amount) {
+    counts.xp_awards += 1;
+    if (!player_tables) throw C::Unsupported("player_giveExp: experience table not bound");
+    auto memory = shared_memory();
+    const auto r = campaign_rewards::give_exp(*player_tables, memory, std::int64_t(std::int32_t(slot)),
+                                              std::int64_t(std::int32_t(amount)));
+    counts.xp_gained += std::uint32_t(std::int64_t(std::int32_t(amount)));
+    counts.levels_gained += std::size_t(r.levels_gained);
+    awards.push_back({std::int32_t(slot), std::int32_t(amount), r.levels_gained, r.level_before, r.level_after,
+                      r.experience_before, r.experience_after});
+    refuse("player_recalcStats after a level-up: only the maximum hit points and mana (level and effective statistics) are recomputed; the other derived fields are not modelled");
+  }
+  // loot_generateDrops over the shared seed with the executable's item tables.
+  void roll_loot(const C::LootDrop &d) {
+    counts.loot_calls += 1;
+    if (!loot) {
+      const auto reader = [e = exe](std::uint32_t a, std::size_t n) {
+        std::vector<std::uint8_t> out;
+        out.reserve(n);
+        for (std::size_t i = 0; i < n; ++i) out.push_back(e->byte(a + std::uint32_t(i)));
+        return out;
+      };
+      loot = std::make_unique<campaign_rewards::Loot>(script_items::image_tables(reader), shared_memory());
+    }
+    // The reagent filter is a picture-name string address; the boar passes none.
+    if (d.filter) throw C::Unsupported("loot_generateDrops: a reagent filter string is not bound");
+    const auto out = loot->roll(d, {});
+    counts.loot_items += out.items.size();
+    counts.loot_shared_draws += out.shared_draws;
+    for (const auto &g : out.items) {
+      ground_drops.push_back({g.kind, g.category, g.count, false});
+      refuse("loot item prop (" + g.kind + "): the ground object is not built; the loot PhProp_ctor's lump/model/texture, part mask, launch flags and scale, and PhProp_initPhysics' inputs are not in the research (the item record and the constructor's one shared draw are kept)");
+    }
+  }
+
   // ---- services ----------------------------------------------------------
   C::Services build_services() {
     C::Services base;
     base.dialog_is_open = [this] { return dialog_open ? dialog_open() : false; };
     // No gate travel in this session's World (the level script owns gates).
     base.jumpgate_travel_state = [] { return Raw(0); };
-    base.skill_stat = [](const std::string &, Raw, Raw) -> Raw {
-      throw C::Unsupported("skill statistic: the player's skill tables are not bound");
+    base.skill_stat = [](const std::string &name, Raw, Raw rank) -> Raw {
+      // SkillLifeTap_getStat0Fraction 0x2f8e78 = statistic 0 at (slot 14 rank,
+      // 1) x 0.01 (research-campaign-combat skills-35-68.md, skill 59), and the
+      // statistic getter (slot 10) returns 0 for rank 0 (tools/ref_skills_b.py
+      // skill_get_stat): a player without the skill has a 0.0 chance. The
+      // session player has no skill ranks, which is the only case answered.
+      if (name == "SkillLifeTap_getStat0Fraction" && rank == 0) return 0;
+      throw C::Unsupported("skill statistic: skill tables for a nonzero rank are not bound (" + name + ")");
     };
+    base.give_exp = [this](Raw slot, Raw amount) { award_exp(slot, amount); };
     base.attach_point = [this](Address actor, Raw, const Vec3 &position, Raw, Raw) {
       refuse("model_getAttachPoint: pose transform not ported (spark origin is the actor position)");
       (void)actor;
@@ -202,10 +258,7 @@ struct Fight::Impl {
       return player_token(q.entry);
     };
     base.is_class = [](Address, const std::string &) { return false; };
-    base.loot_generate = [this](const C::LootDrop &) {
-      counts.loot_calls += 1;
-      refuse("loot_generateDrops: item tables, ground-object spawn and shared-seed draws not bound");
-    };
+    base.loot_generate = [this](const C::LootDrop &d) { roll_loot(d); };
     base.spawn_named_item = [](const Vec3 &, Raw) -> void {
       throw C::Unsupported("loot_spawnNamedItem: ground items not bound");
     };
@@ -557,6 +610,17 @@ std::string Fight::start(const PlayerStart &start) {
     p.failed = true;
     return e.what();
   }
+  // The experience thresholds and class formulas come from the executable at
+  // run time. The 81 table words are also put where Creature_processDamage
+  // reads the per-kill cap (0x41b558).
+  try {
+    if (!p.exe) throw std::runtime_error("executable not bound");
+    p.player_tables = player_state::read_tables(*p.exe);
+    for (std::size_t level = 0; level < p.player_tables->experience.size(); ++level)
+      p.world->write(0x41b558 + 4 * Address(level), 4, std::uint32_t(p.player_tables->experience[level]));
+  } catch (const std::exception &e) {
+    p.refuse(std::string("experience: tables unavailable (") + e.what() + "); kills award nothing");
+  }
   const auto player_error = [&]() -> std::string {
     try {
       return p.setup_player(start);
@@ -652,6 +716,12 @@ PlayerView Fight::player() const {
   v.action_state = std::int32_t(p.read(p.player + 0x58c));
   v.weapon_class = std::int8_t(p.read(PLAYERS + 0x4a86, 1));
   v.gold = p.read(PLAYERS + 0xe4);
+  v.level = std::int8_t(p.read(PLAYERS + 0x59, 1));
+  v.experience = std::int32_t(p.read(PLAYERS + 0x5c));
+  v.skill_points = std::int32_t(p.read(PLAYERS + 0xe8));
+  v.stat_points = std::int32_t(p.read(PLAYERS + 0xec, 1));
+  v.mana = p.read(PLAYERS + 0xc0);
+  v.max_mana = p.read(PLAYERS + 0xc4);
   return v;
 }
 std::vector<EnemyView> Fight::enemies() const {
@@ -676,6 +746,8 @@ std::vector<EnemyView> Fight::enemies() const {
   return out;
 }
 const Counts &Fight::counts() const { return p_->counts; }
+const std::vector<AwardView> &Fight::awards() const { return p_->awards; }
+const std::vector<GroundDrop> &Fight::ground_drops() const { return p_->ground_drops; }
 const std::map<std::string, std::size_t> &Fight::refusals() const {
   static std::map<std::string, std::size_t> merged;
   merged = p_->refusals;
