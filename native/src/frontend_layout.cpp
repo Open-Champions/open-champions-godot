@@ -35,6 +35,12 @@ const char *menu_sound_resource(menu_sound s) {
 
 namespace layout {
 namespace {
+int bcd_value(std::uint8_t value) {
+  const int high = value >> 4, low = value & 15;
+  if (high > 9 || low > 9)
+    throw Refusal("card directory date or clock has invalid BCD digits");
+  return high * 10 + low;
+}
 // Row geometry of menuList_draw 0x1a07c4: rows are 22 apart, the first row sits
 // at origin_y - (11 * rows + 6); a value row's text is shifted 23 left; a list
 // with value rows is the wide 210 frame, others the 54-wide minimum. The research
@@ -61,6 +67,61 @@ Draw make_frame(int x, int y, int w, int h, int layer, std::uint32_t tint, int s
   return d;
 }
 } // namespace
+
+std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata,
+                                       const std::vector<std::uint8_t> &headers,
+                                       int count, int scroll_base) {
+  if (count < 0 || scroll_base < 0 || scroll_base > count ||
+      static_cast<std::size_t>(count) > metadata.size() / 16 ||
+      static_cast<std::size_t>(count) > headers.size() / 0x70)
+    throw Refusal("card cache count, scroll, metadata or header length is invalid");
+  std::vector<CardRow> out;
+  if (count == 0 || scroll_base == count)
+    return out;
+  for (int r = 0; r < 5; ++r) {
+    const int index = scroll_base + r;
+    CardRow row;
+    row.index = index;
+    row.y = 128 + 17 * r;
+    row.number = std::to_string(static_cast<long long>(index) + 1) + ".";
+    if (index < count) {
+      row.populated = true;
+      row.metadata_offset = static_cast<std::size_t>(index) * 16;
+      row.header_offset = static_cast<std::size_t>(index) * 0x70;
+      const auto meta = row.metadata_offset;
+      const int month = bcd_value(metadata[meta + 6]);
+      const int day = bcd_value(metadata[meta + 5]);
+      const int year = bcd_value(metadata[meta + 7]);
+      const int hour = bcd_value(metadata[meta + 3]);
+      const int minute = bcd_value(metadata[meta + 2]);
+      if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59)
+        throw Refusal("card directory date or clock is outside supported fields");
+      row.date = std::to_string(month) + "/" + std::to_string(day) + "/" +
+                 std::to_string(2000 + year);
+      const int shown_hour = hour % 12 == 0 ? 12 : hour % 12;
+      row.clock = std::to_string(shown_hour) + ":" + (minute < 10 ? "0" : "") +
+                  std::to_string(minute) + (hour < 12 ? "am" : "pm");
+    }
+    out.push_back(std::move(row));
+  }
+  return out;
+}
+
+CardPreview card_preview(const std::vector<std::uint8_t> &headers, int count, int header_index) {
+  if (count <= 0 || header_index < 0 || header_index >= count ||
+      static_cast<std::size_t>(count) > headers.size() / 0x70)
+    throw Refusal("selected card header is unavailable");
+  const auto at = static_cast<std::size_t>(header_index) * 0x70;
+  const auto word = [&](std::size_t offset) {
+    return std::uint32_t(headers[at + offset]) |
+           (std::uint32_t(headers[at + offset + 1]) << 8) |
+           (std::uint32_t(headers[at + offset + 2]) << 16) |
+           (std::uint32_t(headers[at + offset + 3]) << 24);
+  };
+  return {header_index, at, word(0x64),
+          std::uint16_t(headers[at + 0x6a] | (std::uint16_t(headers[at + 0x6b]) << 8)),
+          headers[at + 0x6c]};
+}
 
 std::vector<Point> list_anchors(const ListSpec &s) {
   const int first = s.origin_y - (11 * s.rows + 6);
@@ -388,17 +449,52 @@ Scene Flow::layout() const {
                            Evidence::Host, "slot-list title (localized text unavailable)", "0x21d6e8");
     slot_title.settled = true;
     s.draws.push_back(slot_title);
+    // A caller can bind actual 16-byte directory metadata and 0x70-byte
+    // headers. The round-2 fix audit passed for indexed rows, date and clock
+    // formatter calls, and header-backed preview fields. Localized level and
+    // preview wording remains Host, and the real directory source is absent.
+    if (card_cache_supplied_) {
+      s.host_label = "caller card cache; level text and preview wording unverified";
+      for (const auto &row : layout::visible_card_rows(card_metadata_, card_headers_,
+                                                      card_count_, card_scroll_base_)) {
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 77, row.y, 0x7f323c3c,
+                               row.number, Evidence::Executed, "supplied card number", "0x21d99c"));
+        if (row.populated) {
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 365, row.y, 0x7f323c3c,
+                                 row.date, Evidence::Executed, "supplied card date", "0x21db24"));
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 487, row.y, 0x7f323c3c,
+                                 row.clock, Evidence::Executed, "supplied card clock", "0x21dbe8"));
+        }
+      }
+      if (card_preview_index_ >= 0) {
+        const auto preview = layout::card_preview(card_headers_, card_count_, card_preview_index_);
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 220, 247, HOST_MUTED,
+                               "Players", Evidence::Host, "preview label (localized wording unknown)"));
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 320, 247, HOST_MUTED,
+                               std::to_string(preview.player_count), Evidence::Host,
+                               "preview player count (header field)", "0x21e208"));
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 220, 264, HOST_MUTED,
+                               "Difficulty", Evidence::Host, "preview label (localized wording unknown)"));
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 320, 264, HOST_MUTED,
+                               "index " + std::to_string(preview.difficulty_index), Evidence::Host,
+                               "preview difficulty index (header field)", "0x21e2c0"));
+        if (card_debug_time_) {
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 100, 281, HOST_MUTED,
+                                 "Save time (raw)", Evidence::Host,
+                                 "debug preview label (localized wording unknown)"));
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 320, 281, HOST_MUTED,
+                                 std::to_string(preview.play_seconds) + "s", Evidence::Host,
+                                 "debug play seconds (minute display unverified)", "0x21e0f0"));
+        }
+      }
+    }
     s.draws.push_back(slot_frame);
-    // The five row anchors, date/clock calls and selected-header preview were
-    // executed with an authored card cache. This flow has no card directory or
-    // cached PS2 headers. In particular, indexed row/header strides are
-    // Inferred and AM/PM conversion is Unknown, so no slot data is fabricated.
     for (std::size_t i = 0; i < list.size(); ++i) {
       host_text(s, 320, 348 + 22 * static_cast<int>(i),
                 (static_cast<int>(i) == cur ? "> " : "  ") + list[i].label,
                 Align::Centred);
     }
-    s.unknown = {"card directory, indexed row/header mapping (Inferred), AM/PM conversion (Unknown), localized title and prompts, retail pixels and backdrop"};
+    s.unknown = {"real card directory timestamp, card capacity and scroll reachability, localized level/preview/prompt text, minute display beyond completed fixture, retail pixels and backdrop"};
     break;
   }
   case Screen::Saved:

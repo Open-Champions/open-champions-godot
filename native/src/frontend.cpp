@@ -164,10 +164,39 @@ void Flow::sound(menu_sound which) {
 
 void Flow::go(Screen next, int cursor) {
   screen_ = next;
+  card_cache_supplied_ = false;
+  card_metadata_.clear();
+  card_headers_.clear();
+  card_count_ = 0;
+  card_scroll_base_ = 0;
+  card_preview_index_ = -1;
+  card_debug_time_ = false;
   cursor_ = cursor;
   frames_ = 0;
   slider_timer_ = 0;
   error_.clear();
+}
+
+void Flow::set_card_cache(std::vector<std::uint8_t> metadata,
+                          std::vector<std::uint8_t> headers, int count, int scroll_base) {
+  if (screen_ != Screen::LoadGame && screen_ != Screen::SaveGame)
+    throw Refusal("card cache requires the save or load screen");
+  (void)layout::visible_card_rows(metadata, headers, count, scroll_base);
+  card_metadata_ = std::move(metadata);
+  card_headers_ = std::move(headers);
+  card_count_ = count;
+  card_scroll_base_ = scroll_base;
+  card_cache_supplied_ = true;
+  card_preview_index_ = -1;
+  card_debug_time_ = false;
+}
+
+void Flow::set_card_preview(int header_index, bool debug_time) {
+  if (!card_cache_supplied_)
+    throw Refusal("selected card preview requires a supplied card cache");
+  (void)layout::card_preview(card_headers_, card_count_, header_index);
+  card_preview_index_ = header_index;
+  card_debug_time_ = debug_time;
 }
 
 bool Flow::in_frontend() const {

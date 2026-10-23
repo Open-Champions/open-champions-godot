@@ -15,7 +15,7 @@ Evidence pins:
 | t3/research-saves | 8d43286 | `docs/save-format.md` (the 760-byte options image, card states, save latch) |
 | t3/research-combat-ctors | e9777eb | `docs/spec/music-volume.md` (slider, commit, boot copy; ported as `music_volume.hpp`) |
 | t3/research-menus-layout | dc458d5 | `docs/frontend-layout.md`, `tools/ref_frontend_layout.py`, `tools/ref_frontend_screens.py` (draw calls, fonts, layers, tints, menu sounds, the first-theme gate) |
-| t3/research-save-screen | 0a3419b | `docs/save-screen.md` (slot-list tile frame, small font, row anchors and explicit evidence limits; re-audit PASS) |
+| t3/research-save-screen | 9c2b941 | `docs/save-screen.md` (slot-list tile frame, indexed rows, BCD date and clock formatter calls, and completed-slot header-backed preview fields; `research-save-screen-r2-fix.md` audit PASS) |
 
 Status words are the research's: **Executed**, **Observed**, **Ran** (seen on the
 emulator), **Inferred**, **Unknown**.
@@ -54,10 +54,17 @@ the alpha points at y = 448/400/224) are flow or one-line fixture facts; fades a
 curved in the research, so none is drawn.
 
 The save/load screen keeps its file chooser actions in a labelled host area below
-the documented frame. No PS2 card directory or cached save headers are bound, so
-the five card rows, selected-slot preview, date/clock values and confirmation
-prompts stay absent. Indexed row/header mapping is Inferred; AM/PM conversion,
-localized text and retail pixel parity are Unknown. The saved confirmation is
+the documented frame. No PS2 card directory or cached save headers are bound by
+the normal host flow, so the card rows, selected-slot preview, date/clock values
+and confirmation prompts stay absent there. A caller may explicitly supply a
+card cache to `Flow::set_card_cache` / `ChampionsFrontendService.set_card_cache`.
+The bounded 16-byte metadata and 0x70-byte header strides, five visible row
+anchors, numbered markers, `%d/%d/%d` BCD date and tested 12-hour clocks then
+paint with the disc small font. An explicitly selected header supplies raw
+player count, difficulty index and play seconds at the preview anchors; their
+labels are visibly Host because localized text and general minute formatting
+are not established. Real directory timestamps, card capacity, level/class
+text, locale and retail pixel parity remain unverified. The saved confirmation is
 also a labelled host layout because its frame art is not established.
 
 Still a labelled host layout (the research lists them Unknown): class art, the 3D

@@ -38,6 +38,53 @@ func shot(label: String) -> void:
 	else:
 		printerr("capture failed ", label)
 
+func bind_synthetic_card_rows() -> bool:
+	# Authored metadata and headers: five indexed dates/clocks and one preview.
+	var metadata := PackedByteArray()
+	var headers := PackedByteArray()
+	metadata.resize(8 * 16)
+	headers.resize(8 * 0x70)
+	var hours := [0x00, 0x11, 0x12, 0x13, 0x23]
+	var minutes := [0x05, 0x10, 0x00, 0x25, 0x59]
+	var expected := ["12:05am", "11:10am", "12:00pm", "1:25pm", "11:59pm"]
+	for row in range(5):
+		metadata[16 * (row + 2) + 3] = hours[row]
+		metadata[16 * (row + 2) + 2] = minutes[row]
+		metadata[16 * (row + 2) + 6] = 0x01
+		metadata[16 * (row + 2) + 5] = 0x09
+		metadata[16 * (row + 2) + 7] = 0x26
+	headers[2 * 0x70 + 0x64] = 59
+	headers[2 * 0x70 + 0x6a] = 1
+	headers[2 * 0x70 + 0x6c] = 1
+	var result: Dictionary = fe.service.set_card_cache(metadata, headers, 8, 2)
+	if not result.get("ok", false):
+		return false
+	result = fe.service.set_card_preview(2, true)
+	if not result.get("ok", false):
+		return false
+	fe._refresh()
+	var clock_row := 0
+	var number_row := 0
+	var date_row := 0
+	var preview_fields := 0
+	for draw in fe.scene_view.get("draws", []):
+		match str(draw.get("role", "")):
+			"supplied card clock":
+				if clock_row >= 5 or int(draw.x) != 487 or int(draw.y) != 128 + 17 * clock_row or str(draw.font) != "small" or str(draw.text) != expected[clock_row]:
+					return false
+				clock_row += 1
+			"supplied card number":
+				if number_row >= 5 or int(draw.x) != 77 or int(draw.y) != 128 + 17 * number_row or str(draw.text) != "%d." % (number_row + 3):
+					return false
+				number_row += 1
+			"supplied card date":
+				if date_row >= 5 or int(draw.x) != 365 or int(draw.y) != 128 + 17 * date_row or str(draw.text) != "1/9/2026":
+					return false
+				date_row += 1
+			"preview player count (header field)", "preview difficulty index (header field)", "debug play seconds (minute display unverified)":
+				preview_fields += 1
+	return clock_row == 5 and number_row == 5 and date_row == 5 and preview_fields == 3
+
 func run() -> void:
 	if folder.is_empty() or capture_dir.is_empty() or cache.is_empty():
 		printerr("game folder, capture dir and cache are required")
@@ -105,6 +152,11 @@ func run() -> void:
 		printerr("load screen did not paint the documented tile frame and game font")
 		quit(1)
 		return
+	if not bind_synthetic_card_rows():
+		printerr("load screen refused authored indexed card rows")
+		quit(1)
+		return
+	await shot("08a-load-card-synthetic")
 	fe.tap(CIRCLE)
 	fe.tap(0x1000)
 	fe.tap(CROSS)
@@ -150,5 +202,10 @@ func run() -> void:
 		printerr("save screen did not paint the documented tile frame and game font")
 		quit(1)
 		return
+	if not bind_synthetic_card_rows():
+		printerr("save screen refused authored indexed card rows")
+		quit(1)
+		return
+	await shot("22-save-card-synthetic")
 	print("captures ", saved)
-	quit(0 if saved == 21 else 1)
+	quit(0 if saved == 23 else 1)
