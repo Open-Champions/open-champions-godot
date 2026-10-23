@@ -78,15 +78,14 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 	if not prepared.get("ok", false):
 		status = "Player model refused: " + str(prepared.get("error", "rest pose unavailable"))
 		return false
+	var body_read: Dictionary = reader.read_player_resource(selection, body_row,
+		str(listing.fingerprint), body_name)
+	if not body_read.get("ok", false):
+		status = "Player model refused: " + str(body_read.get("error", "body resource changed"))
+		return false
+	body_bytes = body_read.bytes
 	visual.mesh = prepared.mesh
 	rest_mesh = prepared.mesh
-	var body: Dictionary = selection_rows[body_row]
-	var body_size := int(body.get("size", 0))
-	if body_size > 0 and body_size <= 16 * 1024 * 1024:
-		var source := FileAccess.open(selection, FileAccess.READ)
-		if source != null:
-			source.seek(int(body.get("offset", 0)))
-			body_bytes = source.get_buffer(body_size)
 	var animation_name := str(resources.animation_lump).to_lower()
 	animation_archive = str(real.files.get(animation_name, ""))
 	clip_slots = resources.clip_slots_1_to_111.duplicate()
@@ -103,7 +102,8 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 			var skin_name := "%s_bodyv%d.tex" % [code, skin + 1]
 			binder = RealCreature.new()
 			binder.environment = real.environment
-			var bound: Dictionary = binder.bind_named(selection, selection_rows, body_row, skin_name)
+			var bound: Dictionary = binder.bind_named(selection, selection_rows, body_row, skin_name,
+				reader, str(listing.fingerprint))
 			if bound.get("ok", false) and binder.apply(visual):
 				textured = true
 				status = "Class body rest pose and record-selected skin drawn; original idle animation refused."
@@ -146,17 +146,11 @@ func draw_selected_pose(weapon_class: int, role: int, tick: float) -> Dictionary
 	var clip_row := _row_index(listing.rows, clip_name)
 	if clip_row < 0:
 		return {"ok": false, "error": "Player pose refused: selected clip is absent."}
-	var row: Dictionary = listing.rows[clip_row]
-	var size := int(row.get("size", 0))
-	if size <= 0 or size > 16 * 1024 * 1024:
-		return {"ok": false, "error": "Player pose refused: selected clip size is invalid."}
-	var source := FileAccess.open(animation_archive, FileAccess.READ)
-	if source == null:
-		return {"ok": false, "error": "Player pose refused: animation archive cannot be read."}
-	source.seek(int(row.get("offset", 0)))
-	var clip := source.get_buffer(size)
-	if clip.size() != size:
-		return {"ok": false, "error": "Player pose refused: selected clip is truncated."}
+	var clip_read: Dictionary = archive_reader.read_player_resource(animation_archive,
+		clip_row, str(listing.fingerprint), clip_name)
+	if not clip_read.get("ok", false):
+		return {"ok": false, "error": "Player pose refused: " + str(clip_read.get("error", "selected clip changed"))}
+	var clip: PackedByteArray = clip_read.bytes
 	var sample: Dictionary = archive_reader.sample_skinned_resources(body_bytes, clip, tick)
 	var prepared: Dictionary = MeshBuilder.prepare(sample)
 	if not prepared.get("ok", false):

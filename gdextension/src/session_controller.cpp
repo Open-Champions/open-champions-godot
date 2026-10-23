@@ -2074,6 +2074,23 @@ Dictionary ChampionsSessionController::combat_observation() const {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));
       value["action_state"] = int64_t(combat_->world().read(address + 0x58c));
+      if (a.slot == 0) {
+        // These are the executed Player_move mode-0 cells, not a position
+        // delta inferred by presentation. Other play policies have no such
+        // cells and must not advertise original player locomotion.
+        value["locomotion_speed_raw"] = int64_t(combat_->world().read(address + 0x468));
+        value["locomotion_blend_raw"] = int64_t(combat_->world().read(address + 0x46c));
+        value["locomotion_walk_weight_raw"] = int64_t(combat_->world().read(address + 0x14c));
+        value["locomotion_run1_weight_raw"] = int64_t(combat_->world().read(address + 0x164));
+        value["locomotion_run2_weight_raw"] = int64_t(combat_->world().read(address + 0x184));
+        const auto slot = combat_->world().read(address + 0x3c8);
+        if (slot < 4) {
+          const auto record = 0x4d8af0u + static_cast<std::uint32_t>(slot) * 0x4c30u;
+          value["player_model_index"] = int64_t(combat_->world().read(record + 0x54));
+          value["weapon_animation_class"] = int64_t(static_cast<std::int8_t>(
+              combat_->world().read(record + 0x4a86, 1)));
+        }
+      }
     }
     value["present"] = a.present;
     value["dead"] = a.dead;
