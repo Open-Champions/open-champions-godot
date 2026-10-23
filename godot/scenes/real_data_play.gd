@@ -194,7 +194,7 @@ func save_session_file(path: String) -> bool:
 			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
 		status_label.text = "Save refused: level association could not be written."
 		return false
-	status_label.text = "Saved level, player, quests and position. Active world objects are not saved."
+	status_label.text = "Saved level, player, quests and position. World-object and in-flight script continuation refused."
 	return true
 
 func _write_companion(path: String, bytes: PackedByteArray) -> bool:
@@ -265,7 +265,7 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
 			return false
 		_observe(restored)
-	status_label.text = "Loaded level, player, quests and position. World objects restart from level data."
+	status_label.text = "Loaded level, player, quests and position. World-object continuation refused; scripts restart from level data."
 	return true
 
 func _prepare_native_save(path: String) -> Dictionary:

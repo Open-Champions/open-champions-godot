@@ -527,6 +527,7 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["policy"] = rta::play_session::POLICY;
   result["history_policy"] = "windowed";
   result["history_window"] = int64_t((combat_ || level_) ? 0 : rta::play_session::DEFAULT_WINDOW);
+  result["terrain_elements"] = int64_t(active_setup().initial_terrain.data.elements.size());
   Array formats;
   if (!combat_ && !level_) formats.push_back("play-continuation-v1");
   else {
@@ -1471,41 +1472,46 @@ Dictionary ChampionsSessionController::present_terrain(
   if (data.elements.size() > 256)
     throw std::runtime_error(
         "This terrain has too many surfaces for the scene preview.");
-  if (data.elements.size() != 1 || data.elements.front().flags != 0)
-    throw std::runtime_error(
-        "This scene currently displays one plain terrain surface at a time.");
-  const auto &only = data.elements.front();
-  for (const auto coordinate :
-       {only.min_x, only.min_y, only.max_x, only.max_y, only.x, only.y, only.z})
-    if (coordinate < -1048576 || coordinate > 1048576)
-      throw std::runtime_error(
-          "This terrain exceeds the scene display's coordinate range.");
   if (data.grid.empty() || data.grid.size() > 16384)
     throw std::runtime_error(
         "This terrain grid cannot be displayed in the scene yet.");
-  for (const auto &cell : data.grid) {
-    if (cell.empty() || std::any_of(cell.begin(), cell.end(), [](int64_t ref) {
-          return ref != 0 && ref != -1;
-        }))
-      throw std::runtime_error("This terrain has partial surface coverage that "
-                               "the scene cannot display yet.");
-  }
-  if (only.min_x < double(data.tg_x0) * 160 ||
-      only.min_y < double(data.tg_y0) * 160 ||
-      only.max_x >= (double(data.tg_x0) + data.tg_w) * 160 ||
-      only.max_y >= (double(data.tg_y0) + data.tg_h) * 160)
-    throw std::runtime_error(
-        "This terrain surface extends beyond its query grid.");
   rta::ScopedFpu fixed{rta::Fpu{rta::Fpu::Model::Ps2, false, false}};
   rta::world_queries::Level query(data);
   Array surfaces;
   std::size_t tiles = 0;
-  for (const auto &e : data.elements) {
+  for (std::size_t element_index = 0; element_index < data.elements.size(); ++element_index) {
+    const auto &e = data.elements[element_index];
     if (e.flags & 2)
       continue;
+    for (const auto coordinate :
+         {e.min_x, e.min_y, e.max_x, e.max_y, e.x, e.y, e.z})
+      if (coordinate < -1048576 || coordinate > 1048576)
+        throw std::runtime_error(
+            "This terrain exceeds the scene display's coordinate range.");
     if (e.flags != 0 || e.cos != 32767 || e.sin != 0)
       throw std::runtime_error(
           "This scene currently displays plain, unrotated terrain only.");
+    if (e.min_x < double(data.tg_x0) * 160 ||
+        e.min_y < double(data.tg_y0) * 160 ||
+        e.max_x >= (double(data.tg_x0) + data.tg_w) * 160 ||
+        e.max_y >= (double(data.tg_y0) + data.tg_h) * 160)
+      throw std::runtime_error(
+          "This terrain surface extends beyond its query grid.");
+    if (e.min_x >= e.max_x || e.min_y >= e.max_y)
+      throw std::runtime_error("This terrain surface has no visible area.");
+    // The preview draws the whole element rectangle. Refuse holes: every grid
+    // cell touched by that rectangle must list this element for collision.
+    const auto col0 = (e.min_x - data.tg_x0 * 160) / 160;
+    const auto col1 = (e.max_x - data.tg_x0 * 160) / 160;
+    const auto row0 = (e.min_y - data.tg_y0 * 160) / 160;
+    const auto row1 = (e.max_y - data.tg_y0 * 160) / 160;
+    for (auto row = row0; row <= row1; ++row)
+      for (auto col = col0; col <= col1; ++col) {
+        const auto &cell = data.grid[std::size_t(row * data.tg_w + col)];
+        if (std::find(cell.begin(), cell.end(), int64_t(element_index)) == cell.end())
+          throw std::runtime_error("This terrain has partial surface coverage that "
+                                   "the scene cannot display yet.");
+      }
     const auto index =
         e.hf < 0 ? int64_t(data.heightfields.size()) + e.hf : e.hf;
     const auto &hf = data.heightfields.at(static_cast<std::size_t>(index));
