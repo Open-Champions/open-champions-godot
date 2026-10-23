@@ -196,6 +196,67 @@ void host() {
   }
   {
     Host h;
+    auto chunk = h.w->spawn_gut_chunk({0, 0, 0}, 2, 0);
+    std::vector<std::uint8_t> vif(0x40 + 64 * 24);
+    vif[0x25] = 4;
+    for (unsigned i = 0; i < 24; ++i)
+      vif[0x40 + i] = std::uint8_t(i - 12);
+    h.w->bind_prop_model(chunk, {vif.data(), vif.size()});
+    const auto model = h.w->read(chunk + 0x4c);
+    check(model != 0 && h.w->read(C::Address(model) + 0x25, 1) == 4 &&
+              h.w->read(C::Address(model) + 0x40, 1) == std::uint8_t(-12),
+          "the PhProp model pointer resolves an owner-supplied signed VIF hull");
+    std::string run_refusal;
+    try { h.w->run_actor(chunk); }
+    catch (const std::exception &e) { run_refusal = e.what(); }
+    check(run_refusal.find("model_getHullPoints returned null") == std::string::npos,
+          "the prop run passes its previously missing hull lookup");
+    vif[0x25] = 0;
+    bool refused = false;
+    try { h.w->bind_prop_model(chunk, {vif.data(), vif.size()}); }
+    catch (const champions::FormatError &) { refused = true; }
+    check(refused && h.w->read(C::Address(model) + 0x25, 1) == 4,
+          "a missing disc hull refuses without replacing the bound model");
+  }
+  {
+    Host h;
+    h.w->write(0x4f7120, 4, 1); // Mode B is selected by the caller.
+    h.w->begin_arena_intro();
+    check(h.w->read(0x5038c8, 2) == 180 && h.w->read(0x503890) == 1,
+          "wave intro begins with the observed lock and 180 visits");
+    for (unsigned visit = 0; visit < 180; ++visit) {
+      h.w->arena_intro_visit();
+      check(h.w->read(0x5038c8, 2) == 179 - visit &&
+                h.w->read(0x503890) == 1 &&
+                h.w->read(0x41b4fc) == 1 && h.w->read(0x41b500) == 1,
+            "each positive intro visit preserves all three locks");
+    }
+    h.w->arena_intro_visit();
+    check(h.w->read(0x5038c8, 2) == 0xffff &&
+              h.w->read(0x503890) == 0 &&
+              h.w->read(0x41b4fc) == 0 && h.w->read(0x41b500) == 0,
+          "visit 181 releases the creature state gate");
+  }
+  {
+    world_queries::LevelData data;
+    data.tg_w = data.tg_h = 1;
+    data.grid = {{0}};
+    world_queries::HeightField field;
+    field.w = field.h = 1;
+    field.samples = {0};
+    data.heightfields.push_back(field);
+    data.elements.push_back(world_queries::make_element(
+        0, -100, -100, 100, 100, 0, 0, 0, 0, 0, 32767, 0));
+    world_queries::Level terrain(data);
+    auto services = C::with_terrain({}, terrain);
+    check(services.raycast({0, 0, from_int(5)}, {from_int(20), 0, 0},
+                           3, ONE) == MINUS_ONE,
+          "selected terrain gives the clear-line ray answer, not a zero stub");
+    check(services.height_below({0, 0, from_int(5)}, from_int(4)) == 0,
+          "sight and movement services share the same selected terrain");
+  }
+  {
+    Host h;
     auto target = h.creature({from_int(8), 0, 0});
     h.w->write(target + 0x2e0, 2, 0x20);
     h.w->write(target + 0x24, 4, 0x1000);

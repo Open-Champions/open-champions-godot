@@ -1,6 +1,8 @@
 #pragma once
 #include "champions/core_math.hpp"
 #include "champions/creature_hp.hpp"
+#include "champions/archive.hpp"
+#include "champions/world_queries.hpp"
 #include <array>
 #include <functional>
 #include <memory>
@@ -127,6 +129,9 @@ struct Services {
   // refuses. The flat fixture returns 0, which is not an original group id.
   std::function<Raw()> particle_group;
 };
+// Install the original terrain query answers from one selected, post-fixup
+// WORLD. The caller owns Level for as long as the resulting World runs.
+Services with_terrain(Services base, world_queries::Level &level);
 struct Arc {
   Raw facing = 0, angle = 6000, minimum = 4, maximum = 8, attack = 100,
       flags = 8;
@@ -217,6 +222,13 @@ public:
   void process_damage(Address);
   void player_find_target(Address, Raw reach);
   void player_melee_hit(Address, Address, Raw extra = 0, Raw scale = 0);
+  // Mode-B arena_startWave's bounded intro state and arena_runTask's first
+  // 181 visits. The wave builder and later empty-wave branch are not implied.
+  void begin_arena_intro();
+  void arena_intro_visit();
+  // Bind the owner-supplied .vif hulls at a PhProp's resource pointer. Checks
+  // every active mesh bit before publishing bytes to the owned World memory.
+  void bind_prop_model(Address prop, champions::Bytes vif);
   void apply_knockback(Address, Raw scale);
   Raw move_creature(Address, const Vec3 &);
   void dead_update(Address, Raw events, Raw hold, Raw size,
