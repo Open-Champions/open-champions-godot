@@ -148,6 +148,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::stop_session);
   ClassDB::bind_method(D_METHOD("get_observation"),
                        &ChampionsSessionController::get_observation);
+  ClassDB::bind_method(D_METHOD("probe_full_walk_weight_test"),
+                       &ChampionsSessionController::probe_full_walk_weight_test);
   ClassDB::bind_method(D_METHOD("get_terrain"),
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
@@ -318,6 +320,27 @@ Dictionary ChampionsSessionController::present_observation(
 Dictionary ChampionsSessionController::get_observation() const {
   try {
     return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::probe_full_walk_weight_test() {
+  try {
+    if (!combat_ || !combat_->full())
+      throw std::runtime_error("Walk-cell probe requires the synthetic Full fixture.");
+    const auto player = combat_->actors().at(0);
+    const auto address = combat_->world().target(player.handle);
+    const auto expected = combat_->world().read(address + 0x144);
+    const auto observed = combat_->probe_walk_life_zero([&] {
+      const Array actors = combat_observation()["combat_actors"];
+      const Dictionary row = actors[0];
+      return rta::Raw(int64_t(row["locomotion_walk_weight_raw"]));
+    });
+    Dictionary out;
+    out["ok"] = true;
+    out["expected_weight_raw"] = int64_t(expected);
+    out["observed_weight_raw"] = int64_t(observed);
+    return out;
   } catch (const std::exception &e) {
     return failure(e);
   }
@@ -2080,7 +2103,7 @@ Dictionary ChampionsSessionController::combat_observation() const {
         // cells and must not advertise original player locomotion.
         value["locomotion_speed_raw"] = int64_t(combat_->world().read(address + 0x468));
         value["locomotion_blend_raw"] = int64_t(combat_->world().read(address + 0x46c));
-        value["locomotion_walk_weight_raw"] = int64_t(combat_->world().read(address + 0x14c));
+        value["locomotion_walk_weight_raw"] = int64_t(combat_->world().read(address + 0x144));
         value["locomotion_run1_weight_raw"] = int64_t(combat_->world().read(address + 0x164));
         value["locomotion_run2_weight_raw"] = int64_t(combat_->world().read(address + 0x184));
         const auto slot = combat_->world().read(address + 0x3c8);

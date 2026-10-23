@@ -228,6 +228,7 @@ public:
   godot::Dictionary release_input();
   godot::Dictionary stop_session();
   godot::Dictionary get_observation() const;
+  godot::Dictionary probe_full_walk_weight_test();
   godot::Dictionary get_terrain() const;
   godot::Dictionary save_file(const godot::String &path);
   godot::Dictionary save_snapshot_file(const godot::String &path);

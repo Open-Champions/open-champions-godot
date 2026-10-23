@@ -1,4 +1,4 @@
-STATUS: PARTIAL — PV3-1 archive-identity audit finding is fixed and verified; Full-fixture locomotion cells are exposed. The ordinary game-folder player still has no verified Player_move state or equipment/appearance draw path, so live idle/walk/run and hair/beard/gear parity are not complete.
+STATUS: PARTIAL — PV3-1 archive identity and PV4-1 walk-weight audit findings are fixed and verified in the Full fixture. The ordinary game-folder player still has no verified Player_move state or equipment/appearance draw path, so live idle/walk/run and hair/beard/gear parity are not complete.
 
 # Play visuals round 4 — 2026-10-23
 
@@ -14,6 +14,8 @@ Branch `codex/play-visuals`, base `f0213ec`. Evidence: `t3/research-player-anim`
 
 - PV3-1: `read_player_resource` selects and copies a `.vif`, `.anm` or `.tex` entry from one validated, fingerprinted archive snapshot. The caller supplies the selected row, fingerprint and expected entry name; a changed archive or name returns a refusal. `real_player.gd` no longer rereads saved body or clip offsets, and the player skin binder uses the same validated path for body and texture bytes.
 - Synthetic archive tests check accepted body/clip/texture copies, a wrong clip name, and changed archives at the same path for each resource. No private bytes enter those fixtures.
+- PV4-1: `locomotion_walk_weight_raw` now reads track 1 weight at `P+0x144`, as specified by `t3/research-player-anim` `f6dfb13` (`docs/spec/player-animation-selection.md:87-90`, `docs/spec/animation.md:52-76`). `P+0x14c` is track 1 life. The Full smoke checks the walk weight against the executed blend during the mode-0 rise.
+- Mode 0 writes the same blend to weight and life, so equality alone cannot distinguish those addresses. A synthetic Full-fixture probe temporarily sets life to zero, reads the same Godot observation, then restores the exact word without a tick or journal entry. With the old `P+0x14c` read temporarily reinstated, the smoke failed on that probe (1 failure); the corrected read passes. The probe is restricted to the synthetic Full fixture.
 
 ## Verification
 
@@ -25,5 +27,16 @@ Branch `codex/play-visuals`, base `f0213ec`. Evidence: `t3/research-player-anim`
 - `python3 work/play-visuals/r4-run-godot-matrix.py`: final Godot 4.5.2 dev matrix **54/54 exit 0**. The Full fixture smoke includes new checks for the player locomotion fields and the nonzero executed walk cells; **2,622 checks, zero failures**.
 - `zsh work/play-visuals/r4-run-sweep-final.sh`: read-only disc, scripts on, four background slices; **111 tried / 111 loaded / 111 played**, 230 checks passed, 111 scripts attached, zero script faults, failures or refusals.
 - Final dev Full smoke `FULL_TRACE`: **36,402 bytes**, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged from round 3. This is a synthetic fixture trace, not retail play parity.
+
+### PV4-1 audit-fix verification
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release && cmake --build build/native -j 4`: passed on arm64 after the probe addition.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/../integration/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug && cmake --build build/godot-extension -j 4`: passed on arm64 after restoring the corrected `P+0x144` read.
+- `ctest --test-dir build/native --output-on-failure -j 3 -R '^(fixture-save|creature-anim-api|creature-anim-exact|skinning-positions|model-texture-bind|combat-play|play-session-boundary)$'`: **7/7 passed** on arm64.
+- `ctest --test-dir build/native --output-on-failure -j 3`: **231/231 passed** on arm64 (950.04 seconds under concurrent test load).
+- Negative control: temporarily reading `P+0x14c` made `playable_wave_smoke_full_combat.gd` exit 1, with exactly one failure: `walk observation reads weight when synthetic life differs`. Restoring `P+0x144` gave zero failures. The negative-control edit is absent from this commit.
+- `python3 work/play-visuals/r4-run-godot-matrix.py`: **54/54 exit 0** on the corrected build; the Full smoke passed **2,624 checks, zero failures**.
+- `zsh work/play-visuals/r4-run-sweep-final.sh`: read-only disc, scripts on; **111 tried / 111 loaded / 111 played**, 230 checks passed, 111 scripts attached, zero failures or refusals.
+- Final dev Full smoke `FULL_TRACE`: **36,402 bytes**, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged by the observation and probe.
 
 No push or PR. Original player animation integration requires a game-folder Session backed by the executed Player_move/animation state, bound to the selected record. Exact appearance needs record choices, live equipped item/definition/cache data, parent part skinning and draw order, followed by a rendered native-frame comparison for the two Unknown timing points.

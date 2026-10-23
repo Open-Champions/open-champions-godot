@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace champions::simulation::rta::fixture_save {
 namespace fxsim = champions::rta::fx::sim;
@@ -72,6 +73,9 @@ public:
   const play_animation::Frame &animation_frame(unsigned slot) const { return session_->animation_frame(slot); }
   const std::vector<combat_runtime::Event> &tick_events() const { return session_->tick_events(); }
   Raw shared_seed() const { return session_->shared_seed(); }
+  // Synthetic Full-fixture observation probe: make walk life distinct for one
+  // read, then restore it without advancing or recording a journal action.
+  Raw probe_walk_life_zero(const std::function<Raw()> &read_exposed);
 
   // Journaled operations (each forwards to combat_play::Session / Effects and
   // rethrows its refusal after recording it).

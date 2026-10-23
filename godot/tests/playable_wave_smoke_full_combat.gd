@@ -61,7 +61,17 @@ func continuation_cases() -> void:
 	step()
 	check(scene.raw_observation.ready_ticks == 0, "first submission has no ready tick")
 	var x0: float = actor(0).position.x
-	for i in range(40): step(1) # D: stick +x
+	for i in range(40):
+		step(1) # D: stick +x
+		if i == 2:
+			var blend_raw: int = int(actor(0).locomotion_blend_raw)
+			check(blend_raw != 0 and blend_raw != 0x3f800000
+				and int(actor(0).locomotion_walk_weight_raw) == blend_raw,
+				"mode-0 walk weight equals the rising blend before saturation")
+			var probe: Dictionary = scene.controller.probe_full_walk_weight_test()
+			check(probe.get("ok", false) and int(probe.get("expected_weight_raw", 0)) == blend_raw
+				and int(probe.get("observed_weight_raw", 0)) == blend_raw,
+				"walk observation reads weight when synthetic life differs")
 	check(actor(0).position.x > x0 + 40.0, "the stick walks the player along +x (executed Player_move)")
 	check(int(actor(0).locomotion_speed_raw) != 0 and int(actor(0).locomotion_blend_raw) != 0
 		and int(actor(0).locomotion_walk_weight_raw) != 0,
