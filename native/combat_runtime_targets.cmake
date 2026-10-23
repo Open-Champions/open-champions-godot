@@ -5,6 +5,7 @@ add_library(champions-combat-runtime
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_damage.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_player.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_api.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_adopt.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_move.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_melee.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_defence.cpp"

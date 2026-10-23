@@ -1282,6 +1282,13 @@ void World::State::run(Address a) {
   }
   // FullRuntime._slot4.
   auto fn = u(u(a + 0x48) + 36);
+  if (services.external_run) {
+    auto external = services.external_run;
+    if (external(a)) {
+      note("run", {a});
+      return;
+    }
+  }
   // StaticFire_run 0x2c595c still deals damage from a view test this round
   // did not take. DiseaseCloud_run 0x2ce6e0 is the round-3 body.
   if (fn == 0x2c595c || (fn == DISEASE_CLOUD_RUN && !round3))

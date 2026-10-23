@@ -3,6 +3,7 @@
 #include "champions/creature_hp.hpp"
 #include "champions/world_authority.hpp"
 #include <array>
+#include <map>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -134,6 +135,10 @@ struct Services {
   // particleGroup_create (SpellHornOmenEffect_ctor). A missing function
   // refuses. The flat fixture returns 0, which is not an original group id.
   std::function<Raw()> particle_group;
+  // Slot 4 of an adopted campaign creature (World::adopt_creature). Called
+  // from the run list before any table lookup; return true when the class
+  // body ran. A false return falls through to the executed dispatch.
+  std::function<bool(Address actor)> external_run;
 };
 struct Arc {
   Raw facing = 0, angle = 6000, minimum = 4, maximum = 8, attack = 100,
@@ -207,6 +212,34 @@ public:
   // A level-factory object remains owned by the script host. Its handle can
   // be resolved here without claiming an unported combat constructor or run.
   const objects::GameObject *factory_object(Address head) const;
+  // A script-host factory creature that a campaign class port has finished
+  // building: its bytes already live in the shared memory and its object is
+  // registered with the authority. Gives it a combat record so executed
+  // damage, targeting and knockback bodies (damage_apply, Creature_takeDamage,
+  // grid queries) accept it as a victim or target. The vtable at +0x48 must be
+  // defined (define_creature_table) first. Never allocates, draws or links.
+  void adopt_creature(Address factory_object);
+  // Writes a creature vtable image: the executed Creature base slots, then the
+  // class's own overrides (slot -> function address).
+  void define_creature_table(Address table,
+                             const std::map<unsigned, Raw> &overrides);
+  // A class virtual body ported outside the arena model, selected by function
+  // address (for example a WarBoar_setState at slot 27). Runs before any
+  // inherited body; arguments are the call's integer arguments.
+  void set_class_body(Raw function,
+                      std::function<void(Address self,
+                                         const std::vector<std::uint64_t> &args)> body);
+  // Base Creature steps a class run makes over the shared memory
+  // (Creature_run, Creature_updateActive, Creature_stepAnim).
+  bool creature_run(Address);
+  bool creature_update_active(Address);
+  Raw creature_step_anim(Address, Raw speed);
+  bool creature_away_from_home(Address);
+  bool creature_sees_target(Address);
+  // Creature_filterState 0x10a9c0: true when the requested state is allowed.
+  bool creature_filter_state(Address, std::uint32_t requested);
+  // Creature_onDeath 0x10beb8 (virtual slot 28).
+  void creature_on_death(Address, Raw quiet = 0);
   void destroy(Address);       // slot 1 with 3 through the executed chain
   void delete_object(Address); // unlink run list now; grid/handles persist
   void update_grid(Address);

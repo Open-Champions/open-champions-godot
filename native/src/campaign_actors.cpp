@@ -84,14 +84,22 @@ std::array<Raw, 5> balance_lookup(const std::uint8_t *data, std::size_t size,
   return {ONE, ONE, ONE, ONE, ONE};
 }
 
-Actor::Actor(Kind k, objects::GameObject *o) : kind(k), object(o) {}
+Actor::Actor(Kind k, objects::GameObject *o, creature_hp::Memory *shared)
+    : kind(k), object(o),
+      hp_owned_(shared ? std::make_unique<creature_hp::Model>(*shared)
+                       : std::make_unique<creature_hp::Model>()),
+      hp(*hp_owned_) {}
 Raw Actor::health() const { return Raw(hp.mem.load(object->addr + 0x228, 4)); }
 bool Actor::dead() const { return !lt(ZERO, health()); }
 
-Runtime::Runtime(objects::World &world, resources::Manager &resources, Services services)
+Runtime::Runtime(objects::World &world, resources::Manager &resources, Services services,
+                 creature_hp::Memory *shared)
     : world_(world), resources_(resources), services_(std::move(services)),
       boar_def_(definition("warboar.lmp", BOAR_NAMES)),
-      minotaur_def_(definition("minotaur.lmp", MINOTAUR_NAMES)) {
+      minotaur_def_(definition("minotaur.lmp", MINOTAUR_NAMES)), shared_(shared) {
+  // A shared-memory Runtime is dispatched and resolved by its owner (the
+  // combat World calls tick(address); entries resolve in adopt()).
+  if (shared_) return;
   // This bounded runtime owns dispatch for the supplied isolated World.
   if (world_.on_run || world_.res_find)
     throw Unsupported("constructor: World already has actor or resource dispatch");
@@ -101,8 +109,18 @@ Runtime::Runtime(objects::World &world, resources::Manager &resources, Services 
   world_.on_run = [this](objects::GameObject &o) { tick(o.addr); };
 }
 Runtime::~Runtime() {
+  if (shared_) return;
   world_.on_run = {};
   world_.res_find = {};
+}
+
+std::optional<std::pair<std::string, std::string>> Runtime::resource_name(std::uint32_t token) const {
+  if (!token || token > names_.size()) return std::nullopt;
+  return names_[token - 1];
+}
+std::optional<champions::Bytes> Runtime::resource_bytes(std::uint32_t token) {
+  if (!token || token > handles_.size()) return std::nullopt;
+  return resources_.bytes(handles_[token - 1]);
 }
 
 std::uint32_t Runtime::resolve(const std::string &lump, const std::string &entry) {
@@ -110,6 +128,7 @@ std::uint32_t Runtime::resolve(const std::string &lump, const std::string &entry
   if (!handle || !resources_.bytes(*handle))
     throw Unsupported("GameObject_ctor/res_find: named resource unavailable");
   handles_.push_back(*handle);
+  names_.emplace_back(lump, entry);
   // Native opaque IDs are scoped to this Runtime; they are never game pointers.
   return std::uint32_t(handles_.size());
 }
@@ -281,6 +300,100 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
       });
 }
 
+Actor *Runtime::find(std::uint32_t address) {
+  auto it = actors_.find(address);
+  return it == actors_.end() || !it->second->object->alive ? nullptr : it->second.get();
+}
+
+std::uint32_t Runtime::definition_entry(Kind kind, unsigned slot) {
+  auto def = kind == Kind::Minotaur ? minotaur_def_ : boar_def_;
+  if (!slot || slot > def->entries.size())
+    throw Unsupported("definition slot outside the documented table");
+  return def->entries[slot - 1].second;
+}
+
+Actor &Runtime::adopt(Kind kind, objects::GameObject &object, std::uint32_t angle,
+                      std::optional<std::int64_t> boss_rank) {
+  if (!shared_) throw Unsupported("adopt: needs a shared-memory Runtime");
+  if (kind == Kind::Minotaur)
+    throw Unsupported("Minotaur_ctor/base creature flags Unknown");
+  required(services_.model_hide_mask, "constructor/model_buildHideMask");
+  required(services_.animation_init, "constructor/anim_clear_push");
+  required(services_.set_def_entry_params, "constructor/creature_setDefEntryParams");
+  required(services_.creature_init, "constructor/Creature_init");
+  if (actors_.count(object.addr))
+    throw Unsupported("adopt: address already has an actor");
+  auto def = boar_def_;
+  // Preflight: every named entry must exist before any state is touched.
+  for (const auto &entry : def->entries) {
+    auto h = resources_.find(def->lump, entry.first);
+    if (!h || !resources_.bytes(*h))
+      throw Unsupported("constructor: named definition resource unavailable");
+  }
+  if (def->generation != world_.lump_generation) {
+    for (auto &entry : def->entries) entry.second = resolve(def->lump, entry.first);
+    def->generation = world_.lump_generation;
+  }
+  object.class_def = def;
+  object.angle = angle;
+  object.class_name = kind == Kind::WarBoarSmall ? "WarBoarSmall" : "WarBoar";
+  object.type_name = *object.class_name;
+  std::unique_ptr<Actor> actor;
+  if (kind == Kind::WarBoarSmall) actor = std::make_unique<WarBoarSmall>(&object, shared_);
+  else actor = std::make_unique<WarBoar>(&object, false, shared_);
+  auto &mem = actor->hp.mem;
+  const auto at = object.addr;
+  actor->supplied_rank = boss_rank;
+  // WarBoar_ctor 0x2ba03c, after Creature_ctor (research-campaign-combat
+  // handoff round 2): the same stores construct() makes, over the base
+  // constructor's bytes.
+  object.vtable = 0x517cf0;
+  object.radius = 0x41f00000;
+  object.draw_half_width = 40;
+  actor->creature_flags = UINT64_C(0x200040000);
+  actor->turn_rate = ONE;
+  actor->kind_byte = 3;
+  actor->forward_offset = kind == Kind::WarBoarSmall ? 0xc1200000 : 0xc1700000;
+  actor->scale = kind == Kind::WarBoarSmall ? 0x3f199999 : 0x3f400000;
+  actor->small_marker = kind == Kind::WarBoarSmall ? 1 : 0;
+  mem.store(at + 0x48, 4, 0x517cf0);
+  mem.store(at + 0x1c, 4, object.radius);
+  mem.store(at + 0x28, 1, 40);
+  mem.store(at + 0xb8, 4, 0);
+  mem.store(at + 0xb0, 4, ONE);
+  mem.store(at + 0xb4, 1, 3);
+  mem.store(at + 0xa8, 8, mem.load(at + 0xa8, 8) | UINT64_C(0x200040000));
+  mem.store(at + 0x5c, 4, 0xbe4ccccc);
+  mem.store(at + 0xe0, 4, actor->forward_offset);
+  mem.store(at + 0xdc, 4, actor->scale);
+  mem.store(at + 0x3d0, 1, actor->small_marker);
+  mem.store(at + 0x232, 2, 0);
+  mem.store(at + 0xec, 4, 0);
+  mem.store(at + 0xe8, 4, 0);
+  mem.store(at + 0x220, 8, 0);
+  actor->hp.callbacks["handle_clear"] = [this](creature_hp::Model &, const std::vector<std::uint32_t> &a) {
+    required(services_.handle_clear, "Creature_takeDamage/handle_clear");
+    services_.handle_clear(a.at(0));
+  };
+  actor->hp.callbacks["handle_link"] = [this](creature_hp::Model &, const std::vector<std::uint32_t> &a) {
+    required(services_.handle_link, "Creature_takeDamage/handle_link");
+    services_.handle_link(a.at(0), a.at(1));
+  };
+  // Definition words: slot k's resolved ID lives at +8k+4 (research: class
+  // definition 0x502f80; model_buildHideMask reads slot 1, idle is slot 16).
+  for (unsigned k = 1; k <= def->entries.size(); ++k)
+    mem.store(0x502f80 + 8 * k + 4, 4, def->entries[k - 1].second);
+  actor->hidden_parts = services_.model_hide_mask(def->entries.at(0).second, 0);
+  mem.store(at + 0x220, 8, actor->hidden_parts);
+  services_.animation_init(at, true);
+  world_.run_every_60(object);
+  for (const auto &p : BOAR_EVENTS) services_.set_def_entry_params(at, p);
+  services_.creature_init(at);
+  auto *result = actor.get();
+  actors_.emplace(at, std::move(actor));
+  return *result;
+}
+
 Actor &Runtime::at(std::uint32_t address) {
   auto it = actors_.find(address);
   if (it == actors_.end() || !it->second->object->alive)
@@ -319,7 +432,15 @@ void Runtime::set_state(Actor &a, std::uint32_t state) {
     if (a.kind == Kind::Minotaur) {
       services_.minotaur_death_remainder(a.object->addr);
     } else {
-      a.object->rand(); // observed boar death-animation choice
+      // Observed boar death-animation choice: one own-generator draw. A
+      // shared-memory actor's generator is the object's +0x44 word.
+      if (shared_) {
+        const auto seed = std::uint32_t(a.hp.mem.load(a.object->addr + 0x44, 4)) *
+                              0x19660du + 0x3c6ef35fu;
+        a.hp.mem.store(a.object->addr + 0x44, 4, seed);
+      } else {
+        a.object->rand();
+      }
       services_.death_animation(a.object->addr);
       services_.on_death(a.object->addr);
     }
@@ -352,7 +473,7 @@ void Runtime::tick_boar(Actor &a, const TickInput &in) {
     if (!in.state_entry_frame)
       throw Unsupported("WarBoar_run/state0: entry age for +0xf4 Unknown");
     // State 0 -> 1 once the clock exceeds +0xf4 = entry age + 180 (fixed).
-    if (world_.frame > *in.state_entry_frame + 180)
+    if (clock() > *in.state_entry_frame + 180)
       throw Unsupported("WarBoar_run/state0: state-1 transition effects Unknown");
     return;
   case 3:
@@ -386,6 +507,22 @@ void Runtime::tick(std::uint32_t address) {
   services_.process_damage(address);
   services_.creature_run(address);
   if (a.dead() && !a.death_reported) { set_state(a, 0x14); return; }
+  if (a.ai_refusal) return;
+  if (!contain_) { tick_ai(a, address); return; }
+  try {
+    tick_ai(a, address);
+  } catch (const Unsupported &refusal) {
+    a.ai_refusal = refusal.what();
+    refusal_counts_[refusal.what()] += 1;
+  }
+}
+
+std::int64_t Runtime::clock() const {
+  // A shared-memory Runtime reads the combat World's simulation frame word.
+  return shared_ ? std::int64_t(shared_->load(creature_hp::G_SIM_FRAME, 4)) : world_.frame;
+}
+
+void Runtime::tick_ai(Actor &a, std::uint32_t address) {
   const auto in = services_.tick_input(address);
   if (!in.active) return;
   required(services_.animation_step, "Creature_stepAnim");
@@ -406,7 +543,7 @@ void Runtime::take_damage(std::uint32_t address, std::uint32_t attacker,
   auto &a = at(address);
   if (attacker != 0)
     throw Unsupported("Creature_takeDamage: nonzero attacker World binding Unknown");
-  a.hp.mem.store(creature_hp::G_SIM_FRAME, 4, std::uint32_t(world_.frame));
+  a.hp.mem.store(creature_hp::G_SIM_FRAME, 4, std::uint32_t(clock()));
   a.hp.take_damage(address, attacker, flags, amount);
 }
 } // namespace champions::simulation::rta::campaign_actors

@@ -313,6 +313,25 @@ public:
     bool gate_travel = false, loaded_from_save = false;
   };
   void set_player1_entry(Player1Entry entry) { player1_entry_ = std::move(entry); }
+  // A class port finishing a factory creature (campaign_actors WarBoar and
+  // WarBoarSmall). When set, a boar-family record runs the executed base
+  // Creature_ctor (arena model) over the shared memory first, with the
+  // selected level's balance row and monster level, and then the builder runs
+  // the class constructor. The builder throws (its what() is the refusal
+  // label) to leave the record a labelled stub. Without a builder these
+  // records stay unbuilt, as before.
+  struct CreatureRequest {
+    std::string class_name;
+    bool small = false;
+    std::uint32_t address = 0, angle = 0;
+    objects::GameObject *object = nullptr;
+  };
+  using CreatureBuilder = std::function<void(const CreatureRequest &)>;
+  void set_creature_builder(CreatureBuilder builder) { creature_builder_ = std::move(builder); }
+  champions::resources::Manager &resources() { return resources_; }
+  // Keeps a class port's runtime alive exactly as long as this host (and
+  // destroys it before the host's objects).
+  void retain(std::shared_ptr<void> owner) { keepalive_.push_back(std::move(owner)); }
   // Execute the observed intro/hud.lmp gate. A missing residency result
   // refuses seed advancement and counts the potentially omitted 223 draws.
   void advance_first_level_items(const std::string &level_name,
@@ -521,6 +540,9 @@ private:
   // record's property list (research items-gaps ecf9742 docs/spec/hide-monster.md
   // 4.1 and 5). world_createObject for ScriptGenerator_spawn: the factory row,
   // then a ported constructor chain; any other constructor refuses.
+  Build build_creature_family(const level_flow::Record &, const level_factory::Outcome &,
+                              std::uint32_t address, const std::vector<std::string> &props);
+  CreatureBuilder creature_builder_;
   Build build_generator(const level_factory::Outcome &, const level_flow::Record &,
                         std::uint32_t address, const std::vector<std::string> &props);
   std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
@@ -624,6 +646,8 @@ private:
   // A dialog built-in is running: the binder's camera, message, shop and menu
   // seams it calls are answered by the dialog wiring.
   bool in_dialog_command_ = false;
+  // After variables_: a class port's runtime dies before the host's objects.
+  std::vector<std::shared_ptr<void>> keepalive_;
   // Declared last so the machine, whose natives capture this, dies first.
   std::shared_ptr<amx::Machine> machine_;
 };

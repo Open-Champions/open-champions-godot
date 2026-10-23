@@ -79,23 +79,31 @@ struct Actor {
   std::uint64_t hidden_parts = 0;
   std::uint64_t creature_flags = 0;
   std::optional<std::int64_t> supplied_rank;
-  creature_hp::Model hp;
+  // Owns its bytes unless constructed over a shared World memory.
+  std::unique_ptr<creature_hp::Model> hp_owned_;
+  creature_hp::Model &hp;
   bool death_reported = false;
+  // Set when a contained refusal froze this actor's AI (see
+  // Runtime::contain_refusals); processDamage and the death check still run.
+  std::optional<std::string> ai_refusal;
   combat::MonsterStats stats;
-  Actor(Kind, objects::GameObject *);
+  Actor(Kind, objects::GameObject *, creature_hp::Memory *shared = nullptr);
   virtual ~Actor() = default;
   Raw health() const;
   bool dead() const;
 };
 struct WarBoar : Actor {
-  explicit WarBoar(objects::GameObject *o, bool small = false)
-      : Actor(small ? Kind::WarBoarSmall : Kind::WarBoar, o) {}
+  explicit WarBoar(objects::GameObject *o, bool small = false,
+                   creature_hp::Memory *shared = nullptr)
+      : Actor(small ? Kind::WarBoarSmall : Kind::WarBoar, o, shared) {}
 };
 struct WarBoarSmall : WarBoar {
-  explicit WarBoarSmall(objects::GameObject *o) : WarBoar(o, true) {}
+  explicit WarBoarSmall(objects::GameObject *o, creature_hp::Memory *shared = nullptr)
+      : WarBoar(o, true, shared) {}
 };
 struct Minotaur : Actor {
-  explicit Minotaur(objects::GameObject *o) : Actor(Kind::Minotaur, o) {}
+  explicit Minotaur(objects::GameObject *o, creature_hp::Memory *shared = nullptr)
+      : Actor(Kind::Minotaur, o, shared) {}
 };
 class Runtime {
   objects::World &world_;
@@ -104,14 +112,25 @@ class Runtime {
   std::shared_ptr<objects::ClassDef> boar_def_, minotaur_def_;
   std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
   std::vector<resources::Handle> handles_;
+  std::vector<std::pair<std::string, std::string>> names_;
+  creature_hp::Memory *shared_ = nullptr;
+  std::int64_t clock() const;
+  bool contain_ = false;
+  std::map<std::string, std::size_t> refusal_counts_;
   std::uint32_t resolve(const std::string &, const std::string &);
+  void tick_ai(Actor &, std::uint32_t address);
   Actor &construct_impl(Kind, const objects::Vec3 &, std::uint32_t,
                         objects::Props, Raw,
                         const std::function<void(Actor &)> &);
   void tick_boar(Actor &, const TickInput &);
   void set_state(Actor &, std::uint32_t);
 public:
-  Runtime(objects::World &, resources::Manager &, Services);
+  // `shared` (optional): the World authority's memory. Adopted actors read
+  // and write their fields there, so the combat World sees the same bytes.
+  // With it the Runtime does not install World-wide run/res_find dispatch:
+  // the owner dispatches slot 4 and resolves resources itself.
+  Runtime(objects::World &, resources::Manager &, Services,
+          creature_hp::Memory *shared = nullptr);
   ~Runtime();
   // Supplied HP is a bounded synthetic/base-service answer. Use the balanced
   // overload when the selected level's tables and rank are available.
@@ -124,7 +143,27 @@ public:
                             objects::Props, const std::uint8_t *balance,
                             std::size_t balance_size, const combat::Tables &,
                             const combat::World &, std::int64_t rank);
+  // The class-constructor part of WarBoar_ctor / WarBoarSmall_ctor on an
+  // object whose GameObject_ctor and Creature_ctor already ran (the host's
+  // base-constructor model wrote the stats, flags and class definition word).
+  // Does not draw, allocate or re-roll anything. Minotaur is not adoptable:
+  // its base Creature_ctor flags are Unknown (Services::minotaur_base_flags).
+  Actor &adopt(Kind, objects::GameObject &, std::uint32_t angle,
+               std::optional<std::int64_t> boss_rank);
+  // Documented definition-slot resolution (20 boar slots, by name) and the
+  // slot-ordered opaque IDs the object's definition words hold.
+  std::uint32_t definition_entry(Kind, unsigned one_based_slot);
+  // The (lump, entry) name and the owned bytes behind an opaque resource ID.
+  std::optional<std::pair<std::string, std::string>> resource_name(std::uint32_t token) const;
+  std::optional<champions::Bytes> resource_bytes(std::uint32_t token);
   Actor &at(std::uint32_t);
+  Actor *find(std::uint32_t);
+  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() const { return actors_; }
+  // Opt-in: an Unsupported from the AI portion of a tick is recorded on the
+  // actor (Actor::ai_refusal) and counted, and that actor's AI stays frozen;
+  // processDamage, Creature_run and the death check keep running.
+  void set_contain_refusals(bool on) { contain_ = on; }
+  const std::map<std::string, std::size_t> &refusal_counts() const { return refusal_counts_; }
   void tick(std::uint32_t);
   void set_state(std::uint32_t, std::uint32_t);
   void take_damage(std::uint32_t, std::uint32_t attacker,
