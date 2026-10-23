@@ -339,7 +339,7 @@ void World::State::install_ctor_services() {
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
         "Skeleton_shatter", "GutChunk_ctor", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
         "MissileWeapon_ctor",
-        "model_getSamplePoint", "AntWave_ctor",
+        "model_getSamplePoint", "AntWave_ctor", "StaticFire_ctor",
         "creature_getAttachMatrix0", "model_getAttachMatrix",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
         "CT_type_info_equals"}) {
@@ -472,6 +472,10 @@ void World::State::install_services() {
                          "GameObject_ctor",
                          "GameObject_dtor",
                          "LightEffect_ctor",
+                         "Creature_setEffectTimer",
+                         "obj_addToAlwaysDraw",
+                         "path_blockNodes",
+                         "StaticFire_typeinfo",
                          "sound_playSample",
                          "trail_create",
                          "obj_updateActive",
@@ -649,8 +653,12 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return iv(is_demon_near(ar(0)));
   if (n == "CT_type_id")
     return iv(type_of(ar(0)));
+  // StaticFire's getter 0x3c7318 and descriptor 0x9083c0 are pinned by
+  // research-combat-ctors-3 symbols/runtime.tsv:500. Descriptor identity here
+  // is a World adapter; the RTTI equality body was not executed in research.
   if (n == "CT_type_info_equals")
-    return iv(same_type(ar(0),ar(1)) ? 1 : 0);
+    return iv((ar(0)==0x9083c0 || ar(1)==0x9083c0)
+        ? (ar(0)==ar(1)) : same_type(ar(0),ar(1)));
   if (n.rfind("Holder.v",0)==0) {
     auto slot=unsigned(std::stoul(n.substr(8)));
     if (slot>=1&&slot<=24) {
@@ -703,6 +711,12 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
                                         {5,0x2387d0},{15,0x11fcd0}};
     write_table(0x50d298,&slots);
     combat_ctors::antwave_ctor(model,ar(0),ar(1),v(2),ar(3),ar(4));
+    return iv(0);
+  }
+  if (n == "StaticFire_ctor") {
+    const std::map<unsigned,Raw> slots{{0,0x3c7318},{1,0x2c5770},{4,0x2c595c}};
+    write_table(0x50da38,&slots);
+    combat_ctors::staticfire_ctor(model,ar(0),v(1),ar(2),ar(3),ar(4),ar(5),ar(6));
     return iv(0);
   }
   if (n == "cxx_throwBadTypeid")
@@ -766,6 +780,16 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     schedule(ar(0), n == "obj_runEveryFrame" ? 1 : 60);
     return iv(0);
   }
+  if (n == "obj_addToAlwaysDraw") {
+    if (!full()) throw Unsupported("always-draw service outside Full");
+    link(0x5db4e8,ar(0),ar(0));
+    // research-combat-5 tools/ref_objects.py:add_to_always_draw:
+    // the list insertion also marks the object as not grid drawn.
+    w(ar(0)+0xc,u(ar(0)+0xc)|2u);
+    return iv(0);
+  }
+  if (n == "path_blockNodes")
+    throw Unsupported("path_blockNodes: a path-grid service is not supplied");
   if (n == "obj_stopRunning") {
     auto obj=ar(0);
     if (head(obj+4).next) handles.remove(head(obj+4).next);
@@ -943,6 +967,14 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "rigidbody_init" || n == "quat_fromMat3" || n == "quat_normalize" ||
       n == "rigidbody_updateDerived") {
     note(n,{ar(0)});
+    if (n == "rigidbody_init")
+      combat_ctors::rigidbody_init(model, ar(0), ar(1), ar(2), ar(3), ar(4), ar(5));
+    else if (n == "quat_fromMat3")
+      combat_ctors::rigidbody_quat_from_mat3(model, ar(0), ar(1));
+    else if (n == "quat_normalize")
+      combat_ctors::rigidbody_quat_normalize(model, ar(0));
+    else
+      combat_ctors::rigidbody_update_derived(model, ar(0));
     return iv(0);
   }
   if (n == "resref_get") {
@@ -1205,9 +1237,19 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
         throw Unsupported("Dodge statistics at a nonzero rank");
       return iv(0);
     }
+    // Descriptor address: research-combat-ctors-3 symbols/runtime.tsv:500.
+    // The equality rule using it is the World adapter documented above.
+    if (n == "StaticFire_typeinfo") return iv(0x9083c0);
     if (n == "LightEffect_ctor") {
-      Raw life = a.size() >= 4 + 12 ? ar(4 + 11) : ONE;
-      light_effect_ctor(ar(0), v(1), ar(2), life);
+      if (a.size()!=16)
+        throw Unsupported("LightEffect_ctor requires its twelve executed float arguments");
+      std::array<Raw,12> floats{};
+      for (unsigned k=0;k<12;++k) floats[k]=ar(4+k);
+      combat_ctors::light_effect_ctor(model,ar(0),v(1),ar(2),ar(3),floats);
+      return iv(0);
+    }
+    if (n == "Creature_setEffectTimer") {
+      combat_ctors::creature_set_effect_timer(model,ar(0),ar(1),ar(2),ar(3));
       return iv(0);
     }
     if (n == "GameObject_ctor") {
@@ -1292,8 +1334,12 @@ void World::State::run(Address a) {
     combat_ctors::gold_run(model,a);
     return;
   }
-  if (fn == 0x1edb18 || fn == 0x155fcc)
-    throw Unsupported("PhProp_run needs the unmodelled rigidbody_init output and terrain sweep");
+  if (fn == 0x1edb18 || fn == 0x155fcc) {
+    note("run", {a});
+    if (fn == 0x1edb18) combat_ctors::gutchunk_run(model, a);
+    else combat_ctors::phprop_run(model, a);
+    return;
+  }
   if (fn == 0x238938) {
     note("run",{a});
     combat_ctors::antwave_run(model,a);

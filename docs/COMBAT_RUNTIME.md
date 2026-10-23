@@ -553,3 +553,24 @@ The Full fixture's slot-5 Skeleton at (70, 100) (`combat_play.cpp`) is an **auth
 **Loaded-data services (round 4).** `model_getMeshJoint` (`0x179358`, the u8 at +6 of the 10-byte mesh record, `model-texture.md`) and `resref_get` (`0x17377c`, the cached data pointer, `engine.md`) are call-outs with no modelled result in the research (`ref_phprop.py`, `gut-chunk.md` section 9). The World no longer answers them with 0 and "the first word at the pointer": `Services::mesh_joint` and `Services::resref` supply loaded data, and a missing function refuses (`Skeleton_shatter` → `PhProp_ctor2`, `Gold_ctor2`). The synthetic Full fixture supplies neither.
 
 **Soul_isDemonNear, standalone.** `combat_ctors::soul` takes `typeid(obj)` of every box object, as `soul-run.md` and `ref_soul_run.py` do; it no longer skips objects with an unset slot 0 or an unknown getter and refuses instead. The World answers `Soul_isDemonNear` through its own call-out and does not take this path.
+
+## Combat constructors, round 5
+
+Research `t3/research-combat-5` `f33d1a3` executes `rigidbody_init`,
+`rigidbody_updateDerived`, `quat_fromMat3` and `quat_normalize`. The native
+PhProp constructor now stores their complete body output and spends exactly one
+cosmetic draw for `rigidbody_init`; the shared seed is untouched. Full World
+objects now enter the already executed `PhProp_run` and `GutChunk_run` bodies.
+The synthetic Full fixture has no loaded model hull table, so its AntQueen
+blood chunk stops at `model_getHullPoints returned null` on ready tick 269.
+It does not substitute a hull or claim that a live bone or gold pile settles.
+
+The cold-arrow timer and exploding-arrow `LightEffect_ctor` now have exact
+standalone bodies. The World composes the latter for its kind 1/2/5/6 arrow
+light calls, recording the full light record and its one GameObject shared draw.
+The elemental arrow family remains a separate `skills_b` runtime, with no
+Full World spawning route. The round-5 direct `StaticFire_ctor`, shared init and
+particle push bodies execute with supplied host services; its World path
+refuses when no path-grid service is supplied, and its run, draw and destructor
+remain unexecuted. `Minion_run`'s executed prefix places a held Soul after its
+animation step; states below `0x18` still refuse at the unexecuted dispatch.

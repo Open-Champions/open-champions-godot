@@ -178,6 +178,26 @@ void phprop_ctor2(A::Model &, Address prop, const Vec3 &position, Raw facing,
 void gold_ctor2(A::Model &, Address gold, const Vec3 &position, Raw amount);
 void phprop_run(A::Model &, Address prop);
 void gutchunk_run(A::Model &, Address chunk);
+// research-combat-5 f33d1a3, rigidbody-init.md: executed prop body services.
+void rigidbody_init(A::Model &, Address body, Raw mass, Raw factor,
+                    Raw sx, Raw sy, Raw sz);
+void rigidbody_update_derived(A::Model &, Address body);
+void rigidbody_quat_from_mat3(A::Model &, Address out, Address matrix);
+void rigidbody_quat_normalize(A::Model &, Address quaternion);
+// arrow-hit.md: the cold timer and exploding arrow's complete light record.
+void creature_set_effect_timer(A::Model &, Address creature, Raw which,
+                               Address source, Raw seconds);
+void light_effect_ctor(A::Model &, Address block, const Vec3 &position,
+                       Address follow, Raw tag, const std::array<Raw, 12> &floats);
+// staticfire-ctor.md: constructor, shared init and ring velocity push. Its
+// run/draw/destructor remain refused.
+void staticfire_ctor(A::Model &, Address fire, const Vec3 &position, Raw life,
+                     Address owner, Raw flag, Raw size, Raw scale);
+void staticfire_init_common(A::Model &, Address fire);
+void staticfire_push(A::Model &, Address fire, Raw facing);
+// minion-place.md: only the executed prefix and held-object placement.
+// A state below 0x18 refuses at the unexecuted state dispatch.
+bool minion_run_prefix(A::Model &, Address minion);
 void gold_run(A::Model &, Address gold);
 void gold_on_touch(A::Model &, Address gold, Address toucher);
 void hud_add_gold_floater(A::Model &, Raw slot, const Vec3 &position, Raw amount);

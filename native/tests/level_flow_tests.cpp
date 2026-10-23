@@ -1,4 +1,5 @@
 #include "champions/core_math.hpp"
+#include "champions/arena_executable.hpp"
 #include "champions/objects.hpp"
 #include "champions/session_level_flow.hpp"
 #include "../tools/level_spawn_lmp.hpp"
@@ -1433,6 +1434,49 @@ void round4_cases() {
   // Positions, z and facing of the mode-A start (pre-search and with a
   // seeded search) are reference-generated in level_flow_vectors.inc.
 }
+void arena_executable_case() {
+  namespace arena = champions::simulation::rta::arena_executable;
+  // Authored ELF32 fixture: one file-backed segment maps both documented
+  // table addresses. The names are synthetic and never come from the disc.
+  Blob bytes(0x1300);
+  bytes[0] = 0x7f;
+  bytes[1] = 'E';
+  bytes[2] = 'L';
+  bytes[3] = 'F';
+  bytes[4] = bytes[5] = 1;
+  put(bytes, 0x1c, 0x34);
+  put(bytes, 0x2a, 0x20, 2);
+  put(bytes, 0x2c, 1, 2);
+  put(bytes, 0x34, 1);
+  put(bytes, 0x38, 0x100);
+  put(bytes, 0x3c, 0x503000);
+  put(bytes, 0x44, 0x1200);
+  auto place = [&](std::uint32_t table, unsigned count, const std::string &prefix,
+                   std::uint32_t start) {
+    for (unsigned i = 0; i < count; ++i) {
+      const auto name = prefix + std::to_string(i);
+      const auto address = start + i * 16;
+      put(bytes, 0x100 + table - 0x503000 + 4 * i, address);
+      const auto offset = 0x100 + address - 0x503000;
+      std::copy(name.begin(), name.end(), bytes.begin() + offset);
+      bytes[offset + name.size()] = 0;
+    }
+  };
+  place(arena::NAMES_A_TABLE, 13, "A", 0x503900);
+  place(arena::NAMES_B_TABLE, 7, "B", 0x503a00);
+  arena::Executable executable;
+  CHECK(executable.load(bytes));
+  const auto names = arena::read_mode_a_names(executable);
+  CHECK(names.size() == 13);
+  CHECK(arena::mode_a_index(names, "a12") == 12);
+  CHECK(arena::mode_a_index(names, "B0") == -1);
+  CHECK(arena::mode_a_index(names, "") == -1);
+  put(bytes, 0x100 + arena::NAMES_A_TABLE - 0x503000 + 4 * 12, 0);
+  CHECK(executable.load(bytes));
+  refuses([&] { arena::read_mode_a_names(executable); });
+  bytes[0] = 0;
+  CHECK(!executable.load(bytes));
+}
 } // namespace
 // Authored LMP: one record naming "a.world" (4 payload bytes) and a count
 // word whose low 16 bits are 1. Research FORMATS.md: the LMP count is u32, so
@@ -1475,6 +1519,7 @@ int main() {
     robustness_and_state();
     top_floor();
     integration();
+    arena_executable_case();
     std::cout
         << "PASS level-flow: " << checks
         << " exact checks; reference fixtures and synthetic gate integration\n";
