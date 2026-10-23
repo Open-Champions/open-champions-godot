@@ -61,6 +61,9 @@ void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
 } // namespace
 struct ChampionsSessionController::PendingTerrain {
   std::unique_ptr<rta::native_save::Scene> control;
+  std::unique_ptr<rta::world_queries::Level> player_service_level;
+  std::unique_ptr<champions::real_world::WaterImage> player_water_image;
+  std::unique_ptr<rta::player_services::Bundle> player_services;
   // A fixture continuation (play_fixture_save.hpp) instead of a dry scene.
   std::unique_ptr<rta::fixture_save::CombatScene> combat;
   std::unique_ptr<rta::fixture_save::LevelScene> level;
@@ -164,6 +167,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
                        &ChampionsSessionController::load_terrain_file);
+  ClassDB::bind_method(D_METHOD("set_player_camera", "slot", "yaw", "flag", "position", "side_normals"),
+                       &ChampionsSessionController::set_player_camera);
   ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path", "build_display"),
                        &ChampionsSessionController::prepare_terrain_file, DEFVAL(true));
   ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name", "previous", "entrance"),
@@ -1542,6 +1547,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       // draws no longer share the session's stream.
       unpair_script_seed();
       level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
+      player_services_.reset(); player_water_image_.reset(); player_service_level_.reset();
       terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
       cache_state(state, true); clock_.reset();
       return observation();
@@ -1559,6 +1565,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       attach_effects();
       level_.reset();
       control_.reset(); // The combat World is the sole actor owner.
+      player_services_.reset(); player_water_image_.reset(); player_service_level_.reset();
       pending_.reset();
       cache_state(state, true);
       return observation();
@@ -2007,6 +2014,13 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
     next_config.start = start;
     prepared->control =
         std::make_unique<rta::native_save::Scene>(next_config, data);
+    prepared->player_service_level = std::make_unique<rta::world_queries::Level>(data);
+    prepared->player_services = std::make_unique<rta::player_services::Bundle>(*prepared->player_service_level);
+    if (!illustration) {
+      prepared->player_water_image = std::make_unique<champions::real_world::WaterImage>(input, geometry);
+      prepared->player_services->bind_water(prepared->player_water_image->service(),
+                                           prepared->player_water_image->world());
+    }
     prepared->name = path.get_file();
     const Dictionary initial_observation =
         present_observation(prepared->control->observation());
@@ -2092,6 +2106,9 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
       combat_ = std::move(pending_->combat);
       level_ = std::move(pending_->level);
       control_.reset();
+      player_services_.reset();
+      player_water_image_.reset();
+      player_service_level_.reset();
       combat_setup_ = pending_->setup;
       terrain_ = pending_->terrain;
       std::swap(terrain_name_, pending_->name);
@@ -2116,6 +2133,9 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     unpair_script_seed_if_paired();
     control_.swap(pending_->control);
+    player_services_ = std::move(pending_->player_services);
+    player_water_image_ = std::move(pending_->player_water_image);
+    player_service_level_ = std::move(pending_->player_service_level);
     combat_.reset();
     level_.reset();
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
@@ -2147,6 +2167,32 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
   if (!bool(prepared.get("ok", false)))
     return prepared;
   return commit_terrain_file(int64_t(prepared["token"]));
+}
+void ChampionsSessionController::set_player_camera(
+    int64_t slot, int64_t yaw, bool flag, const Vector3 &position,
+    const PackedVector3Array &side_normals) {
+  if (!player_services_) return; // no real level is resident yet
+  if (slot < 0 || slot > 3 || side_normals.size() != 4)
+    throw std::runtime_error("Player camera needs one slot and four side normals.");
+  auto bits = [](double value) -> rta::Raw {
+    if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+      throw std::runtime_error("Player camera has a nonfinite component.");
+    const float narrowed = static_cast<float>(value);
+    rta::Raw raw;
+    std::memcpy(&raw, &narrowed, sizeof(raw));
+    return raw;
+  };
+  auto vector = [&](const Vector3 &v) -> rta::Vec3 {
+    return {bits(v.x), bits(v.y), bits(v.z)};
+  };
+  rta::player_services::Camera snapshot;
+  snapshot.yaw = rta::Raw(yaw & 0xffff);
+  snapshot.flag = flag ? 1 : 0;
+  snapshot.position = vector(position);
+  for (int i = 0; i < 4; ++i)
+    snapshot.side_normals[unsigned(i)] = vector(side_normals[i]);
+  player_services_->set_local_slot(rta::Raw(slot));
+  player_services_->set_camera(rta::Raw(slot), std::move(snapshot));
 }
 
 Dictionary ChampionsSessionController::save_file(const String &path) {
