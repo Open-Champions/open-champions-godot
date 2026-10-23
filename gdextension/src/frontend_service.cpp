@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -203,6 +204,10 @@ protected:
     ClassDB::bind_method(D_METHOD("boot", "options_file"), &ChampionsFrontendService::boot);
     ClassDB::bind_method(D_METHOD("view"), &ChampionsFrontendService::view);
     ClassDB::bind_method(D_METHOD("layout"), &ChampionsFrontendService::layout);
+    ClassDB::bind_method(D_METHOD("set_card_cache", "metadata", "headers", "count", "scroll_base"),
+                         &ChampionsFrontendService::set_card_cache);
+    ClassDB::bind_method(D_METHOD("set_card_preview", "header_index", "debug_time"),
+                         &ChampionsFrontendService::set_card_preview);
     ClassDB::bind_method(D_METHOD("frame", "buttons", "stick_x", "stick_y"), &ChampionsFrontendService::frame, DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("set_name", "name"), &ChampionsFrontendService::set_name);
     ClassDB::bind_method(D_METHOD("load_class_start_stats", "executable_path"), &ChampionsFrontendService::load_class_start_stats);
@@ -260,6 +265,22 @@ public:
         throw F::Refusal("pad word or stick byte out of range");
       flow_->frame(static_cast<std::uint16_t>(buttons), static_cast<std::uint8_t>(stick_x),
                    static_cast<std::uint8_t>(stick_y));
+    });
+  }
+  Dictionary set_card_cache(const PackedByteArray &metadata, const PackedByteArray &headers,
+                            int64_t count, int64_t scroll_base) {
+    return guarded([&] {
+      if (count < 0 || count > std::numeric_limits<int>::max() || scroll_base < 0 ||
+          scroll_base > std::numeric_limits<int>::max())
+        throw F::Refusal("card count or scroll is outside int range");
+      flow_->set_card_cache(bytes_of(metadata), bytes_of(headers), int(count), int(scroll_base));
+    });
+  }
+  Dictionary set_card_preview(int64_t header_index, bool debug_time) {
+    return guarded([&] {
+      if (header_index < 0 || header_index > std::numeric_limits<int>::max())
+        throw F::Refusal("card preview index is outside int range");
+      flow_->set_card_preview(int(header_index), debug_time);
     });
   }
   Dictionary set_name(const String &name) { return guarded([&] { flow_->set_name(text_of(name)); }); }

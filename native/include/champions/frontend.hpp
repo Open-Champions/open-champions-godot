@@ -146,6 +146,11 @@ public:
   // The documented draw calls of the current screen, in submission order. The
   // frames are the documented minimum-width calls (no text-width rule is traced).
   Scene layout() const;
+  // Optional caller-supplied card cache. The host must obtain real directory
+  // metadata and headers; this flow never invents them from a file chooser.
+  void set_card_cache(std::vector<std::uint8_t> metadata, std::vector<std::uint8_t> headers,
+                      int count, int scroll_base);
+  void set_card_preview(int header_index, bool debug_time);
   // Music requests the volume gate refused (music_playGlobal 0x2110e0).
   int gated_music() const { return gated_music_; }
   std::vector<Request> take_requests();
@@ -229,6 +234,11 @@ private:
   std::string error_;
   std::string import_context_; // "char" (page 1 triangle) or "load"
   bool card_paused_ = false;   // memcard_pushPause state to restore
+  bool card_cache_supplied_ = false;
+  std::vector<std::uint8_t> card_metadata_, card_headers_;
+  int card_count_ = 0, card_scroll_base_ = 0;
+  int card_preview_index_ = -1;
+  bool card_debug_time_ = false;
 
   void go(Screen next, int cursor = 0);
   void music(const char *kind, const char *name, std::uint32_t flags);

@@ -15,6 +15,7 @@ Evidence pins:
 | t3/research-saves | 8d43286 | `docs/save-format.md` (the 760-byte options image, card states, save latch) |
 | t3/research-combat-ctors | e9777eb | `docs/spec/music-volume.md` (slider, commit, boot copy; ported as `music_volume.hpp`) |
 | t3/research-menus-layout | dc458d5 | `docs/frontend-layout.md`, `tools/ref_frontend_layout.py`, `tools/ref_frontend_screens.py` (draw calls, fonts, layers, tints, menu sounds, the first-theme gate) |
+| t3/research-save-screen | 9c2b941 | `docs/save-screen.md` (slot-list tile frame, indexed rows, BCD date and clock formatter calls, and completed-slot header-backed preview fields; `research-save-screen-r2-fix.md` audit PASS) |
 
 Status words are the research's: **Executed**, **Observed**, **Ran** (seen on the
 emulator), **Inferred**, **Unknown**.
@@ -38,17 +39,33 @@ submission first.
 | Title | `FRONTEND.LMP/title.tex` at (141,15), layer 5, tint 0x80808080, states 0-4 only | Executed |
 | Publisher logo | `SOELOGO.LMP/soe_splash_url.tex` (192,330) and `soe_splash.tex` (64,50), layer 3, tint 0x80808080 | Executed |
 | Footer, message box, slot list, character, name entry | the research's small-font layer-6 batches, colours and text anchors; the research word is carried verbatim in `Draw.colour`. Only the slot-list batch sets `Draw.settled` for known fade. The Godot host paints its authored placeholder text at a readable Host opacity, separate from the research alpha. Message-box backing style, layer and inflation are Host choices. Phase-3 colours follow the call order of `PLAYERSEL_PHASES` (header and description 0x0A316864, points row 0x08325D18, stat rows 0x08585E5D, selected 0x0068C7CC). Label text is a host choice | Executed positions, Host text |
+| Save/load tile frame | `memcard_slotList`'s settled fixture passes (61,126,519,97) to the wrapper, which submits the style-2 `INTERFAC.LMP/tile*.tex` frame at (60,122,521,105), layer 6. The nine pieces are loaded from the selected disc at run time. The fixture tint 0x7f616369 is retained for this captured state; fade interpolation and exact retail pixels remain Unknown | Executed frame submission / Observed art names |
 | Menu sounds | move `menu_main_toggle.anm`, select `menu_main_accept.anm`, back `menu_main_back.anm` (FX.LMP) are requested at the documented triggers and counted by the host (`sounds`) | Executed ids |
 | First theme | `mx_maintheme_l.vag` flags 1 goes through the one music-volume gate (0x3d4ccccc), also for the credits handoff (flags 3) | Executed |
 
 Cursor and highlight: the list cursor is the style-0 frame above for row 0. The slot-list
-highlight rectangle (66,133)-(574,152) is Inferred by the research; the host draws it
-for the selected slot. The import row rectangle (108,101)-(298,118) is documented but
+rectangle (66,133)-(574,152) follows the selected-row word in the fixture, but its
+retail highlight role and cursor bounds are Inferred; this client does not paint it
+without a card directory. The import row rectangle (108,101)-(298,118) is documented but
 is not drawn by this host. No other cursor
 is documented. Animation: the only documented timed behaviours (logo 240 frames, film
 press after 30 frames, credits scroll one unit per call with the +2/+2 shadow pass and
 the alpha points at y = 448/400/224) are flow or one-line fixture facts; fades are not
 curved in the research, so none is drawn.
+
+The save/load screen keeps its file chooser actions in a labelled host area below
+the documented frame. No PS2 card directory or cached save headers are bound by
+the normal host flow, so the card rows, selected-slot preview, date/clock values
+and confirmation prompts stay absent there. A caller may explicitly supply a
+card cache to `Flow::set_card_cache` / `ChampionsFrontendService.set_card_cache`.
+The bounded 16-byte metadata and 0x70-byte header strides, five visible row
+anchors, numbered markers, the save-only first free row, `%d/%d/%d` BCD date and tested 12-hour clocks then
+paint with the disc small font. An explicitly selected header supplies raw
+player count, difficulty index and play seconds at the preview anchors; their
+labels are visibly Host because localized text and general minute formatting
+are not established. Real directory timestamps, card capacity, level/class
+text, locale and retail pixel parity remain unverified. The saved confirmation is
+also a labelled host layout because its frame art is not established.
 
 Still a labelled host layout (the research lists them Unknown): class art, the 3D
 model pose and the per-race animations, appearance art, the options value bars and

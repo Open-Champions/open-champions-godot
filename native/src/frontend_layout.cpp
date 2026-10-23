@@ -35,6 +35,12 @@ const char *menu_sound_resource(menu_sound s) {
 
 namespace layout {
 namespace {
+int bcd_value(std::uint8_t value) {
+  const int high = value >> 4, low = value & 15;
+  if (high > 9 || low > 9)
+    throw Refusal("card directory date or clock has invalid BCD digits");
+  return high * 10 + low;
+}
 // Row geometry of menuList_draw 0x1a07c4: rows are 22 apart, the first row sits
 // at origin_y - (11 * rows + 6); a value row's text is shifted 23 left; a list
 // with value rows is the wide 210 frame, others the 54-wide minimum. The research
@@ -61,6 +67,63 @@ Draw make_frame(int x, int y, int w, int h, int layer, std::uint32_t tint, int s
   return d;
 }
 } // namespace
+
+std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata,
+                                       const std::vector<std::uint8_t> &headers,
+                                       int count, int scroll_base, bool saving) {
+  if (count < 0 || scroll_base < 0 || scroll_base > count ||
+      static_cast<std::size_t>(count) > metadata.size() / 16 ||
+      static_cast<std::size_t>(count) > headers.size() / 0x70)
+    throw Refusal("card cache count, scroll, metadata or header length is invalid");
+  std::vector<CardRow> out;
+  if ((count == 0 || scroll_base == count) && !saving)
+    return out;
+  for (int r = 0; r < 5; ++r) {
+    const int index = scroll_base + r;
+    CardRow row;
+    row.index = index;
+    row.y = 128 + 17 * r;
+    row.number = std::to_string(static_cast<long long>(index) + 1) + ".";
+    if (index < count) {
+      row.populated = true;
+      row.metadata_offset = static_cast<std::size_t>(index) * 16;
+      row.header_offset = static_cast<std::size_t>(index) * 0x70;
+      const auto meta = row.metadata_offset;
+      const int month = bcd_value(metadata[meta + 6]);
+      const int day = bcd_value(metadata[meta + 5]);
+      const int year = bcd_value(metadata[meta + 7]);
+      const int hour = bcd_value(metadata[meta + 3]);
+      const int minute = bcd_value(metadata[meta + 2]);
+      if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59)
+        throw Refusal("card directory date or clock is outside supported fields");
+      row.date = std::to_string(month) + "/" + std::to_string(day) + "/" +
+                 std::to_string(2000 + year);
+      const int shown_hour = hour % 12 == 0 ? 12 : hour % 12;
+      row.clock = std::to_string(shown_hour) + ":" + (minute < 10 ? "0" : "") +
+                  std::to_string(minute) + (hour < 12 ? "am" : "pm");
+    } else if (saving && index == count) {
+      row.new_save = true;
+    }
+    out.push_back(std::move(row));
+  }
+  return out;
+}
+
+CardPreview card_preview(const std::vector<std::uint8_t> &headers, int count, int header_index) {
+  if (count <= 0 || header_index < 0 || header_index >= count ||
+      static_cast<std::size_t>(count) > headers.size() / 0x70)
+    throw Refusal("selected card header is unavailable");
+  const auto at = static_cast<std::size_t>(header_index) * 0x70;
+  const auto word = [&](std::size_t offset) {
+    return std::uint32_t(headers[at + offset]) |
+           (std::uint32_t(headers[at + offset + 1]) << 8) |
+           (std::uint32_t(headers[at + offset + 2]) << 16) |
+           (std::uint32_t(headers[at + offset + 3]) << 24);
+  };
+  return {header_index, at, word(0x64),
+          std::uint16_t(headers[at + 0x6a] | (std::uint16_t(headers[at + 0x6b]) << 8)),
+          headers[at + 0x6c]};
+}
 
 std::vector<Point> list_anchors(const ListSpec &s) {
   const int first = s.origin_y - (11 * s.rows + 6);
@@ -365,34 +428,88 @@ Scene Flow::layout() const {
     host_text(s, 320, 200, "Credits: the data layout is not documented. Circle returns.", Align::Centred);
     s.unknown = {"credits data layout and line spacing, imagery, the exit input and sound"};
     break;
-  case Screen::LoadGame: case Screen::SaveGame: case Screen::Saved: {
-    host("card rows with real file data, the slot cursor and the card sounds are Unknown");
-    // memcard_slotList 0x21c3a4: small-font layer-6 batch 0x1e6464 (alpha = fade),
-    // title centred (320,110), prompt (320,320), row-highlight rectangle
-    // (66,133)-(574,152) colour 0x366876 (an Inferred highlight).
-    const char *title = screen_ == Screen::LoadGame ? "Load Game" : screen_ == Screen::SaveGame ? "Save Game" : "Saved";
+  case Screen::LoadGame: case Screen::SaveGame: {
+    host("card directory and cached headers unavailable; host file actions below the original frame");
+    // research-save-screen 0a3419b, memcard_slotList 0x21d814: the wrapper
+    // adjusts (61,126,519,97) to (60,122,521,105), forces style 2, and
+    // submits the nine tile*.tex pieces from INTERFAC.LMP. Its settled
+    // fixture tint is not a constant across fades.
+    Draw slot_frame;
+    slot_frame.kind = Draw::Kind::Frame;
+    slot_frame.evidence = Evidence::Executed;
+    slot_frame.x = 60;
+    slot_frame.y = 122;
+    slot_frame.w = 521;
+    slot_frame.h = 105;
+    slot_frame.layer = 6;
+    slot_frame.colour = 0x7f616369;
+    slot_frame.style = 2;
+    slot_frame.role = "slot-list tile frame (settled fixture)";
+    slot_frame.site = "0x21d814";
+    const char *title = screen_ == Screen::LoadGame ? "Load Game" : "Save Game";
     Draw slot_title = text(Font::Small, Align::Centred, 6, 320, 110, 0x001E6464, title,
-                           Evidence::Inferred, "slot-list title (text Host)", "0x21d6e8");
+                           Evidence::Host, "slot-list title (localized text unavailable)", "0x21d6e8");
     slot_title.settled = true;
     s.draws.push_back(slot_title);
-    for (std::size_t i = 0; i < list.size(); ++i) {
-      const int y = 133 + 22 * static_cast<int>(i); // row 0 is the documented rectangle; the step is Host
-      // The row text is submitted before the highlight: inside a layer the later
-      // submission is painted first, so the highlight lies behind the label.
-      s.draws.push_back(text(Font::Small, Align::Centred, 6, 320, y + 2, 0x323c3c, list[i].label,
-                             Evidence::Host, "slot-list row"));
-      if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(66, y, 574, y + 19, 6, 0x80366876,
-                               Evidence::Host, "slot-list row highlight", "0x21e508"));
+    // A caller can bind actual 16-byte directory metadata and 0x70-byte
+    // headers. The round-2 fix audit passed for indexed rows, date and clock
+    // formatter calls, and header-backed preview fields. Localized level and
+    // preview wording remains Host, and the real directory source is absent.
+    if (card_cache_supplied_) {
+      s.host_label = "caller card cache; level text and preview wording unverified";
+      for (const auto &row : layout::visible_card_rows(card_metadata_, card_headers_,
+                                                      card_count_, card_scroll_base_,
+                                                      screen_ == Screen::SaveGame)) {
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 77, row.y, 0x7f323c3c,
+                               row.number, Evidence::Executed, "supplied card number", "0x21d99c"));
+        if (row.populated) {
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 365, row.y, 0x7f323c3c,
+                                 row.date, Evidence::Executed, "supplied card date", "0x21db24"));
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 487, row.y, 0x7f323c3c,
+                                 row.clock, Evidence::Executed, "supplied card clock", "0x21dbe8"));
+        } else if (row.new_save) {
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 100, row.y, HOST_MUTED,
+                                 "New Save", Evidence::Host,
+                                 "save-only free row (localized wording unknown)", "0x21d9f4"));
+        }
+      }
+      if (card_preview_index_ >= 0) {
+        const auto preview = layout::card_preview(card_headers_, card_count_, card_preview_index_);
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 220, 247, HOST_MUTED,
+                               "Players", Evidence::Host, "preview label (localized wording unknown)"));
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 320, 247, HOST_MUTED,
+                               std::to_string(preview.player_count), Evidence::Host,
+                               "preview player count (header field)", "0x21e208"));
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 220, 264, HOST_MUTED,
+                               "Difficulty", Evidence::Host, "preview label (localized wording unknown)"));
+        s.draws.push_back(text(Font::Small, Align::Left, 6, 320, 264, HOST_MUTED,
+                               "index " + std::to_string(preview.difficulty_index), Evidence::Host,
+                               "preview difficulty index (header field)", "0x21e2c0"));
+        if (card_debug_time_) {
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 100, 281, HOST_MUTED,
+                                 "Save time (raw)", Evidence::Host,
+                                 "debug preview label (localized wording unknown)"));
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 320, 281, HOST_MUTED,
+                                 std::to_string(preview.play_seconds) + "s", Evidence::Host,
+                                 "debug play seconds (minute display unverified)", "0x21e0f0"));
+        }
+      }
     }
-    Draw slot_prompt = text(Font::Small, Align::Centred, 6, 320, 320, 0x001E6464,
-                           screen_ == Screen::Saved ? "Cross: close" : "Cross: choose   Circle: back",
-                           Evidence::Inferred, "slot-list prompt (text Host)", "0x21c8b0");
-    slot_prompt.settled = true;
-    s.draws.push_back(slot_prompt);
-    s.unknown = {"per-row text positions with real file data, the spinner and the error sound"};
+    s.draws.push_back(slot_frame);
+    for (std::size_t i = 0; i < list.size(); ++i) {
+      host_text(s, 320, 348 + 22 * static_cast<int>(i),
+                (static_cast<int>(i) == cur ? "> " : "  ") + list[i].label,
+                Align::Centred);
+    }
+    s.unknown = {"real card directory timestamp, card capacity and scroll reachability, localized level/preview/prompt text, minute display beyond completed fixture, retail pixels and backdrop"};
     break;
   }
+  case Screen::Saved:
+    host("the saved confirmation box art and localized text are not established");
+    host_text(s, 320, 220, "Saved", Align::Centred);
+    host_text(s, 320, 348, "Cross: close", Align::Centred);
+    s.unknown = {"saved confirmation box frame, localized text, fade and sound"};
+    break;
   case Screen::CharClass: {
     host("class art, the 3D model pose, cursor and highlight and the per-race animation are Unknown");
     // Class selection has no phase of its own in the research (frontend-layout.md),
