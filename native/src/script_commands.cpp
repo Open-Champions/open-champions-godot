@@ -247,6 +247,10 @@ Host::Host()
   variables_->memory.word(script_effects::G_FADE, 0);
 }
 Host::~Host() {
+  // Remove pairs from host-owned heads before the external objects or heads
+  // are destroyed; Variables unregisters its own object nodes during teardown.
+  for (auto &entry : target_cells_)
+    variables_->world->handles.clear(*entry.second);
   // Variables unregisters external objects and their handle nodes. Their
   // host-owned list heads must still exist while that teardown runs.
   machine_.reset();

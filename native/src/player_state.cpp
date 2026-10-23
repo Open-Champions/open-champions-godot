@@ -117,13 +117,10 @@ void validate(const Record &r, const Tables &t) {
 //    0x1b6458 at 0x1b23f8 *before* the character has a Player object (+0x43d8
 //    is null), and that call skips the maxima for such a record.
 //  * The first player_recalcStats with a Player object present computes the
-//    maxima with the formula below (starting gear adds no statistic modifier
-//    7..10 for any of the 12 models; effective = base) and trims each current
-//    value to its maximum. This function returns that state: the record a
-//    live Player object sees, not the bytes init alone leaves.
-// Current HP/mana stay unestablished here (current_known false): the session
-// does not run player_recalcStats for the record, so no current value is
-// claimed.
+//    maxima (starting gear adds no statistic modifier 7..10 for any of the
+//    12 models; effective = base) and trims each current to its maximum.
+// This function computes the documented maxima but does not execute that live
+// recalc. Current HP/mana remain unestablished (current_known false).
 Record create(const std::string &name, std::int32_t cls, std::int32_t model,
               const std::array<std::int32_t, 4> &stats, const Tables &tables) {
   if (cls < 0 || cls >= 7) throw Refusal("class is outside 0..6");
@@ -139,9 +136,8 @@ Record create(const std::string &name, std::int32_t cls, std::int32_t model,
   r.max_hp = combat::fsub(
       combat::fadd(combat::fmul(combat::itof(r.level), f[3]),
                    combat::fmul(combat::itof(stats[3]), f[4])), f[5]);
-  // Current values are not established by the cited new-character contract.
-  // Their raw storage is not a claim of zero health or mana: current_known
-  // stays false, and the session refuses current-dependent script commands.
+  // The init sentinel is not a playable current. Keep current_known false;
+  // the session refuses current-dependent script commands until live recalc.
   validate(r, tables);
   return r;
 }

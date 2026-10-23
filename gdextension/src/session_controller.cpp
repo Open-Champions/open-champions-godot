@@ -7,6 +7,7 @@
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/arena_executable.hpp"
+#include "champions/hud_extras.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
@@ -740,6 +741,8 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
       if (!bool(character.get("ready", false))) throw std::runtime_error("Character creation has not finished.");
       next = rta::player_state::create(named, cls,
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
+      // Creation has no live Player recalc or record-to-object current mirror.
+      // Keep current-dependent script commands refused until that event exists.
     }
     player_ = std::move(next);
     ++player_record_revision_;

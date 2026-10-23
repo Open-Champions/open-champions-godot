@@ -28,6 +28,7 @@ var _refused_level_request := ""
 var last_campaign_carried := false
 var last_campaign_image_restored := false
 var hud_art_counts: Dictionary = {}
+var hud_extras_counts: Dictionary = {}
 var hud_font_loaded := false
 const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
 var npc_dialog: Control
@@ -140,6 +141,13 @@ func open_game_folder(path: String) -> bool:
 	real_font_choice.disabled = found.is_empty()
 	hud_art_counts = real.load_hud_art()
 	hud_font_loaded = play_hud != null and play_hud.set_font(real.hud_font_bytes())
+	hud_extras_counts = {"loaded": 0, "refused": 0}
+	var hud_lmp: String = real.files.get("hud.lmp", "")
+	if play_hud != null and not hud_lmp.is_empty():
+		var extra: Dictionary = load("res://ui/original_art/hud_extras_art.gd").load_green(inspector, hud_lmp)
+		hud_extras_counts = {"loaded": int(extra.loaded), "refused": int(extra.refused)}
+		play_hud.set_extras_art(extra.images)
+		play_hud.configure_gold(0)
 	# The string tables and help chime from the folder, for the level script.
 	text_sources = RealText.install(real, controller)
 	if text_hud != null: text_hud.configure(real, controller, inspector)
