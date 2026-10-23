@@ -172,6 +172,36 @@ int main(int argc, char **argv) {
                                      " != " + std::to_string(want));
         }
         check(seed.state == hex(c[7]), where + " shared seed");
+        // Native companion fields: a constructed Creature, with synthetic
+        // words, must recover its writer-verified fields on the same record.
+        auto &memory = host.variables().memory;
+        memory.word(address + 0xe8, 0x12345678);
+        memory.word(address + 0x228, 0x3f800000);
+        memory.word(address + 0x22c, 0x40000000);
+        memory.word(address + 0xa8, 0x01800000);
+        memory.word(address + 0xac, 0x00000001);
+        memory.byte(address + 0x231, 1);
+        memory.word(address + 0x312, 7);
+        const auto saved_fields = host.save_built_object_fields();
+        check(saved_fields.size() == 1 && saved_fields[0].fields.size() == 20,
+              where + " saved Creature fields");
+        memory.word(address + 0xe8, 0);
+        memory.word(address + 0x228, 0);
+        memory.word(address + 0x22c, 0);
+        memory.word(address + 0xa8, 0);
+        memory.word(address + 0xac, 0);
+        memory.byte(address + 0x231, 0);
+        memory.word(address + 0x312, 0);
+        check(host.restore_built_object_fields(saved_fields) == 1 &&
+                  host.save_built_object_fields()[0].fields == saved_fields[0].fields,
+              where + " restored Creature fields");
+        auto *live = host.variables().world->objects.at(address);
+        live->alive = false;
+        bool deleted_refused = false;
+        try { (void)host.save_built_object_fields(); }
+        catch (const std::runtime_error &) { deleted_refused = true; }
+        live->alive = true;
+        check(deleted_refused, where + " deleted Creature is refused");
         ++built;
       } else {
         check(c[5] == "stub" && counts.objects_unbuilt == 1 && counts.objects_built == 0,
@@ -187,6 +217,27 @@ int main(int argc, char **argv) {
         }
     }
     check(built > 200 && stubs > 0, "case coverage");
+    rta::level_object_state::Directory directory;
+    for (unsigned i = 0; i != 10; ++i)
+      check(directory.store("hub_" + std::to_string(i), {{i, "Creature", {1, 2, 3}}}),
+            "directory readable slot");
+    check(directory.store("hub_4", {{4, "Creature", {9}}}) &&
+              directory.count() == 10 && directory.lookup("hub_4") &&
+              directory.lookup("hub_4")->records[0].fields[0] == 9,
+          "duplicate rewrites its existing directory slot");
+    check(!directory.store("hub_10", {{10, "Creature", {4}}}) &&
+              !directory.store("hub_11", {{11, "Creature", {5}}}) &&
+              directory.lookup("hub_10") == nullptr && directory.lookup("hub_9") != nullptr,
+          "ten readable slots and write-only overflow");
+    check(directory.overflow_gap() && directory.overflow_gap()->key == "hub_10" &&
+              directory.overflow_gap()->records[0].ordinal == 11,
+          "overflow gap retains first name and aliases later body");
+    const auto encoded = directory.encode();
+    const auto decoded = rta::level_object_state::Directory::decode(encoded);
+    check(decoded.count() == 10 && decoded.lookup("hub_9") &&
+              decoded.lookup("hub_9")->records[0].ordinal == 9 &&
+              decoded.overflow_gap() && decoded.overflow_gap()->records[0].ordinal == 11,
+          "directory roundtrip");
     std::cout << "PASS level-objects: " << checks << " checks, " << built << " built, " << stubs
               << " stubs\n";
     return 0;

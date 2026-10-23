@@ -266,6 +266,25 @@ func run() -> void:
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
+	# Use a level whose existing factory built a real Creature subclass, so the
+	# save probe exercises a confirmed field. Diagnostic selection does not
+	# checkpoint levels it merely inspected on the way to that candidate.
+	var object_level_found := int(scene.controller.level_object_state_status().get("built_records", 0)) > 0 and \
+		int(scene.controller.get_play_capabilities().get("terrain_elements", 0)) > 1
+	if not object_level_found:
+		for index in range(scene.real.levels.size()):
+			if index == scene.real.current or not scene.load_real_level(index, false): continue
+			if not scene.controller.get_play_capabilities().get("level_script_enabled", false):
+				scene.attach_level_script()
+			object_level_found = int(scene.controller.level_object_state_status().get("built_records", 0)) > 0 and \
+				int(scene.controller.get_play_capabilities().get("terrain_elements", 0)) > 1
+			if object_level_found: break
+	if object_level_found: scene.start_play()
+	terrain_elements = int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+	mark("object_state_level", "loaded" if object_level_found else "refused",
+		{"confirmed_creature_records": int(scene.controller.level_object_state_status().get("built_records", 0)),
+		"terrain_elements": int(scene.controller.get_play_capabilities().get("terrain_elements", 0)),
+		"session_started": scene.session_started})
 	var before: Dictionary = scene.controller.get_observation()
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
@@ -278,6 +297,7 @@ func run() -> void:
 	var saved_hp := float(after.get("hp", -1.0))
 	var saved_gold := int(after.get("gold", -1))
 	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var saved_object_count := int(scene.controller.level_object_state_status().get("built_records", 0))
 	var actors_after: Array = after.get("combat_actors", [])
 	mark("enemy_fight", "combat_observed" if after.get("combat_enabled", false) else "refused",
 		{"attack_input_handled": attack_handled, "actors_before": actors_before.size(),
@@ -301,15 +321,16 @@ func run() -> void:
 	# The host's F5 route opens the documented in-game save screen.
 	var native_pause_intact: bool = fe.screen() == "pause" and pause_entries == 5 and not pause_save_entry
 	var save_path := out_dir.path_join("playthrough.ocplay")
-	for suffix in ["", ".player", ".menus", ".level", ".campaign"]:
+	for suffix in ["", ".player", ".menus", ".level", ".campaign", ".worldstate"]:
 		if FileAccess.file_exists(save_path + suffix): DirAccess.remove_absolute(save_path + suffix)
 	fe.queue_path("save_session", save_path)
 	var route_handled := game_key(KEY_F5)
 	mark("pause_save", "routed" if native_pause_intact and route_handled and fe.screen() == "save-game" else "refused",
 		{"original_pause_entries": pause_entries})
 	if fe.screen() == "save-game": tap(CROSS)
-	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign")
+	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign") and FileAccess.file_exists(save_path + ".worldstate")
 	mark("in_game_save", "saved" if saved else "refused", {"screen": fe.screen()})
+	var saved_state := FileAccess.get_file_as_bytes(save_path + ".worldstate") if saved else PackedByteArray()
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)
 	if fe.screen() == "playing": tap(START)
@@ -349,6 +370,13 @@ func run() -> void:
 		"level_index_after": scene.real.current, "gold_before": saved_gold,
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
 		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match})
+	var warm_status: Dictionary = scene.controller.level_object_state_status()
+	var warm_fields: Dictionary = scene.controller.save_level_object_directory(str(scene.real.levels[scene.real.current].stem)) if carried else {}
+	var warm_object_match: bool = saved and saved_object_count > 0 and \
+		int(warm_status.get("restored_records", -1)) == saved_object_count and \
+		int(warm_fields.get("records", -1)) == saved_object_count and warm_fields.get("current_level_bytes", PackedByteArray()) == saved_state
+	mark("level_object_roundtrip", "restored" if warm_object_match else "refused",
+		{"confirmed_creature_records": saved_object_count, "restored_records": int(warm_status.get("restored_records", 0))})
 	await capture("09-loaded")
 	var transition_before: int = scene.real.current
 	var pending_levels := int(scene.controller.dialog_status().get("counts", {}).get("pending_levels", 0))
@@ -384,6 +412,13 @@ func run() -> void:
 		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
 	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded,
 		"terrain_elements": int(cold.controller.get_play_capabilities().get("terrain_elements", 0))})
+	var cold_status: Dictionary = cold.controller.level_object_state_status()
+	var cold_fields: Dictionary = cold.controller.save_level_object_directory(str(cold.real.levels[cold.real.current].stem)) if cold_match else {}
+	var cold_object_match: bool = cold_match and saved_object_count > 0 and \
+		int(cold_status.get("restored_records", -1)) == saved_object_count and \
+		int(cold_fields.get("records", -1)) == saved_object_count and cold_fields.get("current_level_bytes", PackedByteArray()) == saved_state
+	mark("cold_level_object_roundtrip", "restored" if cold_object_match else "refused",
+		{"confirmed_creature_records": saved_object_count, "restored_records": int(cold_status.get("restored_records", 0))})
 	# A displayed level with different collision must not be reused for this save.
 	var other_index := 0 if level_before != 0 else 1
 	var other_loaded: bool = cold.load_real_level(other_index)
@@ -392,6 +427,16 @@ func run() -> void:
 		"collision differs" in str(mismatch.get("error", ""))
 	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
 		{"different_level_loaded": other_loaded})
+	var revisited: bool = other_loaded and cold.load_real_level(level_before)
+	var revisit_status: Dictionary = cold.controller.level_object_state_status()
+	var revisit_fields: Dictionary = cold.controller.save_level_object_directory(str(cold.real.levels[cold.real.current].stem)) if revisited else {}
+	var revisit_match: bool = revisited and saved_object_count > 0 and \
+		int(revisit_status.get("restored_records", -1)) == saved_object_count and \
+		int(revisit_fields.get("records", -1)) == saved_object_count and \
+		revisit_fields.get("current_level_bytes", PackedByteArray()) == saved_state
+	mark("level_revisit", "restored" if revisit_match else "refused",
+		{"confirmed_creature_records": saved_object_count,
+		"restored_records": int(revisit_status.get("restored_records", 0))})
 	cold.queue_free()
 	await process_frame
 	save_json()

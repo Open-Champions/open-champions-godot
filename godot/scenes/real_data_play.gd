@@ -136,8 +136,13 @@ func creature_archives() -> PackedStringArray:
 	out.sort()
 	return out
 
-func load_real_level(index: int) -> bool:
+func load_real_level(index: int, record_departing_state := true) -> bool:
 	if index < 0: return false
+	if record_departing_state and not restoring_real_level and real.current >= 0 and controller.get_play_capabilities().get("level_script_enabled", false):
+		var previous: Dictionary = controller.save_level_object_directory(str(real.levels[real.current].stem))
+		if not previous.get("ok", false) or not previous.get("readable", false):
+			status_label.text = "Level change refused: per-level object directory is full or unreadable."
+			return false
 	var result: Dictionary = real.load_level(index)
 	if not result.ok:
 		status_label.text = "Level refused at %s. %s" % [result.stage, str(result.get("error", ""))]
@@ -163,17 +168,24 @@ func save_session_file(path: String) -> bool:
 	var source: String = str(real.cache_dir.path_join("level-%03d.world" % real.current))
 	var world_hash := FileAccess.get_sha256(source)
 	var tex_hash := FileAccess.get_sha256(str(level.tex))
-	if world_hash.is_empty() or tex_hash.is_empty():
-		status_label.text = "Save refused: this level's WORLD/TEX data cannot be verified."
+	var gob_hash := FileAccess.get_sha256(str(level.gob))
+	if world_hash.is_empty() or tex_hash.is_empty() or gob_hash.is_empty():
+		status_label.text = "Save refused: this level's source data cannot be verified."
 		return false
 	var scripted: bool = controller.get_play_capabilities().get("level_script_enabled", false)
 	var campaign := PackedByteArray()
+	var object_state := PackedByteArray()
 	if scripted:
 		var state: Dictionary = controller.save_campaign_bytes()
 		if not state.get("ok", false):
 			status_label.text = "Save refused: campaign state could not be captured."
 			return false
 		campaign = state.bytes
+		var objects_saved: Dictionary = controller.save_level_object_directory(str(level.stem))
+		if not objects_saved.get("ok", false) or not objects_saved.get("readable", false):
+			status_label.text = "Save refused: per-level object directory is full or unreadable."
+			return false
+		object_state = objects_saved.bytes
 	if not super.save_session_file(path): return false
 	var player_hash := FileAccess.get_sha256(path + ".player")
 	if player_hash.is_empty():
@@ -182,19 +194,25 @@ func save_session_file(path: String) -> bool:
 	if scripted and not _write_companion(path + ".campaign", campaign):
 		status_label.text = "Save refused: campaign companion could not be written."
 		return false
+	if scripted and not _write_companion(path + ".worldstate", object_state):
+		status_label.text = "Save refused: per-level object state could not be written."
+		return false
 	if not scripted and FileAccess.file_exists(path + ".campaign"):
 		DirAccess.remove_absolute(path + ".campaign")
-	var manifest := {"version": 1, "save_sha256": FileAccess.get_sha256(path),
+	if not scripted and FileAccess.file_exists(path + ".worldstate"):
+		DirAccess.remove_absolute(path + ".worldstate")
+	var manifest := {"version": 2, "save_sha256": FileAccess.get_sha256(path),
 		"player_sha256": player_hash,
 		"level_index": real.current, "level_stem": str(level.stem),
-		"world_sha256": world_hash, "tex_sha256": tex_hash,
+		"world_sha256": world_hash, "tex_sha256": tex_hash, "gob_sha256": gob_hash,
 		"scripted": scripted,
-		"campaign_sha256": FileAccess.get_sha256(path + ".campaign") if scripted else ""}
-	if manifest.save_sha256.is_empty() or (scripted and manifest.campaign_sha256.is_empty()) or \
+		"campaign_sha256": FileAccess.get_sha256(path + ".campaign") if scripted else "",
+		"worldstate_sha256": FileAccess.get_sha256(path + ".worldstate") if scripted else ""}
+	if manifest.save_sha256.is_empty() or (scripted and (manifest.campaign_sha256.is_empty() or manifest.worldstate_sha256.is_empty())) or \
 			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
 		status_label.text = "Save refused: level association could not be written."
 		return false
-	status_label.text = "Saved level, player, quests and position. World-object and in-flight script continuation refused."
+	status_label.text = "Saved level, player, quests, position and confirmed Creature fields. Other object and in-flight script effects refused."
 	return true
 
 func _write_companion(path: String, bytes: PackedByteArray) -> bool:
@@ -219,7 +237,7 @@ func load_session_file(path: String) -> bool:
 		status_label.text = "Load refused: level association is unreadable or too large."
 		return false
 	var manifest = JSON.parse_string(file.get_as_text())
-	if not (manifest is Dictionary) or manifest.get("version", -1) != 1 or \
+	if not (manifest is Dictionary) or int(manifest.get("version", -1)) not in [1, 2] or \
 			FileAccess.get_sha256(path) != manifest.get("save_sha256", ""):
 		status_label.text = "Load refused: level association does not match this native save."
 		return false
@@ -237,8 +255,12 @@ func load_session_file(path: String) -> bool:
 	if FileAccess.get_sha256(str(level.tex)) != manifest.get("tex_sha256", ""):
 		status_label.text = "Load refused: saved level TEX differs from the selected folder."
 		return false
+	if int(manifest.version) == 2 and FileAccess.get_sha256(str(level.gob)) != manifest.get("gob_sha256", ""):
+		status_label.text = "Load refused: saved level archive differs from the selected folder."
+		return false
 	var scripted: bool = manifest.get("scripted", false)
 	var campaign := PackedByteArray()
+	var object_state := PackedByteArray()
 	if scripted:
 		var campaign_path := path + ".campaign"
 		var source := FileAccess.open(campaign_path, FileAccess.READ)
@@ -247,8 +269,28 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Load refused: campaign companion is absent or differs."
 			return false
 		campaign = source.get_buffer(source.get_length())
+	if scripted and int(manifest.version) == 2:
+		var object_path := path + ".worldstate"
+		var object_file := FileAccess.open(object_path, FileAccess.READ)
+		if object_file == null or object_file.get_length() > 32 * 1024 * 1024 or \
+				FileAccess.get_sha256(object_path) != manifest.get("worldstate_sha256", ""):
+			status_label.text = "Load refused: per-level object companion is absent or differs."
+			return false
+		object_state = object_file.get_buffer(object_file.get_length())
+		var directory: Dictionary = controller.load_level_object_directory(object_state)
+		if not directory.get("ok", false):
+			status_label.text = "Load refused: per-level object directory is invalid."
+			return false
+	else:
+		controller.load_level_object_directory(PackedByteArray())
 	level_script.set_pressed_no_signal(scripted)
-	if not load_real_level(index): return false
+	restoring_real_level = true
+	var level_loaded := load_real_level(index)
+	restoring_real_level = false
+	if not level_loaded: return false
+	if scripted and not controller.get_play_capabilities().get("level_script_enabled", false):
+		status_label.text = "Load refused: level object construction or restoration failed."
+		return false
 	var world_path: String = str(real.cache_dir.path_join("level-%03d.world" % index))
 	if FileAccess.get_sha256(world_path) != manifest.get("world_sha256", ""):
 		status_label.text = "Level reloaded; load refused: saved WORLD differs from the selected folder."
@@ -265,7 +307,7 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
 			return false
 		_observe(restored)
-	status_label.text = "Loaded level, player, quests and position. World-object continuation refused; scripts restart from level data."
+	status_label.text = "Loaded level, player, quests, position and confirmed Creature fields. Other object effects refused; scripts restart."
 	return true
 
 func _prepare_native_save(path: String) -> Dictionary:
@@ -306,7 +348,7 @@ func attach_level_script() -> bool:
 	controller.set_level_text(RealText.level_tables(real, level))
 	# The NPC dialog is attached before the level entry runs (docs/DIALOG.md).
 	var volume_bits: int = audio.music_volume_bits if audio != null else -1
-	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits)
+	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits, str(level.stem))
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	return result.get("ok", false)
 

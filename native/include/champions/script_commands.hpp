@@ -14,6 +14,7 @@
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
+#include "champions/level_object_state.hpp"
 
 #include "champions/script_effects.hpp"
 
@@ -263,6 +264,11 @@ public:
   // adopt_objects registers every record as a stub.
   void set_executable(level_factory::Executable);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
+  // Only the five currently constructed Creature subclasses participate.
+  // These are raw fields proved by the writer difftest; load services such as
+  // corpse animation and motion are deliberately outside this API.
+  std::vector<level_object_state::Record> save_built_object_fields() const;
+  std::size_t restore_built_object_fields(const std::vector<level_object_state::Record> &);
   // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
   // The ELF image starts this presentation word at zero. Replacement hosts
@@ -481,6 +487,13 @@ private:
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
+  struct BuiltRecord {
+    std::uint32_t ordinal, address;
+    std::string cls;
+    std::array<std::uint32_t, 3> position;
+    std::uint16_t angle;
+  };
+  std::vector<BuiltRecord> built_records_;
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;

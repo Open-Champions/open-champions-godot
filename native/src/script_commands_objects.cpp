@@ -5,6 +5,7 @@
 #include "champions/monsters_1.hpp"
 #include "champions/script_commands.hpp"
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -64,6 +65,89 @@ struct Refused : std::runtime_error {
 
 } // namespace
 
+std::vector<level_object_state::Record> Host::save_built_object_fields() const {
+  std::vector<level_object_state::Record> result;
+  auto &m = variables_->memory;
+  auto put = [](level_object_state::Bytes &out, std::uint32_t word) {
+    for (unsigned i = 0; i != 4; ++i) out.push_back(std::uint8_t(word >> (8 * i)));
+  };
+  constexpr std::uint64_t masks[5] = {0x1000000ull, 0x100000000ull,
+                                      0x400000ull, 0x800000ull,
+                                      0x2000000000000ull};
+  for (const auto &built : built_records_) {
+    const auto live = variables_->world->objects.find(built.address);
+    if (live == variables_->world->objects.end() || !live->second || !live->second->alive)
+      throw std::runtime_error("deleted built-object save policy is unverified");
+    level_object_state::Record record;
+    record.ordinal = built.ordinal;
+    record.cls = built.cls;
+    record.position = built.position;
+    record.angle = built.angle;
+    const auto c = built.address;
+    put(record.fields, m.word(c + 0xe8));
+    put(record.fields, m.word(c + 0x228));
+    put(record.fields, m.word(c + 0x22c));
+    const auto raw_flags = std::uint64_t(m.word(c + 0xa8)) |
+                           (std::uint64_t(m.word(c + 0xac)) << 32);
+    std::uint32_t bits = 0;
+    for (unsigned i = 0; i != 5; ++i)
+      if (raw_flags & masks[i]) bits |= 1u << i;
+    if (m.u8(c + 0x231) & 1u) bits |= 1u << 5;
+    if (m.word(c + 0x312)) bits |= 1u << 6;
+    put(record.fields, bits);
+    if (bits & (1u << 6)) put(record.fields, m.word(c + 0x312));
+    result.push_back(std::move(record));
+  }
+  return result;
+}
+
+std::size_t Host::restore_built_object_fields(
+    const std::vector<level_object_state::Record> &records) {
+  // Validate the complete matching set before changing any memory. Missing
+  // constructors remain an explicit refusal, not a fabricated object.
+  if (records.size() != built_records_.size())
+    throw std::runtime_error("saved built-object count differs from the loaded level");
+  for (std::size_t i = 0; i != records.size(); ++i) {
+    const auto &r = records[i];
+    const auto &b = built_records_[i];
+    if (r.ordinal != b.ordinal || r.cls != b.cls ||
+        r.position != b.position || r.angle != b.angle ||
+        (r.fields.size() != 16 && r.fields.size() != 20))
+      throw std::runtime_error("saved built-object identity or field layout differs");
+    const auto bits = std::uint32_t(r.fields[12]) |
+                      (std::uint32_t(r.fields[13]) << 8) |
+                      (std::uint32_t(r.fields[14]) << 16) |
+                      (std::uint32_t(r.fields[15]) << 24);
+    if (bits & ~0x7fu || ((bits & 0x40u) != 0) != (r.fields.size() == 20))
+      throw std::runtime_error("invalid saved Creature flag fields");
+  }
+  auto &m = variables_->memory;
+  auto word = [](const level_object_state::Bytes &v, std::size_t at) {
+    return std::uint32_t(v[at]) | (std::uint32_t(v[at + 1]) << 8) |
+           (std::uint32_t(v[at + 2]) << 16) | (std::uint32_t(v[at + 3]) << 24);
+  };
+  constexpr std::uint64_t masks[5] = {0x1000000ull, 0x100000000ull,
+                                      0x400000ull, 0x800000ull,
+                                      0x2000000000000ull};
+  for (std::size_t i = 0; i != records.size(); ++i) {
+    const auto c = built_records_[i].address;
+    const auto &v = records[i].fields;
+    m.word(c + 0xe8, word(v, 0));
+    m.word(c + 0x228, word(v, 4));
+    m.word(c + 0x22c, word(v, 8));
+    const auto bits = word(v, 12);
+    auto raw_flags = std::uint64_t(m.word(c + 0xa8)) |
+                     (std::uint64_t(m.word(c + 0xac)) << 32);
+    for (unsigned bit = 0; bit != 5; ++bit)
+      raw_flags = (raw_flags & ~masks[bit]) | ((bits & (1u << bit)) ? masks[bit] : 0);
+    m.word(c + 0xa8, std::uint32_t(raw_flags));
+    m.word(c + 0xac, std::uint32_t(raw_flags >> 32));
+    m.byte(c + 0x231, std::uint8_t((m.u8(c + 0x231) & ~1u) | ((bits >> 5) & 1u)));
+    m.word(c + 0x312, bits & 0x40u ? word(v, 16) : 0);
+  }
+  return records.size();
+}
+
 level_factory::Executable executable_view(std::shared_ptr<const arena_modes::Executable> exe) {
   if (!exe)
     throw std::invalid_argument("no executable");
@@ -97,7 +181,8 @@ void Host::stub(const level_flow::Record &record, std::uint32_t address,
 // record the factory constructs takes its pool block, built or not, so the
 // pool runs out where the original's would.
 bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
-  for (const auto &record : records) {
+  for (std::size_t ordinal = 0; ordinal < records.size(); ++ordinal) {
+    const auto &record = records[ordinal];
     // GameObject_ctor step 7: name= values in double quotes are unquoted in place.
     std::vector<std::string> props = record.props;
     for (auto &entry : props)
@@ -128,6 +213,8 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
     const auto result = build(record, outcome, address, props);
     if (result == Build::Built) {
       counts_.objects_built += 1;
+      built_records_.push_back({std::uint32_t(ordinal), address, record.cls,
+                                record.position, record.angle});
       continue;
     }
     if (result == Build::NotBuilt)

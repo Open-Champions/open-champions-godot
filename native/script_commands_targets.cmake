@@ -13,6 +13,7 @@ endif()
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/script_items_targets.cmake")
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/strings_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/level_object_state.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp")

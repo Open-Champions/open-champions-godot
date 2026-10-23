@@ -5,6 +5,7 @@
 #include "champions/core_state.hpp"
 #include "champions/combat_play_effects.hpp"
 #include "champions/level_play.hpp"
+#include "champions/level_object_state.hpp"
 #include "champions/native_save.hpp"
 #include "champions/play_fixture_save.hpp"
 #include "champions/player_state.hpp"
@@ -16,6 +17,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 #include <array>
 #include <godot_cpp/variant/array.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -49,6 +51,9 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  champions::simulation::rta::level_object_state::Directory level_states_;
+  std::size_t restored_object_fields_ = 0;
+  std::string level_object_key_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   void remember_script_fade();
@@ -176,7 +181,11 @@ public:
                                         const godot::PackedByteArray &objects,
                                         bool carry_campaign = false,
                                         const godot::Dictionary &dialog = godot::Dictionary(),
-                                        std::int64_t music_volume_bits = -1);
+                                        std::int64_t music_volume_bits = -1,
+                                        const godot::String &qualified_key = godot::String());
+  godot::Dictionary save_level_object_directory(const godot::String &qualified_key);
+  godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes);
+  godot::Dictionary level_object_state_status() const;
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,

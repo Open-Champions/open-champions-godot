@@ -92,8 +92,14 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits"),
-                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)));
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "qualified_key"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)), DEFVAL(String()));
+  ClassDB::bind_method(D_METHOD("save_level_object_directory", "qualified_key"),
+                       &ChampionsSessionController::save_level_object_directory);
+  ClassDB::bind_method(D_METHOD("load_level_object_directory", "bytes"),
+                       &ChampionsSessionController::load_level_object_directory);
+  ClassDB::bind_method(D_METHOD("level_object_state_status"),
+                       &ChampionsSessionController::level_object_state_status);
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -811,7 +817,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
                                                           const Dictionary &dialog,
-                                                          int64_t music_volume_bits) {
+                                                          int64_t music_volume_bits,
+                                                          const String &qualified_key) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -854,6 +861,12 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
       std::memcpy(raw.data(), objects.ptr(), raw.size());
       next->adopt_objects(raw.data(), raw.size());
+    }
+    std::size_t restored_fields = 0;
+    const std::string key = qualified_key.utf8().get_data();
+    if (!key.empty()) {
+      if (const auto *slot = level_states_.lookup(key))
+        restored_fields = next->restore_built_object_fields(slot->records);
     }
     std::shared_ptr<DialogData> data;
     if (!dialog.is_empty()) {
@@ -913,6 +926,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
     scripts_ = std::move(next);
+    level_object_key_ = key;
+    restored_object_fields_ = restored_fields;
     script_fade_ = scripts_->fade_level();
     if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
@@ -925,11 +940,70 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     result["executable"] = bool(executable_);
     result["music_volume"] = int64_t(scripts_->audio().music_volume());
     result["fade_level"] = int64_t(script_fade_);
+    result["restored_object_fields"] = int64_t(restored_object_fields_);
     return result;
   } catch (const std::exception &e) {
     return failure(e);
   }
 }
+Dictionary ChampionsSessionController::save_level_object_directory(const String &qualified_key) {
+  try {
+    if (!scripts_) throw std::runtime_error("No built level-script objects to save.");
+    const std::string key = qualified_key.utf8().get_data();
+    if (key != level_object_key_)
+      throw std::runtime_error("The level-state key differs from the loaded objects.");
+    const auto records = scripts_->save_built_object_fields();
+    const auto count = records.size();
+    rta::level_object_state::Directory current_only;
+    current_only.store(key, records);
+    const auto current_bytes = current_only.encode();
+    const bool readable = level_states_.store(key, records);
+    const auto bytes = level_states_.encode();
+    PackedByteArray packed;
+    packed.resize(bytes.size());
+    std::copy(bytes.begin(), bytes.end(), packed.ptrw());
+    PackedByteArray current_packed;
+    current_packed.resize(current_bytes.size());
+    std::copy(current_bytes.begin(), current_bytes.end(), current_packed.ptrw());
+    Dictionary result;
+    result["ok"] = true;
+    result["readable"] = readable;
+    result["records"] = int64_t(count);
+    result["slots"] = int64_t(level_states_.count());
+    result["bytes"] = packed;
+    result["current_level_bytes"] = current_packed;
+    return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::load_level_object_directory(const PackedByteArray &packed) {
+  try {
+    auto decoded = packed.is_empty()
+        ? rta::level_object_state::Directory()
+        : rta::level_object_state::Directory::decode(
+              rta::level_object_state::Bytes(packed.ptr(), packed.ptr() + packed.size()));
+    level_states_ = std::move(decoded);
+    restored_object_fields_ = 0;
+    Dictionary result;
+    result["ok"] = true;
+    result["slots"] = int64_t(level_states_.count());
+    return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::level_object_state_status() const {
+  Dictionary result;
+  result["slots"] = int64_t(level_states_.count());
+  result["restored_records"] = int64_t(restored_object_fields_);
+  result["built_records"] = scripts_ ? int64_t(scripts_->counts().objects_built) : int64_t(0);
+  Array refused;
+  refused.push_back("Chest interaction flag, zero-gold branch, animation arguments/state and class-definition argument");
+  refused.push_back("ItemProp state-bit branches, Prop load and transform arguments/state");
+  refused.push_back("Creature motion, corpse animation and effects behind world services");
+  result["refused_load_effects"] = refused;
+  return result;
+}
+
 Dictionary ChampionsSessionController::disable_level_script() {
   remember_script_fade();
   release_help_pause();
