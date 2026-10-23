@@ -42,9 +42,16 @@ func _run() -> void:
 	hud.observe_play(value, true)
 	var by_element := {}
 	for record in hud.records: by_element[hud._element(record)] = record
-	check(hud.drawn.size() == 5, "health, pending health, pending mana, mana and frame drawn: %s" % [hud.drawn])
-	for element in ["health_bar", "pending_health", "pending_mana", "mana_bar", "status_frame"]:
+	check(hud.drawn.size() == 3, "health, mana and frame drawn without an observed dead bit: %s" % [hud.drawn])
+	for element in ["health_bar", "mana_bar", "status_frame"]:
 		check(element in hud.drawn, element + " drawn")
+	check(hud.refusals.has("pending_health") and hud.refusals.has("pending_mana"), "both pending rectangles refuse a missing dead bit at positive HP")
+	hud.observe_play(dict_with(value, {"dead": null}), true)
+	check(not "pending_health" in hud.drawn and hud.refusals.has("pending_health"), "invalid dead-bit value also refuses pending")
+	value["dead"] = false
+	hud.observe_play(value, true)
+	by_element.clear()
+	for record in hud.records: by_element[hud._element(record)] = record
 	var health: Dictionary = by_element.get("health_bar", {})
 	check(health.get("x") == 27 and health.get("y") == 46 and health.get("resource") == "bar_red01.tex" and health.clip.right == 76, "health bar position, tick-7 frame and 50/100 fill")
 	var mana: Dictionary = by_element.get("mana_bar", {})
@@ -116,7 +123,9 @@ func _run() -> void:
 	hud.observe_play({"hp": 0.0, "max_hp": 100.0, "pending_health": 5.0, "dead": true, "ready_ticks": 44}, true)
 	check(hud.drawn == ["status_frame", "health_bar"], "dead bit set: no pending rectangle: %s" % [hud.drawn])
 	hud.observe_play({"hp": 20.0, "max_hp": 100.0, "mana": 10.0, "max_mana": 50.0, "pending_mana": 3.0, "ready_ticks": 44}, true)
-	check("pending_mana" in hud.drawn and not "pending_health" in hud.drawn, "each rectangle needs its own pending value")
+	check(not "pending_mana" in hud.drawn and not "pending_health" in hud.drawn and hud.refusals.has("pending_mana"), "positive HP does not supply a missing dead bit")
+	hud.observe_play({"hp": 20.0, "max_hp": 100.0, "mana": 10.0, "max_mana": 50.0, "pending_mana": 3.0, "dead": false, "ready_ticks": 44}, true)
+	check("pending_mana" in hud.drawn and not "pending_health" in hud.drawn, "observed clear dead bit admits only the pending mana rectangle")
 	# The experience bar (hud-xp.md): drawn for acknowledged level > 0 with the
 	# bar_green frame (tick >> 2) % 11, origin (27, 56), clip right
 	# trunc(27 + (xp - lower) / (upper - lower) * 99).
@@ -150,12 +159,18 @@ func _run() -> void:
 		hud.observe_play(gold_value, true)
 		var state: Dictionary = hud.extras.gold_state()
 		if credited < 0 and int(state.gold[0]) != 500: credited = tick
-		if tick == 20: check(int(state.alpha[0]) > 0 and int(state.floaters_busy) == 1 and int(state.cosmetic_draws) == 1, "counter visible while the floater flies, one cosmetic draw owed")
+		if tick == 20:
+			check(int(state.alpha[0]) > 0 and int(state.floaters_busy) == 1 and int(state.cosmetic_draws) == 1, "counter visible while the floater flies, one cosmetic draw owed")
+			var during_floater: Dictionary = hud.extras.gold_sync(0, 777)
+			check(not during_floater.get("ok", true) and str(during_floater.get("error", "")).contains("composite order"), "direct record change during a flying floater is refused")
 	check(credited == 43, "gold arrives at tick 43, got %d" % credited)
 	var final_state: Dictionary = hud.extras.gold_state()
 	check(int(final_state.gold[0]) + int(final_state.pending[0]) == 600 and int(final_state.pending[0]) > 0, "the amount arrives in eighths: credited plus pending is the pickup")
 	var busy_sync: Dictionary = hud.extras.gold_sync(0, 777)
-	check(busy_sync.get("ok", false) and not busy_sync.get("synced", true), "record gold does not replace a pending pickup")
+	check(not busy_sync.get("ok", true) and str(busy_sync.get("error", "")).contains("composite order"), "independent record change during pending credit is refused")
+	var gold_before_refusal := int(hud.extras.gold_state().gold[0])
+	hud.observe_play({"hp": 50.0, "max_hp": 100.0, "ready_ticks": 60, "gold": 777}, true)
+	check(hud.refusals.has("gold") and not "gold" in hud.drawn and int(hud.extras.gold_state().gold[0]) < 777 and int(hud.extras.gold_state().gold[0]) >= gold_before_refusal, "busy direct write cannot display a stale gold counter")
 	for tick in range(60, 150):
 		hud.observe_play({"hp": 50.0, "max_hp": 100.0, "ready_ticks": tick, "gold": 600}, true)
 	hud.observe_play({"hp": 50.0, "max_hp": 100.0, "ready_ticks": 150, "gold": 777}, true)

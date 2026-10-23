@@ -50,9 +50,9 @@ slots 4,093 (1,600 potion uses), minimap 820 (260 views, 56 drawn, 48 blips).
 
 `play_hud.gd` now draws, through the service:
 
-- the pending rectangles without the `health > 0` gate (the dead bit is read from the
-  observation key `dead` when present, otherwise taken as clear and listed under
-  `assumed`; health is never substituted);
+- the pending rectangles without the `health > 0` gate when the observation
+  supplies a Boolean `dead` bit that is clear. A missing or invalid bit refuses
+  the rectangles at every HP;
 - the experience bar when the observation carries integer `acknowledged_level`,
   `experience`, `experience_base`, `experience_next` and the eleven `bar_green` frames
   are loaded (`hud_extras_art.gd`, same pinned-shape checks as the other HUD art);
@@ -66,6 +66,10 @@ when these values and all eleven green frames are present. A direct writer to
 record gold does not start the counter: it still requires an observed floater
 from `Gold_onTouch` or chest gold. The current play session has no such pickup
 producer, so the counter stays hidden and labelled as refused.
+If observed record gold changes while a floater or pending credit is busy, the
+play HUD refuses the composite counter: that observation cannot be ordered
+against the local payout. Gold tick and draw-frame timing continue while the
+composite is refused; an idle record change then synchronizes directly.
 
 Created records leave current HP and mana unestablished: the session has no
 live `Player` recalculation or record-to-object mirror. The standalone

@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <cstring>
+#include <array>
 #include <exception>
 #include <optional>
 #include <string>
@@ -44,6 +45,7 @@ double getf(const Dictionary &d, const char *key, double fallback) {
 class ChampionsHudExtrasService : public RefCounted {
   GDCLASS(ChampionsHudExtrasService, RefCounted)
   X::GoldState gold_;
+  std::array<std::optional<uint32_t>, 4> last_observed_gold_{};
 
 protected:
   static void _bind_methods() {
@@ -122,11 +124,16 @@ public:
   }
   Dictionary gold_reset(const PackedInt64Array &gold) {
     gold_ = X::GoldState{};
-    for (int i = 0; i < 4 && i < gold.size(); ++i) gold_.gold[std::size_t(i)] = uint32_t(gold[i]);
+    last_observed_gold_ = {};
+    for (int i = 0; i < 4 && i < gold.size(); ++i) {
+      gold_.gold[std::size_t(i)] = uint32_t(gold[i]);
+      last_observed_gold_[std::size_t(i)] = uint32_t(gold[i]);
+    }
     return success();
   }
-  // Direct record writes update the counter only when this slot has no
-  // outstanding pickup. Preserve the presentation hold and alpha timers.
+  // A busy floater owns local payouts. A changed observed record may include
+  // those payouts, a direct writer, or both; without their ordering it cannot
+  // be reconciled. Refuse the composite instead of displaying stale gold.
   Dictionary gold_sync(int slot, int64_t value) {
     try {
       if (slot < 0 || slot > 3) throw X::Refusal("gold slot outside 0..3");
@@ -134,7 +141,11 @@ public:
       bool busy = gold_.pending[std::size_t(slot)] != 0;
       for (const auto &f : gold_.floaters)
         if (f.amount && f.slot == slot) busy = true;
+      if (busy && last_observed_gold_[std::size_t(slot)] &&
+          uint32_t(value) != *last_observed_gold_[std::size_t(slot)])
+        throw X::Refusal("record gold changed during a floater or pending credit; composite order is unobserved");
       if (!busy) gold_.gold[std::size_t(slot)] = uint32_t(value);
+      if (!busy) last_observed_gold_[std::size_t(slot)] = uint32_t(value);
       Dictionary out = success(); out["synced"] = !busy; return out;
     } catch (const std::exception &e) { return failure(e); }
   }
