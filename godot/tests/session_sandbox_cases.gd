@@ -278,6 +278,14 @@ func run(scene) -> bool:
 	check(pair_saved.get("ok", false) and pair_reload.get("ok", false) and pair_reload.get("terrain", {}).get("surfaces", []).size() == 2,
 		"multi-element collision preview prepares from a native continuation")
 	if pair_reload.get("ok", false): scene.controller.cancel_terrain_file(pair_reload.token)
+	var hole := flat_world_pair()
+	hole.encode_u16(0x8416, 0)
+	hole.encode_u16(0x8418, 0xffff)
+	hole.encode_u32(0x8404, 6)
+	var hole_path := write_file("Missing element coverage.WORLD", hole)
+	var hole_result: Dictionary = scene.controller.prepare_terrain_file(hole_path)
+	check(not hole_result.get("ok", false) and "partial surface coverage" in str(hole_result.get("error", "")),
+		"multi-element preview refuses a collision-grid hole")
 	check(scene.load_terrain_file(floor_path), "single-element fixture returns after multi-element save probe")
 	scene.handle_input_event(key(KEY_D))
 	scene.advance_step()
