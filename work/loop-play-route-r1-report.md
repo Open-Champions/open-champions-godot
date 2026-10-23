@@ -40,3 +40,20 @@ Godot --path godot --script res://tests/loop_playthrough.gd -- --game-folder=<ow
 ## Remaining boundary
 
 The hub PushTrigger is invoked through the existing selected-object host action. Its normal position/use dispatch was not established by the research for this specific object, so this work does not claim a physical portal interaction. The generic level loader consumed the runtime entrance and records; the blood1-specific default marker and final coordinates remain unverified. The separate Valor probe still has zero live hostile actors and no handled attack. The later pause-save and load check retain their existing refusals.
+
+## Audit fixes
+
+- PR-1 (MEDIUM): `--route-only` now requires the opening dialog choice to complete, the native mission menu to be closed before the hub record-11 PushTrigger action, that action to return `ok`, and the native menu to be open afterward. The selected mission and arrival checks remain required. The result row records each condition, so an already-open menu or failed action cannot produce a passing route.
+- Verified on macOS arm64: focused Release CTest `^(level-flow-exact|script-commands|quests|script-builtins-api)$` **4/4 passed**; `champions-script-commands-tests` is Mach-O arm64. Godot 4.5.2 dev matrix **54/54 commands exited 0**. Its existing `scene_play_flow` and `ui_layout_smoke` script/API errors remain present despite exit 0.
+- Scripts-on sweep: **111/111 candidates loaded and played**, 224 checks passed, zero failures, 111 scripts attached and zero script faults. The owner disc remained read-only at 994 files. Full-combat headless: 2,620 checks, zero failures; `FULL_TRACE` **36,402 bytes**, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged from the pre-fix report.
+- Bounded `--route-only` playthrough exited 0 headless and rendered. Both results recorded `dialog_choice_close=closed`, `hub_trigger_mission_menu=opened` with `hub_trigger_found`, `dialog_choice_completed`, `menu_was_closed`, `trigger_action_ok` and `menu_open` all true, followed by the first story request and arrival. The rendered menu and level-change captures were inspected.
+
+Audit-fix commands (run sequentially by ignored `work/play-route/verify-audit.py`; `Godot` denotes `../integration/work/runtime/Godot.app/Contents/MacOS/Godot`, with the same `<owner-disc>`, `<ignored-cache>`, `<ignored-summary>` and `<ignored-output>` substitutions as above):
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3 -R '^(level-flow-exact|script-commands|quests|script-builtins-api)$'
+Godot --headless --path godot --script res://tests/loop_playthrough.gd -- --game-folder=<owner-disc> --out=<ignored-output> --route-only
+Godot --path godot --script res://tests/loop_playthrough.gd -- --game-folder=<owner-disc> --out=<ignored-output> --route-only --rendered
+Godot --headless --path godot --script res://tests/real_data_scene.gd -- --game-folder=<owner-disc> --cache=<ignored-cache> --all --levels=0 --from=0 --to=111 --ticks=60 --scripts --summary=<ignored-summary>
+python3 work/play-route/run-godot.py
+```

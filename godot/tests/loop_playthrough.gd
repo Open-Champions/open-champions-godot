@@ -217,6 +217,7 @@ func run() -> void:
 		"walk_displacement": walk_start.distance_to(walk_end),
 		"nearest_target_known": false, "paused": scene.paused,
 		"menu_visible": scene.menu.visible})
+	var dialog_choice_completed := false
 	if opened_dialog:
 		for i in range(3): await process_frame
 		var frame: Dictionary = scene.npc_dialog.frame
@@ -247,7 +248,8 @@ func run() -> void:
 		var dialog_counts: Dictionary = scene.controller.dialog_status().get("counts", {})
 		for why in dialog_counts.get("refused_reasons", {}):
 			refusal("dialog", "%s count=%d" % [safe(why), int(dialog_counts.refused_reasons[why])])
-		mark("dialog_choice_close", "closed" if closed and int(dialog_counts.get("choices_taken", 0)) > 0 else "refused",
+		dialog_choice_completed = closed and int(dialog_counts.get("choices_taken", 0)) > 0
+		mark("dialog_choice_close", "closed" if dialog_choice_completed else "refused",
 			{"closed": closed, "choices_taken": int(dialog_counts.get("choices_taken", 0)),
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
@@ -264,14 +266,18 @@ func run() -> void:
 		if int(target.index) == 11 and str(target.kind) == "PushTrigger" and target.get("script_action", false):
 			hub_trigger_found = true
 			break
-	var trigger_result: Dictionary = scene.controller.script_run_exit(11) if at_hub and hub_trigger_found and not scene.controller.dialog_status().get("open", false) else {"ok": false}
-	var menu_open: bool = bool(scene.controller.script_mission_menu_state().get("open", false))
+	var menu_was_closed: bool = menu_before.get("ok", false) and not menu_before.get("open", false)
+	var trigger_result: Dictionary = scene.controller.script_run_exit(11) if at_hub and hub_trigger_found and dialog_choice_completed and menu_was_closed and not scene.controller.dialog_status().get("open", false) else {"ok": false}
+	var menu_after: Dictionary = scene.controller.script_mission_menu_state()
+	var menu_open: bool = bool(menu_after.get("ok", false) and menu_after.get("open", false))
+	var trigger_opened_menu: bool = hub_trigger_found and menu_was_closed and trigger_result.get("ok", false) and menu_open
 	scene._refresh_mission_menu()
-	mark("hub_trigger_mission_menu", "opened" if trigger_result.get("ok", false) and menu_open else "refused",
-		{"hub_trigger_found": hub_trigger_found, "menu_open": menu_open,
+	mark("hub_trigger_mission_menu", "opened" if trigger_opened_menu else "refused",
+		{"hub_trigger_found": hub_trigger_found, "dialog_choice_completed": dialog_choice_completed,
+		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false), "menu_open": menu_open,
 		"host_panel_visible": scene.mission_menu_panel.visible})
 	await capture("10-mission-menu")
-	var selected: bool = menu_open and scene.mission_menu_select_first_story()
+	var selected: bool = trigger_opened_menu and scene.mission_menu_select_first_story()
 	var pending: Dictionary = scene.controller.script_level_request()
 	mark("mission_1_story_request", "blood1" if selected and str(pending.get("name", "")) == "blood1" else "refused",
 		{"queued": pending.get("queued", false), "orientation": pending.get("orientation", -1)})
@@ -302,7 +308,7 @@ func run() -> void:
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()
-		quit(0 if at_hub and menu_open and selected and record_carried and at_blood1 and mission1_still_available else 1)
+		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
 		return
 	# Combat remains a separate diagnostic until blood1 hostile constructors
 	# yield live enemies. Direct selection of valor is not a campaign route.
