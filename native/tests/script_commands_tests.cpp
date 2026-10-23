@@ -754,9 +754,11 @@ void test_mounted_records() {
   const std::array<std::string, 4> rider_classes = {
       row_class(0x532cc8), row_class(0x532cd8), row_class(0x532ce8), row_class(0x532cf8)};
   const auto nightmare_class = row_class(0x532c98);
-  const auto foot_class = row_class(0x532dc8);
+  const std::array<std::string, 4> foot_classes = {
+      row_class(0x532dc8), row_class(0x532dd8), row_class(0x532de8), row_class(0x532df8)};
   for (const auto &cls : rider_classes) check(!cls.empty(), "a mounted factory row exists");
-  check(!nightmare_class.empty() && !foot_class.empty(), "the other factory rows exist");
+  for (const auto &cls : foot_classes) check(!cls.empty(), "an on-foot factory row exists");
+  check(!nightmare_class.empty(), "the Nightmare factory row exists");
   auto built = build_calls({{"start", {}}}, {});
   sc::Host host;
   SharedRandom live(20973);
@@ -766,26 +768,25 @@ void test_mounted_records() {
   host.run_prestart();
   const auto blob = objects_blob({{rider_classes[0], "rider0"}, {rider_classes[1], "rider1"},
                                   {rider_classes[2], "rider2"}, {rider_classes[3], "rider3"},
-                                  {foot_class, "foot"}, {nightmare_class, "horse"}});
+                                  {foot_classes[0], "foot0"}, {foot_classes[1], "foot1"},
+                                  {foot_classes[2], "foot2"}, {foot_classes[3], "foot3"},
+                                  {nightmare_class, "horse"}});
   check(host.adopt_objects(blob.data(), blob.size()), "mounted records adopt");
   const auto &counts = host.counts();
-  // Shared draws: each rider record two (rider, then mount), the placed Nightmare one; the
-  // undocumented on-foot row (same constructor, rows 0x532dc8..) keeps the old accounting.
+  // Each mounted row draws twice; each on-foot row and the placed mount once.
   SharedRandom expect(20973);
-  for (int i = 0; i < 10; ++i) expect.draw();
-  check(live.state == expect.state, "four rider records drew twice each, the on-foot stub and Nightmare once");
+  for (int i = 0; i < 13; ++i) expect.draw();
+  check(live.state == expect.state, "four pairs, four on-foot rows and Nightmare shared draws");
   const std::array<std::string, 4> mount_names = {
       "horsedisease", "horsewar", "horsepestilence", "horsedeath"};
-  check(counts.build_refusals.size() == 1 &&
-        counts.build_refusals.count("Holder.v1 table slot 1 is untraced") == 1,
-        "mounted lists build; the separately ported on-foot row retains its Holder refusal");
+  check(counts.build_refusals.empty(), "all four documented mount lists build");
+  const auto &mem = host.variables().memory;
   for (int i = 0; i < 4; ++i) {
     auto *rider = host.variables().find_first("rider" + std::to_string(i));
     auto *mount = host.variables().find_first(mount_names[i]);
     check(rider && mount && host.is_built(rider->addr) && host.is_built(mount->addr),
           "rider and named mount build");
     if (rider && mount) {
-      const auto &mem = host.variables().memory;
       const auto rider_node = mem.word(rider->addr + 0x3c8);
       const auto mount_node = mem.word(mount->addr + 0x3c8);
       check((mem.word(mount->addr + 0xa8) & 1) && !(mem.word(mount->addr + 0x0c) & 0x100000) &&
@@ -797,16 +798,21 @@ void test_mounted_records() {
             "reciprocal rider-mount handles");
     }
   }
-  check(host.variables().find_first("foot") != nullptr && counts.objects_unbuilt == 1,
-        "only the undocumented on-foot row is unbuilt");
-  check(counts.load_draws_unmodelled == 1, "only the undocumented on-foot row owes an unmodelled draw");
+  for (int i = 0; i < 4; ++i) {
+    auto *foot = host.variables().find_first("foot" + std::to_string(i));
+    check(foot && host.is_built(foot->addr), "on-foot Horsemen record builds");
+    check(mem.u8(foot->addr + 0x470) == i && mem.u16(foot->addr + 0x232) == 0 &&
+              mem.word(foot->addr + 0x3c8) == 0,
+          "on-foot variant, initial state and absent mount link");
+  }
+  check(counts.objects_unbuilt == 0 && counts.load_draws_unmodelled == 0,
+        "all documented Horsemen rows have modelled draws");
   auto *horse = host.variables().find_first("horse");
-  check(horse && host.is_built(horse->addr) && counts.objects_built == 5, "all documented rows build");
-  const auto &mem = host.variables().memory;
+  check(horse && host.is_built(horse->addr) && counts.objects_built == 9, "all documented rows build");
   check(mem.word(horse->addr + 0x48) == 0x5155e8 && mem.u8(horse->addr + 0xb4) == 10 &&
             mem.word(horse->addr + 0xe0) == 0xc1a00000 && mem.u8(horse->addr + 0x28) == 0x32,
         "the built Nightmare carries its table, kind, seat offset and byte 0x28");
-  check(counts.objects_registered == 10, "four rider-mount pairs, on-foot stub and Nightmare are registered");
+  check(counts.objects_registered == 13, "four pairs, four on-foot rows and Nightmare are registered");
 
   // Leave exactly one rider-sized block, with no larger fallback block.
   // The rider's pool_new succeeds and its mount's pool_new returns zero.
