@@ -109,7 +109,7 @@ func _ready() -> void:
 func _update_menu() -> void:
 	super._update_menu()
 	if mode_label != null and play_mode and real != null and real.current >= 0:
-		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
+		mode_label.text = "Play mode · walk-in triggers can change real levels; combat and other campaign paths remain incomplete."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -208,7 +208,9 @@ func _refresh_exit_targets() -> void:
 	real_exit_choice.add_item("Level exits and portals", -1)
 	for target in controller.script_exit_targets():
 		var kind: String = str(target.get("kind", "unknown"))
-		var suffix := " · script action" if target.get("script_action", false) else " · arrival/prompt only"
+		var suffix := " · walk-in" if target.get("walk_in", false) else \
+			(" · walk-in refused" if target.has("walk_in_refusal") else \
+			(" · script action" if target.get("script_action", false) else " · arrival/prompt only"))
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
 
 func activate_selected_exit() -> Dictionary:

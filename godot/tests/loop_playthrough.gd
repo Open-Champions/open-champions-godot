@@ -98,6 +98,51 @@ func advance(command := 0, count := 1) -> void:
 		collect("tick")
 		scene.held_commands = 0
 
+func inside_trigger(point: Vector3, target: Dictionary) -> bool:
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	return point.x >= lo.x and point.x <= hi.x and point.y >= lo.y and point.y <= hi.y
+
+func trigger_distance(point: Vector3, target: Dictionary) -> float:
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	return maxf(maxf(lo.x - point.x, point.x - hi.x), 0.0) + \
+		maxf(maxf(lo.y - point.y, point.y - hi.y), 0.0)
+
+func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
+	var began: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+	if inside_trigger(began, target): return {"entered": false, "ticks": 0}
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	var aim := Vector3((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, 0)
+	var moved := false
+	var entered := false
+	var ticks := 0
+	var still := 0
+	var without_progress := 0
+	var best_distance := trigger_distance(began, target)
+	while ticks < max_ticks and not scene.controller.script_level_request().get("queued", false):
+		var before: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		var command := 0
+		if before.x < lo.x or before.x > hi.x:
+			command = 1 if before.x < aim.x else 2
+		elif before.y < lo.y or before.y > hi.y:
+			command = 4 if before.y < aim.y else 8
+		advance(command)
+		ticks += 1
+		var after: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if after.distance_to(before) > 0.001: moved = true; still = 0
+		else: still += 1
+		if moved and not inside_trigger(before, target) and inside_trigger(after, target): entered = true
+		var distance := trigger_distance(after, target)
+		if distance < best_distance - 0.25:
+			best_distance = distance
+			without_progress = 0
+		else: without_progress += 1
+		if still >= 20 or without_progress >= 600 or scene.stopped: break
+		if command == 0 and ticks % 15 == 0 and not scene.controller.script_level_request().get("queued", false): break
+	return {"entered": entered, "ticks": ticks, "navigation_stalled": without_progress >= 600}
+
 func help_close() -> void:
 	for i in range(200):
 		if not scene.controller.text_hud().get("help_open", false): return
@@ -252,56 +297,78 @@ func run() -> void:
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
-	# Step 6: the same real-level script host exposes object-record exits and
-	# pending newWorld/newWorldPost. Execute only a documented script action.
+	# Step 6: walk the native player into a real Trigger's inclusive x/y box.
 	var transition_before: int = scene.real.current
 	var exit_targets: Array = scene.controller.script_exit_targets()
 	var pending: Dictionary = scene.controller.script_level_request()
-	var exit_attempts := 0
+	var walk_attempts := 0
+	var walked_into := false
+	var entered_without_change := 0
+	var navigation_stalls := 0
 	var sources_examined := 1
-	if not pending.get("queued", false):
-		for target in exit_targets:
-			if not target.get("script_action", false): continue
-			exit_attempts += 1
-			var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
-			if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
-			pending = scene.controller.script_level_request()
-			if pending.get("queued", false): break
-	# The chosen first-level dialog is allowed to leave its exit locked. Search
-	# other real levels for a documented action that actually queues newWorld;
-	# this diagnostic selection never fabricates a destination or script value.
-	if not pending.get("queued", false):
-		for index in range(scene.real.levels.size()):
+	var candidate_indices: Array[int] = []
+	for index in range(scene.real.levels.size()):
+		var level: Dictionary = scene.real.levels[index]
+		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+		if objects.is_empty(): continue
+		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
+		if inventory.get("ok", false) and int(inventory.get("triggers", 0)) >= 4:
+			candidate_indices.append(index)
+	var sources: Array[int] = [-1]
+	sources.append_array(candidate_indices)
+	for index in sources:
+		if index >= 0:
 			if index == transition_before: continue
 			if not scene.load_real_level(index, true): continue
 			scene.start_play()
+			help_close()
+			if scene.paused and scene.session_started: scene.resume_session()
 			sources_examined += 1
 			exit_targets = scene.controller.script_exit_targets()
+		pending = scene.controller.script_level_request()
+		if pending.get("queued", false): continue
+		var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
+		if walk_targets.size() < 4: continue
+		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
+		for target in walk_targets:
+			walk_attempts += 1
+			var walk: Dictionary = walk_into_trigger(target, 45000)
+			if walk.get("navigation_stalled", false): navigation_stalls += 1
+			walked_into = bool(walk.get("entered", false))
 			pending = scene.controller.script_level_request()
-			if not pending.get("queued", false):
-				for target in exit_targets:
-					if not target.get("script_action", false): continue
-					exit_attempts += 1
-					var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
-					if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
-					pending = scene.controller.script_level_request()
-					if pending.get("queued", false): break
-			if pending.get("queued", false):
-				transition_before = index
-				break
+			if walked_into and not pending.get("queued", false): entered_without_change += 1
+			if pending.get("queued", false) and walked_into: break
+		if pending.get("queued", false) and walked_into:
+			transition_before = scene.real.current
+			break
 	var record_before: Dictionary = scene.controller.get_observation()
+	var trigger_status: Dictionary = scene.controller.script_trigger_status()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var transition_ok: bool = walked_into and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
 	var record_after: Dictionary = scene.controller.get_observation()
+	var start: Dictionary = scene.controller.get_terrain().get("start", {})
+	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
+	var marker_position: Vector3 = start.get("position", Vector3.ZERO)
+	var arrival_at_marker: bool = transition_ok and start.has("position") and \
+		arrived_position.distance_to(marker_position) < 0.01
 	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
 		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
 		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
 		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
 		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
-	mark("level_change", "changed" if record_carried and scene.real.current != transition_before else "refused",
+	mark("level_change", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
-		"exit_targets": exit_targets.size(), "exit_actions_attempted": exit_attempts,
+		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
+		"entered_without_change": entered_without_change,
+		"navigation_stalls": navigation_stalls,
+		"trigger_samples": int(trigger_status.get("samples", 0)),
+		"trigger_dispatches": int(trigger_status.get("dispatches", 0)),
+		"trigger_missing": int(trigger_status.get("missing", 0)),
+		"arrival_at_marker": arrival_at_marker,
+		"arrival_pre_search": bool(start.get("pre_search", false)),
+		"arrival_rank": int(start.get("rank", 0)),
 		"sources_examined": sources_examined,
 		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
 		"campaign_image_restored": scene.last_campaign_image_restored,

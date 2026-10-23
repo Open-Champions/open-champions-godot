@@ -19,6 +19,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -52,6 +53,23 @@ class ChampionsSessionController : public godot::RefCounted {
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
   // Parsed records belong to this level's script image and are replaced with it.
   std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
+  struct LiveTrigger {
+    std::size_t record = 0;
+    champions::simulation::rta::level_flow::Trigger body;
+    bool refused = false;
+    LiveTrigger(std::size_t i, champions::simulation::rta::level_flow::Trigger t, bool r)
+        : record(i), body(std::move(t)), refused(r) {}
+  };
+  std::vector<LiveTrigger> live_triggers_;
+  std::array<std::vector<std::size_t>, 15> trigger_lists_;
+  unsigned trigger_list_cursor_ = 0;
+  std::size_t trigger_frame_ = 0;
+  std::string trigger_refusal_;
+  std::size_t trigger_samples_ = 0, trigger_dispatches_ = 0,
+              trigger_missing_ = 0;
+  std::string trigger_level_name_;
+  std::map<std::string, std::vector<champions::simulation::rta::level_flow::TriggerState>> trigger_states_;
+  void run_level_triggers();
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   void remember_script_fade();
@@ -209,6 +227,8 @@ public:
   godot::Dictionary script_command_counts() const;
   godot::Dictionary script_level_request() const;
   godot::Array script_exit_targets() const;
+  godot::Dictionary inspect_exit_records(const godot::PackedByteArray &) const;
+  godot::Dictionary script_trigger_status() const;
   godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
