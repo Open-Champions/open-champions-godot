@@ -107,7 +107,7 @@ World::State::~State() {
   // target list, an external retained handle) are unlinked from both lists
   // first: their other list belongs to a host-owned object that may outlive
   // this World.
-  for (auto &entry : owned_heads) handles.clear(*entry.second);
+  for (auto &entry : owned_heads) handles.clear_nodes(*entry.second);
   overlay->s = nullptr;
   mem.detach_overlay(overlay);
   for (const auto &entry : objects) authority->unregister_object(*entry.second);

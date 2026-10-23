@@ -227,6 +227,26 @@ void HandlePool::clear(Cell &head) {
     node = following;
   }
 }
+void HandlePool::clear_nodes(Cell &head) {
+  auto *node = head.next;
+  while (node) {
+    auto *following = node->next;
+    if (node->kind == LinkKind::Iterator) {
+      node = following;
+      continue;
+    }
+    if (following && following == node->partner)
+      throw HandleError("both partners in cleared list");
+    unlink(node);
+    auto *partner = node->partner;
+    if (partner) {
+      unlink(partner);
+      release(partner);
+    }
+    release(node);
+    node = following;
+  }
+}
 std::size_t HandlePool::count_free() const {
   std::size_t count = 0;
   for (auto *n = free; n; n = n->next)

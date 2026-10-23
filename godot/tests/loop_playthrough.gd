@@ -448,6 +448,7 @@ func run() -> void:
 		walk_ticks += 12
 		if observed.get("stopped", false) or observed.get("failed", false): break
 	var organic_reached := reached
+	var organic_end_distance := last_distance
 	var placed := false
 	if not reached:
 		# DIAGNOSTIC: the walk is blind to the level's walls, so a scripted run
@@ -541,7 +542,7 @@ func run() -> void:
 		"player_weapon_class": int(after.get("fight_player_weapon_class", -1)),
 		"player_start": player_before, "player_end": after.get("position", Vector3.ZERO),
 		"walk_ticks": walk_ticks, "start_distance": start_distance, "end_distance": last_distance,
-		"reached_enemy_by_walking": organic_reached, "placed_for_swing": placed, "swing_cycles": swings,
+		"reached_enemy_by_walking": organic_reached, "walk_end_distance": organic_end_distance, "placed_for_swing": placed, "swing_cycles": swings,
 		"ready_ticks": int(after.get("ready_ticks", -1)), "session_stopped": bool(after.get("stopped", false)),
 		"hp_before": hp_before, "hp_after": float(after.get("hp", -1.0)),
 		"hp_change": float(after.get("hp", -1.0)) - hp_before,
