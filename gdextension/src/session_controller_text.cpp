@@ -47,6 +47,7 @@ void ChampionsSessionController::bind_text_methods() {
                        &ChampionsSessionController::set_text_sources);
   ClassDB::bind_method(D_METHOD("set_level_text", "tables"), &ChampionsSessionController::set_level_text);
   ClassDB::bind_method(D_METHOD("text_hud"), &ChampionsSessionController::text_hud);
+  ClassDB::bind_method(D_METHOD("quest_journal"), &ChampionsSessionController::quest_journal);
   ClassDB::bind_method(D_METHOD("help_frame", "confirm"), &ChampionsSessionController::help_frame);
 }
 
@@ -147,6 +148,44 @@ Dictionary ChampionsSessionController::text_hud() const {
     return d;
   } catch (const std::exception &e) {
     return text_failure(e);
+  }
+}
+
+// Inventory page 4 reads the active title/body pairs in player record 0.
+// The fields remain localization keys; this view resolves them only for the
+// runtime renderer and does not mutate the script machine's lookup ring.
+Dictionary ChampionsSessionController::quest_journal() const {
+  Dictionary out;
+  out["ok"] = false;
+  if (!scripts_ || !scripts_->has_text()) return out;
+  try {
+    const auto &record = scripts_->campaign().record(0);
+    if (record.quest_count < 0 || record.quest_count > rta::quests::QUEST_SLOTS)
+      return out;
+    const auto key = [](const rta::quests::Field &field) {
+      std::string value;
+      for (const auto byte : field) {
+        if (!byte) break;
+        value.push_back(static_cast<char>(byte));
+      }
+      return value;
+    };
+    Array entries;
+    for (int i = 0; i < record.quest_count; ++i) {
+      const auto &line = record.quests[static_cast<std::size_t>(i)];
+      Dictionary entry;
+      entry["title"] = units(scripts_->text().peek(key(line.title)));
+      entry["body"] = units(scripts_->text().peek(key(line.text)));
+      entries.push_back(entry);
+    }
+    out["ok"] = true;
+    out["count"] = int64_t(record.quest_count);
+    out["entries"] = entries;
+    if (record.quest_count == 0)
+      out["empty"] = units(scripts_->text().peek(rta::quests::QUEST_PLACEHOLDER));
+    return out;
+  } catch (const std::exception &error) {
+    return text_failure(error);
   }
 }
 

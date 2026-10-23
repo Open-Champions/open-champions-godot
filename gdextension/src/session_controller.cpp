@@ -1380,6 +1380,10 @@ Dictionary ChampionsSessionController::script_mission_menu_state() const {
   out["column"] = int64_t(menu.col);
   out["chooser"] = int64_t(campaign.chooser());
   out["first_story_available"] = bool(campaign.mission_available(1));
+  out["first_story_complete"] = bool(campaign.mission_complete(1));
+  // Mission 2 has a separate hub script action; completing mission 1 alone
+  // must not be presented as an unlock (quest-log.md section 4).
+  out["second_story_available"] = bool(campaign.mission_available(2));
   out["pending"] = String::utf8(menu.pending.c_str());
   return out;
 }

@@ -95,6 +95,7 @@ class ChampionsSessionController : public godot::RefCounted {
   std::optional<std::uint8_t> help_chime_;
   bool help_paused_ = false;
   static void bind_text_methods();
+  godot::Dictionary quest_journal() const;
   void apply_text(champions::simulation::rta::script_commands::Host &);
   void note_help_box();
   void release_help_pause();

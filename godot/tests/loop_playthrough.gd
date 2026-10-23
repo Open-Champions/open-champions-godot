@@ -193,6 +193,7 @@ func run() -> void:
 	help_close()
 	if scene.paused and scene.session_started: scene.resume_session()
 	var dialog: Dictionary = scene.controller.dialog_status()
+	var opening_quests_before: Dictionary = scene.controller.quest_journal()
 	var talkers := int(dialog.get("talkers", 0))
 	var walk_start: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var opened_dialog := false
@@ -254,6 +255,22 @@ func run() -> void:
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
+	var opening_quests_after: Dictionary = scene.controller.quest_journal()
+	var opening_quest_set: bool = dialog_choice_completed and opening_quests_before.get("ok", false) \
+		and opening_quests_after.get("ok", false) and int(opening_quests_before.get("count", -1)) == 0 \
+		and int(opening_quests_after.get("count", -1)) == 1
+	mark("opening_choice_quest", "set" if opening_quest_set else "refused",
+		{"before_count": opening_quests_before.get("count", -1),
+		"after_count": opening_quests_after.get("count", -1)})
+	if scene.quest_journal != null:
+		var journal_key_handled := game_key(KEY_Q)
+		for i in range(3): await process_frame
+		mark("journal_after_dialog", "drawn" if journal_key_handled and scene.quest_journal.visible and scene.quest_journal.art_ready and \
+			int(scene.quest_journal.entry_count) == 1 and scene.quest_journal.refusal.is_empty() else "refused",
+			{"key_handled": journal_key_handled, "art_ready": scene.quest_journal.art_ready, "entry_count": scene.quest_journal.entry_count,
+			"font_ready": not scene.quest_journal.font().is_empty()})
+		await capture("05-quest-journal")
+		game_key(KEY_Q)
 	# The opening choice and this hub PushTrigger are checked separately in
 	# research-story-route. Exercise their native integration in this session.
 	var transition_before: int = scene.real.current
@@ -287,6 +304,7 @@ func run() -> void:
 	var record_after: Dictionary = scene.controller.get_observation()
 	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var mission1_still_available: bool = bool(scene.controller.script_mission_menu_state().get("first_story_available", false))
+	var mission2_not_inferred: bool = not bool(scene.controller.script_mission_menu_state().get("second_story_available", true))
 	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
 		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
 		and int(record_after.get("player_class", -1)) == int(record_before.get("player_class", -2)) \
@@ -303,12 +321,13 @@ func run() -> void:
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
 		"quest_vars_after": int(quests_after.get("vars", 0)),
 		"mission1_still_available": mission1_still_available,
+			"mission2_not_inferred": mission2_not_inferred,
 		"mission_available_before": int(quests_before.get("mission_available_bits", 0)),
 		"mission_available_after": int(quests_after.get("mission_available_bits", 0))})
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()
-		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
+		quit(0 if at_hub and dialog_choice_completed and opening_quest_set and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available and mission2_not_inferred else 1)
 		return
 	# Combat remains a separate diagnostic until blood1 hostile constructors
 	# yield live enemies. Direct selection of valor is not a campaign route.

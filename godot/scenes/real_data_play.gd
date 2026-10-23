@@ -6,9 +6,11 @@ extends "res://scenes/play_flow.gd"
 const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const TextHud = preload("res://ui/text_hud.gd")
+const QuestJournal = preload("res://ui/quest_journal.gd")
 var real: Node
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
 var text_hud: Control
+var quest_journal: Control
 var text_sources := {}
 var real_folder: FileDialog
 var real_recipes: FileDialog
@@ -43,6 +45,10 @@ func _ready() -> void:
 		text_hud = TextHud.new()
 		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 		viewport.add_child(text_hud)
+		quest_journal = QuestJournal.new()
+		quest_journal.set_anchors_preset(Control.PRESET_FULL_RECT)
+		viewport.add_child(quest_journal)
+		quest_journal.visible = false
 	real_folder = FileDialog.new()
 	real_folder.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	real_folder.access = FileDialog.ACCESS_FILESYSTEM
@@ -68,6 +74,7 @@ func _ready() -> void:
 	_add_action("real_recipes", "Skill recipe JSON…", func(): open_dialog(real_recipes))
 	_add_action("real_lights", "Level lights JSON…", func(): open_dialog(real_lights))
 	_add_action("npc_leave", "Leave stalled dialog", leave_stalled_dialog)
+	_add_action("quest_journal", "Quest journal", toggle_quest_journal)
 	real_level_choice = OptionButton.new()
 	real_level_choice.disabled = true
 	real_level_choice.add_item("Game-folder level", -1)
@@ -158,6 +165,7 @@ func open_game_folder(path: String) -> bool:
 	# The string tables and help chime from the folder, for the level script.
 	text_sources = RealText.install(real, controller)
 	if text_hud != null: text_hud.configure(real, controller, inspector)
+	if quest_journal != null: quest_journal.configure(real, controller, inspector)
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	if npc_dialog != null:
 		npc_dialog.set_font(real.dialog_font())
@@ -325,6 +333,12 @@ func handle_input_event(event: InputEvent) -> bool:
 	# simultaneous dialog or game-menu handler must not consume that key.
 	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:
 		return true
+	if event is InputEventKey and event.pressed and not event.echo and controller != null:
+		var journal_key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if journal_key == KEY_Q and real != null and not real.disc_dir.is_empty() and \
+			not controller.dialog_status().get("open", false) and not mission_menu_panel.visible:
+			toggle_quest_journal()
+			return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
 		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
@@ -336,6 +350,11 @@ func handle_input_event(event: InputEvent) -> bool:
 				controller.dialog_press(int(TALK_KEYS[key]))
 				return true
 	return super.handle_input_event(event)
+
+func toggle_quest_journal() -> void:
+	if quest_journal == null: return
+	quest_journal.visible = not quest_journal.visible
+	if quest_journal.visible: quest_journal.step_frame()
 
 func start_play() -> void:
 	if level_script != null and level_script.button_pressed and real != null and real.current >= 0:
