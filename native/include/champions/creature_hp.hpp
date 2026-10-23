@@ -59,6 +59,13 @@ class Memory {
   std::shared_ptr<const ReadOverlay> overlay_;
   std::function<std::uint64_t(Address, std::size_t)> under_;
   mutable std::size_t under_depth_ = 0;
+  // Backing entries first created by write_host_bytes. The combat budget
+  // counts combat-owned bytes only, so a large script store never makes an
+  // overwrite or a combat addition throw (audit WA-F4).
+  std::size_t host_extra_ = 0;
+  std::size_t combat_bytes() const noexcept {
+    return bytes_.size() - (host_extra_ < bytes_.size() ? host_extra_ : bytes_.size());
+  }
   std::uint64_t underlying(Address, std::size_t) const;
 
 public:
@@ -123,7 +130,10 @@ class Model {
 public:
   using Callback =
       std::function<void(Model &, const std::vector<std::uint32_t> &)>;
-  Memory mem;
+  // Owned by default; the shared-memory constructor borrows an authority's
+  // Memory instead (the caller keeps it alive for this Model's lifetime).
+  std::unique_ptr<Memory> owned_memory_;
+  Memory &mem;
   // Callback effects, self-replacement and exceptions are preserved. Copy the
   // callable before invocation; mutable capture identity is a host boundary.
   // Keep authoritative callback state in memory or stable external reference
@@ -135,6 +145,10 @@ public:
   std::uint64_t draws = 0; // This entry point never draws randomness.
   CallbackPolicy policy;
   explicit Model(CallbackPolicy policy = CallbackPolicy::RequireHandlers,
+                 Limits limits = {});
+  // Borrowed memory: reads and writes hit the shared World bytes directly.
+  explicit Model(Memory &shared,
+                 CallbackPolicy policy = CallbackPolicy::RequireHandlers,
                  Limits limits = {});
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

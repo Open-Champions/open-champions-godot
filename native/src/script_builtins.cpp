@@ -402,7 +402,8 @@ namespace {
 std::uint8_t canonical_byte(const creature_hp::Memory &memory, std::uint32_t address) {
   try {
     return std::uint8_t(memory.load(address, 1));
-  } catch (const creature_hp::Error &error) {
+  } catch (const std::runtime_error &error) {
+    // creature_hp::Error and the combat overlay's own error type.
     throw amx::HostFault(error.what());
   }
 }
