@@ -1262,14 +1262,13 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["item_load_gate_refusals"] = static_cast<int64_t>(counts.item_load_gate_refusals);
   result["item_load_draws_inferred"] = static_cast<int64_t>(counts.item_load_draws_inferred);
   result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
-  // Both WarBoar names share the factory constructor. Surface its record
-  // count without disclosing any private level record or treating a stub as
-  // a live combat actor (campaign-combat handoff r2/r3).
+  // Both WarBoar names share the factory constructor. An unbuilt record is a
+  // stub, not a live combat actor.
   const auto boars = counts.unbuilt_constructors.find(0x2ba03c);
   result["warboar_unbuilt"] = static_cast<int64_t>(
       boars == counts.unbuilt_constructors.end() ? 0 : boars->second);
-  // Round 4 identifies a distinct, Gold-capable Minotaur death path. This
-  // reports its unbuilt factory records only; no Gold is inferred from them.
+  // Report the Minotaur constructor separately. This gives no evidence of a
+  // Gold drop or credit.
   const auto minotaurs = counts.unbuilt_constructors.find(0x288fdc);
   result["minotaur_unbuilt"] = static_cast<int64_t>(
       minotaurs == counts.unbuilt_constructors.end() ? 0 : minotaurs->second);

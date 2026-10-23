@@ -353,9 +353,12 @@ func run() -> void:
 	var gold_before := int(before.get("gold", -1))
 	var actors_before: Array = before.get("combat_actors", [])
 	var enemy_hp_before := {}
+	var enemy_hp_before_total := 0.0
 	for actor in actors_before:
 		if int(actor.get("slot", 0)) > 0 and actor.get("present", false) and not actor.get("dead", false):
-			enemy_hp_before[int(actor.slot)] = float(actor.get("hp", -1.0))
+			var enemy_hp := float(actor.get("hp", -1.0))
+			enemy_hp_before[int(actor.slot)] = enemy_hp
+			enemy_hp_before_total += enemy_hp
 	var attack_handled := false
 	# Exercise pressed edges throughout the fight window. A single tap cannot
 	# establish damage, a death, or a drop in the live session.
@@ -372,18 +375,32 @@ func run() -> void:
 	var actors_after: Array = after.get("combat_actors", [])
 	var enemy_damaged := false
 	var enemy_died := false
+	var enemy_hp_after_total := 0.0
+	var live_enemies_after := 0
+	var enemy_slots_after := {}
 	for actor in actors_after:
 		var slot := int(actor.get("slot", 0))
+		enemy_slots_after[slot] = true
+		if slot > 0 and actor.get("present", false) and not actor.get("dead", false):
+			live_enemies_after += 1
 		if enemy_hp_before.has(slot):
-			enemy_damaged = enemy_damaged or float(actor.get("hp", -1.0)) < float(enemy_hp_before[slot])
+			var enemy_hp := float(actor.get("hp", -1.0))
+			enemy_hp_after_total += enemy_hp
+			enemy_damaged = enemy_damaged or enemy_hp < float(enemy_hp_before[slot])
 			enemy_died = enemy_died or actor.get("dead", false) or not actor.get("present", true)
+	for slot in enemy_hp_before:
+		enemy_died = enemy_died or not enemy_slots_after.has(slot)
 	var drops_before := int(before.get("combat_drops", 0))
 	var drops_after := int(after.get("combat_drops", 0))
 	var gold_after := int(after.get("gold", -1))
+	# Round 8 traced Gold from AutoContainer, separate from the boar's
+	# zero-Gold drop. Require a runtime source witness before crediting Gold
+	# toward this gate; an unrelated balance change is insufficient.
+	var auto_container_gold := bool(after.get("gold_from_auto_container", false))
 	var fight_passed: bool = fight_loaded and scene.real.current == fight_level \
 		and after.get("combat_enabled", false) and attack_handled \
 		and not enemy_hp_before.is_empty() and enemy_damaged and enemy_died \
-		and drops_after > drops_before and gold_after > gold_before
+		and auto_container_gold and gold_after > gold_before
 	var missing_fight_steps := {}
 	if not fight_loaded or scene.real.current != fight_level: missing_fight_steps["enemy_level_entry"] = 1
 	if not after.get("combat_enabled", false): missing_fight_steps["campaign_combat_runtime"] = 1
@@ -391,16 +408,22 @@ func run() -> void:
 	if enemy_hp_before.is_empty(): missing_fight_steps["live_enemy"] = 1
 	if not enemy_damaged: missing_fight_steps["enemy_damage"] = 1
 	if not enemy_died: missing_fight_steps["enemy_death"] = 1
-	if drops_after <= drops_before: missing_fight_steps["drop"] = 1
+	if not auto_container_gold: missing_fight_steps["auto_container_gold_source"] = 1
 	if gold_after <= gold_before: missing_fight_steps["gold_gain"] = 1
 	var object_counts: Dictionary = scene.controller.script_command_counts()
 	mark("enemy_fight", "passed" if fight_passed else "blocked_unported_combat",
 		{"attack_input_handled": attack_handled, "live_enemies_before": enemy_hp_before.size(),
+		"live_enemies_after": live_enemies_after,
+		"enemy_hp_before_total": enemy_hp_before_total,
+		"enemy_hp_after_total": enemy_hp_after_total,
+		"enemy_hp_change_total": enemy_hp_after_total - enemy_hp_before_total,
 		"scene_paused": scene.paused, "frontend_screen": fe.screen(),
 		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
 		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
 		"hp_before": hp_before, "hp_after": float(after.get("hp", -1.0)),
+		"hp_change": float(after.get("hp", -1.0)) - hp_before,
 		"gold_before": gold_before, "gold_after": gold_after,
+		"gold_from_auto_container": auto_container_gold,
 		"drops_before": drops_before, "drops_after": drops_after,
 		"objects_built": int(object_counts.get("objects_built", 0)),
 		"objects_unbuilt": int(object_counts.get("objects_unbuilt", 0)),

@@ -408,13 +408,19 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
                         std::uint32_t c, const std::vector<std::string> &props) {
   if (outcome.constructor() == SCRIPT_GENERATOR_CTOR)
     return build_generator(outcome, record, c, props);
-  // Both WarBoar record names take this factory branch (campaign-combat
-  // handoff r2/r3). The constructor's resource references and hide mask have
-  // no production answer in this host, and its run/state methods have no
-  // binding to the script world's actor. Keep the factory allocation/order,
-  // but never register a partly constructed hostile as a live creature.
+  // Campaign-combat r7 observed both class constructors entering Creature_ctor,
+  // then GameObject_ctor, which called res_find. Its 46 resource returns are
+  // addresses in one scripted-entry emulator session, not addresses allocated
+  // by this host. Registration on the 60-frame list was observed; dispatch of
+  // these actors and their class AI was not. Keep allocation/file order, but
+  // refuse registration until this host owns the resources and shared combat
+  // services needed to construct a live creature.
   if (outcome.constructor() == 0x2ba03c) {
     counts_.build_refusals["WarBoar resource and shared combat services unavailable"] += 1;
+    return Build::NotBuilt;
+  }
+  if (outcome.constructor() == 0x288fdc) {
+    counts_.build_refusals["Minotaur resource and shared combat services unavailable"] += 1;
     return Build::NotBuilt;
   }
   if (outcome.constructor() == 0x158928) {
