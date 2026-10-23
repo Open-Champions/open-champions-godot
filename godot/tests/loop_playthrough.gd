@@ -210,7 +210,12 @@ func run() -> void:
 		for i in range(4): tap(CROSS)
 		if fe.screen() == "difficulty": tap(CROSS)
 		mark("character_class", fe.screen())
-		if fe.screen() == "char-class": tap(CROSS)
+		if fe.screen() == "char-class":
+			# The assisted Valor capture used the model-11/class-6 character.
+			# Select that documented pair through character creation; the
+			# capture's equipped club is still a separate item-state question.
+			for i in range(11): tap(DOWN)
+			tap(CROSS)
 		if fe.screen() == "char-appearance": tap(CROSS)
 		if fe.screen() == "char-ability":
 			for i in range(20): tap(RIGHT)
@@ -219,7 +224,13 @@ func run() -> void:
 			fe.type_name("Probe")
 			tap(DOWN)
 			tap(CROSS)
-	mark("character_created", fe.screen(), {"player_ready": scene.controller.get_observation().get("player_ready", false)})
+	var created_player: Dictionary = scene.controller.get_observation()
+	mark("character_created", fe.screen(),
+		{"player_ready": created_player.get("player_ready", false),
+		"player_class": created_player.get("player_class", -1),
+		"player_model": created_player.get("player_model", -1)})
+	if int(created_player.get("player_class", -1)) != 6 or int(created_player.get("player_model", -1)) != 11:
+		refusal("character_created", "character creation did not yield the documented class-6/model-11 pair")
 	mark("first_level", "entered" if scene.real.current >= 0 and scene.play_mode else "refused",
 		{"level_index": scene.real.current, "session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
