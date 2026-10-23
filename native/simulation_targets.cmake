@@ -235,6 +235,17 @@ else()
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
+# Isolated campaign WarBoar/Minotaur actor boundary; no play-scene binding.
+add_library(champions-campaign-actors "${CHAMPIONS_SIMULATION_ROOT}/src/campaign_actors.cpp")
+target_include_directories(champions-campaign-actors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-campaign-actors PUBLIC champions-objects champions-creature-hp champions-archive champions-combat)
+if(MSVC)
+    target_compile_options(champions-campaign-actors PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-campaign-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-campaign-actors)
+
 # AntQueen, Skeleton and Soul constructors, set-states and run prologues
 # (research-combat-ctors e9777eb) on the arena model.
 add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors.cpp"
