@@ -128,6 +128,53 @@ func player_actor_pixels() -> int:
 			if shown.get_pixel(x, y) != hidden.get_pixel(x, y): changed += 1
 	return changed
 
+# Explicit diagnostic samples from the selected model's animation lump. The
+# level session does not yet expose weapon class, so row 0 is a stated test
+# input, never an inferred equipped class or automatic action transition.
+func player_pose_pixels() -> Dictionary:
+	if scene.real_player == null or not scene.real_player.body_drawn:
+		return {"ok": false, "error": "class body unavailable"}
+	var idle: Dictionary = scene.real_player.draw_selected_pose(0, 0, 1.0)
+	if not idle.get("ok", false): return idle
+	var idle_mesh: Mesh = scene.actor_visual.mesh
+	scene.asset_label.text = "Explicit class-0 idle clip sample · diagnostic pose"
+	await capture("03-player-idle")
+	var idle_image: Image
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.force_draw()
+		idle_image = scene.viewport.get_texture().get_image()
+	var walk: Dictionary = scene.real_player.draw_selected_pose(0, 1, 1.0)
+	if not walk.get("ok", false):
+		scene.real_player.restore_rest_pose()
+		scene.asset_label.text = scene.real_player.status
+		return walk
+	scene.asset_label.text = "Explicit class-0 walk clip sample · diagnostic pose"
+	await capture("03-player-walk")
+	var walk_mesh: Mesh = scene.actor_visual.mesh
+	var walk_image: Image
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.force_draw()
+		walk_image = scene.viewport.get_texture().get_image()
+	var pose_corners := 0
+	if idle_mesh.get_surface_count() == walk_mesh.get_surface_count():
+		for surface in range(idle_mesh.get_surface_count()):
+			var first: PackedVector3Array = idle_mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			var second: PackedVector3Array = walk_mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			if first.size() != second.size(): continue
+			for index in range(first.size()):
+				if first[index] != second[index]: pose_corners += 1
+	var changed := 0
+	if idle_image != null and walk_image != null and not idle_image.is_empty() \
+			and idle_image.get_size() == walk_image.get_size():
+		for y in range(0, idle_image.get_height(), 3):
+			for x in range(0, idle_image.get_width(), 3):
+				if idle_image.get_pixel(x, y) != walk_image.get_pixel(x, y): changed += 1
+	scene.real_player.restore_rest_pose()
+	scene.asset_label.text = scene.real_player.status
+	return {"ok": pose_corners > 0 and (changed > 0 or DisplayServer.get_name() == "headless"),
+		"idle_slot": int(idle.slot), "walk_slot": int(walk.slot),
+		"pose_corners": pose_corners, "pose_pixels": changed, "sample_tick": 1.0}
+
 func tap(bits: int) -> void:
 	fe.tap(bits)
 	collect("frontend")
@@ -237,9 +284,12 @@ func run() -> void:
 		"practice_label": scene.asset_label.text.begins_with("Practice figure"),
 		"body_drawn": scene.real_player.body_drawn, "model_match": scene.real_player.model_index == int(scene.controller.get_observation().get("player_model_index", -1)),
 		"actor_visible": scene.actor_visual.visible})
+	var pose: Dictionary = await player_pose_pixels()
+	mark("player_pose_sample", "sampled" if pose.get("ok", false) else "refused", pose)
 	if args.has("visual-only"):
 		save_json()
-		quit(0 if class_mesh and (DisplayServer.get_name() == "headless" or actor_pixels > 0) else 1)
+		quit(0 if class_mesh and pose.get("ok", false) and \
+			(DisplayServer.get_name() == "headless" or actor_pixels > 0) else 1)
 		return
 	if scene.real.current < 0 and not scene.real.levels.is_empty():
 		var direct: bool = scene.load_real_level(0)
