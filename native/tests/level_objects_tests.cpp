@@ -172,8 +172,9 @@ int main(int argc, char **argv) {
                                      " != " + std::to_string(want));
         }
         check(seed.state == hex(c[7]), where + " shared seed");
-        // Native companion fields: a constructed Creature, with synthetic
-        // words, must recover its writer-verified fields on the same record.
+        // Independently specified alive writer layout (research save-world.md
+        // and creatures.md): the s16 charm is sign-extended; the adjacent s16
+        // root timer is not part of the record.
         auto &memory = host.variables().memory;
         memory.word(address + 0xe8, 0x12345678);
         memory.word(address + 0x228, 0x3f800000);
@@ -181,20 +182,59 @@ int main(int argc, char **argv) {
         memory.word(address + 0xa8, 0x01800000);
         memory.word(address + 0xac, 0x00000001);
         memory.byte(address + 0x231, 1);
-        memory.word(address + 0x312, 7);
+        memory.w16(address + 0x312, 0xffff);
+        memory.w16(address + 0x314, 9);
         const auto saved_fields = host.save_built_object_fields();
-        check(saved_fields.size() == 1 && saved_fields[0].fields.size() == 20,
-              where + " saved Creature fields");
+        const rta::level_object_state::Bytes expected{
+            0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x80, 0x3f,
+            0x00, 0x00, 0x00, 0x40, 0x6b, 0x00, 0x00, 0x00,
+            0xff, 0xff, 0xff, 0xff};
+        check(saved_fields.size() == 1 && saved_fields[0].fields == expected,
+              where + " exact alive Creature writer layout");
         memory.word(address + 0xe8, 0);
         memory.word(address + 0x228, 0);
         memory.word(address + 0x22c, 0);
         memory.word(address + 0xa8, 0);
         memory.word(address + 0xac, 0);
         memory.byte(address + 0x231, 0);
-        memory.word(address + 0x312, 0);
+        memory.w16(address + 0x312, 0);
+        memory.w16(address + 0x314, 0x1234);
         check(host.restore_built_object_fields(saved_fields) == 1 &&
-                  host.save_built_object_fields()[0].fields == saved_fields[0].fields,
+                  host.save_built_object_fields()[0].fields == expected &&
+                  memory.u16(address + 0x312) == 0xffff &&
+                  memory.u16(address + 0x314) == 0x1234,
               where + " restored Creature fields");
+        memory.w16(address + 0x312, 0);
+        const auto no_charm = host.save_built_object_fields();
+        const rta::level_object_state::Bytes expected_no_charm{
+            0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x80, 0x3f,
+            0x00, 0x00, 0x00, 0x40, 0x2b, 0x00, 0x00, 0x00};
+        check(no_charm[0].fields == expected_no_charm,
+              where + " root timer alone omits charm field");
+        memory.w16(address + 0x312, 5);
+        check(host.restore_built_object_fields(no_charm) == 1 &&
+                  memory.u16(address + 0x312) == 0 &&
+                  memory.u16(address + 0x314) == 0x1234,
+              where + " absent charm clears only charm timer");
+        for (const std::uint32_t dead_hp : {0u, 0xc1c80000u}) {
+          memory.word(address + 0x228, dead_hp);
+          bool dead_save_refused = false;
+          try { (void)host.save_built_object_fields(); }
+          catch (const std::runtime_error &) { dead_save_refused = true; }
+          check(dead_save_refused, where + " dead Creature save refused");
+        }
+        memory.word(address + 0x228, 0x3f800000);
+        auto dead_record = saved_fields;
+        dead_record[0].fields[4] = 0;
+        dead_record[0].fields[5] = 0;
+        dead_record[0].fields[6] = 0;
+        dead_record[0].fields[7] = 0;
+        bool dead_restore_refused = false;
+        try { (void)host.restore_built_object_fields(dead_record); }
+        catch (const std::runtime_error &) { dead_restore_refused = true; }
+        check(dead_restore_refused && memory.word(address + 0x228) == 0x3f800000 &&
+                  memory.u16(address + 0x314) == 0x1234,
+              where + " dead Creature restore refused without mutation");
         auto *live = host.variables().world->objects.at(address);
         live->alive = false;
         bool deleted_refused = false;

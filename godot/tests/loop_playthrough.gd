@@ -329,7 +329,10 @@ func run() -> void:
 		{"original_pause_entries": pause_entries})
 	if fe.screen() == "save-game": tap(CROSS)
 	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign") and FileAccess.file_exists(save_path + ".worldstate")
-	mark("in_game_save", "saved" if saved else "refused", {"screen": fe.screen()})
+	var save_probe: Dictionary = scene.controller.save_level_object_directory(str(scene.real.levels[scene.real.current].stem)) if not saved else {}
+	var dead_state_refused: bool = not saved and str(save_probe.get("error", "")) == "dead built-Creature save state is unverified"
+	mark("in_game_save", "saved" if saved else ("refused_as_expected" if dead_state_refused else "refused"),
+		{"screen": fe.screen(), "dead_state_refused": dead_state_refused})
 	var saved_state := FileAccess.get_file_as_bytes(save_path + ".worldstate") if saved else PackedByteArray()
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)

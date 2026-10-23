@@ -63,6 +63,13 @@ struct Refused : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+bool live_creature_hp(std::uint32_t raw) {
+  float hp;
+  static_assert(sizeof(hp) == sizeof(raw), "Creature HP is a 32-bit float");
+  std::memcpy(&hp, &raw, sizeof(hp));
+  return hp > 0.0f;
+}
+
 } // namespace
 
 std::vector<level_object_state::Record> Host::save_built_object_fields() const {
@@ -84,6 +91,8 @@ std::vector<level_object_state::Record> Host::save_built_object_fields() const {
     record.position = built.position;
     record.angle = built.angle;
     const auto c = built.address;
+    if (!live_creature_hp(m.word(c + 0x228)))
+      throw std::runtime_error("dead built-Creature save state is unverified");
     put(record.fields, m.word(c + 0xe8));
     put(record.fields, m.word(c + 0x228));
     put(record.fields, m.word(c + 0x22c));
@@ -93,9 +102,9 @@ std::vector<level_object_state::Record> Host::save_built_object_fields() const {
     for (unsigned i = 0; i != 5; ++i)
       if (raw_flags & masks[i]) bits |= 1u << i;
     if (m.u8(c + 0x231) & 1u) bits |= 1u << 5;
-    if (m.word(c + 0x312)) bits |= 1u << 6;
+    if (m.s16(c + 0x312)) bits |= 1u << 6;
     put(record.fields, bits);
-    if (bits & (1u << 6)) put(record.fields, m.word(c + 0x312));
+    if (bits & (1u << 6)) put(record.fields, std::uint32_t(m.s16(c + 0x312)));
     result.push_back(std::move(record));
   }
   return result;
@@ -120,6 +129,17 @@ std::size_t Host::restore_built_object_fields(
                       (std::uint32_t(r.fields[15]) << 24);
     if (bits & ~0x7fu || ((bits & 0x40u) != 0) != (r.fields.size() == 20))
       throw std::runtime_error("invalid saved Creature flag fields");
+    if (!live_creature_hp(std::uint32_t(r.fields[4]) |
+                          (std::uint32_t(r.fields[5]) << 8) |
+                          (std::uint32_t(r.fields[6]) << 16) |
+                          (std::uint32_t(r.fields[7]) << 24)))
+      throw std::runtime_error("dead built-Creature restore state is unverified");
+    if (r.fields.size() == 20) {
+      const auto charm = std::uint16_t(r.fields[16]) | (std::uint16_t(r.fields[17]) << 8);
+      const auto sign = (charm & 0x8000u) ? 0xffu : 0u;
+      if (!charm || r.fields[18] != sign || r.fields[19] != sign)
+        throw std::runtime_error("invalid saved Creature charm timer");
+    }
   }
   auto &m = variables_->memory;
   auto word = [](const level_object_state::Bytes &v, std::size_t at) {
@@ -143,7 +163,7 @@ std::size_t Host::restore_built_object_fields(
     m.word(c + 0xa8, std::uint32_t(raw_flags));
     m.word(c + 0xac, std::uint32_t(raw_flags >> 32));
     m.byte(c + 0x231, std::uint8_t((m.u8(c + 0x231) & ~1u) | ((bits >> 5) & 1u)));
-    m.word(c + 0x312, bits & 0x40u ? word(v, 16) : 0);
+    m.w16(c + 0x312, bits & 0x40u ? word(v, 16) : 0);
   }
   return records.size();
 }

@@ -141,7 +141,9 @@ func load_real_level(index: int, record_departing_state := true) -> bool:
 	if record_departing_state and not restoring_real_level and real.current >= 0 and controller.get_play_capabilities().get("level_script_enabled", false):
 		var previous: Dictionary = controller.save_level_object_directory(str(real.levels[real.current].stem))
 		if not previous.get("ok", false) or not previous.get("readable", false):
-			status_label.text = "Level change refused: per-level object directory is full or unreadable."
+			status_label.text = "Level change refused: this level has Creature death state that cannot be restored yet." if \
+				str(previous.get("error", "")) == "dead built-Creature save state is unverified" else \
+				"Level change refused: per-level object directory is full or unreadable."
 			return false
 	var result: Dictionary = real.load_level(index)
 	if not result.ok:
@@ -183,7 +185,9 @@ func save_session_file(path: String) -> bool:
 		campaign = state.bytes
 		var objects_saved: Dictionary = controller.save_level_object_directory(str(level.stem))
 		if not objects_saved.get("ok", false) or not objects_saved.get("readable", false):
-			status_label.text = "Save refused: per-level object directory is full or unreadable."
+			status_label.text = "Save refused: this level has Creature death state that cannot be restored yet." if \
+				str(objects_saved.get("error", "")) == "dead built-Creature save state is unverified" else \
+				"Save refused: per-level object directory is full or unreadable."
 			return false
 		object_state = objects_saved.bytes
 	if not super.save_session_file(path): return false
