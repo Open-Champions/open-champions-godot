@@ -303,6 +303,7 @@ func run() -> void:
 	var pending: Dictionary = scene.controller.script_level_request()
 	var walk_attempts := 0
 	var walked_into := false
+	var queued_by_walk := false
 	var entered_without_change := 0
 	var navigation_stalls := 0
 	var sources_examined := 1
@@ -333,19 +334,25 @@ func run() -> void:
 		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
 		for target in walk_targets:
 			walk_attempts += 1
+			var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
 			var walk: Dictionary = walk_into_trigger(target, 45000)
 			if walk.get("navigation_stalled", false): navigation_stalls += 1
 			walked_into = bool(walk.get("entered", false))
 			pending = scene.controller.script_level_request()
+			var dispatch: Dictionary = scene.controller.script_trigger_status()
+			queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
+				int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
+				int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
+				str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
 			if walked_into and not pending.get("queued", false): entered_without_change += 1
-			if pending.get("queued", false) and walked_into: break
-		if pending.get("queued", false) and walked_into:
+			if pending.get("queued", false): break
+		if queued_by_walk:
 			transition_before = scene.real.current
 			break
 	var record_before: Dictionary = scene.controller.get_observation()
 	var trigger_status: Dictionary = scene.controller.script_trigger_status()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = walked_into and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
 	var record_after: Dictionary = scene.controller.get_observation()
 	var start: Dictionary = scene.controller.get_terrain().get("start", {})
 	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
@@ -361,10 +368,12 @@ func run() -> void:
 	mark("level_change", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
 		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
+		"queued_by_walk": queued_by_walk,
 		"entered_without_change": entered_without_change,
 		"navigation_stalls": navigation_stalls,
 		"trigger_samples": int(trigger_status.get("samples", 0)),
 		"trigger_dispatches": int(trigger_status.get("dispatches", 0)),
+		"trigger_queued_dispatches": int(trigger_status.get("queued_dispatches", 0)),
 		"trigger_missing": int(trigger_status.get("missing", 0)),
 		"arrival_at_marker": arrival_at_marker,
 		"arrival_pre_search": bool(start.get("pre_search", false)),

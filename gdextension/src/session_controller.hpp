@@ -67,6 +67,9 @@ class ChampionsSessionController : public godot::RefCounted {
   std::string trigger_refusal_;
   std::size_t trigger_samples_ = 0, trigger_dispatches_ = 0,
               trigger_missing_ = 0;
+  std::size_t trigger_queued_dispatches_ = 0;
+  std::size_t trigger_queued_record_ = 0;
+  std::string trigger_queued_destination_;
   std::string trigger_level_name_;
   std::map<std::string, std::vector<champions::simulation::rta::level_flow::TriggerState>> trigger_states_;
   void run_level_triggers();

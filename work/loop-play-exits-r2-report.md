@@ -18,6 +18,7 @@ Changed files: `native/include/champions/level_flow.hpp`, `native/src/level_flow
 
 - `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and `cmake --build build/native -j 4`: PASS. `build/native/champions-level-flow-tests` is arm64 Mach-O.
 - `ctest --test-dir build/native --output-on-failure -j 3 -R '^(level-flow-exact|script-commands|quests|script-builtins-api)$'`: PASS, 4/4.
+- `ctest --test-dir build/native --output-on-failure -j 3`: PASS, 231/231; `player-exact` passed in 162.88 seconds, so no serial no-timeout retry was needed.
 - `cmake --build build/godot-extension -j 4`: PASS, including the Godot development extension.
 - `python3 work/play-exits/run-godot.py`: PASS, 54/54 Godot dev matrix. The full-combat smoke's `FULL_TRACE` is 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged from the pre-change trace.
 - `../integration/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --script res://tests/real_data_scene.gd -- --game-folder=<owner-supplied-disc> --cache=<local-cache> --all --levels=0 --from=0 --to=111 --ticks=60 --scripts --summary=<local-summary>`: PASS, 111/111 candidates, loads and plays; 224 checks passed, zero failures. The disc remained read-only at 994 files.
@@ -30,3 +31,17 @@ Changed files: `native/include/champions/level_flow.hpp`, `native/src/level_flow
 The linked TriggerParams box query is not represented by this bridge, so any level containing such records is refused conservatively. The research does not enumerate every other constructor that advances the shared 15-list cursor; the bridge refuses known unmodelled cases and does not claim complete original scheduling across arbitrary levels. Normal nearest-object PushTrigger interaction and host/network prompts are not wired. JumpGate discovery, list persistence, eight-state menu input, 180-tick real-level travel, and destination gate construction are not wired. The real scene still starts at the documented marker before Player1's live free-spot search; exact terrain-dependent arrival and original facing cannot be claimed. Pending post actions, same-level reload, and complete level-state save/re-entry remain refused.
 
 Private disc files were read only for acceptance. No names, decoded content, or game bytes are committed.
+
+## Audit fixes
+
+- PER2-1: The live Trigger reads the documented `t` property alone. A missing or empty `t` refuses automatic dispatch. The synthetic Godot smoke supplies both `script=absent` and `t=tick` and observes a non-missing walk-in dispatch; its alias-only case refuses walk-in.
+- PER2-2: Each successful live Trigger entry dispatch records its object index only when that dispatch changes the pending level request to a queued destination. Playthrough step 6 now requires a geometric entry, a new queued-dispatch event for the entered record, and equality between that event's destination and the accepted pending request before applying the level change. The existing arrival and carried-record checks remain.
+
+Verification after these fixes:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and `cmake --build build/native -j 4`: PASS. `cmake --build build/godot-extension -j 4` and the final `-j 2` rebuild: PASS.
+- `ctest --test-dir build/native --output-on-failure -j 3 -R '^(level-flow-exact|script-commands|quests|script-builtins-api)$'`: PASS, 4/4.
+- `../integration/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --script res://tests/script_commands_smoke.gd`: PASS, including both Trigger property cases.
+- `python3 work/play-exits/run-godot.py`: PASS, 54/54. Its `FULL_TRACE` is 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged.
+- `../integration/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --script res://tests/real_data_scene.gd -- --game-folder=<owner-supplied-disc> --cache=<local-cache> --all --levels=0 --from=0 --to=111 --ticks=60 --scripts --summary=<local-summary>`: PASS, 111/111 candidates loaded and played, 224 checks passed, zero failures or refusal kinds.
+- `python3 tools/run_loop_playthrough.py --godot ../integration/work/runtime/Godot.app/Contents/MacOS/Godot --game-folder=<owner-supplied-disc> --out work/play-exits/audit-fix-final-playthrough`: step 6 PASS in headless and rendered runs with `walked_into=true`, `queued_by_walk=true`, one request-queueing Trigger dispatch, `record_carried=true`, `campaign_image_restored=true`, and `arrival_at_marker=true`; the rendered destination frame was inspected. The wrapper still exits 1 for the later combat and native save/load refusals. Ten rendered frames were captured. The disc remained 994 files before and after.

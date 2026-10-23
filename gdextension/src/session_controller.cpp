@@ -635,7 +635,16 @@ void ChampionsSessionController::run_level_triggers() {
     live.body.run_exact({player}, false, nullptr, {},
                         [this, &live](const std::string &name, unsigned slot) {
       ++trigger_dispatches_;
+      const Dictionary before = script_level_request();
       const auto stop = scripts_->run_object_entry(live.record, name, slot);
+      const Dictionary after = script_level_request();
+      if (stop == rta::script_commands::Stop::Complete && name == live.body.script &&
+          bool(after.get("queued", false)) &&
+          (!bool(before.get("queued", false)) || before.get("name", String()) != after.get("name", String()))) {
+        ++trigger_queued_dispatches_;
+        trigger_queued_record_ = live.record;
+        trigger_queued_destination_ = String(after.get("name", String())).utf8().get_data();
+      }
       if (stop == rta::script_commands::Stop::Missing) {
         ++trigger_missing_;
         return -1;
@@ -948,6 +957,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     trigger_frame_ = 0;
     trigger_refusal_.clear();
     trigger_samples_ = trigger_dispatches_ = trigger_missing_ = 0;
+    trigger_queued_dispatches_ = 0;
+    trigger_queued_destination_.clear();
     const bool has_params = std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
         [](const auto &r) { return r.cls == "TriggerParams"; });
     const bool has_unmodelled_slow = std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
@@ -970,7 +981,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
           throw std::runtime_error("Trigger dimension outside signed32.");
         return int(parsed);
       };
-      const auto script = record.prop("script").value_or(record.prop("t").value_or(""));
+      const auto script = record.prop("t").value_or("");
       const bool refused = has_params || has_unmodelled_slow || script.empty();
       if (refused) trigger_refusal_ =
           "TriggerParams linking, another slow-list constructor, or missing script is unported.";
@@ -1011,6 +1022,8 @@ Dictionary ChampionsSessionController::disable_level_script() {
   for (auto &list : trigger_lists_) list.clear();
   trigger_refusal_.clear();
   trigger_samples_ = trigger_dispatches_ = trigger_missing_ = 0;
+  trigger_queued_dispatches_ = 0;
+  trigger_queued_destination_.clear();
   trigger_states_.clear();
   trigger_level_name_.clear();
   script_seed_.reset();
@@ -1488,6 +1501,9 @@ Dictionary ChampionsSessionController::script_trigger_status() const {
   result["samples"] = int64_t(trigger_samples_);
   result["dispatches"] = int64_t(trigger_dispatches_);
   result["missing"] = int64_t(trigger_missing_);
+  result["queued_dispatches"] = int64_t(trigger_queued_dispatches_);
+  result["queued_record"] = int64_t(trigger_queued_record_);
+  result["queued_destination"] = String::utf8(trigger_queued_destination_.c_str());
   result["refusal"] = String::utf8(trigger_refusal_.c_str());
   return result;
 }
