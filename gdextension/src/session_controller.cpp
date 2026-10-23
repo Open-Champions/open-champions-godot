@@ -94,9 +94,11 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world"),
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world", "resource_lumps"),
                        &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)),
-                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()));
+                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()), DEFVAL(Dictionary()));
+  ClassDB::bind_method(D_METHOD("combat_resource_lump_names"),
+                       &ChampionsSessionController::combat_resource_lump_names);
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -823,6 +825,19 @@ Dictionary ChampionsSessionController::load_campaign_bytes(const PackedByteArray
     Dictionary result = observation(); result["ok"] = true; return result;
   } catch (const std::exception &e) { return failure(e); }
 }
+Array ChampionsSessionController::combat_resource_lump_names() const {
+  Array names;
+  if (!executable_) return names;
+  for (const auto definition : {0x502f80u, 0x501200u}) {
+    std::uint32_t address = 0;
+    for (unsigned i = 0; i < 4; ++i)
+      address |= std::uint32_t(executable_->byte(definition + i)) << (i * 8);
+    const auto name = executable_->string(address);
+    if (!name.empty()) names.push_back(String::utf8(name.c_str()));
+  }
+  return names;
+}
+
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
@@ -830,7 +845,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                                           int64_t music_volume_bits,
                                                           const String &level_name,
                                                           const PackedByteArray &balance,
-                                                          const PackedByteArray &world) {
+                                                          const PackedByteArray &world,
+                                                          const Dictionary &resource_lumps) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -876,6 +892,13 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    for (const auto &name_value : resource_lumps.keys()) {
+      const String name = name_value;
+      const PackedByteArray image = resource_lumps[name];
+      if (image.is_empty() || image.size() > 64 * 1024 * 1024)
+        throw std::runtime_error("Selected resource archive is empty or too large.");
+      next->load_resource_lmp(name.utf8().get_data(), {image.ptr(), std::size_t(image.size())});
+    }
     // Malformed statistics or WORLD are refused and counted; the script still
     // attaches without them.
     if (executable_ && !level_name.is_empty() && !balance.is_empty()) {

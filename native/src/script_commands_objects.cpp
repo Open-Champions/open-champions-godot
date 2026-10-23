@@ -434,16 +434,35 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // Campaign-combat r7 observed both class constructors entering Creature_ctor,
   // then GameObject_ctor, which called res_find. Its 46 resource returns are
   // addresses in one scripted-entry emulator session, not addresses allocated
-  // by this host. Registration on the 60-frame list was observed; dispatch of
-  // these actors and their class AI was not. Keep allocation/file order, but
-  // refuse registration until this host owns the resources and shared combat
-  // services needed to construct a live creature.
-  if (outcome.constructor() == 0x2ba03c) {
-    counts_.build_refusals["WarBoar resource and shared combat services unavailable"] += 1;
-    return Build::NotBuilt;
-  }
-  if (outcome.constructor() == 0x288fdc) {
-    counts_.build_refusals["Minotaur resource and shared combat services unavailable"] += 1;
+  // by this host. Registration on the 60-frame list and direct runObjects to
+  // WarBoar_run dispatch were observed in round 8; Minotaur dispatch was not
+  // captured. Definition names come from the selected executable, never the
+  // capture's returned pointers. This verifies the native resource service
+  // separately from the still-unported actor execution.
+  if (outcome.constructor() == 0x2ba03c || outcome.constructor() == 0x288fdc) {
+    const bool boar = outcome.constructor() == 0x2ba03c;
+    const std::uint32_t definition = boar ? 0x502f80 : 0x501200;
+    const unsigned slots = boar ? 20 : 26;
+    auto word = [this](std::uint32_t at) {
+      std::uint32_t value = 0;
+      for (unsigned i = 0; i < 4; ++i)
+        value |= std::uint32_t(exe_->byte(at + i)) << (i * 8);
+      return value;
+    };
+    const auto lump = exe_->string(word(definition));
+    bool complete = !lump.empty();
+    for (unsigned slot = 0; slot < slots && complete; ++slot) {
+      const auto name = exe_->string(word(definition + 8 + 8 * slot));
+      const auto handle = resources_.find(lump, name);
+      complete = !name.empty() && handle && resources_.bytes(*handle).has_value();
+    }
+    if (!complete || word(definition + 8 + 8 * slots) != 0) {
+      counts_.build_refusals[boar ? "WarBoar named resources unavailable" :
+                                    "Minotaur named resources unavailable"] += 1;
+      return Build::NotBuilt;
+    }
+    counts_.build_refusals[boar ? "WarBoar class tick and shared actor runtime unavailable" :
+                                  "Minotaur class tick and shared actor runtime unavailable"] += 1;
     return Build::NotBuilt;
   }
   if (outcome.constructor() == 0x158928) {

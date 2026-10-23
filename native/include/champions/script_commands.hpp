@@ -21,6 +21,7 @@
 #include "champions/script_effects.hpp"
 
 #include "champions/script_items.hpp"
+#include "champions/resource_manager.hpp"
 
 #include "champions/strings.hpp"
 #include <array>
@@ -294,6 +295,11 @@ public:
   // The selected level's WORLD payload supplies the terrain queries used by
   // Player1_ctor's four exact free-spot searches.
   void set_level_world(const std::uint8_t *world, std::size_t size);
+  // Read-only bytes from the caller's selected disc, installed before object
+  // adoption. Resource names are read from the executable definition table.
+  void load_resource_lmp(const std::string &name, champions::Bytes image) {
+    resources_.load_lmp(name, image);
+  }
   // The level-entry inputs of Player1_ctor's marker ranking (research
   // ref_objects.py player1_marker: prev_level, entrance, gate_travel, and the
   // start rank 3 after a load from a save, docs/issues/arena-entry.md). Nothing
@@ -568,6 +574,7 @@ private:
   bool seed_gate_observed_ = false;
   std::optional<Player1Entry> player1_entry_;
   std::unique_ptr<world_queries::Level> terrain_level_;
+  champions::resources::Manager resources_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;

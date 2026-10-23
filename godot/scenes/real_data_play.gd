@@ -405,7 +405,11 @@ func attach_level_script(carry_campaign := false) -> bool:
 	var balance := PackedByteArray()
 	if real.files.has("balance.lmp"):
 		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
-	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
+	var resource_lumps := {}
+	for name in controller.combat_resource_lump_names():
+		if real.files.has(name):
+			resource_lumps[name] = FileAccess.get_file_as_bytes(real.files[name])
+	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world, resource_lumps)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
 	if result.get("ok", false): _refused_level_request = ""

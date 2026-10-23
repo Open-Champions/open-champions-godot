@@ -23,6 +23,9 @@ target_link_libraries(champions-script-commands PUBLIC
     champions-level-factory champions-monsters-1 champions-arena-monsters champions-script-items champions-dialog
     champions-dialog-gaps champions-strings champions-ui-text-gaps
     champions-combat champions-terrain-file)
+if(TARGET champions-archive)
+    target_link_libraries(champions-script-commands PUBLIC champions-archive)
+endif()
 # The native build provides champions-native-audio. The Godot extension compiles
 # the same file as champions-native-audio-binding-core and links it after this
 # static library, so the Playback references resolve there.
