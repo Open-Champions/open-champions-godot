@@ -78,6 +78,7 @@ func _ready() -> void:
 	npc_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
 	npc_dialog.configure(controller)
 	npc_dialog.audio_owner = self
+	npc_dialog.connect("shop_requested", _open_script_shop)
 	if viewport != null: viewport.add_child(npc_dialog)
 	else: add_child(npc_dialog)
 	# The help box takes input until confirmation; keep it visible above a
@@ -233,6 +234,14 @@ func _present_npc_dialog() -> void:
 		status_label.text = "Talking is blocked: the menu lock is held (offline the inventory's close frees it). \"Leave stalled dialog\" frees it."
 	elif not str(talk.get("last_use", "")).is_empty():
 		status_label.text = "Use: " + str(talk.last_use)
+
+func _open_script_shop(slot: int) -> void:
+	if slot != 0 or game_menus == null:
+		status_label.text = "Shop refused: no supported local player slot."
+		return
+	var result: Dictionary = game_menus.open_vendor_shop()
+	if not result.get("ok", false):
+		status_label.text = str(result.get("error", "Shop refused."))
 
 func leave_stalled_dialog() -> void:
 	if controller == null: return

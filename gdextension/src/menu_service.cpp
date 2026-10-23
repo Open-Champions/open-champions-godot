@@ -227,6 +227,14 @@ public:
       };
       auto tables = champions::simulation::rta::script_items::image_tables(reader);
       if (!tables) throw M::Refusal("selected executable has no item tables");
+      // The shop's item_getValue path also reads these file-backed tables.
+      // docs/data-tables.md §1: seven subtype multipliers and twelve quality rows.
+      for (std::uint32_t row = 0; row < 7; ++row)
+        tables->weapon_multipliers.push_back(image.word(0x3e9cb0u + row * 4u));
+      for (std::uint32_t row = 0; row < 12; ++row)
+        tables->quality_rows.push_back({image.word(0x3e9c18u + row * 12u),
+                                        image.word(0x3e9c1cu + row * 12u),
+                                        image.word(0x3e9c20u + row * 12u)});
       champions::inventory_icons::PictureTables pictures;
       for (std::uint32_t row = 0; row < 134; ++row) {
         const auto ptr = image.word(0x3e9ce0u + row * 0x10u + 4u);

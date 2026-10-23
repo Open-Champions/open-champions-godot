@@ -261,7 +261,6 @@ std::vector<Gap> gaps() {
       {"skill-tree-node-pairs", "The 17 line calls were not recorded as endpoint pairs."},
       {"hotkey-from-skills", "This screen does not send the HUD spell-assign message."},
       {"shop-stock-generation", "Stock generation was not run again in the menu research."},
-      {"shop-choice-centre-x", "Shop choice rows have a baseline y. Their centre x was not in the checked arguments."},
       {"workshop-body", "Mode 3 hands the cell to workshop_input. That body is not in this contract."},
       {"confirm-box-geometry", "An equipped sell opens hud_confirmBox. Its frame was not executed."},
       {"exp-threshold-table", "Experience thresholds at 0x41b558 are not in this contract. Level award applies the documented point bands only."},
@@ -402,8 +401,10 @@ bool Ledger::bag_index(std::uint32_t addr, int &bag, int &index) const {
 }
 
 Action Ledger::press(int mode, std::uint32_t edge) {
-  if (live_record_ && mode != 2)
-    throw Refusal("live imported record supports inventory actions only");
+  if (live_record_ && mode == 0)
+    throw Refusal("shop stock generation is unknown; no live stock item may be bought");
+  if (live_record_ && mode != 1 && mode != 2)
+    throw Refusal("live imported record supports inventory and shop sale actions only");
   if (page() >= 3)
     return Action::None;
   const auto cell = cursor_cell(0, cursor_x_, cursor_y_);
@@ -612,6 +613,18 @@ Frame Ledger::frame(const std::string &screen) {
     return out;
   }
   if (screen == "shop") {
+    // The bounded shop probe establishes these three sprite submissions.
+    // Stock-mode packing and localized choice strings remain unknown.
+    out.sprites.push_back({66, 210, 0, 0x80808080u, "", "buttontop.tex"});
+    out.sprites.push_back({60, 174, 0, 0x80808080u, "", "buysell.tex"});
+    out.sprites.push_back({320, 0, 1, 0x80808080u, "", "front.tex"});
+    out.texts.push_back({160, 203, 0x80323c3cu, true, "Buy"});
+    out.texts.push_back({160, 243, 0x80323c3cu, true, "Sell"});
+    out.gaps.push_back({"shop-choice-text", "Choice positions are observed; English labels are host text until localized strings are resolved."});
+    if (live_record_) {
+      out.gaps.push_back({"shop-stock-count", "Fixed stock count and generation budget are unknown; stock is not generated."});
+      return out;
+    }
     const auto strip = inventory_strip(0);
     const auto above = inventory_strip_above(0);
     out.rects.push_back({strip.x0, strip.y0, strip.x1, strip.y1, 0x80808080u, strip.layer});
@@ -726,6 +739,9 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
   dragging_ = 0;
   drag_cell_ = 0;
   live_record_ = true;
+  // The authored constructor's stock item is a test fixture, never live stock.
+  machine_->w32(stock_addr_, 0);
+  machine_->w32(0x868078, 0);
   set_page(0);
 }
 

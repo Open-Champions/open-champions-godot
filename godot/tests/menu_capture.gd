@@ -75,6 +75,20 @@ func run() -> void:
 		printerr("bounded inventory draw was not submitted")
 		quit(1)
 		return
+	var shop_frame: Dictionary = scene.game_menus.service.frame("shop")
+	if shop_frame.get("sprites", []).size() != 3:
+		printerr("checked shop sprite submissions missing")
+		quit(1)
+		return
+	var shop_art_count := 0
+	for sprite in shop_frame.sprites:
+		var art: Dictionary = scene.game_menus._shop_art(str(sprite.resource))
+		if not art.is_empty():
+			shop_art_count += 1
+	if shop_art_count != 3:
+		printerr("checked shop art could not be read from selected disc")
+		quit(1)
+		return
 	for sprite in inventory_frame.sprites:
 		if str(sprite.resource).contains("underbar"):
 			printerr("unverified underbar submission was drawn")
@@ -99,6 +113,18 @@ func run() -> void:
 		printerr("inventory capture could not be read")
 		quit(1)
 		return
+	var shop_capture := Image.new()
+	if shop_capture.load(capture_dir.path_join("shop.png")) != OK or shop_capture.get_data() == first.get_data():
+		printerr("rendered shop did not differ from inventory")
+		quit(1)
+		return
+	scene.npc_dialog.emit_signal("shop_requested", 0)
+	if not scene.game_menus.vendor_open or not scene.game_menus.open or scene.game_menus.live_imported:
+		printerr("hub shop without a player record did not open in refusal state")
+		quit(1)
+		return
+	scene.game_menus.close_menu()
+	scene.game_menus.sync_font(scene.components.art)
 	scene.game_menus.open_screen("inventory")
 	scene.game_menus.service.set_cursor(17, 123)
 	scene.game_menus.queue_redraw()
@@ -162,6 +188,47 @@ func run() -> void:
 		printerr("unequip did not change the imported player record")
 		quit(1)
 		return
+	scene.npc_dialog.emit_signal("shop_requested", 0)
+	if not scene.game_menus.vendor_open or not scene.game_menus.service.state().get("live_record", false):
+		printerr("hub shop event did not open the imported player's shop")
+		quit(1)
+		return
+	var live_shop: Dictionary = scene.game_menus.service.frame("shop")
+	if live_shop.get("sprites", []).size() != 3 or int(scene.game_menus.service.state().gold) != 777:
+		printerr("live shop did not retain the imported player")
+		quit(1)
+		return
+	for _frame in range(4):
+		await process_frame
+		await RenderingServer.frame_post_draw
+	var live_shop_image: Image = scene.viewport.get_texture().get_image()
+	if live_shop_image == null or live_shop_image.get_data() == shop_capture.get_data() or live_shop_image.save_png(capture_dir.path_join("shop-live.png")) != OK:
+		printerr("live shop capture did not show imported state")
+		quit(1)
+		return
+	var stock_refused: Dictionary = scene.game_menus.service.press(0, int(scene.game_menus.service.state().shop_mask))
+	if stock_refused.get("ok", false) or int(scene.game_menus.service.state().gold) != 777:
+		printerr("unknown stock purchase was not refused")
+		quit(1)
+		return
+	var before_sale: PackedByteArray = scene.ps2_import.record_bytes()
+	var before_count: int = int(before_sale[0x134]) | (int(before_sale[0x135]) << 8)
+	scene.game_menus.open_screen("shop-bag")
+	scene.game_menus.service.set_cursor(17, 100)
+	scene.game_menus._press(int(scene.game_menus.service.state().shop_mask))
+	var after_sale: PackedByteArray = scene.ps2_import.record_bytes()
+	var after_count: int = int(after_sale[0x134]) | (int(after_sale[0x135]) << 8)
+	if after_sale == before_sale or after_count >= before_count or int(scene.ps2_import.record_word(0xe4)) < 777:
+		printerr("shop sale did not sync: count ", before_count, " -> ", after_count,
+			" gold ", 777, " -> ", int(scene.ps2_import.record_word(0xe4)),
+			" action state ", scene.game_menus.status.text.left(160))
+		quit(1)
+		return
+	scene.game_menus.close_menu()
+	if scene.game_menus.vendor_open or scene.game_menus.open or scene.game_menus.inventory_art != null:
+		printerr("shop close did not hide and unload resources")
+		quit(1)
+		return
 	scene.ps2_import.replace_record(original_record)
-	print("captures ", saved + 2)
+	print("captures ", saved + 3)
 	quit(0 if saved == 8 else 1)

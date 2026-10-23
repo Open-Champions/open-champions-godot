@@ -72,7 +72,7 @@ func run() -> void:
 	var ids := {}
 	for gap in service.gaps().gaps:
 		ids[str(gap.id)] = true
-	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "stat-spend-input", "skill-confirm-input", "pause-frames", "memory-card-frames", "shop-choice-centre-x", "exp-threshold-table", "mana-refill-offset"]:
+	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "stat-spend-input", "skill-confirm-input", "pause-frames", "memory-card-frames", "exp-threshold-table", "mana-refill-offset"]:
 		check(ids.has(id), "refusal " + id)
 	service.press(2, 0x40)
 	var dir := "user://menu-smoke-%d" % OS.get_process_id()

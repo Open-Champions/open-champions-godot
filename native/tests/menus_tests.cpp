@@ -165,6 +165,18 @@ void layout_vectors() {
 
 void ledger_vectors() {
   {
+    Ledger shop;
+    const auto initial = shop.bag_count(0);
+    expect(shop.press(0, CROSS_CONFIRM.shop) == Action::Buy, "fixture shop buy action");
+    expect(shop.gold() == 441 && shop.bag_count(0) == initial + 1,
+           "100 value buy truncates to 59 and inserts in player bag");
+    const auto sold = hit_cell(0, 0, 2);
+    shop.set_cursor(sold.x0, sold.y0);
+    expect(shop.press(1, CROSS_CONFIRM.shop) == Action::Sell, "fixture shop sell action");
+    expect(shop.gold() == 445 && shop.bag_count(0) == initial,
+           "100 value sell credits 4 and removes from player bag");
+  }
+  {
     Ledger book;
     expect(book.gold() == 500 && book.bag_count(0) == 2 && book.skill_points() == 4, "seed");
     expect(book.stat_points() == 3 && book.level() == 5 && book.acknowledged() == 4, "seed points");
@@ -180,6 +192,7 @@ void ledger_vectors() {
       auto def = std::make_shared<champions::simulation::rta::items::Definition>();
       def->addr = champions::simulation::rta::items::A_DEFS + static_cast<std::uint32_t>(i) * 64;
       def->name = i == 0 ? "blade" : "charm";
+      def->price = 10;
       def->slot = i;
       def->category = 0;
       tables.defs.push_back(def);
@@ -194,6 +207,12 @@ void ledger_vectors() {
            copied.record_word(0x43f0) == PLAYER + BAG_ITEMS, "imported record equip pointer");
     expect(copied.press(2, 0x40) == Action::Unequip &&
            copied.record_word(0x43f0) == 0, "imported record unequip pointer");
+    reject([&] { copied.press(0, CROSS_CONFIRM.shop); }, "unknown live stock refuses purchase");
+    expect(copied.frame("shop").sprites.size() == 3, "shop submits checked disc sprites");
+    expect(copied.record_word(0xe4) == 500, "refused stock does not debit gold");
+    expect(copied.press(1, CROSS_CONFIRM.shop) == Action::Sell &&
+           copied.gold() == 501 && copied.bag_count(0) == 1,
+           "live sale credits the imported record and removes one item");
     reject([&] { copied.press(2, 0x10); }, "live drop refuses missing world placement");
     auto page_record = authored.record_bytes();
     const auto put_word = [&](std::size_t at, std::uint32_t value) {
@@ -235,7 +254,10 @@ void ledger_vectors() {
   {
     Ledger book;
     expect(book.press(0, 0x80) == Action::Buy && book.gold() == 441 && book.bag_count(0) == 3, "buy");
-    expect(book.frame("shop").texts.at(0).text == "stock", "stock cell");
+    const auto shop_frame = book.frame("shop");
+    expect(shop_frame.texts.size() == 3 && shop_frame.texts[0].x == 160 &&
+           shop_frame.texts[0].y == 203 && shop_frame.texts[1].y == 243 &&
+           shop_frame.texts[2].text == "stock", "shop choice positions and fixture stock cell");
   }
   {
     Ledger book;
