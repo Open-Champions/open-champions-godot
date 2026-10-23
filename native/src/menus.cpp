@@ -548,12 +548,18 @@ Frame Ledger::frame(const std::string &screen) {
       out.rects.push_back({panel_x + 15, 413 + n, panel_x + 305, 414 + n,
                            alpha << 24, 4});
     }
-    // The visible grid uses its own page/column stride. Only addresses that
-    // resolve to a counted player item can supply a native picture or name.
+    // Hover uses the separate display-grid address. The selected runtime
+    // supplies only the copied player record, so its researched page-1/2
+    // first-cell sender is the sole established bag-to-screen association.
+    // Other cells on those pages remain unrendered until the display grid is
+    // supplied; do not read page*bdd8 out of the player record.
     const auto selected = cursor_cell(0, cursor_x_, cursor_y_);
+    if (page() > 0 && counts().n[page()] > 1)
+      out.gaps.push_back({"inventory-page-grid", "Only the page's first counted item has a documented bag-to-screen association."});
     for (int row = 0; row < 10; ++row) {
       for (int column = 0; column < GRID_COLS; ++column) {
-      const auto addr = cell_address(2, column, row);
+      const auto addr = page() == 0 ? cell_address(2, column, row)
+                                    : (column == 0 && row == 0 ? first_cell_bag_address(record(), page()) : 0);
       int bag = 0, index = 0;
       if (!bag_index(addr, bag, index) || machine_->u32(addr) == 0) continue;
       bool equipped = false;
@@ -609,6 +615,12 @@ Frame Ledger::frame(const std::string &screen) {
       }
       }
     }
+    // Both cursor copies use the observed resource, layer and tint. The host
+    // cursor is relative to the bounded panel-x=80 fixture above.
+    out.sprites.push_back({panel_x + cursor_x_, cursor_y_, 7, 0x80808080u,
+                           "inventry.lmp", "mousecursor.tex"});
+    out.sprites.push_back({panel_x + cursor_x_, cursor_y_, 7, 0x34000000u,
+                           "inventry.lmp", "mousecursor.tex"});
     return out;
   }
   if (screen == "shop") {

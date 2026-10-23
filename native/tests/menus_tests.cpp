@@ -209,11 +209,18 @@ void ledger_vectors() {
     Ledger pages;
     pages.adopt_record(page_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
     pages.set_page(1);
+    const auto page_one = pages.frame("inventory");
+    expect(page_one.rects.size() == 66 && page_one.frames.size() == 1 &&
+           page_one.rects.back().layer == 5,
+           "page-one counted first item draws an underlay and detail frame");
     expect(pages.press(2, 0x40) == Action::Equip &&
            pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 1),
            "page-one first-cell action uses bag stride");
     expect(pages.press(2, 0x40) == Action::Unequip, "page-one unequip");
     pages.set_page(2);
+    const auto page_two = pages.frame("inventory");
+    expect(page_two.rects.size() == 66 && page_two.frames.size() == 1,
+           "page-two counted first item draws an underlay and detail frame");
     expect(pages.press(2, 0x40) == Action::Equip &&
            pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 2),
            "page-two first-cell action uses bag stride");
@@ -323,8 +330,12 @@ void ledger_vectors() {
     const auto drawn = book.frame("inventory");
     expect(!drawn.texts.empty() && drawn.texts[0].x == 17 && drawn.texts[0].y == 89 &&
            drawn.texts[0].colour == 0x80464646u, "documented small-font base colour");
-    expect(drawn.sprites.size() == 20 && drawn.sprites[0].resource == "inventrybox3.tex" &&
+    expect(drawn.sprites.size() == 22 && drawn.sprites[0].resource == "inventrybox3.tex" &&
            drawn.sprites[3].resource == "inventryboxend.tex", "bounded zero-state box sequence");
+    expect(drawn.sprites[20].resource == "mousecursor.tex" && drawn.sprites[21].resource == "mousecursor.tex" &&
+           drawn.sprites[20].layer == 7 && drawn.sprites[21].layer == 7 &&
+           drawn.sprites[20].tint == 0x80808080u && drawn.sprites[21].tint == 0x34000000u,
+           "two documented cursor copies");
     expect(drawn.rects.size() >= 65 && drawn.rects[0].colour == 0x01000000u &&
            drawn.rects[64].colour == 0x7f000000u, "scrollbar gradient");
     expect(drawn.selected_texts.size() == 1 && drawn.selected_texts[0].colour == 0x805c2913u,

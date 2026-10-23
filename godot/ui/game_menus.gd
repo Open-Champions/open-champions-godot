@@ -156,26 +156,28 @@ func _icon(picture: String) -> Dictionary:
 	if icon_cache.has(picture):
 		return icon_cache[picture]
 	if scene == null or scene.get("real") == null or scene.get("inspector") == null or icon_index.is_empty():
-		return {}
+		return {"refused": "Picture cache index or runtime reader is unavailable."}
 	var real = scene.get("real")
 	if not real.files.has("piccache.dat"):
-		return {}
+		return {"refused": "Picture cache data is unavailable."}
 	var inspector = scene.get("inspector")
 	var found: Dictionary = inspector.lookup_inventory_icon(icon_index, picture, "rta")
-	if not found.get("ok", false) or not found.get("found", false):
-		return {}
+	if not found.get("ok", false):
+		return {"refused": "Picture cache lookup failed."}
+	if not found.get("found", false):
+		return {"miss": true}
 	var offset: int = int(found.first_sector) * 2048
 	var length: int = int(found.sectors) * 2048
 	var file := FileAccess.open(real.files["piccache.dat"], FileAccess.READ)
 	if file == null or length <= 0 or length > 8 * 1024 * 1024 or offset < 0 or offset + length > file.get_length():
-		return {}
+		return {"refused": "Picture cache payload is unavailable or outside its bounds."}
 	file.seek(offset)
 	var payload := file.get_buffer(length)
 	if payload.size() != length:
-		return {}
+		return {"refused": "Picture cache payload is truncated."}
 	var decoded: Dictionary = inspector.decode_inventory_icon(payload, "rta", true)
 	if not decoded.get("ok", false) or int(decoded.width) != int(found.width) or int(decoded.height) != int(found.height):
-		return {}
+		return {"refused": "Picture cache payload failed decoding or dimension checks."}
 	var image := Image.create_from_data(int(decoded.width), int(decoded.height), false, Image.FORMAT_RGBA8, decoded.rgba)
 	icon_cache[picture] = {"texture": ImageTexture.create_from_image(image), "width": int(decoded.width), "height": int(decoded.height)}
 	return icon_cache[picture]
@@ -356,6 +358,8 @@ func _draw() -> void:
 		# Original queue sorts by layer, with later submissions before earlier
 		# ones in a layer. This bounded art sequence is the zero-state fixture.
 		for sprite in drawn.get("sprites", []):
+			if int(sprite.layer) >= 7:
+				continue
 			if inventory_art == null:
 				continue
 			var art: Dictionary = inventory_art.load_art(str(sprite.lump), str(sprite.resource), true)
@@ -384,11 +388,17 @@ func _draw() -> void:
 				draw_rect(Rect2(int(rect.x0), int(rect.y0), int(rect.x1) - int(rect.x0), int(rect.y1) - int(rect.y0)), _word(int(rect.colour)), true)
 		for icon in drawn.get("icons", []):
 			var art: Dictionary = _icon(str(icon.picture))
-			if art.is_empty() and inventory_art != null:
+			if art.get("miss", false) and inventory_art != null:
 				art = inventory_art.load_art("equipmnt.lmp", "pic_dagger1.tex", true)
-			if art.is_empty() or scene.get("inspector") == null:
+			var row_y: float = 119.0 + float(icon.row) * 34.0
+			if art.has("refused") or art.is_empty():
+				var mark := Rect2(97 + int(icon.column) * 32, row_y, 96, 32)
+				draw_rect(mark, Color(0.35, 0.0, 0.0, 0.95), true)
+				draw_rect(mark, Color(1.0, 0.2, 0.2), false, 2.0)
+				draw_string(ThemeDB.fallback_font, mark.position + Vector2(2, 20), "ICON REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE)
 				continue
-			var row_y: float = 30.0 + (229.0 - 140.0) + float(icon.row) * 34.0
+			if scene.get("inspector") == null:
+				continue
 			var position: Dictionary = scene.get("inspector").inventory_icon_grid_placement(int(art.width), int(art.height), 80, int(icon.column), row_y, "rta")
 			if not position.get("ok", false):
 				continue
@@ -400,6 +410,12 @@ func _draw() -> void:
 			_glyphs(int(row_text.x), int(row_text.y), str(row_text.text), int(row_text.colour), bool(row_text.centred), true)
 		for selected in drawn.get("selected_texts", []):
 			_glyphs(int(selected.x), int(selected.y), str(selected.text), int(selected.colour), true, true)
+		for sprite in drawn.get("sprites", []):
+			if int(sprite.layer) != 7 or inventory_art == null:
+				continue
+			var cursor_art: Dictionary = inventory_art.load_art(str(sprite.lump), str(sprite.resource), true)
+			if not cursor_art.is_empty():
+				draw_texture(cursor_art.texture, Vector2(int(sprite.x), int(sprite.y)), _word(int(sprite.tint)))
 	if screen in ["stats", "level-up", "skills"] or (screen == "inventory" and int(service.state().get("page", 0)) >= 3):
 		for text in drawn.texts:
 			_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred), true)

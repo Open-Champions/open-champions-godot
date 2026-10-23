@@ -66,7 +66,7 @@ func run() -> void:
 	service.reset()
 	var drawn: Dictionary = service.frame("inventory")
 	check(drawn.get("ok", false) and int(drawn.texts[0].x) == 17 and int(drawn.texts[0].y) == 89 and str(drawn.texts[0].text) == "blade", "item name sits on the hit cell")
-	check(drawn.sprites.size() == 20 and drawn.selected_texts.size() == 1 and drawn.icons.is_empty(), "bounded box art and authored item text; no invented icon")
+	check(drawn.sprites.size() == 22 and drawn.selected_texts.size() == 1 and drawn.icons.is_empty(), "bounded box and cursor art with authored item text; no invented icon")
 	check(service.frame("pause").texts.is_empty(), "pause draws no invented frame")
 	check(str(service.frame("stats").texts[0].text) == "5", "level uses the executed header position")
 	var ids := {}
