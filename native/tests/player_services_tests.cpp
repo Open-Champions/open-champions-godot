@@ -23,6 +23,13 @@ template <class F> void refuses(F call, const char *reason) {
   try { call(); } catch (const C::Unsupported &) { found = true; }
   check(found, reason);
 }
+template <class F> void refuses_with(F call, const char *label, const char *reason) {
+  bool found = false;
+  try { call(); } catch (const C::Unsupported &e) {
+    found = std::string(e.what()).find(label) != std::string::npos;
+  }
+  check(found, reason);
+}
 R::Raw f(int n) { return R::from_int(std::uint32_t(n)); }
 W::LevelData authored_ground() {
   W::LevelData d;
@@ -57,6 +64,9 @@ void synthetic() {
         "loaded dry point remains dry");
   check(s.water_test({f(110), f(110), f(12)}, f(4)) == 1,
         "loaded water chunk overlaps documented query box");
+  check(s.water_test({f(95), f(110), f(12)}, f(4)) == 1 &&
+            s.water_disturb({f(95), f(110), f(12)}, f(1), f(4)) == 0,
+        "dry disturb uses its unpadded query despite a padded water-test hit");
   refuses([&] { (void)s.water_height({f(110), f(110), f(12)}, f(4)); },
           "ordered water height refuses without runtime tree");
   refuses([&] { (void)s.water_disturb({f(110), f(110), f(12)}, f(1), f(4)); },
@@ -72,15 +82,26 @@ void synthetic() {
     memory.poke(0x3008 + 4 * axis, 4, f(axis < 2 ? -192 : 8));
     memory.poke(0x3014 + 4 * axis, 4, f(axis < 2 ? 192 : 8));
   }
-  memory.poke(0x5008, 4, 0x6000); // loaded ripple grid
+  memory.poke(0x5008, 4, 0); // real-level image has no runtime ripple grid
   R::creature_water::Service water_service(memory);
   bundle.bind_water(water_service, 0x1000);
   check(s.water_test({0, 0, 0}, f(12)) == 1,
         "bound water service queries authored tree");
   check(s.water_height({0, 0, 0}, f(12)) == f(8),
         "bound water height reads first queried chunk");
+  check(s.water_disturb({f(400), f(400), 0}, f(100), f(12)) == 0,
+        "bound service keeps a dry disturbance dry without a grid owner");
+  refuses_with([&] { (void)s.water_disturb({0, 0, 0}, f(100), f(12)); },
+               "wet runtime ripple grid is not bound",
+               "wet service refuses when runtime grid ownership is unverified");
+  check(water_service.writes().empty(), "wet refusal occurs before ripple writes");
+  bundle.bind_water(water_service, 0x1000, true);
+  refuses_with([&] { (void)s.water_disturb({0, 0, 0}, f(100), f(12)); },
+               "wet runtime ripple grid is missing",
+               "declared grid ownership still refuses a null grid pointer");
+  memory.poke(0x5008, 4, 0x6000); // authored runtime grid supplied by this test
   check(s.water_disturb({0, 0, 0}, f(100), f(12)) == 1,
-        "bound water service updates authored ripple grid");
+        "explicit runtime grid owner permits the authored disturbance");
   refuses([&] { (void)s.raycast(at, at, 0, 0); }, "unported ray refuses");
   refuses([&] { (void)s.camera_yaw(0); }, "unbound camera refuses");
   P::Camera known;
@@ -96,6 +117,14 @@ void synthetic() {
             planes[2].point == R::Vec3{0, f(60), f(13)} &&
             planes[3].point == R::Vec3{0, f(-60), f(13)},
         "known host camera flattened at player height with documented inset");
+  refuses_with([&] { (void)s.camera_flag(2); }, "live mode is not bound",
+               "host yaw and frustum do not imply a live follow mode");
+  known.flag = 1;
+  bundle.set_camera(2, known);
+  check(s.camera_flag(2) == 1, "observed non-following mode is supplied");
+  known.flag = 0;
+  bundle.set_camera(2, known);
+  check(s.camera_flag(2) == 0, "observed following mode is supplied");
   refuses([&] { (void)s.camera_yaw(1); }, "other machine has no implicit camera");
 
   R::creature_anim::Runtime runtime;
@@ -138,6 +167,14 @@ void synthetic() {
         "second tick advances the same owned track");
   check(s.animation_root(0x1000) == std::array<R::Raw, 2>{0, 0},
         "authored no-root clip gives measured zero displacement");
+  const auto replacement = runtime.add_state();
+  bundle.bind_actor(0x1000, replacement);
+  refuses_with([&] { (void)s.animation_root(0x1000); }, "actor has not advanced",
+               "rebound actor cannot reuse the old state's root displacement");
+  s.animation_start(0x1000, 0x1234, 1, 0, 0);
+  (void)s.animation_advance(0x1000, R::ONE);
+  check(s.animation_root(0x1000) == std::array<R::Raw, 2>{0, 0},
+        "newly bound actor exposes only its own new advance");
 }
 void real_probe(const char *path) {
   std::ifstream file(path, std::ios::binary);

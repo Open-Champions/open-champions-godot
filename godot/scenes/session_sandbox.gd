@@ -134,7 +134,8 @@ func _capture_player_camera() -> void:
 		return
 	var native_forward := _native_camera_vector(forward)
 	var yaw := roundi(atan2(native_forward.y, native_forward.x) * 65536.0 / TAU) & 0xffff
-	controller.set_player_camera(0, yaw, false, _native_camera_vector(camera.global_position), sides)
+	# Camera3D has no source for the original live follow mode.
+	controller.set_player_camera(0, yaw, null, _native_camera_vector(camera.global_position), sides)
 
 func _input(event: InputEvent) -> void:
 	if handle_input_event(event):

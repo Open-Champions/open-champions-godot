@@ -18,6 +18,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <array>
 #include <godot_cpp/variant/array.hpp>
 #include <cstdint>
@@ -262,7 +263,7 @@ public:
   godot::Dictionary save_snapshot_file(const godot::String &path);
   godot::Dictionary prepare_save_file(const godot::String &path, bool reuse_loaded_level = false);
   godot::Dictionary load_terrain_file(const godot::String &path);
-  void set_player_camera(int64_t slot, int64_t yaw, bool flag,
+  void set_player_camera(int64_t slot, int64_t yaw, const godot::Variant &flag,
                          const godot::Vector3 &position,
                          const godot::PackedVector3Array &side_normals);
   champions::simulation::rta::player_services::Bundle *player_services() noexcept {

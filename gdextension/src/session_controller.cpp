@@ -2169,7 +2169,7 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
   return commit_terrain_file(int64_t(prepared["token"]));
 }
 void ChampionsSessionController::set_player_camera(
-    int64_t slot, int64_t yaw, bool flag, const Vector3 &position,
+    int64_t slot, int64_t yaw, const Variant &flag, const Vector3 &position,
     const PackedVector3Array &side_normals) {
   if (!player_services_) return; // no real level is resident yet
   if (slot < 0 || slot > 3 || side_normals.size() != 4)
@@ -2187,7 +2187,10 @@ void ChampionsSessionController::set_player_camera(
   };
   rta::player_services::Camera snapshot;
   snapshot.yaw = rta::Raw(yaw & 0xffff);
-  snapshot.flag = flag ? 1 : 0;
+  if (flag.get_type() == Variant::BOOL)
+    snapshot.flag = bool(flag) ? 1 : 0;
+  else if (flag.get_type() != Variant::NIL)
+    throw std::runtime_error("Player camera mode needs a boolean or null.");
   snapshot.position = vector(position);
   for (int i = 0; i < 4; ++i)
     snapshot.side_normals[unsigned(i)] = vector(side_normals[i]);

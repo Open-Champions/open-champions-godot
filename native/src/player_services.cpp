@@ -11,6 +11,8 @@ void Bundle::set_camera(Raw slot, Camera camera) {
 }
 void Bundle::bind_animation(creature_anim::Runtime &runtime,
                             std::function<creature_anim::ClipId(Address, Raw)> clips) {
+  actors_.clear();
+  motion_.clear();
   animation_ = &runtime;
   clips_ = std::move(clips);
 }
@@ -18,6 +20,7 @@ void Bundle::bind_actor(Address actor, creature_anim::StateId state) {
   if (!animation_)
     missing("player animation actor: runtime is not bound");
   (void)animation_->state(state); // reject stale state at the binding boundary
+  motion_.erase(actor); // a new binding has no advance for this actor
   actors_[actor] = state;
 }
 void Bundle::bind_player_reader(std::function<std::uint64_t(Address, unsigned)> read) {
@@ -35,18 +38,20 @@ AnimationFields Bundle::animation_fields(Address actor) const {
           static_cast<std::int32_t>(player_read_(actor + 0x58c, 4))};
 }
 void Bundle::bind_water(creature_water::Service &service,
-                        creature_water::Address world) {
+                        creature_water::Address world, bool runtime_grids_bound) {
   water_ = &service;
   water_world_ = world;
+  water_grids_bound_ = runtime_grids_bound;
 }
 void Bundle::bind_water_chunks(std::vector<WaterChunk> chunks) {
   water_chunks_ = std::move(chunks);
   water_chunks_bound_ = true;
 }
-bool Bundle::touches_water(const Vec3 &p, Raw radius) const {
-  const Vec3 lo{sub(sub(p[0], radius), ONE), sub(sub(p[1], radius), ONE),
+bool Bundle::touches_water(const Vec3 &p, Raw radius, bool padded) const {
+  const Raw pad = padded ? ONE : 0;
+  const Vec3 lo{sub(sub(p[0], radius), pad), sub(sub(p[1], radius), pad),
                 sub(p[2], ONE)};
-  const Vec3 hi{add(add(p[0], radius), ONE), add(add(p[1], radius), ONE),
+  const Vec3 hi{add(add(p[0], radius), pad), add(add(p[1], radius), pad),
                 add(p[2], from_int(60))};
   for (const auto &chunk : water_chunks_) {
     bool hit = true;
@@ -85,13 +90,31 @@ combat_runtime::Services Bundle::services(combat_runtime::Services s) {
   };
   s.water_test = [this](const Vec3 &p, Raw radius) {
     if (water_) return Raw(water_->water_test(radius, water_world_, p));
-    if (water_chunks_bound_) return Raw(touches_water(p, radius));
+    if (water_chunks_bound_) return Raw(touches_water(p, radius, true));
     missing("player water test: loaded water chunks are not bound");
   };
   s.water_disturb = [this](const Vec3 &p, Raw strength, Raw radius) {
-    if (water_) return Raw(water_->water_disturb(strength, radius, water_world_, p));
+    if (water_) {
+      // Query before any service write. A wet disturbance needs an owned grid
+      // for every touched chunk; the real-level WORLD image has none.
+      if (water_->memory().load(0x44fcec, 1)) return Raw(0);
+      if (!lt(0, radius)) missing("player water disturb: radius must be positive");
+      const Vec3 lo{sub(p[0], radius), sub(p[1], radius), sub(p[2], ONE)};
+      const Vec3 hi{add(p[0], radius), add(p[1], radius), add(p[2], from_int(60))};
+      const auto chunks = water_->query(water_world_, lo, hi, 16);
+      if (chunks.empty()) return Raw(0);
+      if (!water_grids_bound_)
+        missing("player water disturb: wet runtime ripple grid is not bound");
+      for (const auto chunk : chunks) {
+        const auto payload = creature_water::Address(water_->memory().load(chunk, 4));
+        if (!payload || !water_->memory().load(payload + 8, 4))
+          missing("player water disturb: wet runtime ripple grid is missing");
+      }
+      return Raw(water_->water_disturb(strength, radius, water_world_, p));
+    }
     if (!water_chunks_bound_) missing("player water disturb: loaded water chunks are not bound");
-    if (!touches_water(p, radius)) return Raw(0);
+    if (!lt(0, radius)) missing("player water disturb: radius must be positive");
+    if (!touches_water(p, radius, false)) return Raw(0);
     missing("player water disturb: wet runtime ripple grid is not bound");
   };
   s.water_height = [this](const Vec3 &p, Raw radius) -> Raw {
@@ -112,7 +135,8 @@ combat_runtime::Services Bundle::services(combat_runtime::Services s) {
   s.camera_flag = [this](Raw slot) {
     const auto it = cameras_.find(slot);
     if (it == cameras_.end()) missing("player camera flag: machine camera is not bound");
-    return it->second.flag;
+    if (!it->second.flag) missing("player camera flag: live mode is not bound");
+    return *it->second.flag;
   };
   s.screen_planes = [this](const Vec3 &player) {
     // Only the local machine has a drawable screen; a remote clamp must use

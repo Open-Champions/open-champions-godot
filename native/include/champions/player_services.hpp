@@ -4,6 +4,7 @@
 #include "champions/creature_water.hpp"
 #include "champions/world_queries.hpp"
 #include <map>
+#include <optional>
 
 namespace champions::simulation::rta::player_services {
 using Address = combat_runtime::Address;
@@ -14,7 +15,8 @@ using Plane = combat_runtime::Plane;
 // vectors and planes are in native world coordinates and raw32 units. A remote
 // slot needs its own snapshot; it never inherits the local camera.
 struct Camera {
-  Raw yaw = 0, flag = 0;
+  Raw yaw = 0;
+  std::optional<Raw> flag; // net_getCamFlag needs an observed live mode
   Vec3 position{};
   std::array<Vec3, 4> side_normals{};
 };
@@ -42,9 +44,10 @@ class Bundle {
   std::function<std::uint64_t(Address, unsigned)> player_read_;
   creature_water::Service *water_ = nullptr;
   creature_water::Address water_world_ = 0;
+  bool water_grids_bound_ = false;
   bool water_chunks_bound_ = false;
   std::vector<WaterChunk> water_chunks_;
-  bool touches_water(const Vec3 &, Raw) const;
+  bool touches_water(const Vec3 &, Raw, bool padded) const;
 public:
   explicit Bundle(world_queries::Level &level) : level_(level) {}
   Bundle(const Bundle &) = delete;
@@ -61,8 +64,9 @@ public:
   // Values are read on every call, so equip and action transitions are visible.
   void bind_player_reader(std::function<std::uint64_t(Address, unsigned)> read);
   AnimationFields animation_fields(Address actor) const;
+  // Opt in only when the owner supplies runtime ripple grids for wet chunks.
   void bind_water(creature_water::Service &service,
-                  creature_water::Address world);
+                  creature_water::Address world, bool runtime_grids_bound = false);
   void bind_water_chunks(std::vector<WaterChunk> chunks);
   // Other production callbacks (dialog, resources, etc.) may be supplied in
   // base. Never pass flat_fixture_services as base for a real level.
