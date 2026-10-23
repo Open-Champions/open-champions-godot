@@ -105,6 +105,7 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("combat_press_disease_bolt", "held"), &ChampionsSessionController::combat_press_disease_bolt, DEFVAL(true));
   ClassDB::bind_method(D_METHOD("combat_release_disease_bolt"), &ChampionsSessionController::combat_release_disease_bolt);
   ClassDB::bind_method(D_METHOD("combat_spawn_creature", "own_class"), &ChampionsSessionController::combat_spawn_creature);
+  ClassDB::bind_method(D_METHOD("combat_spawn_mounted_horseman", "variant"), &ChampionsSessionController::combat_spawn_mounted_horseman);
   ClassDB::bind_method(D_METHOD("combat_drop_potion", "kind"), &ChampionsSessionController::combat_drop_potion);
   ClassDB::bind_static_method("ChampionsSessionController", D_METHOD("own_creature_classes"), &ChampionsSessionController::own_creature_classes);
   ClassDB::bind_method(D_METHOD("set_effect_recipe_constants_json", "json", "source"),
@@ -2511,6 +2512,10 @@ Dictionary ChampionsSessionController::combat_observation() const {
       kind = "Skeleton";
     else if (a.slot == 6)
       kind = "Soul";
+    else if (a.slot == 7)
+      kind = "Horsemen";
+    else if (a.slot == 8)
+      kind = "Nightmare";
     else if (a.slot)
       kind = combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight";
     value["kind"] = kind;
@@ -2679,6 +2684,16 @@ Dictionary ChampionsSessionController::combat_spawn_creature(int64_t own_class) 
     if (own_class < 0 || own_class >= int64_t(rta::combat_play::OWN_CLASS_COUNT))
       throw std::runtime_error("Unknown own-machine class.");
     combat_->spawn_creature(unsigned(own_class));
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_spawn_mounted_horseman(int64_t variant) {
+  try {
+    if (!combat_ || !combat_->full())
+      throw std::runtime_error("Mounted Horsemen need the Full combat fixture.");
+    if (variant < 0 || variant > 3)
+      throw std::runtime_error("Horsemen variant is outside 0 to 3.");
+    combat_->spawn_mounted_horseman(unsigned(variant));
     return observation();
   } catch (const std::exception &e) { return failure(e); }
 }

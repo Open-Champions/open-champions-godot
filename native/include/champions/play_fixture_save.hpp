@@ -90,6 +90,7 @@ public:
   void release_disease_bolt();
   // Wave-12 Full-fixture extensions (combat_play::Session).
   void spawn_creature(unsigned own_class); // index into combat_play::OWN_CLASSES
+  void spawn_mounted_horseman(unsigned variant);
   void drop_potion(unsigned kind);
   void release_input();
   void set_paused(bool);

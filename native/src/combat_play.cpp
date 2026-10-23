@@ -14,7 +14,8 @@ struct Session::State {
   objects::TaskList tasks;
   // Slot 3 is the optional one-per-session creature. Slots 4, 5 and 6 are
   // the Full fixture's AntQueen, Skeleton and Soul.
-  std::array<Raw, 7> handles{};
+  // Slots 7 and 8 are an optional mounted rider and Nightmare pair.
+  std::array<Raw, 9> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
   session_control::Observation status;
@@ -92,6 +93,7 @@ struct Session::State {
     };
     out.animation_start = [this](Raw a, Raw clip, Raw flags, Raw, Raw) { full_start(a, clip, flags); };
     out.animation_advance = [this](Raw a, Raw) { return full_advance(a); };
+    out.in_knockdown_anim = [](C::Address) { return false; }; // no knockdown clip in this fixture
     out.is_class = [](C::Address, const std::string &) { return false; };
     out.loot_generate = [](const C::LootDrop &) {};
     out.spawn_named_item = [](const Vec3 &, Raw) {};
@@ -498,6 +500,23 @@ void Session::spawn_creature(const std::string &own_class) {
       const auto clip = Raw(s_->world->read(definition + off));
       if (clip && !s_->clips.count(clip)) s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
     }
+}
+std::array<C::Address, 2> Session::spawn_mounted_horseman(
+    unsigned variant, const C::Spawn &rider, const C::Spawn &mount) {
+  if (!full()) throw C::Unsupported("mounted Horsemen need the Full combat fixture");
+  if (s_->status.stopped) throw C::Error("combat fixture stopped");
+  if (s_->handles[7] || s_->handles[8])
+    throw C::Unsupported("one mounted pair per combat fixture");
+  auto pair = s_->world->spawn_mounted_horseman(variant, rider, mount);
+  s_->handles[7] = s_->world->retain(pair[0]);
+  s_->handles[8] = s_->world->retain(pair[1]);
+  // Synthetic event timeline for the four documented mounted swing entries.
+  auto def = Raw(s_->world->read(pair[0] + 0x24));
+  for (Raw off : {0x8cu, 0x94u, 0x9cu, 0xc4u}) {
+    auto clip = Raw(s_->world->read(def + off));
+    s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
+  }
+  return pair;
 }
 const std::string &Session::own_creature_class() const { return s_->own_class; }
 void Session::drop_potion(unsigned kind) {

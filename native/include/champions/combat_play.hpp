@@ -81,6 +81,9 @@ public:
   // words) can be built; the other eight classes refuse because their
   // constructors were not executed.
   void spawn_creature(const std::string &own_class);
+  std::array<combat_runtime::Address, 2> spawn_mounted_horseman(
+      unsigned variant, const combat_runtime::Spawn &rider,
+      const combat_runtime::Spawn &mount);
   const std::string &own_creature_class() const; // empty until spawned
   // drop_potion: a thrown potion of kind 1..3 (combat-runtime-4
   // playerProjectile_run) at the player's position with the Thrown defaults

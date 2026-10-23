@@ -21,6 +21,7 @@ enum Op : std::uint8_t {
   OPEN_GATE = 11, CONFIRM_GATE = 12, REQUEST_LEVEL = 13,
   SPAWN_CREATURE = 14, DROP_POTION = 15, // wave 12, Full only
   SELECT_DISEASE_BOLT = 16, PRESS_DISEASE_BOLT = 17, RELEASE_DISEASE_BOLT = 18,
+  SPAWN_MOUNTED_HORSEMAN = 19, // opt-in Horsemen pair, Full only
 };
 void require(bool ok, const char *what) {
   if (!ok) throw Error(what);
@@ -32,6 +33,16 @@ struct Corrupt : Error {
 };
 void valid(bool ok, const char *what) {
   if (!ok) throw Corrupt(what);
+}
+void spawn_mounted_fixture(combat_play::Session &session, unsigned variant) {
+  // Authored flat-fixture placement and stats, shared with its other
+  // 120-HP encounter actors. This is not a retail spawn record.
+  combat_runtime::Spawn rider, mount;
+  rider.position = mount.position = {from_int(0), from_int(80), from_int(0)};
+  rider.facing = mount.facing = 0xc000;
+  rider.hp = mount.hp = 0x42f00000;
+  rider.team = mount.team = 1;
+  session.spawn_mounted_horseman(variant, rider, mount);
 }
 struct Writer {
   Bytes b;
@@ -252,6 +263,13 @@ void CombatScene::spawn_creature(unsigned own_class) {
     session_->spawn_creature(combat_play::OWN_CLASSES[own_class]);
   });
 }
+void CombatScene::spawn_mounted_horseman(unsigned variant) {
+  record(SPAWN_MOUNTED_HORSEMAN, variant, [&] {
+    if (variant >= 4)
+      throw combat_runtime::Unsupported("Horsemen variant outside 0..3");
+    spawn_mounted_fixture(*session_, variant);
+  });
+}
 void CombatScene::drop_potion(unsigned kind) {
   record(DROP_POTION, kind, [&] { session_->drop_potion(kind); });
 }
@@ -296,6 +314,10 @@ void CombatScene::apply(const Action &a) {
   case SPAWN_CREATURE:
     valid(a.value < combat_play::OWN_CLASS_COUNT, "journal creature class");
     session_->spawn_creature(combat_play::OWN_CLASSES[a.value]);
+    return;
+  case SPAWN_MOUNTED_HORSEMAN:
+    valid(a.value < 4, "journal Horsemen variant");
+    spawn_mounted_fixture(*session_, a.value);
     return;
   case DROP_POTION:
     valid(a.value >= 1 && a.value <= 3, "journal potion kind");

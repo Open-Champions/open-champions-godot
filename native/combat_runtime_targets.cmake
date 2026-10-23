@@ -1,5 +1,6 @@
 add_library(champions-combat-runtime
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_world.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_horsemen.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_services.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_queries.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_terrain.cpp"

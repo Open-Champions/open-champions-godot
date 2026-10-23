@@ -178,6 +178,7 @@ public:
   godot::Dictionary combat_press_disease_bolt(bool held = true);
   godot::Dictionary combat_release_disease_bolt();
   godot::Dictionary combat_spawn_creature(int64_t own_class);
+  godot::Dictionary combat_spawn_mounted_horseman(int64_t variant);
   godot::Dictionary combat_drop_potion(int64_t kind);
   static godot::PackedStringArray own_creature_classes();
   // fx_skill_recipes.py --json (user's) or the labelled synthetic fixture.

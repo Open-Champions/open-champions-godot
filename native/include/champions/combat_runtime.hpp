@@ -101,6 +101,8 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // Nightmare charge contact excludes players in knockdown animation.
+  std::function<bool(Address)> in_knockdown_anim;
   // model_getMeshJoint 0x179358 (model, mesh index) -> the u8 at +6 of the
   // 10-byte mesh record (model-texture.md, mesh record). The record is loaded
   // data (the user's disc at run time); the research models the call as an
@@ -198,6 +200,13 @@ public:
   // Own-machine classes. The vtable is allocated on the first spawn, so an
   // untouched world keeps the Skelight corpus image.
   Address spawn_class(const std::string &name, const Spawn & = {});
+  // Authored synthetic placement of one documented mounted Horsemen pair.
+  // The two Spawn records supply fixture stats; the native run bodies own the
+  // subsequent AI, contact, damage and lifecycle. Returns {rider, mount}.
+  std::array<Address, 2> spawn_mounted_horseman(unsigned variant,
+                                               const Spawn &rider,
+                                               const Spawn &mount);
+  void set_mounted_state(Address mount, Raw state);
   Address spawn_player(unsigned slot, const Spawn &, int strength = 20,
                        int level = 1);
   bool contains(Address) const;
