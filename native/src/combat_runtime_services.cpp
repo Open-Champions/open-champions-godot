@@ -762,8 +762,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
         throw Unsupported("nonempty spell iterator");
       return iv(0);
     }
-    if (iterators.size() >= 65536)
-      throw Error("combat iterator retention budget exceeded");
+    reserve_iterator();
     iterators.push_back(std::make_unique<Iterator>(list_head(ar(0)), ar(1)));
     auto *it = iterators.back().get();
     spell_iterators.push_back(it);
@@ -783,7 +782,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       return iv(0);
     if (spell_iterators.empty())
       throw Error("iter_end without iter_begin");
-    spell_iterators.back()->end();
+    end_iterator(*spell_iterators.back());
     spell_iterators.pop_back();
     return iv(0);
   }

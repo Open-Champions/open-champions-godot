@@ -585,9 +585,42 @@ std::vector<Address> World::State::box(const Vec3 &lo, const Vec3 &hi,
   note("box", {out.begin(), out.end()});
   return out;
 }
-void World::State::walk(Address h, const std::function<void(Address)> &fn) {
+void World::State::reserve_iterator() {
+  if (iterators.size() >= prune_at) {
+    prune_iterators();
+    prune_at = std::max<std::size_t>(4096, 2 * iterators.size());
+  }
   if (iterators.size() >= 65536)
     throw Error("combat iterator retention budget exceeded");
+}
+void World::State::end_iterator(Iterator &it) {
+  it.end();
+  ended_iterators.insert(&it);
+}
+void World::State::prune_iterators() {
+  std::set<const Link *> referred;
+  authority->objects->collect_link_references(ended_iterators, referred);
+  auto add_refs = [&](const Link &n) {
+    for (const auto *ref : {n.next, n.prev, n.partner})
+      if (ref && ended_iterators.count(ref))
+        referred.insert(ref);
+  };
+  for (const auto &entry : owned_heads) add_refs(*entry.second);
+  for (const auto &entry : heads) add_refs(*entry.second);
+  for (const auto &it : iterators)
+    if (!ended_iterators.count(it.get())) add_refs(*it);
+  std::vector<std::unique_ptr<Iterator>> kept;
+  kept.reserve(iterators.size());
+  for (auto &it : iterators) {
+    if (ended_iterators.count(it.get()) && !referred.count(it.get())) {
+      ended_iterators.erase(it.get());
+    } else
+      kept.push_back(std::move(it));
+  }
+  iterators = std::move(kept);
+}
+void World::State::walk(Address h, const std::function<void(Address)> &fn) {
+  reserve_iterator();
   auto p = std::make_unique<Iterator>(head(h), 0);
   auto &it = *p;
   iterators.push_back(std::move(p));
@@ -599,9 +632,9 @@ void World::State::walk(Address h, const std::function<void(Address)> &fn) {
       if (!it.done())
         it.advance();
     }
-    it.end();
+    end_iterator(it);
   } catch (...) {
-    it.end();
+    end_iterator(it);
     throw;
   }
 }

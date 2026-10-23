@@ -59,7 +59,7 @@ R::Raw raw_of(float f) {
 int main(int argc, char **argv) {
   std::string root, level_name = "valor";
   unsigned ticks = 600, attack_every = 30;
-  bool walk = false, near_boar = false, weak = false;
+  bool walk = false, near_boar = false, weak = false, near_weakest = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--game" && i + 1 < argc) root = argv[++i];
@@ -69,7 +69,8 @@ int main(int argc, char **argv) {
     else if (a == "--walk") walk = true;
     else if (a == "--near") near_boar = true;
     else if (a == "--weak") weak = true;
-    else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk] [--near (DIAGNOSTIC: start 40 units from a boar)] [--weak (DIAGNOSTIC: set HP 1.0 on boars within 400 units to exercise the death path)]\n"; return 2; }
+    else if (a == "--near-weakest") near_weakest = true;
+    else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk] [--near (DIAGNOSTIC: start 40 units from a boar)] [--near-weakest (DIAGNOSTIC: like --near, at the boar with the lowest hit points)] [--weak (DIAGNOSTIC: set HP 1.0 on boars within 400 units to exercise the death path)]\n"; return 2; }
   }
   if (root.empty() || !fs::is_directory(root)) { std::cerr << "need --game DIR\n"; return 2; }
   std::map<std::string, fs::path> files;
@@ -168,6 +169,18 @@ int main(int argc, char **argv) {
         break;
       }
   const auto start_error = fight.start(start);
+  if (near_weakest) {
+    const CF::EnemyView *weakest = nullptr;
+    const auto all = fight.enemies();
+    for (const auto &e : all)
+      if (!weakest || as_float(e.hp) < as_float(weakest->hp)) weakest = &e;
+    if (weakest) {
+      auto spot = weakest->position;
+      spot[0] = R::sub(spot[0], R::from_int(40));
+      fight.place_player(spot, 0);
+      start.position = spot;
+    }
+  }
   if (std::getenv("FIGHT_DEBUG")) {
     auto &w = fight.world();
     std::cout << "debug flags=" << std::hex << w.read(0x4d8af0 + 0x43d8) << " numplayers=" << std::dec << w.read(0x4d8ae0)
@@ -188,6 +201,8 @@ int main(int argc, char **argv) {
     }
   }
   const auto before = fight.enemies();
+  std::map<CF::Address, float> hp_before;
+  for (const auto &e : before) hp_before[e.address] = as_float(e.hp);
   double hp0 = 0;
   for (const auto &e : before) hp0 += as_float(e.hp);
   std::cout << "enemies=" << before.size() << " total_hp=" << hp0 << "\n";
@@ -214,6 +229,20 @@ int main(int argc, char **argv) {
   double hp1 = 0;
   std::size_t dead = 0;
   for (const auto &e : after) { hp1 += as_float(e.hp); dead += e.dead; }
+  {
+    std::size_t damaged = 0;
+    float lowest = 1e30f, most_lost = 0;
+    for (const auto &e : after) {
+      const float now = as_float(e.hp), was = hp_before[e.address];
+      if (now < was) {
+        ++damaged;
+        std::cout << "damaged boar: " << (e.small ? "small" : "large") << " hp " << was << " -> " << now << " max " << as_float(e.max_hp) << " dead=" << e.dead << "\n";
+      }
+      lowest = std::min(lowest, now);
+      most_lost = std::max(most_lost, was - now);
+    }
+    std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
+  }
   const auto player = fight.player();
   const auto &n = fight.counts();
   std::cout << "ticks=" << n.ticks << " failed=" << fight.failed() << " error=" << fight.error() << "\n"

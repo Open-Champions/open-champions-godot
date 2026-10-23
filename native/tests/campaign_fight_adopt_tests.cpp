@@ -197,6 +197,16 @@ void adopt_and_run() {
   for (unsigned frame = 0; frame < 120; ++frame) world.tick();
   check(external_runs == 2, "slot 4 reaches the external owner on the 60-frame list");
 }
+
+// The combat World retains finished iterators only while something still
+// refers to them: a long run walks its lists far more than 65,536 times
+// (four walks a tick) and must not end at the host's retention budget.
+void long_run_releases_iterators() {
+  auto authority = std::make_shared<R::WorldAuthority>();
+  CR::World world(authority, CR::flat_fixture_services(), 0, CR::Composition::Full);
+  for (unsigned frame = 0; frame < 24000; ++frame) world.tick();
+  check(world.read(CR::FRAME) == 24000, "24,000 ticks ran (about 96,000 list walks)");
+}
 } // namespace
 int main() {
   try {
@@ -204,6 +214,7 @@ int main() {
     memory_budget_after_checkpoint();
     clear_nodes_adjacent_partners();
     adopt_and_run();
+    long_run_releases_iterators();
   } catch (const std::exception &error) {
     std::cerr << "campaign fight adoption test failed: " << error.what() << "\n";
     return 1;

@@ -300,10 +300,8 @@ void World::walk_list(Cell &head, std::uint32_t mask,
   completed_iterators_.insert(id);
   prune_iterators();
 }
-void World::prune_iterators() {
-  std::set<const Link *> referred, candidates;
-  for (const auto &entry : iterators_)
-    candidates.insert(entry.second.get());
+void World::collect_link_references(const std::set<const Link *> &candidates,
+                                    std::set<const Link *> &referred) const {
   auto add_refs = [&](const Link &n) {
     for (const auto *ref : {n.next, n.prev, n.partner})
       if (ref && candidates.count(ref))
@@ -311,10 +309,11 @@ void World::prune_iterators() {
   };
   for (auto *n : handles.nodes())
     add_refs(*n);
-  for (const auto &e : iterators_)
-    add_refs(*e.second);
   for (const auto &e : storage_)
     for (const auto &c : e->heads)
+      add_refs(c);
+  for (const auto &e : objects)
+    for (const auto &c : e.second->heads)
       add_refs(c);
   for (const auto &e : extra_cells_)
     add_refs(*e.second);
@@ -330,6 +329,16 @@ void World::prune_iterators() {
   add_refs(always_draw);
   add_refs(delete_list);
   add_refs(run_active);
+}
+void World::prune_iterators() {
+  std::set<const Link *> referred, candidates;
+  for (const auto &entry : iterators_)
+    candidates.insert(entry.second.get());
+  collect_link_references(candidates, referred);
+  for (const auto &e : iterators_)
+    for (const auto *ref : {e.second->next, e.second->prev, e.second->partner})
+      if (ref && candidates.count(ref))
+        referred.insert(ref);
   for (auto i = completed_iterators_.begin();
        i != completed_iterators_.end();) {
     auto found = iterators_.find(*i);

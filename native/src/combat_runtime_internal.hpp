@@ -105,8 +105,17 @@ struct World::State {
   Address fixture_next = FIXTURE_BASE, external_next = 0x90000000;
   int camera_mode = 1;
   bool running = false, failed = false;
+  // Iterators are retained after end() because stale node references can read
+  // their prev links. The retention is a host choice, not a game rule: an
+  // ended iterator that no list, node or live iterator refers to is released
+  // (prune_iterators), and only a runaway count of referenced ones is refused.
   std::vector<std::unique_ptr<Iterator>>
       iterators; // preserve retired prev links
+  std::set<const Link *> ended_iterators;
+  std::size_t prune_at = 4096;
+  void reserve_iterator();
+  void end_iterator(Iterator &);
+  void prune_iterators();
   std::vector<Iterator *> spell_iterators; // iter_begin/next/end stack
   std::map<Address, std::pair<Raw, Raw>> animations;
   std::array<std::uint8_t, 32> music{};
