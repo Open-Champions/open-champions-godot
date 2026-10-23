@@ -116,7 +116,7 @@ int main() {
   world.shared.state = 20973;
   std::vector<std::string> calls;
   std::vector<C::LootArgs> drops;
-  C::TickInput input{true, false, false, false, false, false};
+  C::TickInput input{true, false, false, false, false, false, 0};
   C::Services services;
   services.tick_input = [&](std::uint32_t) { return input; };
   services.process_damage = [&](std::uint32_t) { calls.emplace_back("damage"); };
@@ -137,6 +137,9 @@ int main() {
   services.minotaur_variant = [&](std::uint32_t, std::uint32_t) {
     calls.emplace_back("variant"); return 1u; // r5 stub answer
   };
+  services.minotaur_base_flags = [](std::uint32_t) {
+    return UINT64_C(0x80); // synthetic base Creature_ctor answer
+  };
   services.animation_init = [&](std::uint32_t, bool push) {
     calls.emplace_back(push ? "animPush" : "animClear");
   };
@@ -155,8 +158,10 @@ int main() {
     calls.emplace_back("hand");
   };
   services.minotaur_initial_state = [&](std::uint32_t) { calls.emplace_back("state0"); };
-  services.loot_eligible = [&](std::uint32_t) { calls.emplace_back("dropLoot"); return true; };
-  services.loot_generate = [&](std::uint32_t, const C::LootArgs &a) {
+  services.creature_drop_loot = [&](std::uint32_t, const C::LootArgs &a) {
+    // Synthetic answer for the rank-0 untinted ordinary call only; the runtime
+    // must refuse every other case before reaching it.
+    calls.emplace_back("dropLoot");
     calls.emplace_back("generateDrops"); drops.push_back(a);
   };
   services.on_death = [&](std::uint32_t) { calls.emplace_back("onDeath"); };
@@ -184,15 +189,25 @@ int main() {
     }, "unknown model service refusal");
     check(rejected.objects.empty(), "constructor refusal leaves no live World actor");
   }
+  {
+    O::World rejected(O::CallbackPolicy::ReferenceBase);
+    auto unavailable = services;
+    unavailable.minotaur_base_flags = {};
+    C::Runtime failed(rejected, resources, unavailable);
+    refuses([&] { failed.construct(C::Kind::Minotaur, {0, 0, 0}, 0, {},
+                                    R::from_int(100)); },
+            "missing base creature flags refuse Minotaur construction");
+    check(rejected.objects.empty(), "Minotaur base refusal consumes no World block");
+  }
   C::Runtime actors(world, resources, services);
   refuses([&] {
     actors.construct(C::Kind::WarBoar, {0, 0, 0}, 0,
         std::make_shared<std::vector<std::string>>(1, "hide=1"),
         R::from_int(100));
   }, "Creature_ctor property effects Unknown refusal");
-  auto &large = actors.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100));
-  auto &small = actors.construct(C::Kind::WarBoarSmall, {R::from_int(2), 0, 0}, 0, {}, R::from_int(80));
-  auto &mino = actors.construct(C::Kind::Minotaur, {R::from_int(4), 0, 0}, 0, {}, R::from_int(200));
+  auto &large = actors.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100), 0);
+  auto &small = actors.construct(C::Kind::WarBoarSmall, {R::from_int(2), 0, 0}, 0, {}, R::from_int(80), 0);
+  auto &mino = actors.construct(C::Kind::Minotaur, {R::from_int(4), 0, 0}, 0, {}, R::from_int(200), 0);
   check(dynamic_cast<C::WarBoar *>(&large) &&
         dynamic_cast<C::WarBoarSmall *>(&small) &&
         dynamic_cast<C::Minotaur *>(&mino),
@@ -208,6 +223,15 @@ int main() {
         "round-7 same World grid/run links");
   check(large.object->radius == 0x41f00000 && small.object->radius == 0x41f00000,
         "r2 boar radius");
+  check(mino.object->radius == 0x41c80000 &&
+        mino.hp.mem.load(mino.object->addr + 0x1c, 4) == 0x41c80000 &&
+        mino.hp.mem.load(mino.object->addr + 0xb8, 4) == 0 &&
+        mino.hp.mem.load(mino.object->addr + 0xb0, 4) == 0x3f999999 &&
+        mino.hp.mem.load(mino.object->addr + 0xb4, 1) == 0xb &&
+        mino.hp.mem.load(mino.object->addr + 0xf4, 4) == 300 &&
+        mino.hp.mem.load(mino.object->addr + 0xa8, 8) == UINT64_C(0x200040080) &&
+        mino.hp.mem.load(mino.object->addr + 0x46c, 4) == 0,
+        "Minotaur_ctor documented radius, speed, turn, kind, age, flags and charge fields");
   check(large.forward_offset == 0xc1700000 && small.forward_offset == 0xc1200000 &&
         large.scale == 0x3f400000 && small.scale == 0x3f199999 && small.small_marker == 1,
         "round-2 boar variants");
@@ -245,6 +269,23 @@ int main() {
   calls.clear(); world.run_objects();
   check(calls == std::vector<std::string>({"damage", "run", "anim", "knockback", "target"}),
         "round-2 bounded tick order");
+  // WarBoar_run state 0 (docs/monsters-2.md "0 idle"): clock > +0xf4, which is
+  // entry age + 180 (fixed), leaves for state 1. The entry age is a caller input.
+  input.state_entry_frame.reset();
+  refuses([&] { actors.tick(large.object->addr); },
+          "state0 requires the entry age behind +0xf4");
+  for (const std::int64_t entry : {0, 100}) {
+    input.state_entry_frame = entry;
+    world.frame = entry + 180;
+    actors.tick(large.object->addr);
+    check(large.state == 0, "state0 stays through the 180th frame after entry");
+    world.frame = entry + 181;
+    refuses([&] { actors.tick(large.object->addr); },
+            "state0 refuses unported state-1 transition once clock > entry + 180");
+    check(large.state == 0, "idle transition refusal preserves state");
+  }
+  input.state_entry_frame = 0;
+  world.frame = 1;
   input.has_target = true;
   refuses([&] { actors.tick(large.object->addr); }, "state0 target Unknown refusal");
   large.state = 3; // reference state's explicit test input
@@ -267,11 +308,29 @@ int main() {
   actors.tick(large.object->addr);
   check(large.hit_frame == 1, "one hit per attack state");
   input.hit_event = false;
+  const auto hp_before_attacker = large.health();
+  const auto hit_angle_before = large.hp.mem.load(large.object->addr + 0x2e0, 2);
+  const auto owner_before = large.hp.mem.load(large.object->addr + 0x2e4, 4);
+  refuses([&] { actors.take_damage(large.object->addr, small.object->addr, 1,
+                                   R::from_int(5)); },
+          "nonzero attacker requires shared World HP binding");
+  check(large.health() == hp_before_attacker &&
+        large.hp.mem.load(large.object->addr + 0x2e0, 2) == hit_angle_before &&
+        large.hp.mem.load(large.object->addr + 0x2e4, 4) == owner_before,
+        "refusal does not fabricate hit angle or owner attribution");
   actors.take_damage(large.object->addr, 0, 0x42000, R::ZERO);
   check(large.health() == R::from_int(100) && !large.dead(),
         "r7 zero-damage miss leaves HP unchanged");
   actors.take_damage(large.object->addr, 0, 1, R::from_int(101));
   check(large.dead() && large.health() == R::from_int(-1), "Creature_takeDamage HP subtraction");
+  // creature-tick spec 12.1 with attacker 0: frame stamp, flag OR, pending
+  // damage; the hit angle and owner handle are written only for an attacker.
+  check(large.hp.mem.load(large.object->addr + 0x304, 4) == world.frame &&
+        (large.hp.mem.load(large.object->addr + 0x2dc, 4) & 1) == 1 &&
+        large.hp.mem.load(large.object->addr + 0xc8, 4) == R::from_int(101) &&
+        large.hp.mem.load(large.object->addr + 0x2e0, 2) == hit_angle_before &&
+        large.hp.mem.load(large.object->addr + 0x2e4, 4) == owner_before,
+        "slot-2 attacker-0 effects match spec 12.1");
   const auto before_death_seed = large.object->seed;
   calls.clear();
   actors.tick(large.object->addr);
@@ -325,9 +384,17 @@ int main() {
   seed7.shared.state = 7;
   champions::resources::Manager resources7;
   resources7.load_lmp("warboar.lmp", {b.data(), b.size()});
+  resources7.load_lmp("minotaur.lmp", {m.data(), m.size()});
   C::Runtime actors7(seed7, resources7, services);
   auto &on7 = actors7.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100));
   check(on7.object->seed != large.object->seed, "seed 7 own stream differs");
+  seed7.frame = 7;
+  auto &mino7 = actors7.construct(C::Kind::Minotaur,
+      {R::from_int(4), 0, 0}, 0, {}, R::from_int(200));
+  check(mino7.hp.mem.load(mino7.object->addr + 0xf4, 4) == 307 &&
+        mino7.hp.mem.load(mino7.object->addr + 0xe8, 4) ==
+            (1u << ((mino7.object->seed >> 16) & 1u)),
+        "seed-7 Minotaur frame threshold and own-draw hidden part");
   R::combat::Tables tables;
   R::combat::World combat_world;
   combat_world.num_players = 1;
@@ -350,5 +417,102 @@ int main() {
         balanced.hp.mem.load(balanced.object->addr + 0xd8, 4) ==
             balanced.stats.exp_value,
         "Creature_setStats documented field offsets");
+  // Idle timer under the second reference seed's World.
+  input.state_entry_frame = 7;
+  seed7.frame = 187;
+  actors7.tick(on7.object->addr);
+  seed7.frame = 188;
+  refuses([&] { actors7.tick(on7.object->addr); },
+          "seed-7 state0 refuses after entry + 180");
+  seed7.frame = 7;
+  // Death loot: only the ordinary rank-0, untinted call is modeled.
+  for (const auto rank : {1, 2}) {
+    auto &ranked = actors7.construct_balanced(C::Kind::WarBoar,
+        {R::from_int(20 + rank), 0, 0}, 0, {}, balance.data(), balance.size(),
+        tables, combat_world, rank);
+    const auto drop_count = drops.size();
+    calls.clear();
+    refuses([&] { actors7.set_state(ranked.object->addr, 0x14); },
+            "rank 1/2 Creature_dropLoot extra calls refuse");
+    check(ranked.state == 0 && !ranked.death_reported && drops.size() == drop_count &&
+          calls.empty() && ranked.hp.mem.load(ranked.object->addr + 0x232, 2) == 0,
+          "ranked loot refusal leaves state, seed-bound services and loot untouched");
+  }
+  {
+    auto &unknown_rank = actors7.construct(C::Kind::WarBoar,
+        {R::from_int(30), 0, 0}, 0, {}, R::from_int(100));
+    calls.clear();
+    refuses([&] { actors7.set_state(unknown_rank.object->addr, 0x14); },
+            "unknown creature_bossRank refuses death loot");
+    check(unknown_rank.state == 0 && calls.empty(), "unknown rank leaves actor untouched");
+    auto &tinted = actors7.construct(C::Kind::WarBoar,
+        {R::from_int(31), 0, 0}, 0, {}, R::from_int(100), 0);
+    tinted.hp.mem.store(tinted.object->addr + 0xa0, 1, 6);
+    calls.clear();
+    refuses([&] { actors7.set_state(tinted.object->addr, 0x14); },
+            "tint preset scaling refuses death loot");
+    check(tinted.state == 0 && calls.empty(), "tint refusal leaves actor untouched");
+    const auto before = drops.size();
+    auto &plain = actors7.construct_balanced(C::Kind::WarBoar,
+        {R::from_int(32), 0, 0}, 0, {}, balance.data(), balance.size(),
+        tables, combat_world, 0);
+    actors7.set_state(plain.object->addr, 0x14);
+    check(drops.size() == before + 1 &&
+          seeded_loot(drops.back(), 7) ==
+              std::make_pair(std::vector<std::string>{}, UINT64_C(7)) &&
+          seeded_loot(drops.back(), 20973) ==
+              std::make_pair(std::vector<std::string>{"consumable"}, UINT64_C(10)),
+          "rank-0 balanced boar death makes the one pinned ordinary call");
+  }
+  // Minotaur_ctor (docs/monsters-2.md 4871-4882) against an independent model,
+  // fresh World per reference seed. Shared draw -> object seed (16-bit), the
+  // base setStats draw (balanced path only), then the class's own draw.
+  const auto lcg = [](std::uint32_t x) { return x * 0x19660dU + 0x3c6ef35fU; };
+  for (const std::uint32_t seed : {20973u, 7u})
+    for (const bool balanced : {false, true}) {
+      O::World fresh(O::CallbackPolicy::ReferenceBase);
+      fresh.shared.state = seed;
+      fresh.frame = 40 + seed % 11;
+      champions::resources::Manager res;
+      res.load_lmp("warboar.lmp", {b.data(), b.size()});
+      res.load_lmp("minotaur.lmp", {m.data(), m.size()});
+      auto svc = services;
+      std::vector<std::uint32_t> variant_draws;
+      std::vector<std::string> order;
+      svc.minotaur_variant = [&](std::uint32_t, std::uint32_t draw) {
+        variant_draws.push_back(draw); order.emplace_back("variant"); return draw & 1u;
+      };
+      svc.weapon_shield = [&](std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) {
+        order.emplace_back("hand");
+      };
+      svc.minotaur_initial_state = [&](std::uint32_t) { order.emplace_back("state0"); };
+      svc.creature_init = [&](std::uint32_t) { order.emplace_back("init"); };
+      svc.minotaur_base_flags = [](std::uint32_t) { return UINT64_C(0x1); };
+      C::Runtime rt(fresh, res, svc);
+      auto &mi = balanced
+          ? rt.construct_balanced(C::Kind::Minotaur, {0, 0, 0}, 0, {}, balance.data(),
+                                  balance.size(), tables, combat_world, 0)
+          : rt.construct(C::Kind::Minotaur, {0, 0, 0}, 0, {}, R::from_int(200), 0);
+      auto word = lcg(seed) >> 16;                 // GameObject seed
+      if (balanced) word = lcg(word);              // setStats consumes one draw
+      word = lcg(word);                            // class draw
+      const auto own = word >> 16;
+      const auto at = mi.object->addr;
+      check(variant_draws == std::vector<std::uint32_t>{own} &&
+            mi.object->seed == word,
+            "Minotaur ctor makes exactly one own draw and hands it to the hide variant");
+      check(mi.object->radius == 0x41c80000 && mi.hp.mem.load(at + 0x1c, 4) == 0x41c80000 &&
+            mi.hp.mem.load(at + 0xb8, 4) == 0 &&
+            mi.hp.mem.load(at + 0xb0, 4) == 0x3f999999 &&
+            mi.hp.mem.load(at + 0xb4, 1) == 0xb &&
+            mi.hp.mem.load(at + 0xf4, 4) == std::uint32_t(fresh.frame + 300) &&
+            mi.hp.mem.load(at + 0xa8, 8) == (UINT64_C(0x1) | UINT64_C(0x200040000)) &&
+            mi.hp.mem.load(at + 0x46c, 4) == 0 &&
+            mi.hp.mem.load(at + 0xe8, 4) == (1u << (own & 1u)) &&
+            mi.hp.mem.load(at + 0x48, 4) == 0x5165f0,
+            "Minotaur_ctor radius 25, speed 0, turn 1.2, kind 0xb, age+300, flags, +0x46c, own-draw word");
+      check(order == std::vector<std::string>({"hand", "hand", "variant", "state0", "init"}),
+            "Minotaur ctor hand, own draw/hide mask, setState(0), init order");
+    }
   return 0;
 }

@@ -115,8 +115,10 @@ std::uint32_t Runtime::resolve(const std::string &lump, const std::string &entry
 }
 
 Actor &Runtime::construct(Kind kind, const objects::Vec3 &pos,
-                          std::uint32_t angle, objects::Props props, Raw initial_hp) {
-  return construct_impl(kind, pos, angle, std::move(props), initial_hp, {});
+                          std::uint32_t angle, objects::Props props, Raw initial_hp,
+                          std::optional<std::int64_t> boss_rank) {
+  return construct_impl(kind, pos, angle, std::move(props), initial_hp,
+                        [boss_rank](Actor &a) { a.supplied_rank = boss_rank; });
 }
 
 Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
@@ -132,6 +134,7 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
   if (kind == Kind::Minotaur) {
     required(services_.weapon_shield, "Minotaur_ctor/WeaponShield");
     required(services_.minotaur_variant, "Minotaur_ctor/hide variant Unknown");
+    required(services_.minotaur_base_flags, "Minotaur_ctor/base creature flags Unknown");
     required(services_.minotaur_initial_state, "Minotaur_ctor/setState(0)");
   }
   auto def = kind == Kind::Minotaur ? minotaur_def_ : boar_def_;
@@ -169,6 +172,8 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
     if (kind != Kind::Minotaur) {
       o->radius = 0x41f00000;
       o->draw_half_width = 40;
+    } else {
+      o->radius = 0x41c80000; // Minotaur_ctor: 25
     }
     actor->hp.mem.store(o->addr + 0x48, 4, o->vtable);
     actor->hp.mem.store(o->addr + 0x1c, 4, o->radius);
@@ -190,6 +195,16 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
       actor->hp.mem.store(o->addr + 0xe8, 4, 0);
       actor->hp.mem.store(o->addr + 0x220, 8, 0);
     } else {
+      actor->creature_flags = services_.minotaur_base_flags(o->addr) |
+                              UINT64_C(0x200040000);
+      actor->turn_rate = 0x3f999999; // 1.2
+      actor->kind_byte = 0xb;
+      actor->hp.mem.store(o->addr + 0xb8, 4, 0);
+      actor->hp.mem.store(o->addr + 0xb0, 4, actor->turn_rate);
+      actor->hp.mem.store(o->addr + 0xb4, 1, actor->kind_byte);
+      actor->hp.mem.store(o->addr + 0xf4, 4, std::uint32_t(world_.frame) + 300u);
+      actor->hp.mem.store(o->addr + 0xa8, 8, actor->creature_flags);
+      actor->hp.mem.store(o->addr + 0x46c, 4, 0);
       services_.weapon_shield(o->addr + 0x3c8, 1, 0x15, 0x20);
       services_.weapon_shield(o->addr + 0x3c8, 2, 0x19, 0x20);
     }
@@ -198,8 +213,11 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
       actor->hp.mem.store(o->addr + 0xb4, 1, actor->kind_byte);
       actor->hp.mem.store(o->addr + 0xa8, 8, actor->creature_flags);
     }
+    const auto own_draw = kind == Kind::Minotaur ? o->rand() : 0u;
+    if (kind == Kind::Minotaur)
+      actor->hp.mem.store(o->addr + 0xe8, 4, 1u << (own_draw & 1u));
     const auto variant = kind == Kind::Minotaur
-        ? services_.minotaur_variant(o->addr, o->rand()) : 0u;
+        ? services_.minotaur_variant(o->addr, own_draw) : 0u;
     actor->hidden_parts = services_.model_hide_mask(def->entries.at(0).second, variant);
     services_.animation_init(o->addr, kind != Kind::Minotaur);
     if (kind == Kind::Minotaur)
@@ -247,6 +265,7 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
   // Creature_setStats replaces that placeholder before class-owned draws.
   return construct_impl(kind, pos, angle, std::move(props), 0x41200000,
       [&](Actor &a) {
+        a.supplied_rank = rank;
         a.stats = combat::monster_stats(tables, combat_world, pct, rank,
             std::u32string(name.begin(), name.end()), true, a.object->rand());
         if (!a.stats.hp || !a.stats.max_hp)
@@ -272,13 +291,20 @@ Actor &Runtime::at(std::uint32_t address) {
 void Runtime::set_state(Actor &a, std::uint32_t state) {
   if (state == 0x14 && a.death_reported) return;
   if (state == 0x14) {
+    // Only the ordinary call is modeled (docs/data-tables.md 2.2): rank 1/2
+    // extra calls, the tint multipliers and MiniBoss suppression are not.
+    if (!a.supplied_rank)
+      throw Unsupported("Creature_dropLoot/creature_bossRank Unknown");
+    if (*a.supplied_rank != 0)
+      throw Unsupported("Creature_dropLoot/rank 1-2 extra calls Unknown");
+    if (a.hp.mem.load(a.object->addr + 0xa0, 1) != 0)
+      throw Unsupported("Creature_dropLoot/tint gold and quality scaling Unknown");
     if (a.kind != Kind::Minotaur) {
       required(services_.filter_state, "WarBoar_setState/Creature_filterState Unknown");
       required(services_.death_animation, "WarBoar_setState/death animation Unknown");
       if (!services_.filter_state(a.object->addr, state)) return;
     }
-    required(services_.loot_eligible, "Creature_dropLoot/eligibility Unknown");
-    required(services_.loot_generate, "loot_generateDrops service Unknown");
+    required(services_.creature_drop_loot, "Creature_dropLoot/eligibility Unknown");
     if (a.kind == Kind::Minotaur)
       required(services_.minotaur_death_remainder,
                "Minotaur_setState/death remainder Unknown");
@@ -289,8 +315,7 @@ void Runtime::set_state(Actor &a, std::uint32_t state) {
         : LootArgs{0x42100000, 0x40000000, 0x40333333, ZERO, 0x40400000, 0x3e800000};
     a.state = state;
     a.hp.mem.store(a.object->addr + 0x232, 2, state);
-    if (services_.loot_eligible(a.object->addr))
-      services_.loot_generate(a.object->addr, args);
+    services_.creature_drop_loot(a.object->addr, args);
     if (a.kind == Kind::Minotaur) {
       services_.minotaur_death_remainder(a.object->addr);
     } else {
@@ -324,6 +349,11 @@ void Runtime::tick_boar(Actor &a, const TickInput &in) {
   case 0:
     if (in.has_target || in.away_home)
       throw Unsupported("WarBoar_run/state0: sight or home transition Unknown");
+    if (!in.state_entry_frame)
+      throw Unsupported("WarBoar_run/state0: entry age for +0xf4 Unknown");
+    // State 0 -> 1 once the clock exceeds +0xf4 = entry age + 180 (fixed).
+    if (world_.frame > *in.state_entry_frame + 180)
+      throw Unsupported("WarBoar_run/state0: state-1 transition effects Unknown");
     return;
   case 3:
     throw Unsupported("WarBoar_run/state3: transition target Unknown");
@@ -374,6 +404,8 @@ void Runtime::set_state(std::uint32_t address, std::uint32_t state) {
 void Runtime::take_damage(std::uint32_t address, std::uint32_t attacker,
                           std::uint32_t flags, Raw amount) {
   auto &a = at(address);
+  if (attacker != 0)
+    throw Unsupported("Creature_takeDamage: nonzero attacker World binding Unknown");
   a.hp.mem.store(creature_hp::G_SIM_FRAME, 4, std::uint32_t(world_.frame));
   a.hp.take_damage(address, attacker, flags, amount);
 }

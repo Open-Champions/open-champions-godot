@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 
 // Bounded RTA US v2.00 class ports. One objects::World block is the actor's
 // grid and run-list identity. Missing Creature/animation service answers refuse
@@ -30,6 +31,9 @@ std::array<Raw, 5> balance_lookup(const std::uint8_t *, std::size_t,
 struct TickInput {
   bool active = false, has_target = false, away_home = false;
   bool hit_event = false, next_event = false, animation_over = false;
+  // Frame at which state 0 was entered. The class sets +0xf4 to this age plus
+  // the fixed 180 on entry; the boar constructor alone does not establish it.
+  std::optional<std::int64_t> state_entry_frame;
 };
 struct Services {
   // Creature_run, updateActive, stepAnim, knockback, pickTarget and the
@@ -48,13 +52,16 @@ struct Services {
   // Native resource ID for definition slot 0, then variant.
   std::function<std::uint64_t(std::uint32_t, std::uint32_t)> model_hide_mask;
   std::function<std::uint32_t(std::uint32_t, std::uint32_t)> minotaur_variant;
+  std::function<std::uint64_t(std::uint32_t)> minotaur_base_flags;
   std::function<void(std::uint32_t, bool)> animation_init;
   std::function<void(std::uint32_t)> minotaur_initial_state;
   std::function<void(std::uint32_t, const EventParams &)> set_def_entry_params;
   std::function<void(std::uint32_t)> creature_init;
   std::function<void(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t)> weapon_shield;
-  std::function<void(std::uint32_t, const LootArgs &)> loot_generate;
-  std::function<bool(std::uint32_t)> loot_eligible;
+  // Creature_dropLoot answer for a rank-0, untinted creature only: eligibility
+  // plus the one ordinary generator call. The runtime refuses rank 1/2, tint
+  // and unknown rank before calling, so the service never sees them.
+  std::function<void(std::uint32_t, const LootArgs &)> creature_drop_loot;
   std::function<void(std::uint32_t)> on_death;
   std::function<void(std::uint32_t)> minotaur_death_remainder;
   std::function<void(std::uint32_t)> death_animation;
@@ -71,6 +78,7 @@ struct Actor {
   std::uint32_t small_marker = 0;
   std::uint64_t hidden_parts = 0;
   std::uint64_t creature_flags = 0;
+  std::optional<std::int64_t> supplied_rank;
   creature_hp::Model hp;
   bool death_reported = false;
   combat::MonsterStats stats;
@@ -107,8 +115,11 @@ public:
   ~Runtime();
   // Supplied HP is a bounded synthetic/base-service answer. Use the balanced
   // overload when the selected level's tables and rank are available.
+  // boss_rank is the caller's creature_bossRank answer; absent means Unknown
+  // and death loot refuses.
   Actor &construct(Kind, const objects::Vec3 &, std::uint32_t angle,
-                   objects::Props, Raw initial_hp);
+                   objects::Props, Raw initial_hp,
+                   std::optional<std::int64_t> boss_rank = std::nullopt);
   Actor &construct_balanced(Kind, const objects::Vec3 &, std::uint32_t angle,
                             objects::Props, const std::uint8_t *balance,
                             std::size_t balance_size, const combat::Tables &,

@@ -1,4 +1,4 @@
-STATUS: COMPLETE — bounded native actor port, focused arm64 tests, Godot matrix, 111-level sweep and FULL_TRACE verified; one broad CTest timeout passed on a direct rerun.
+STATUS: COMPLETE — bounded native actor port with audit r1 fixes (PWB1–PWB4); campaign-actors test, full arm64 Release CTest 237/237, 111/111 sweep and unchanged FULL_TRACE verified. Unmodeled behavior is refused, not guessed.
 
 ## Scope and evidence
 
@@ -23,3 +23,22 @@ STATUS: COMPLETE — bounded native actor port, focused arm64 tests, Godot matri
 - Minotaur AI tick has no executed state-machine reference in rounds 2–8 and refuses with `Minotaur_run: Unknown`. Its documented death `setState(0x14)` call is covered; the unmeasured remainder requires a service answer.
 - Nonempty `Creature_ctor` properties, model hide-mask, relocated animation, terrain/init, hand writes, boar target transitions, loot eligibility and spawn/landing remain explicit service/refusal boundaries. Synthetic service answers are not campaign values.
 - The round-7/8 Valor entry was assisted/scripted. No normal-route campaign entry, player survival, integrated fight or Gold credit is claimed.
+
+## Audit fixes (port-warboar-r1, 1cfddf0..157d9b9)
+
+Evidence: `research-campaign-combat` at `328b072` (`docs/monsters-2.md` Minotaur/WarBoar sections, `docs/data-tables.md` 2.2, `docs/spec/creature-tick.md` 12.1, handoff rounds 2–8, `tools/ref_campaign_combat_r2/r4/r5.py`). Tests use the two reference seeds 20973 and 7 and an independently written LCG model; the reference tools have no Minotaur field table, so the new expectations are authored from the cited prose.
+
+- **PWB1 (HIGH, Minotaur construction).** `Minotaur_ctor` now writes the documented class state: World radius +0x1c = 25, speed +0xb8 = 0, turn +0xb0 = 1.2, kind +0xb4 = 0xb, +0xf4 = caller frame + 300, cflags +0xa8 |= 0x200040000, +0x46c = 0, and +0xe8 = `1 << (ownDraw & 1)`; the same single own draw is handed to the hide-variant service (one own-draw call site, `ref_campaign_combat_r4.MINOTAUR_CALLS`). Order is hands, own draw/hide mask, `setState(0)`, run registration, event params, `Creature_init`. The base `Creature_ctor` cflags are not established, so the `|=` needs a supplied `minotaur_base_flags` service; construction refuses (and leaves no World block) without it. Only the plain `Minotaur` name is constructible: the `minotaurboss` branch (hand-2 part 0x17, +0xe8 = 4) is not offered. The raw turn rate 0x3f999999 is 1.2 truncated, matching every other pinned decimal constant in the research (0.6 → 0x3f199999, −0.2 → 0xbe4ccccc); the research prose gives only "1.2".
+- **PWB2 (HIGH, boar idle timing).** State 0 now applies the documented rule: clock > +0xf4 (= entry age + 180, fixed) leaves for state 1. The entry age is a required `TickInput::state_entry_frame` (the boar constructor does not establish +0xf4). Frames up to entry + 180 idle; later frames refuse, because the state-1 effects are not ported. Missing entry age refuses. Tested at entries 0 and 100 (seed 20973 world) and entry 7 (seed 7 world).
+- **PWB3 (HIGH, nonzero attacker).** The default `creature_hp::Model` has no attacker bytes, and this branch has no World-backed read-through, so `take_damage` with a nonzero attacker refuses before any write. Attacker 0 is checked against spec 12.1 (frame stamp +0x304, flag OR +0x2dc, pending +0xc8, no write to +0x2e0/+0x2e4). Binding it needs the shared-World attacker bytes and handle service (the `Session::bind_hp` seam named in the handoff); not done here.
+- **PWB4 (MEDIUM, ranked loot).** Death loot is now guarded in the runtime: rank must be supplied and 0 (`construct(..., boss_rank)` or `construct_balanced`), and tint +0xa0 must be 0. Rank 1/2 extra calls, the tint ×3/×4 scaling and MiniBoss suppression refuse before any service call or state write; unknown rank also refuses. The service is now `creature_drop_loot(addr, args)` for the ordinary rank-0, untinted call only. Class call-site parameters are unchanged. Rank-0 balanced boar death compared against `items::loot_generate_drops` for both seeds (20973: one consumable after 10 draws; 7: none after 7).
+
+Tests: `native/tests/campaign_actors_tests.cpp` extended (fresh World per seed, balanced and plain Minotaur paths, ranked/unknown-rank/tinted refusals, idle boundary at 180/181, nonzero-attacker refusal leaves hit angle/owner untouched).
+
+Verification after the fixes (arm64 Release, `build/native`):
+- `cmake --build build/native -j 4`: passed. `build/native/champions-campaign-actors-tests`: passed.
+- Full `ctest --test-dir build/native -j 3`: **237/237 passed** (735.6 s); no timeouts, so no reruns.
+- `bash .../play-enemies/work/play-enemies/run-sweep.sh`: four slices exit 0, **111/111** loaded and played (28+28+28+27), zero failures, zero refusals.
+- `python3 -u .../playable-wave26/run-godot.py`: **54/54** exit 0; `FULL_TRACE` 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged. The actor library is not linked into any play or Godot target, so these were expected to be unchanged.
+
+Still unsupported: Minotaur AI tick, `minotaurboss`, boar state-1/3 transitions, ranked/tinted loot, nonzero-attacker damage, base `Creature_ctor` cflags value.
