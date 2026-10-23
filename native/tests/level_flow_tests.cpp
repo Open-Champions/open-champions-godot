@@ -1435,7 +1435,7 @@ void round4_cases() {
   // seeded search) are reference-generated in level_flow_vectors.inc.
 }
 void arena_executable_case() {
-  namespace arena = champions::simulation::rta::arena_executable;
+  namespace arena = champions::simulation::rta::arena_modes;
   // Authored ELF32 fixture: one file-backed segment maps both documented
   // table addresses. The names are synthetic and never come from the disc.
   Blob bytes(0x1300);
@@ -1466,14 +1466,14 @@ void arena_executable_case() {
   place(arena::NAMES_B_TABLE, 7, "B", 0x503a00);
   arena::Executable executable;
   CHECK(executable.load(bytes));
-  const auto names = arena::read_mode_a_names(executable);
+  const auto names = arena::read_names(executable).names_a;
   CHECK(names.size() == 13);
   CHECK(arena::mode_a_index(names, "a12") == 12);
   CHECK(arena::mode_a_index(names, "B0") == -1);
   CHECK(arena::mode_a_index(names, "") == -1);
   put(bytes, 0x100 + arena::NAMES_A_TABLE - 0x503000 + 4 * 12, 0);
   CHECK(executable.load(bytes));
-  refuses([&] { arena::read_mode_a_names(executable); });
+  refuses([&] { arena::read_names(executable); });
   bytes[0] = 0;
   CHECK(!executable.load(bytes));
 }

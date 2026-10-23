@@ -552,7 +552,8 @@ void test_hide_show_on_stubs() {
   third.bind_seed(&live3);
   third.set_executable(authored_executable());
   plant(third, gated);
-  const auto blob3 = objects_blob({{creature, "hidden"}, {creature, "waiting"}}, {"hide=1", "wait=1"});
+  const auto blob3 = objects_blob({{creature, "hidden"}, {creature, "waiting"}},
+                                  std::vector<std::string>{"hide=1", "wait=1"});
   check(third.adopt_objects(blob3.data(), blob3.size()), "property-bearing stubs adopt");
   third.run_start();
   check(third.counts().refused[hide] == 1 && third.counts().refused[show] == 1 &&
