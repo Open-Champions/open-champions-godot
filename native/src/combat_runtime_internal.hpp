@@ -151,6 +151,8 @@ struct World::State {
   Address alloc_fixture(unsigned);
   Address spawn(const Spawn &, bool, unsigned, int, int);
   Address spawn_class(const std::string &, const Spawn &);
+  std::array<Address, 2> spawn_mounted_horseman(unsigned, const Spawn &,
+                                                const Spawn &);
   void write_table(Address table, const std::map<unsigned, Raw> *extra = nullptr);
   Address construct(Address addr, const Vec3 &pos, Kind kind);
   void link(Address, Address, Address);

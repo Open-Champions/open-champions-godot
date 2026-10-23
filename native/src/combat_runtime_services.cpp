@@ -196,6 +196,29 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   if (slot == 6 && !args.empty())
     note("touch", {self, ar(0)});
   note("virtual", {self, slot});
+  if (fn == 0x27142c) {
+    model.nightmare_on_hit_terrain(self);
+    return iv(0);
+  }
+  if (fn == 0x271484) {
+    std::vector<Raw> touched;
+    if (!args.empty()) {
+      if (auto objects = std::get_if<A::Objects>(&args[0]))
+        touched = objects->values;
+      else if (auto contacts = std::get_if<A::Contacts>(&args[0]))
+        touched = contacts->values;
+    }
+    model.nightmare_on_touch_list(self, touched);
+    return iv(0);
+  }
+  if (fn == 0x27155c) {
+    model.nightmare_set_state(self, ar(0));
+    return iv(0);
+  }
+  if (fn == 0x272f4c) {
+    model.horsemen_set_state(self, ar(0));
+    return iv(0);
+  }
   if (slot == 1 && (fn == 0x151454 || fn == 0x3c6468)) {
     projectile_destroy(self, ar(0));
     return iv(0);
@@ -301,6 +324,9 @@ Value World::State::full_vcall(Address obj, unsigned slot,
 Value World::State::dispatch_virtual(Address self, unsigned slot,
                                      std::vector<Value> args) {
   auto fn = u(u(self + 0x48) + 8 * slot + 4);
+  if (fn == 0x27142c || fn == 0x271484 || fn == 0x27155c ||
+      fn == 0x272f4c)
+    return full_vcall(self, slot, std::move(args));
   if (knows(fn)) {
     for (auto &d : arena_stack)
       if (d.first == self && d.second == slot)
@@ -1008,6 +1034,11 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "creature_findEnemyInCone")
     return iv(cone(ar(0), ar(1), ar(2), ar(3), ar(4)));
+  if (n == "creature_inKnockdownAnim") {
+    if (!services.in_knockdown_anim)
+      throw Unsupported("Nightmare contact needs knockdown animation service");
+    return iv(services.in_knockdown_anim(ar(0)) ? 1 : 0);
+  }
   if (n == "damage_apply") {
     if (!full()) {
       if (ar(6))
@@ -1073,9 +1104,14 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       set_cooldown_on(ar(0), ar(1), ar(2));
       return iv(0);
     }
-    if (n == "Creature_dropLoot")
-      throw Unsupported("Creature_dropLoot: loot generation and type-info "
-                        "tests are outside the composed runtime");
+    if (n == "Creature_dropLoot") {
+      if (u(ar(0) + 0x48) != 0x515730)
+        throw Unsupported("Creature_dropLoot: loot generation and type-info "
+                          "tests are outside the composed runtime");
+      drop_loot(ar(0), v(1), ar(2), ar(3), ar(4), ar(5), ar(6), ar(7),
+                ar(8), ar(9));
+      return iv(0);
+    }
     if (n == "creature_moveSimple")
       return iv(move_with_collision(ar(0), v(1), 0, 0));
     if (n == "obj_moveWithCollision")
@@ -1290,6 +1326,14 @@ void World::State::run(Address a) {
   if (fn == 0x157b58) {
     note("run",{a});
     combat_ctors::gold_run(model,a);
+    return;
+  }
+  if (fn == 0x27236c || fn == 0x270bbc) {
+    note("run", {a});
+    if (fn == 0x27236c)
+      model.horsemen_run(a);
+    else
+      model.nightmare_run(a);
     return;
   }
   if (fn == 0x1edb18 || fn == 0x155fcc)

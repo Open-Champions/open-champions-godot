@@ -147,6 +147,7 @@ public:
   godot::Dictionary combat_block(bool held);
   godot::Dictionary combat_cast_holy_strike();
   godot::Dictionary combat_spawn_creature(int64_t own_class);
+  godot::Dictionary combat_spawn_mounted_horseman(int64_t variant);
   godot::Dictionary combat_drop_potion(int64_t kind);
   static godot::PackedStringArray own_creature_classes();
   // fx_skill_recipes.py --json (user's) or the labelled synthetic fixture.

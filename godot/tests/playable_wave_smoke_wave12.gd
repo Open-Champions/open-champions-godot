@@ -133,9 +133,24 @@ func run() -> void:
 	check(str(out.potions["2"].get("error", "x")).is_empty() and int(out.potions["2"].get("ticks", 0)) == TICKS - 1, "potion 2's cloud runs and the session runs on")
 	check(int(p3.get("LightEffect_ctor", 0)) == 1 and int(p3.get("presentation:decal_add", 0)) == 1, "potion 3: the ring's light and floor decal")
 	check(str(out.potions["3"].get("error", "x")).is_empty() and int(out.potions["3"].get("ticks", 0)) == TICKS - 1, "potion 3 session keeps running")
+	var mounted_start := fresh(controller)
+	check(mounted_start.get("ok", true) != false, "mounted Full fixture starts")
+	var mounted: Dictionary = controller.combat_spawn_mounted_horseman(0)
+	check(mounted.get("ok", true) != false, "mounted Horsemen pair registers")
+	var rider_seen := false
+	var mount_seen := false
+	for actor in mounted.get("combat_actors", []):
+		rider_seen = rider_seen or (int(actor.get("slot", -1)) == 7 and str(actor.get("kind", "")) == "Horsemen")
+		mount_seen = mount_seen or (int(actor.get("slot", -1)) == 8 and str(actor.get("kind", "")) == "Nightmare")
+	check(rider_seen and mount_seen, "mounted actor identities reach Godot")
+	check(controller.combat_spawn_mounted_horseman(0).get("ok", true) == false, "a second mounted pair is refused")
+	controller.advance(0)
+	var mounted_tick: Dictionary = controller.advance(0)
+	check(mounted_tick.get("ok", true) != false and not mounted_tick.get("failed", false), "mounted pair completes a ready tick in Godot")
 	check(controller.combat_drop_potion(4).get("ok", true) == false, "potion kind 4 is refused by the client")
 	controller.start_play_session()
 	check(controller.combat_spawn_creature(0).get("ok", true) == false, "creatures need the Full fixture")
+	check(controller.combat_spawn_mounted_horseman(0).get("ok", true) == false, "mounted pair needs the Full fixture")
 	out["checks"] = checks
 	out["failures"] = failures
 	print("PLAYABLE_WAVE12_RESULT " + JSON.stringify(out))
