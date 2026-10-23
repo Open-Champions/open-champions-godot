@@ -70,13 +70,13 @@ Draw make_frame(int x, int y, int w, int h, int layer, std::uint32_t tint, int s
 
 std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata,
                                        const std::vector<std::uint8_t> &headers,
-                                       int count, int scroll_base) {
+                                       int count, int scroll_base, bool saving) {
   if (count < 0 || scroll_base < 0 || scroll_base > count ||
       static_cast<std::size_t>(count) > metadata.size() / 16 ||
       static_cast<std::size_t>(count) > headers.size() / 0x70)
     throw Refusal("card cache count, scroll, metadata or header length is invalid");
   std::vector<CardRow> out;
-  if (count == 0 || scroll_base == count)
+  if ((count == 0 || scroll_base == count) && !saving)
     return out;
   for (int r = 0; r < 5; ++r) {
     const int index = scroll_base + r;
@@ -101,8 +101,12 @@ std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata
       const int shown_hour = hour % 12 == 0 ? 12 : hour % 12;
       row.clock = std::to_string(shown_hour) + ":" + (minute < 10 ? "0" : "") +
                   std::to_string(minute) + (hour < 12 ? "am" : "pm");
+    } else if (saving && index == count) {
+      row.new_save = true;
     }
     out.push_back(std::move(row));
+    if (count == 0)
+      break;
   }
   return out;
 }
@@ -456,7 +460,8 @@ Scene Flow::layout() const {
     if (card_cache_supplied_) {
       s.host_label = "caller card cache; level text and preview wording unverified";
       for (const auto &row : layout::visible_card_rows(card_metadata_, card_headers_,
-                                                      card_count_, card_scroll_base_)) {
+                                                      card_count_, card_scroll_base_,
+                                                      screen_ == Screen::SaveGame)) {
         s.draws.push_back(text(Font::Small, Align::Left, 6, 77, row.y, 0x7f323c3c,
                                row.number, Evidence::Executed, "supplied card number", "0x21d99c"));
         if (row.populated) {
@@ -464,6 +469,10 @@ Scene Flow::layout() const {
                                  row.date, Evidence::Executed, "supplied card date", "0x21db24"));
           s.draws.push_back(text(Font::Small, Align::Left, 6, 487, row.y, 0x7f323c3c,
                                  row.clock, Evidence::Executed, "supplied card clock", "0x21dbe8"));
+        } else if (row.new_save) {
+          s.draws.push_back(text(Font::Small, Align::Left, 6, 100, row.y, HOST_MUTED,
+                                 "New Save", Evidence::Host,
+                                 "save-only free row (localized wording unknown)", "0x21d9f4"));
         }
       }
       if (card_preview_index_ >= 0) {

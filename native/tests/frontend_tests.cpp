@@ -780,7 +780,7 @@ void card_cache_vectors() {
   metadata[6] = 0x01;
   metadata[5] = 0x09;
   metadata[7] = 0x26;
-  const auto rows = layout::visible_card_rows(metadata, headers, 8, 2);
+  const auto rows = layout::visible_card_rows(metadata, headers, 8, 2, false);
   expect(rows.size() == 5, "card cache exposes five visible rows");
   for (int r = 0; r < 5; ++r)
     expect(rows[static_cast<std::size_t>(r)].index == r + 2 &&
@@ -792,20 +792,29 @@ void card_cache_vectors() {
                rows[static_cast<std::size_t>(r)].date == "1/9/2026" &&
                rows[static_cast<std::size_t>(r)].clock == clocks[r],
            "nonzero scroll uses observed strides, row numbers, date and clock boundaries");
-  const auto sparse = layout::visible_card_rows(metadata, headers, 1, 0);
+  const auto sparse = layout::visible_card_rows(metadata, headers, 1, 0, false);
   expect(sparse.size() == 5 && sparse[0].populated && !sparse[1].populated &&
              sparse[4].number == "5." && sparse[4].date.empty(),
          "nonzero count keeps numbered markers beyond populated cache rows");
+  const auto save_free = layout::visible_card_rows(metadata, headers, 1, 0, true);
+  expect(save_free.size() == 5 && save_free[1].new_save &&
+             save_free[1].number == "2." && !save_free[2].new_save,
+         "save marks only the first free row");
+  const auto empty_save = layout::visible_card_rows({}, {}, 0, 0, true);
+  expect(empty_save.size() == 1 && empty_save[0].new_save &&
+             empty_save[0].number == "1.", "empty save shows a first free row");
+  expect(layout::visible_card_rows({}, {}, 0, 0, false).empty(),
+         "empty load has no rows");
   const auto preview = layout::card_preview(headers, 8, 2);
   expect(preview.header_offset == 2 * 0x70 && preview.play_seconds == 59 &&
              preview.player_count == 1 && preview.difficulty_index == 1,
          "selected header exposes verified preview fields");
-  reject([&] { (void)layout::visible_card_rows(metadata, headers, 8, 9); }, "unavailable scroll refused");
-  reject([&] { (void)layout::visible_card_rows(metadata, std::vector<std::uint8_t>(7 * 0x70), 8, 2); },
+  reject([&] { (void)layout::visible_card_rows(metadata, headers, 8, 9, false); }, "unavailable scroll refused");
+  reject([&] { (void)layout::visible_card_rows(metadata, std::vector<std::uint8_t>(7 * 0x70), 8, 2, false); },
          "short header cache refused");
   auto bad = metadata;
   bad[2 * 16 + 3] = 0x2a;
-  reject([&] { (void)layout::visible_card_rows(bad, headers, 8, 2); }, "invalid BCD clock refused");
+  reject([&] { (void)layout::visible_card_rows(bad, headers, 8, 2, false); }, "invalid BCD clock refused");
   reject([&] { (void)layout::card_preview(headers, 8, 8); }, "unavailable preview header refused");
 
   Flow load = to_main();

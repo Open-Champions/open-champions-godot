@@ -59,7 +59,7 @@ the normal host flow, so the card rows, selected-slot preview, date/clock values
 and confirmation prompts stay absent there. A caller may explicitly supply a
 card cache to `Flow::set_card_cache` / `ChampionsFrontendService.set_card_cache`.
 The bounded 16-byte metadata and 0x70-byte header strides, five visible row
-anchors, numbered markers, `%d/%d/%d` BCD date and tested 12-hour clocks then
+anchors, numbered markers, the save-only first free row, `%d/%d/%d` BCD date and tested 12-hour clocks then
 paint with the disc small font. An explicitly selected header supplies raw
 player count, difficulty index and play seconds at the preview anchors; their
 labels are visibly Host because localized text and general minute formatting

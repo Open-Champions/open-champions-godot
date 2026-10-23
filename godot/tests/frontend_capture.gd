@@ -29,14 +29,34 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func shot(label: String) -> void:
-	for _frame in range(3):
+	for _frame in range(10):
 		await process_frame
 	await RenderingServer.frame_post_draw
 	var image: Image = root.get_texture().get_image()
+	if image != null and label in ["08-load-game", "08a-load-card-synthetic", "21-save-game", "22-save-card-synthetic", "23-save-empty-card"]:
+		var frame_colour := image.get_pixel(500, 350)
+		if maxf(frame_colour.r, maxf(frame_colour.g, frame_colour.b)) < 0.08 or bright_pixels(image, Rect2i(300, 730, 680, 140), 4) < 100:
+			printerr("rendered card frame or host file action absent: ", label)
+			return
+		if label in ["08a-load-card-synthetic", "22-save-card-synthetic"] and bright_pixels(image, Rect2i(140, 290, 960, 175), 4) < 50:
+			printerr("rendered card rows absent: ", label)
+			return
+		if label == "23-save-empty-card" and bright_pixels(image, Rect2i(140, 290, 160, 175), 2) < 20:
+			printerr("rendered first free row absent")
+			return
 	if image != null and image.save_png(capture_dir.path_join(label + ".png")) == OK:
 		saved += 1
 	else:
 		printerr("capture failed ", label)
+
+func bright_pixels(image: Image, area: Rect2i, step: int) -> int:
+	var count := 0
+	for y in range(area.position.y, area.end.y, step):
+		for x in range(area.position.x, area.end.x, step):
+			var colour := image.get_pixel(x, y)
+			if maxf(colour.r, maxf(colour.g, colour.b)) > 0.4:
+				count += 1
+	return count
 
 func bind_synthetic_card_rows() -> bool:
 	# Authored metadata and headers: five indexed dates/clocks and one preview.
@@ -207,5 +227,24 @@ func run() -> void:
 		quit(1)
 		return
 	await shot("22-save-card-synthetic")
+	var empty_result: Dictionary = fe.service.set_card_cache(PackedByteArray(), PackedByteArray(), 0, 0)
+	if not empty_result.get("ok", false):
+		printerr("empty save card cache refused")
+		quit(1)
+		return
+	fe._refresh()
+	var free_rows := 0
+	for draw in fe.scene_view.get("draws", []):
+		if str(draw.get("role", "")) == "save-only free row (localized wording unknown)":
+			if int(draw.x) != 100 or int(draw.y) != 128 or str(draw.font) != "small":
+				printerr("save free row anchor or font changed")
+				quit(1)
+				return
+			free_rows += 1
+	if free_rows != 1:
+		printerr("empty save did not expose one free row")
+		quit(1)
+		return
+	await shot("23-save-empty-card")
 	print("captures ", saved)
-	quit(0 if saved == 23 else 1)
+	quit(0 if saved == 24 else 1)

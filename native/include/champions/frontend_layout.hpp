@@ -67,6 +67,7 @@ struct CardRow {
   int index = 0, y = 0;
   std::size_t metadata_offset = 0, header_offset = 0;
   bool populated = false;
+  bool new_save = false;
   std::string number, date, clock;
 };
 struct CardPreview {
@@ -78,7 +79,7 @@ struct CardPreview {
 };
 std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata,
                                        const std::vector<std::uint8_t> &headers,
-                                       int count, int scroll_base);
+                                       int count, int scroll_base, bool saving);
 CardPreview card_preview(const std::vector<std::uint8_t> &headers, int count, int header_index);
 // Colours the research documents (tint words of the executed calls).
 inline constexpr std::uint32_t LIST_BACKING_TINT = 0x80808080; // style-2 backing frame

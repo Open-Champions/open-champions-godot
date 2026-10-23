@@ -181,7 +181,8 @@ void Flow::set_card_cache(std::vector<std::uint8_t> metadata,
                           std::vector<std::uint8_t> headers, int count, int scroll_base) {
   if (screen_ != Screen::LoadGame && screen_ != Screen::SaveGame)
     throw Refusal("card cache requires the save or load screen");
-  (void)layout::visible_card_rows(metadata, headers, count, scroll_base);
+  (void)layout::visible_card_rows(metadata, headers, count, scroll_base,
+                                  screen_ == Screen::SaveGame);
   card_metadata_ = std::move(metadata);
   card_headers_ = std::move(headers);
   card_count_ = count;
