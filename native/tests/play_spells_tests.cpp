@@ -15,16 +15,25 @@ int main() {
     if (initial != from_int(100)) throw std::runtime_error("authored mana setup");
     session.advance(0); // first network submission is not a ready tick
     session.press_disease_bolt();
-    session.release_disease_bolt(); // ordinary kind-0 cast survives a quick tap
+    session.release_disease_bolt();
+    for (int tick = 0; tick < 3; ++tick) {
+      const auto state = session.advance(0);
+      if (state.failed || session.actors()[0].state == 5)
+        throw std::runtime_error("released ability A admitted a later cast");
+    }
+    session.press_disease_bolt();
+    bool admitted = false;
     bool spawned = false, hit = false, paid = false, regenerated = false;
     bool expiry_refused = false;
     const auto enemy = session.world().target(session.actors()[1].handle);
     const auto hp_before = Raw(session.world().read(enemy + 0x228));
     for (int tick = 0; tick < 50 && !hit; ++tick) {
       const auto state = session.advance(0);
+      admitted |= session.actors()[0].state == 5;
       for (const auto &event : session.tick_events()) {
         if (event.name == "diseasebolt_spawn") {
           spawned = true;
+          session.release_disease_bolt();
           if (Raw(session.world().read(rec + 0xc0)) != from_int(91))
             throw std::runtime_error("rank-1 cast cost differs from 9 mana");
         }
@@ -41,6 +50,7 @@ int main() {
         expiry_refused = true;
       }
     }
+    if (!admitted) throw std::runtime_error("held ability A did not enter cast state 5");
     if (!spawned) throw std::runtime_error("projectile did not spawn");
     if (!paid) throw std::runtime_error("cast did not debit mana");
     if (!regenerated) throw std::runtime_error("mana did not regenerate below the cap");

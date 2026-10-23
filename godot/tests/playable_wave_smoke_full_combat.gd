@@ -188,16 +188,26 @@ func continuation_cases() -> void:
 	var hp_before: float = actor(1).hp
 	step() # lockstep's initial no-ready submission
 	key(KEY_U, true)
-	key(KEY_U, false) # ordinary kind-0 request survives release before animation fires
+	key(KEY_U, false)
+	for i in range(3):
+		step()
+		check(actor(0).state != 5 and not tick_has("diseasebolt_spawn"),
+			"released ability A does not admit a later cast")
+	key(KEY_U, true)
+	var spell_admitted := false
 	var bolt_spawned := false
 	var bolt_hit := false
 	for i in range(50):
 		step()
+		spell_admitted = spell_admitted or actor(0).state == 5
+		if tick_has("diseasebolt_spawn"):
+			key(KEY_U, false)
 		bolt_spawned = bolt_spawned or tick_has("diseasebolt_spawn")
 		bolt_hit = bolt_hit or tick_has("diseasebolt_hit")
 		if tick_has("diseasebolt_spawn"):
 			check(scene.raw_observation.combat_mana < mana_before, "cast spends mana after animation admission")
 		if bolt_hit: break
+	check(spell_admitted, "held ability A enters documented cast state 5")
 	check(bolt_spawned and bolt_hit and actor(1).hp < hp_before,
 		"scene input spawns Disease Bolt and damages a Full-fixture enemy")
 	check(scene.stopped and "unverified destructor" in scene.status_label.text,

@@ -17,6 +17,7 @@ func _initialize() -> void:
 	var hp_initial: int = int(selected.get("combat_actors", [])[1].get("hp_raw", -1))
 	controller.advance(0) # first submission has no ready tick
 	controller.combat_press_disease_bolt(true)
+	var admitted := false
 	var spawned := false
 	var paid := false
 	var hit := false
@@ -24,6 +25,9 @@ func _initialize() -> void:
 	for tick in range(50):
 		var state: Dictionary = controller.advance(0)
 		var events: Array = state.get("combat_tick_events", [])
+		admitted = admitted or int(state.get("combat_actors", [])[0].get("state", -1)) == 5
+		if "diseasebolt_spawn" in events:
+			controller.combat_release_disease_bolt()
 		spawned = spawned or "diseasebolt_spawn" in events
 		paid = paid or int(state.get("combat_mana_raw", initial)) < initial
 		hit = hit or "diseasebolt_hit" in events
@@ -32,8 +36,8 @@ func _initialize() -> void:
 		if state.get("failed", false):
 			_fail("simulation refused before projectile hit: " + str(state.get("error", "")))
 			return
-	if not (spawned and paid and hit and hp_lost):
-		_fail("mana/spawn/hit/damage: %s/%s/%s/%s" % [spawned, paid, hit, hp_lost])
+	if not (admitted and spawned and paid and hit and hp_lost):
+		_fail("admission/mana/spawn/hit/damage: %s/%s/%s/%s/%s" % [admitted, spawned, paid, hit, hp_lost])
 		return
 	print("PLAY_SPELLS_SMOKE PASS: mana, spawn, fixture hit")
 	quit(0)

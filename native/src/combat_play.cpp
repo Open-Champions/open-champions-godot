@@ -36,7 +36,6 @@ struct Session::State {
   C::SessionAdapter::PadInput pad{};
   bool attack_pressed = false, attack_held = false, block_held = false, block_was = false;
   bool ability_pressed = false, ability_held = false;
-  unsigned ability_release_ticks = 0;
   bool disease_selected = false;
   bool cast_pending = false;
   TickObserver observer;
@@ -312,8 +311,6 @@ struct Session::State {
         if (cast_pending) adapter->cast(handles[0], HOLY_STRIKE, 1);
         cast_pending = false;
         adapter->ready_tick(Raw(net.net_frame - 1));
-        if (ability_release_ticks && --ability_release_ticks == 0)
-          ability_held = false;
         net.sim_frame = world->read(C::FRAME);
         ++status.ready_ticks;
         collect_visual_events();
@@ -432,7 +429,6 @@ void Session::release_input() {
   s_->pad = {};
   s_->attack_pressed = s_->attack_held = s_->block_held = false;
   s_->ability_pressed = s_->ability_held = false;
-  s_->ability_release_ticks = 0;
   s_->cast_pending = false;
 }
 void Session::set_paused(bool value) { release_input(); s_->status.paused = value; }
@@ -474,14 +470,10 @@ void Session::press_disease_bolt(bool held) {
     throw C::Unsupported("Disease Bolt input needs a selected Full-fixture spell");
   if (s_->status.stopped) throw C::Error("combat fixture stopped");
   s_->ability_pressed = true;
-  s_->ability_held = true;
-  s_->ability_release_ticks = held ? 0 : 3;
+  s_->ability_held = held;
 }
 void Session::release_disease_bolt() {
-  // A UI click can press and release before any ready tick. This authored
-  // Full-fixture pad pulse lasts three ready ticks so Player_run reaches its
-  // normal admission state; it is not the original HUD selector's mask.
-  if (s_->ability_held) s_->ability_release_ticks = 3;
+  s_->ability_held = false;
 }
 void Session::spawn_creature(const std::string &own_class) {
   if (!full()) throw C::Unsupported("own-machine creatures need the Full combat fixture");
