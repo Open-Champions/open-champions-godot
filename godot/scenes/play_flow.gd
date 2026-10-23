@@ -168,7 +168,7 @@ func _build_flow() -> void:
 	_add_action("diagnostic", "Start diagnostic", start_diagnostic)
 	_add_action("resume", "Resume", resume_session)
 	_add_action("reset", "Reset current level", reset_session)
-	_add_action("save", "Save…", func(): open_dialog(save_dialog))
+	_add_action("save", "Save game…", open_in_game_save)
 	_add_action("load", "Load…", func(): open_dialog(load_dialog))
 	# Reuse the exact legacy save-format selector and its IDs.
 	save_format.reparent(menu_actions)
@@ -404,6 +404,12 @@ func open_dialog(dialog: FileDialog) -> void:
 	set_paused(true)
 	dialog.popup_centered_ratio(0.8)
 
+func open_in_game_save() -> void:
+	if frontend != null and frontend.booted and session_started and not stopped:
+		frontend.open_save_screen()
+	else:
+		open_dialog(save_dialog)
+
 func _dialog_cancelled() -> void:
 	status_label.text = "Selection cancelled. Current session retained; use Resume when ready."
 	_show_menu(flow)
@@ -472,7 +478,7 @@ func load_terrain_file(path: String) -> bool:
 	return ok
 
 func load_session_file(path: String) -> bool:
-	if level_textures != null: level_textures.prepare_restore(path)
+	_prepare_level_restore(path)
 	var ok := super.load_session_file(path)
 	if level_textures != null: level_textures.restore = {}
 	if ok:
@@ -493,6 +499,9 @@ func load_session_file(path: String) -> bool:
 	else:
 		status_label.text = "Load refused: %s. Current session retained; choose a valid native save." % status_label.text
 	return ok
+
+func _prepare_level_restore(path: String) -> void:
+	if level_textures != null: level_textures.prepare_restore(path)
 
 func _observe(result: Dictionary) -> void:
 	super._observe(result)

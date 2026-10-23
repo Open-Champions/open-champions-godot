@@ -19,7 +19,7 @@ const PAD_KEYS := {
 }
 # On the name page only these keys stay pad buttons; the rest type.
 const NAME_PAD_KEYS := [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE, KEY_TAB]
-const KEY_HELP := "Host keys: arrows = d-pad · Enter/Space/X = cross · Backspace/C/Esc = circle · T/Tab = triangle · P = start"
+const KEY_HELP := "Host keys: arrows = d-pad · Enter/Space/X = cross · Backspace/C/Esc = circle · T/Tab = triangle · P = start · F5 = Save screen in play"
 const FrontendView = preload("res://ui/frontend_view.gd")
 
 var scene: Control
@@ -147,6 +147,11 @@ func handle_key(event: InputEvent) -> bool:
 	if not event is InputEventKey or event.echo:
 		return false
 	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+	# Host route from the researched five-entry pause menu to the documented
+	# save screen. F5 is a client shortcut, not an original pause entry.
+	if key == KEY_F5 and screen() in ["playing", "pause"] and scene != null and scene.session_started and not scene.stopped:
+		if event.pressed: open_save_screen()
+		return true
 	if not active():
 		# In play only start (P) reaches the flow; everything else is the game's.
 		if key != KEY_P or scene == null or not scene.session_started or scene.stopped:

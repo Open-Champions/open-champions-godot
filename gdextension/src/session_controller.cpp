@@ -117,12 +117,16 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::save_player_companion);
   ClassDB::bind_method(D_METHOD("load_player_companion", "path"),
                        &ChampionsSessionController::load_player_companion);
+  ClassDB::bind_method(D_METHOD("save_campaign_bytes"),
+                       &ChampionsSessionController::save_campaign_bytes);
+  ClassDB::bind_method(D_METHOD("load_campaign_bytes", "bytes"),
+                       &ChampionsSessionController::load_campaign_bytes);
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
                        &ChampionsSessionController::save_snapshot_file);
-  ClassDB::bind_method(D_METHOD("prepare_save_file", "path"),
-                       &ChampionsSessionController::prepare_save_file);
+  ClassDB::bind_method(D_METHOD("prepare_save_file", "path", "reuse_loaded_level"),
+                       &ChampionsSessionController::prepare_save_file, DEFVAL(false));
   ClassDB::bind_method(D_METHOD("advance_time", "elapsed_usec", "command_mask"),
                        &ChampionsSessionController::advance_time);
   ClassDB::bind_method(D_METHOD("get_presentation"),
@@ -780,6 +784,27 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     player_ = std::move(next);
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true; result["loaded"] = true; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::save_campaign_bytes() {
+  try {
+    if (!scripts_) throw std::runtime_error("A level script is required to save campaign state.");
+    const auto bytes = scripts_->save_campaign();
+    PackedByteArray packed;
+    packed.resize(bytes.size());
+    std::copy(bytes.begin(), bytes.end(), packed.ptrw());
+    Dictionary result; result["ok"] = true; result["bytes"] = packed; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::load_campaign_bytes(const PackedByteArray &packed) {
+  try {
+    if (!scripts_) throw std::runtime_error("Load this level's script before campaign state.");
+    if (packed.is_empty() || packed.size() > 1024 * 1024)
+      throw std::runtime_error("Campaign save is empty or exceeds 1 MiB.");
+    const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
+    scripts_->load_campaign(bytes);
+    Dictionary result = observation(); result["ok"] = true; return result;
   } catch (const std::exception &e) { return failure(e); }
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
@@ -1993,7 +2018,7 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
     return failure(e);
   }
 }
-Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
+Dictionary ChampionsSessionController::prepare_save_file(const String &path, bool reuse_loaded_level) {
   try {
     if (next_candidate_ == std::numeric_limits<int64_t>::max())
       throw std::runtime_error("Restart the scene before loading more saves.");
@@ -2035,13 +2060,27 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
     if (setup.config.movement !=
         rta::session_control::MovementPolicy::DryCreature)
       throw std::runtime_error("This scene requires a DryCreature save.");
-    // Saves contain collision state, not selected WORLD rendering bytes.
-    // Restore an explicitly labelled illustration or refuse unsupported
-    // display.
-    const Dictionary terrain = present_terrain(setup.initial_terrain.data);
-    prepared->terrain = terrain;
-    prepare_meshes(prepared->terrain);
-    prepared->name = "Restored collision ground";
+    // The native continuation contains collision data, not the level's
+    // rendering bytes. The real-data host may first reload and verify the
+    // selected level's WORLD/TEX files, then reuse that prepared display.
+    if (reuse_loaded_level) {
+      if (!control_ || String(terrain_.get("mode", "")) != "static_world")
+        throw std::runtime_error("Load and verify the saved level's own data first.");
+      rta::native_save::Bytes saved_collision;
+      rta::native_save::Bytes displayed_collision;
+      rta::native_save::terrain_codec::encode_terrain(saved_collision,
+                                                     setup.initial_terrain);
+      rta::native_save::terrain_codec::encode_terrain(displayed_collision,
+                                                     control_->setup().initial_terrain);
+      if (saved_collision != displayed_collision)
+        throw std::runtime_error("The displayed level's collision differs from the save.");
+      prepared->terrain = terrain_;
+      prepared->name = terrain_name_;
+    } else {
+      prepared->terrain = present_terrain(setup.initial_terrain.data);
+      prepare_meshes(prepared->terrain);
+      prepared->name = "Restored collision ground";
+    }
     const Dictionary restored =
         present_observation(prepared->control->observation());
     prepared->observation = restored;
