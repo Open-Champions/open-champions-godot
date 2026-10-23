@@ -318,6 +318,18 @@ include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")
 
 target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines champions-creature-anim)
 
+# Borrowed production Player callbacks; the Full fixture retains its own
+# explicit synthetic services. No World ownership is changed here.
+add_library(champions-player-services "${CHAMPIONS_SIMULATION_ROOT}/src/player_services.cpp")
+target_include_directories(champions-player-services PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-player-services PUBLIC champions-combat-runtime champions-world-queries champions-creature-anim champions-creature-water)
+if(MSVC)
+  target_compile_options(champions-player-services PRIVATE /W4 /utf-8 /fp:strict)
+else()
+  target_compile_options(champions-player-services PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-player-services)
+
 target_sources(champions-combat-play PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/play_animation.cpp")
 target_link_libraries(champions-combat-play PUBLIC champions-creature-anim)
 
