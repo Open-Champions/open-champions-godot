@@ -143,6 +143,16 @@ Raw World::State::advance_anim(Address a, Raw speed) {
   note("anim_advance", {a, speed, ev});
   return ev;
 }
+bool World::State::run_class_hook(Raw fn, Address self, const std::vector<Value> &args) {
+  auto hook = class_hooks.find(fn);
+  if (hook == class_hooks.end()) return false;
+  std::vector<std::uint64_t> numbers;
+  for (const auto &value : args)
+    if (auto n = std::get_if<std::int64_t>(&value)) numbers.push_back(std::uint64_t(*n));
+  auto body = hook->second;
+  body(self, numbers);
+  return true;
+}
 Value World::State::vcall(Address c, unsigned slot, std::vector<Value> args) {
   if (full())
     return full_vcall(c, slot, std::move(args));
@@ -229,6 +239,8 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     combat_ctors::gold_on_touch(model,self,ar(0));
     return iv(0);
   }
+  if (run_class_hook(fn, self, args))
+    return iv(0);
   switch (fn) {
   case 0x2da610:
     multifire_on_hit(self, ar(0));
@@ -301,6 +313,8 @@ Value World::State::full_vcall(Address obj, unsigned slot,
 Value World::State::dispatch_virtual(Address self, unsigned slot,
                                      std::vector<Value> args) {
   auto fn = u(u(self + 0x48) + 8 * slot + 4);
+  if (run_class_hook(fn, self, args))
+    return iv(0);
   if (knows(fn)) {
     for (auto &d : arena_stack)
       if (d.first == self && d.second == slot)

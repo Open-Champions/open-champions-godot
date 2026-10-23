@@ -1,0 +1,32 @@
+# The first real enemy fight: one shared World with the session Player and the
+# WarBoar-family actors the level factory finishes. Included by the native tree
+# and by the GDExtension after script_commands_targets.cmake.
+include_guard(GLOBAL)
+set(CHAMPIONS_FIGHT_ARCHIVE "")
+if(TARGET champions-model)
+    list(APPEND CHAMPIONS_FIGHT_ARCHIVE champions-model)
+endif()
+if(TARGET champions-archive)
+    list(APPEND CHAMPIONS_FIGHT_ARCHIVE champions-archive)
+elseif(TARGET champions-archive-binding-core)
+    list(APPEND CHAMPIONS_FIGHT_ARCHIVE champions-archive-binding-core)
+endif()
+if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
+   TARGET champions-player-services AND TARGET champions-combat-runtime AND CHAMPIONS_FIGHT_ARCHIVE)
+    add_library(champions-campaign-fight "${CMAKE_CURRENT_LIST_DIR}/src/campaign_fight.cpp")
+    target_include_directories(champions-campaign-fight PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+    target_link_libraries(champions-campaign-fight PUBLIC
+        champions-script-commands champions-campaign-actors champions-player-services
+        champions-combat-runtime champions-creature-anim ${CHAMPIONS_FIGHT_ARCHIVE})
+    set_target_properties(champions-campaign-fight PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(MSVC)
+        target_compile_options(champions-campaign-fight PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-campaign-fight PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    # Counts-only private-disc probe (never prints paths, names or bytes).
+    if(TARGET champions-archive)
+        add_executable(champions-campaign-fight-probe "${CMAKE_CURRENT_LIST_DIR}/src/campaign_fight_probe.cpp")
+        target_link_libraries(champions-campaign-fight-probe PRIVATE champions-campaign-fight)
+    endif()
+endif()

@@ -51,6 +51,7 @@ target_include_directories(champions-native-fx PUBLIC ../native/include)
 set_target_properties(champions-native-fx PROPERTIES POSITION_INDEPENDENT_CODE ON)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/fx2_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/script_commands_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/../native/campaign_fight_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/combat_play_effects_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/fixture_save_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/ps2_save_targets.cmake")
@@ -67,7 +68,7 @@ set_target_properties(champions-native-audio-binding-core PROPERTIES POSITION_IN
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/frontend_targets.cmake")
 add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/session_controller_text.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/ui_hud_round3_service.cpp src/menu_service.cpp src/frontend_service.cpp src/fx_bridge.cpp src/native_audio_bridge.cpp src/level_lights_service.cpp src/ps2_save_import.cpp)
 target_sources(champions-archive-extension PRIVATE ../native/src/real_world.cpp)
-target_link_libraries(champions-archive-extension PRIVATE champions-player-state champions-menus champions-frontend champions-play-fixture-save champions-fx-world-save champions-level-play champions-combat-play champions-player-services champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-fx-sim champions-script-commands champions-combat-play-effects champions-native-audio-binding-core champions-ps2-save godot::cpp)
+target_link_libraries(champions-archive-extension PRIVATE champions-player-state champions-menus champions-frontend champions-play-fixture-save champions-fx-world-save champions-level-play champions-combat-play champions-player-services champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-fx-sim champions-script-commands champions-campaign-fight champions-combat-play-effects champions-native-audio-binding-core champions-ps2-save godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)

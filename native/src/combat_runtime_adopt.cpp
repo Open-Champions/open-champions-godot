@@ -27,6 +27,7 @@ void World::define_creature_table(Address table,
 void World::set_class_body(
     Raw function,
     std::function<void(Address, const std::vector<std::uint64_t> &)> body) {
+  s_->class_hooks[function] = body;
   s_->model.class_bodies[function] =
       [body](A::Model &, Address self, const std::vector<A::Value> &args) -> A::Value {
     std::vector<std::uint64_t> numbers;
@@ -66,4 +67,5 @@ void World::creature_on_death(Address a, Raw quiet) {
   s_->actor(a);
   s_->model.slot28_on_death(a, quiet);
 }
+std::size_t World::stub_box_skips() const { return s_->stub_box_skips; }
 } // namespace champions::simulation::rta::combat_runtime

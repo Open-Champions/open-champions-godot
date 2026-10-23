@@ -44,6 +44,12 @@ struct Spawn {
   std::uint64_t creature_flags = 0x100000;
   // Full composition players only (authored set-up, not Player_ctor).
   Raw idle_voice_limit = 0x7fff, speed_mul = 0x3f800000;
+  // A session player: the record at PLAYERS already holds the real character
+  // (class, level, statistics, hit points). Only the object back-pointer, the
+  // documented unarmed weapon class and the team are written; the class
+  // definition block is left blank (0x400 bytes) and no authored base cells
+  // are planted, so the caller builds both from the real resources.
+  bool session_record = false;
 };
 struct Slide {
   Vec3 position{};
@@ -240,6 +246,9 @@ public:
   bool creature_filter_state(Address, std::uint32_t requested);
   // Creature_onDeath 0x10beb8 (virtual slot 28).
   void creature_on_death(Address, Raw quiet = 0);
+  // Grid nodes left out of box queries because they are unconstructed host
+  // stubs (their class constructor is not ported).
+  std::size_t stub_box_skips() const;
   void destroy(Address);       // slot 1 with 3 through the executed chain
   void delete_object(Address); // unlink run list now; grid/handles persist
   void update_grid(Address);

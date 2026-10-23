@@ -113,6 +113,11 @@ struct World::State {
   std::map<Address, std::vector<Cast>> queued_casts;
   std::map<int, Address> skill_objects;
   std::vector<std::pair<Raw, Raw>> exp_awards;
+  std::size_t stub_box_skips = 0;
+  // Class virtual bodies ported outside the arena model, by function address
+  // (World::set_class_body). Consulted before any inherited body.
+  std::map<Raw, std::function<void(Address, const std::vector<std::uint64_t> &)>> class_hooks;
+  bool run_class_hook(Raw fn, Address self, const std::vector<Value> &args);
   Address typeid_target = 0, pending_dtor = 0;
   bool has_typeid_target = false;
   Kind kind_hint = Kind::Missile;

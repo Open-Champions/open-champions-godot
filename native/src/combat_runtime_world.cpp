@@ -178,10 +178,10 @@ void World::State::link(Address a, Address back, Address obj) {
   Cell *back_cell = nullptr;
   // A script-host factory object's own head wins over any cached combat head
   // left at its address by a reused pool block.
-  if (back == obj && authority->is_factory(obj)) {
+  if (authority->is_factory(obj) && back >= obj && back - obj <= 8 && !((back - obj) & 3)) {
     auto external = authority->objects->objects.find(obj);
     if (external != authority->objects->objects.end())
-      back_cell = &external->second->heads[0];
+      back_cell = &external->second->heads[(back - obj) / 4];
   }
   if (!back_cell) {
     auto i = heads.find(back);
@@ -387,20 +387,23 @@ Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
   w(a + 0x228, v.hp);
   if (player) {
     auto r = PLAYERS + slot * RECORD_SIZE;
-    auto def = alloc_fixture(0x340);
+    auto def = alloc_fixture(v.session_record ? 0x400 : 0x340);
     w(a + 0x24, def);
-    for (unsigned k = 0; k < 0x340; k += 4)
-      w(def + k, 0xa0000000 + k);
+    if (!v.session_record)
+      for (unsigned k = 0; k < 0x340; k += 4)
+        w(def + k, 0xa0000000 + k);
     w(a + 0x3c8, slot);
     w(a + 0x58c, 2);
     w(a + 0x4b2, 2, 0x7fff);
     w(r + 0x43d8, a);
-    w(r + 0x50, 1);
-    w(r + 0x58, 1, Raw(level));
-    w(r + 0x59, 1, Raw(level));
-    w(r + 0x90, Raw(strength));
-    w(r + 0xac, v.hp);
-    w(r + 0xb0, v.hp);
+    if (!v.session_record) {
+      w(r + 0x50, 1);
+      w(r + 0x58, 1, Raw(level));
+      w(r + 0x59, 1, Raw(level));
+      w(r + 0x90, Raw(strength));
+      w(r + 0xac, v.hp);
+      w(r + 0xb0, v.hp);
+    }
     w(r + 0x4a86, 1, 5);
     w(r + 0x4c24, 1, Raw(v.team));
     w(NUM_PLAYERS, std::max(u(NUM_PLAYERS), slot + 1));
@@ -408,10 +411,12 @@ Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
       // PlayerAnim.reset_player: the four base cells player_resetIdleAnim
       // leaves (authored animation fixture), the idle-voice limit and the
       // record speed multiplier (MoveRuntime set-up).
-      w(a + 0x118, 1, 4);
-      w(a + 0x11a, 2, 0);
-      for (unsigned k = 0; k < 4; ++k)
-        w(a + 0x11c + 0x20 * k, 0xa0000044 + 8 * k);
+      if (!v.session_record) {
+        w(a + 0x118, 1, 4);
+        w(a + 0x11a, 2, 0);
+        for (unsigned k = 0; k < 4; ++k)
+          w(a + 0x11c + 0x20 * k, 0xa0000044 + 8 * k);
+      }
       w(a + 0x4b2, 2, v.idle_voice_limit);
       w(r + 0x4c20, v.speed_mul);
     }
@@ -542,8 +547,16 @@ std::vector<Address> World::State::box(const Vec3 &lo, const Vec3 &hi,
         if (!n->obj)
           continue;
         auto a = n->obj->id;
-        if (!objects.count(a) && !authority->is_factory(a))
-          throw Error("grid node outside the shared World registry");
+        if (!objects.count(a) && !authority->is_factory(a)) {
+          // A host stub (a record whose class constructor is not ported) is
+          // registered with the authority but has no constructed state to
+          // collide with. It is left out of the query and counted; an object
+          // the authority does not know at all is still a refusal.
+          if (!authority->find(a))
+            throw Error("grid node outside the shared World registry");
+          ++stub_box_skips;
+          continue;
+        }
         auto f = u(a + 12);
         if (f & (mask | 0x20000))
           continue;
