@@ -21,6 +21,7 @@ var disc_dir := ""
 var cache_dir := ""
 var files: Dictionary = {} # lower-case file name -> absolute path
 var levels: Array[Dictionary] = [] # {stem, gob, tex, vat}
+var current_qualified := ""
 var current := -1
 var world: RefCounted = null # RealWorld presenter of the current level
 var level_lights_path := "" # user's fx_level_lights.py --json output, if chosen
@@ -44,6 +45,7 @@ func open_disc(path: String) -> bool:
 	_dialog_font_searched = false
 	levels.clear()
 	current = -1
+	current_qualified = ""
 	disc_dir = ""
 	if not DirAccess.dir_exists_absolute(path):
 		return _fail("Game folder unavailable.")
@@ -214,7 +216,7 @@ func dialog_box() -> Dictionary:
 	return {"ok": false}
 
 # Load level `index` through the real level library, then its documented TEX.
-func load_level(index: int) -> Dictionary:
+func load_level(index: int, previous := "", entrance := "", qualified := "") -> Dictionary:
 	if index < 0 or index >= levels.size(): return {"ok": false, "stage": "index"}
 	var level: Dictionary = levels[index]
 	var bytes := read_entry(level.gob, level.stem + ".lmp", ".world")
@@ -230,7 +232,7 @@ func load_level(index: int) -> Dictionary:
 	# Level-spawn story start (docs/LEVEL_FLOW.md section 17) from this level's
 	# objects.ob. Without it the session keeps the historical origin start.
 	var objects := read_entry(level.gob, level.stem + ".lmp", "objects.ob")
-	scene.controller.set_terrain_start_objects(world_path, objects, str(level.stem))
+	scene.controller.set_terrain_start_objects(world_path, objects, str(level.stem), previous, entrance)
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
 	# The streamed path commits the session once with a summary-only neutral
@@ -252,6 +254,7 @@ func load_level(index: int) -> Dictionary:
 		return {"ok": false, "stage": "textures", "error": scene.status_label.text}
 	if stream_textures: library.record_loaded(session_path)
 	current = index
+	current_qualified = qualified if not qualified.is_empty() else str(level.stem)
 	# Per-level light record from the user's executable JSON (level-lights):
 	# game_loadLevel's lookup by this level's name. Applied when play starts;
 	# without a JSON the labelled synthetic sun stays.

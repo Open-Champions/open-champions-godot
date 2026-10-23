@@ -406,13 +406,62 @@ func run() -> void:
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
 		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match})
 	await capture("09-loaded")
+	# Step 6: the same real-level script host exposes object-record exits and
+	# pending newWorld/newWorldPost. Execute only a documented script action.
 	var transition_before: int = scene.real.current
-	var pending_levels := int(scene.controller.dialog_status().get("counts", {}).get("pending_levels", 0))
-	if pending_levels > 0 and fe.screen() == "playing": advance(0, 180)
-	mark("level_change", "changed" if scene.real.current != transition_before else "refused",
-		{"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false),
-		"pending_script_levels": pending_levels, "exit_target_exposed": false})
-	await capture("10-level-change-attempt")
+	var exit_targets: Array = scene.controller.script_exit_targets()
+	var pending: Dictionary = scene.controller.script_level_request()
+	var exit_attempts := 0
+	var sources_examined := 1
+	if not pending.get("queued", false):
+		for target in exit_targets:
+			if not target.get("script_action", false): continue
+			exit_attempts += 1
+			var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
+			if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
+			pending = scene.controller.script_level_request()
+			if pending.get("queued", false): break
+	# The chosen first-level dialog is allowed to leave its exit locked. Search
+	# other real levels for a documented action that actually queues newWorld;
+	# this diagnostic selection never fabricates a destination or script value.
+	if not pending.get("queued", false):
+		for index in range(scene.real.levels.size()):
+			if index == transition_before: continue
+			if not scene.load_real_level(index, true): continue
+			scene.start_play()
+			sources_examined += 1
+			exit_targets = scene.controller.script_exit_targets()
+			pending = scene.controller.script_level_request()
+			if not pending.get("queued", false):
+				for target in exit_targets:
+					if not target.get("script_action", false): continue
+					exit_attempts += 1
+					var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
+					if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
+					pending = scene.controller.script_level_request()
+					if pending.get("queued", false): break
+			if pending.get("queued", false):
+				transition_before = index
+				break
+	var record_before: Dictionary = scene.controller.get_observation()
+	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var transition_ok: bool = bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var record_after: Dictionary = scene.controller.get_observation()
+	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
+		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
+		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
+	mark("level_change", "changed" if record_carried and scene.real.current != transition_before else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current,
+		"exit_targets": exit_targets.size(), "exit_actions_attempted": exit_attempts,
+		"sources_examined": sources_examined,
+		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
+		"campaign_image_restored": scene.last_campaign_image_restored,
+		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
+		"quest_vars_after": int(quests_after.get("vars", 0))})
+	await capture("10-level-change")
 	# A new scene has no in-memory WORLD/TEX save association. The load must
 	# recover the level from the selected folder and its saved identity. Remove
 	# the first scene before creating another process-lifetime audio mixer.

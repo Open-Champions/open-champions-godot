@@ -8,6 +8,7 @@
 #include "champions/native_save.hpp"
 #include "champions/play_fixture_save.hpp"
 #include "champions/player_state.hpp"
+#include "champions/level_flow.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -49,6 +50,8 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  // Parsed records belong to this level's script image and are replaced with it.
+  std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   void remember_script_fade();
@@ -114,6 +117,7 @@ class ChampionsSessionController : public godot::RefCounted {
   godot::String start_objects_path_;
   std::vector<uint8_t> start_objects_;
   std::string start_level_name_;
+  std::string start_previous_level_, start_entrance_;
   std::vector<std::string> arena_names_a_;
   godot::Dictionary terrain_;
   godot::String terrain_name_ = "Practice ground";
@@ -206,6 +210,9 @@ public:
   godot::Dictionary dialog_voice_state(const godot::Dictionary &voice);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
+  godot::Dictionary script_level_request() const;
+  godot::Array script_exit_targets() const;
+  godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
   // later level script, and to the current one.
@@ -244,7 +251,9 @@ public:
   // mode-A arena table read by load_arena_tables.
   godot::Dictionary set_terrain_start_objects(const godot::String &path,
                                               const godot::PackedByteArray &objects,
-                                              const godot::String &level_name = godot::String());
+                                              const godot::String &level_name = godot::String(),
+                                              const godot::String &previous = godot::String(),
+                                              const godot::String &entrance = godot::String());
   // The arena name tables from the owner's executable, read at run time
   // (arena_modes::read_names). Kept in memory only; the result is counts.
   godot::Dictionary load_arena_tables(const godot::String &executable_path);

@@ -17,6 +17,12 @@ var real_level_choice: OptionButton
 var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
+var real_exit_choice: OptionButton
+var _level_change_queued := false
+var _level_change_loading := false
+var _refused_level_request := ""
+var last_campaign_carried := false
+var last_campaign_image_restored := false
 var hud_art_counts: Dictionary = {}
 var hud_font_loaded := false
 const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
@@ -89,6 +95,10 @@ func _ready() -> void:
 	level_script.text = "Level script (opt in)"
 	level_script.toggled.connect(_level_script_toggled)
 	menu.add_child(level_script)
+	real_exit_choice = OptionButton.new()
+	real_exit_choice.add_item("No level exit loaded", -1)
+	menu.add_child(real_exit_choice)
+	_add_action("real_exit", "Use selected level action", activate_selected_exit)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -96,6 +106,11 @@ func _ready() -> void:
 		elif argument.begins_with("--level-lights="): load_level_lights(argument.trim_prefix("--level-lights="))
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--game-folder="): open_game_folder(argument.trim_prefix("--game-folder="))
+
+func _update_menu() -> void:
+	super._update_menu()
+	if mode_label != null and play_mode and real != null and real.current >= 0:
+		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -136,17 +151,18 @@ func creature_archives() -> PackedStringArray:
 	out.sort()
 	return out
 
-func load_real_level(index: int) -> bool:
+func load_real_level(index: int, carry_campaign := false, previous := "", entrance := "", qualified := "") -> bool:
 	if index < 0: return false
-	var result: Dictionary = real.load_level(index)
+	var result: Dictionary = real.load_level(index, previous, entrance, qualified)
 	if not result.ok:
 		status_label.text = "Level refused at %s. %s" % [result.stage, str(result.get("error", ""))]
 		return false
 	if displayed_asset_name == "Practice figure":
 		asset_label.text = "Practice figure · class model resource mapping undocumented"
 	var scripted := false
-	if level_script != null and level_script.button_pressed: scripted = attach_level_script()
+	if level_script != null and level_script.button_pressed: scripted = attach_level_script(carry_campaign)
 	else: controller.disable_level_script()
+	_refresh_exit_targets()
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
@@ -301,7 +317,7 @@ func _sync_saved_music() -> bool:
 			return false
 	return true
 
-func attach_level_script() -> bool:
+func attach_level_script(carry_campaign := false) -> bool:
 	if real == null or real.current < 0 or controller == null: return false
 	if not _sync_saved_music():
 		status_label.text = "Level script refused: saved music options could not be loaded."
@@ -316,9 +332,73 @@ func attach_level_script() -> bool:
 	var balance := PackedByteArray()
 	if real.files.has("balance.lmp"):
 		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
-	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
+	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
+	last_campaign_carried = bool(result.get("campaign_carried", false))
+	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
+	if result.get("ok", false): _refused_level_request = ""
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
+	_refresh_exit_targets()
 	return result.get("ok", false)
+
+func _refresh_exit_targets() -> void:
+	if real_exit_choice == null or controller == null: return
+	real_exit_choice.clear()
+	real_exit_choice.add_item("Level exits and portals", -1)
+	for target in controller.script_exit_targets():
+		var kind: String = str(target.get("kind", "unknown"))
+		var suffix := " · script action" if target.get("script_action", false) else " · arrival/prompt only"
+		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
+
+func activate_selected_exit() -> Dictionary:
+	var out := {"ok": false, "error": "Select a documented level script action."}
+	if controller == null or real_exit_choice == null: return out
+	var index: int = real_exit_choice.get_selected_id()
+	if index < 0: return out
+	out = controller.script_run_exit(index)
+	if not out.get("ok", false): status_label.text = "Level action refused: " + str(out.get("error", "unknown"))
+	if out.get("queued", false): _queue_level_change()
+	return out
+
+func _queue_level_change() -> void:
+	if _level_change_queued or _level_change_loading: return
+	_level_change_queued = true
+	call_deferred("_apply_level_change")
+
+func _apply_level_change() -> bool:
+	_level_change_queued = false
+	if _level_change_loading or controller == null or real == null: return false
+	var pending: Dictionary = controller.script_level_request()
+	if not pending.get("queued", false): return false
+	var requested: String = str(pending.get("name", ""))
+	if requested == _refused_level_request: return false
+	if pending.get("post_action_pending", false):
+		_refused_level_request = requested
+		status_label.text = "Level change refused: a pending post action cannot be carried."
+		return false
+	# level_flow::split_request uses the first underscore for a subname. The
+	# resource lookup takes the base; no guessed destination is substituted.
+	var base: String = requested.get_slice("_", 0).to_lower()
+	var destination := -1
+	for i in range(real.levels.size()):
+		if str(real.levels[i].stem).to_lower() == base:
+			destination = i
+			break
+	if destination < 0:
+		_refused_level_request = requested
+		status_label.text = "Level change refused: the requested level has no selected game-folder resource."
+		return false
+	if destination == real.current:
+		_refused_level_request = requested
+		status_label.text = "Level change refused: same-level reload state is not ported."
+		return false
+	_level_change_loading = true
+	var was_playing: bool = play_mode and session_started and not stopped
+	var changed := load_real_level(destination, true, real.current_qualified,
+		str(pending.get("entrance", "")), requested)
+	if changed and was_playing: start_play()
+	if not changed: _refused_level_request = requested
+	_level_change_loading = false
+	return changed
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
@@ -350,6 +430,10 @@ func start_play() -> void:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
+	if not _level_change_loading and controller != null:
+		var pending: Dictionary = controller.script_level_request()
+		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:
+			_queue_level_change()
 	# The preview rebuilds its mesh when it samples a new tick.
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)

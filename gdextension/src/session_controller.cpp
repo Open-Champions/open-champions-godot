@@ -110,6 +110,9 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
+  ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
+  ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
+  ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
   bind_text_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
                        &ChampionsSessionController::set_player_character);
@@ -159,8 +162,9 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_terrain_file);
   ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path", "build_display"),
                        &ChampionsSessionController::prepare_terrain_file, DEFVAL(true));
-  ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name"),
-                       &ChampionsSessionController::set_terrain_start_objects, DEFVAL(String()));
+  ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name", "previous", "entrance"),
+                       &ChampionsSessionController::set_terrain_start_objects,
+                       DEFVAL(String()), DEFVAL(String()), DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("load_arena_tables", "executable_path"),
                        &ChampionsSessionController::load_arena_tables);
   ClassDB::bind_method(D_METHOD("commit_terrain_file", "token"),
@@ -818,6 +822,11 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
+    // A pending post action belongs to the destination's script load. This
+    // bounded host does not carry it, so keep the current level intact.
+    if (carry_campaign && scripts_ &&
+        !scripts_->variables().memory.cstr(0x86fa80).empty())
+      throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
     auto next = std::make_unique<rta::script_commands::Host>();
@@ -839,8 +848,12 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     // A single-player game (docs/script-session.md section 2); a carried
     // campaign below brings its own values.
     next->start_single_player();
-    if (carried)
-      next->load_campaign(scripts_->save_campaign());
+    bool campaign_image_restored = false;
+    if (carried) {
+      const auto campaign_image = scripts_->save_campaign();
+      next->load_campaign(campaign_image);
+      campaign_image_restored = next->save_campaign() == campaign_image;
+    }
     if (live_player)
       bind_player_to_scripts(*next, *live_player);
     // A fresh stream from the play session's configured shared seed; the
@@ -928,6 +941,11 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       dialog_box_loaded_ = next->dialog_box_word() != 0;
     }
     next->run_start();
+    std::vector<rta::level_flow::Record> next_objects;
+    if (!objects.is_empty()) {
+      const auto raw = raw_bytes(objects);
+      next_objects = rta::level_flow::parse_objects({raw.data(), raw.size()});
+    }
     release_help_pause();
     dialog_data_ = data;
     dialog_voice_.reset();
@@ -936,6 +954,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
     scripts_ = std::move(next);
+    script_level_objects_ = std::move(next_objects);
     script_fade_ = scripts_->fade_level();
     if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
@@ -945,6 +964,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     Dictionary result;
     result["ok"] = true;
     result["campaign_carried"] = carried;
+    result["campaign_image_restored"] = campaign_image_restored;
     result["executable"] = bool(executable_);
     result["music_volume"] = int64_t(scripts_->audio().music_volume());
     result["fade_level"] = int64_t(script_fade_);
@@ -957,6 +977,7 @@ Dictionary ChampionsSessionController::disable_level_script() {
   remember_script_fade();
   release_help_pause();
   scripts_.reset();
+  script_level_objects_.clear();
   script_seed_.reset();
   script_world_.reset();
   dialog_data_.reset();
@@ -1341,6 +1362,105 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["campaign"] = quest;
   if (scripts_->dialog_attached())
     result["dialog"] = dialog_count_dict(scripts_->dialog_counts());
+  return result;
+}
+namespace {
+bool is_exit_record(const std::string &name) {
+  return name == "Trigger" || name == "PushTrigger" || name == "JumpGate" ||
+         name == "Portal" || name == "PortalHurt";
+}
+bool unsupported_exit_conditions(const rta::level_flow::Record &record,
+                                 const std::vector<rta::level_flow::Record> &objects) {
+  if (record.cls == "PushTrigger")
+    return record.prop("shop") || record.prop("offOnly") || record.prop("once");
+  if (record.cls != "Trigger") return false;
+  for (const char *name : {"onOnly", "offOnly", "timeout", "needScriptHit"})
+    if (record.prop(name)) return true;
+  // Linking TriggerParams requires the original rectangle search and re-arm
+  // state. Refuse conservatively when this level contains one.
+  for (const auto &other : objects)
+    if (other.cls == "TriggerParams") return true;
+  return false;
+}
+}
+Dictionary ChampionsSessionController::script_level_request() const {
+  Dictionary result;
+  result["ok"] = bool(scripts_);
+  if (!scripts_) return result;
+  // newWorld writes the binder's next-world word; dialog end and mission menu
+  // also mirror into level_flow::Pending. Both use the researched 0x41b6d0 word.
+  std::string name = scripts_->level().pending.name;
+  if (name.empty()) name = scripts_->variables().memory.cstr(0x41b6d0);
+  result["queued"] = !name.empty();
+  result["name"] = String::utf8(name.c_str());
+  result["orientation"] = int64_t(scripts_->variables().memory.read(0x41b720));
+  result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
+  result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
+  return result;
+}
+Array ChampionsSessionController::script_exit_targets() const {
+  Array result;
+  if (!scripts_) return result;
+  for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
+    const auto &record = script_level_objects_[i];
+    const auto &kind = record.cls;
+    if (!is_exit_record(kind)) continue;
+    Dictionary item;
+    item["index"] = int64_t(i);
+    item["kind"] = String::utf8(kind.c_str());
+    item["position"] = Vector3(display_float(record.position[0]), display_float(record.position[1]),
+                                 display_float(record.position[2]));
+    // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
+    // Neither is a direct script action. The host exposes them without claiming
+    // an undocumented interaction or gate destination.
+    item["script_action"] = !unsupported_exit_conditions(record, script_level_objects_) &&
+        (kind == "Trigger" ? record.prop("t").has_value()
+         : kind == "PushTrigger" ? record.prop("action").has_value() : false);
+    result.push_back(item);
+  }
+  return result;
+}
+Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
+  Dictionary result;
+  result["ok"] = false;
+  try {
+    if (!scripts_ || index < 0 || std::size_t(index) >= script_level_objects_.size())
+      throw std::runtime_error("No level exit at that index.");
+    const auto &record = script_level_objects_[std::size_t(index)];
+    const auto &kind = record.cls;
+    if (kind != "Trigger" && kind != "PushTrigger")
+      throw std::runtime_error("Portal arrival and JumpGate prompt have no direct script action in this host.");
+    if (unsupported_exit_conditions(record, script_level_objects_))
+      throw std::runtime_error("This exit has conditions or lifetime state the host cannot evaluate.");
+    if (kind == "PushTrigger") {
+      // The object table preserves duplicate properties in their source order.
+      // PushTrigger checks every key before running every action in that order.
+      for (const auto &property : record.props) {
+        if (property.rfind("key=", 0) != 0) continue;
+        const auto stop = scripts_->run_object_entry(std::size_t(index), property.substr(4));
+        if (stop != rta::script_commands::Stop::Complete)
+          throw std::runtime_error("Exit key script was refused.");
+        if (scripts_->last_value() == 0)
+          throw std::runtime_error("Exit key script has not unlocked this action.");
+      }
+    }
+    bool ran = false;
+    const std::string prefix = kind == "Trigger" ? "t=" : "action=";
+    for (const auto &property : record.props) {
+      if (property.rfind(prefix, 0) != 0 || property.size() == prefix.size()) continue;
+      ran = true;
+      const auto stop = scripts_->run_object_entry(std::size_t(index), property.substr(prefix.size()));
+      if (stop == rta::script_commands::Stop::Missing || stop == rta::script_commands::Stop::Fault ||
+          stop == rta::script_commands::Stop::Refused)
+        throw std::runtime_error("Exit script stopped or was refused.");
+      if (kind == "Trigger") break;
+    }
+    if (!ran) throw std::runtime_error("This exit has no documented script action.");
+    result["ok"] = true;
+    result["queued"] = bool(script_level_request().get("queued", false));
+  } catch (const std::exception &e) {
+    result["error"] = String::utf8(e.what());
+  }
   return result;
 }
 Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture,
@@ -1769,7 +1889,17 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
     if (!start_objects_path_.is_empty() && start_objects_path_ == path) {
       const auto records = rta::level_flow::parse_objects(
           {start_objects_.data(), start_objects_.size()});
-      auto story = rta::level_flow::story_start_ground({}, records, query);
+      rta::level_flow::StoryGround story;
+      if (start_previous_level_.empty() && start_entrance_.empty()) {
+        story = rta::level_flow::story_start_ground({}, records, query);
+      } else {
+        rta::level_flow::StartEntry entry;
+        entry.prev = start_previous_level_;
+        entry.entrance = start_entrance_;
+        rta::level_flow::Placement placement;
+        placement.players = 1;
+        story = rta::level_flow::entry_start_ground({}, records, entry, placement, query);
+      }
       // A level the story snap cannot start is loaded in arena mode A only
       // when the owner's executable lists it in the mode-A table (0x5037b8,
       // research-levels 13fafa4 section 18.1: those archives are reached
@@ -1850,7 +1980,8 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
   }
 }
 Dictionary ChampionsSessionController::set_terrain_start_objects(
-    const String &path, const PackedByteArray &objects, const String &level_name) {
+    const String &path, const PackedByteArray &objects, const String &level_name,
+    const String &previous, const String &entrance) {
   Dictionary result;
   if (objects.size() > 16 * 1024 * 1024) {
     result["ok"] = false;
@@ -1862,6 +1993,8 @@ Dictionary ChampionsSessionController::set_terrain_start_objects(
   if (!objects.is_empty())
     start_objects_.assign(objects.ptr(), objects.ptr() + objects.size());
   start_level_name_ = objects.is_empty() ? std::string() : std::string(level_name.utf8().get_data());
+  start_previous_level_ = objects.is_empty() ? std::string() : std::string(previous.utf8().get_data());
+  start_entrance_ = objects.is_empty() ? std::string() : std::string(entrance.utf8().get_data());
   result["ok"] = true;
   return result;
 }
