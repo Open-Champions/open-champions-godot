@@ -60,9 +60,12 @@ func run() -> void:
 		return
 	for _tick in range(20):
 		scene.advance_step()
-	scene.viewport.size = Vector2i(1280, 720)
 	if scene.game_menus != null and scene.components.has("art"):
 		scene.game_menus.sync_font(scene.components.art)
+	if scene.game_menus == null or scene.game_menus.small_font_texture == null:
+		printerr("documented small menu font did not load")
+		quit(1)
+		return
 	var saved := 0
 	for which in ["inventory", "shop", "shop-bag", "skills", "stats", "level-up", "save", "pause"]:
 		scene.game_menus.open_screen(which)
