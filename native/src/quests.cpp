@@ -272,6 +272,10 @@ void toward_story(Menu &state, const MissionRow &info, bool available, bool comp
 }
 } // namespace
 void menu_tick(Menu &state, int button, const MenuWorld &world) {
+  // missionMenu_run also reads these two lockstep pad aliases in the executed
+  // mission-menu input probes (mission-menu-art.md, 2026-10-23).
+  if (button & 0x200000) button |= BTN_DOWN;
+  if (button & 0x400000) button |= BTN_LEFT;
   button &= 0xFFFF;
   const int st = state.state;
   if (st == 0) {
@@ -330,8 +334,10 @@ void menu_tick(Menu &state, int button, const MenuWorld &world) {
     }
     if (button & BTN_DOWN) {
       const int next = state.row + 1;
-      if (next <= 11 && world.mission_available(next + 1))
+      if (next <= 11 && world.mission_available(next + 1)) {
         state.row = next;
+        state.col = 0;
+      }
       return;
     }
     const int toward = (state.row & 1) ? BTN_RIGHT : BTN_LEFT;

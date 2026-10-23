@@ -220,6 +220,7 @@ public:
   godot::Dictionary set_level_text(const godot::Array &tables);
   // The HUD text state the five commands wrote, for drawing.
   godot::Dictionary text_hud() const;
+  godot::Dictionary text_lookup(const godot::String &key) const;
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);

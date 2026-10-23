@@ -6,6 +6,7 @@ extends "res://scenes/play_flow.gd"
 const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const TextHud = preload("res://ui/text_hud.gd")
+const MissionMenuView = preload("res://ui/mission_menu_view.gd")
 var real: Node
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
 var text_hud: Control
@@ -18,9 +19,7 @@ var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
 var real_exit_choice: OptionButton
-var mission_menu_panel: PanelContainer
-var mission_menu_status: Label
-var mission_first_story: Button
+var mission_menu_panel
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -32,6 +31,9 @@ const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
 var npc_dialog: Control
 # Talk to an NPC: E (use), Up / Down (choice), Enter or Space (confirm).
 const TALK_KEYS := {KEY_E: "use", KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40}
+const MISSION_KEYS := {KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_RIGHT: 0x8000,
+	KEY_LEFT: 0x2000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40,
+	KEY_ESCAPE: 0x20, KEY_BACKSPACE: 0x20}
 
 func _ready() -> void:
 	super._ready()
@@ -101,25 +103,9 @@ func _ready() -> void:
 	real_exit_choice.add_item("No level exit loaded", -1)
 	menu.add_child(real_exit_choice)
 	_add_action("real_exit", "Use selected level action", activate_selected_exit)
-	mission_menu_panel = PanelContainer.new()
-	mission_menu_panel.set_anchors_preset(Control.PRESET_CENTER)
-	mission_menu_panel.custom_minimum_size = Vector2(380, 160)
-	mission_menu_panel.offset_left = -190
-	mission_menu_panel.offset_top = -80
-	mission_menu_panel.offset_right = 190
-	mission_menu_panel.offset_bottom = 80
+	mission_menu_panel = MissionMenuView.new()
+	mission_menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	mission_menu_panel.visible = false
-	var mission_box := VBoxContainer.new()
-	mission_menu_panel.add_child(mission_box)
-	var mission_title := Label.new()
-	mission_title.text = "Mission menu · host layout"
-	mission_box.add_child(mission_title)
-	mission_menu_status = Label.new()
-	mission_box.add_child(mission_menu_status)
-	mission_first_story = Button.new()
-	mission_first_story.text = "Mission 1 · Story"
-	mission_first_story.pressed.connect(mission_menu_select_first_story)
-	mission_box.add_child(mission_first_story)
 	if viewport != null: viewport.add_child(mission_menu_panel)
 	else: add_child(mission_menu_panel)
 	for argument in OS.get_cmdline_user_args():
@@ -158,6 +144,8 @@ func open_game_folder(path: String) -> bool:
 	# The string tables and help chime from the folder, for the level script.
 	text_sources = RealText.install(real, controller)
 	if text_hud != null: text_hud.configure(real, controller, inspector)
+	if mission_menu_panel != null:
+		mission_menu_panel.configure(real, controller, inspector, real.hud_font_bytes())
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	if npc_dialog != null:
 		npc_dialog.set_font(real.dialog_font())
@@ -275,8 +263,17 @@ func _refresh_mission_menu() -> void:
 	var state: Dictionary = controller.script_mission_menu_state()
 	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false))
 	if mission_menu_panel.visible:
-		mission_first_story.disabled = not bool(state.get("first_story_available", false))
-		mission_menu_status.text = "Mission 1 is available." if not mission_first_story.disabled else "Mission 1 is locked."
+		mission_menu_panel.present(state)
+		if not mission_menu_panel.assets_valid:
+			status_label.text = "Mission art refused: " + mission_menu_panel.last_error
+
+func _process(_delta: float) -> void:
+	super._process(_delta)
+	if mission_menu_panel == null or not mission_menu_panel.visible or controller == null: return
+	var state: Dictionary = controller.script_mission_menu_state()
+	if int(state.get("state", -1)) in [0, 1, 4]:
+		controller.script_mission_menu_tick(0, 0)
+		_refresh_mission_menu()
 
 func _queue_level_change() -> void:
 	if _level_change_queued or _level_change_loading: return
@@ -321,9 +318,23 @@ func _apply_level_change() -> bool:
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
-	# The offline help box owns confirmation while it holds the session. A
-	# simultaneous dialog or game-menu handler must not consume that key.
+	# The offline help box owns confirmation while it holds the session.
 	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:
+		return true
+	if mission_menu_panel != null and mission_menu_panel.visible and controller != null and event is InputEventKey:
+		if event.pressed and not event.echo:
+			var mission_key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+			if MISSION_KEYS.has(mission_key):
+				var menu_state: Dictionary = controller.script_mission_menu_state()
+				for i in range(17):
+					if int(menu_state.get("state", -1)) == 2: break
+					menu_state = controller.script_mission_menu_tick(0, 0)
+				menu_state = controller.script_mission_menu_tick(int(MISSION_KEYS[mission_key]), 0)
+				if int(menu_state.get("state", -1)) == 5:
+					for i in range(4): menu_state = controller.script_mission_menu_tick(0, 128)
+					if menu_state.get("launched", false): _queue_level_change()
+				_refresh_mission_menu()
+			return true
 		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode

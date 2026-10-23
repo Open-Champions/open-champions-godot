@@ -10,6 +10,9 @@ const RIGHT := 0x2000
 const LEFT := 0x8000
 const START := 0x800
 const RealWorld = preload("res://real_data/real_world.gd")
+const MISSION_IMAGES := ["misswar.tex", "missinnovation.tex", "misspit.tex", "misswater.tex",
+	"misstorment.tex", "missdisease.tex", "missvalor.tex", "missfire.tex",
+	"missstorms.tex", "missfeydark.tex", "missnightmare.tex", "missfear.tex"]
 
 var args := {}
 var scene: Control
@@ -276,7 +279,59 @@ func run() -> void:
 		{"hub_trigger_found": hub_trigger_found, "dialog_choice_completed": dialog_choice_completed,
 		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false), "menu_open": menu_open,
 		"host_panel_visible": scene.mission_menu_panel.visible})
+	for i in range(18): await process_frame
+	var mission_art = scene.mission_menu_panel
+	var table_state: Dictionary = scene.controller.script_mission_menu_state()
+	var table_rows: Array = table_state.get("rows", [])
+	var matched_rows := 0
+	if table_rows.size() == 12:
+		for i in range(12):
+			var row: Dictionary = table_rows[i]
+			if str(row.get("image", "")).to_lower() == MISSION_IMAGES[i] and int(row.get("x", -1)) == (140 if i % 2 == 0 else 70) and int(row.get("y", -1)) == 40 + 200 * i:
+				matched_rows += 1
+	mark("mission_menu_table", "checked" if matched_rows == 12 else "refused", {"matched_rows": matched_rows})
+	mark("mission_menu_assets", "checked" if mission_art.assets_valid and mission_art.art.size() == 32 else "refused",
+		{"textures": mission_art.art.size(), "small_font": mission_art.font_texture != null})
 	await capture("10-mission-menu")
+	if DisplayServer.get_name() != "headless":
+		var menu_view = scene.mission_menu_panel
+		var actual: Dictionary = scene.controller.script_mission_menu_state()
+		var base_image := Image.load_from_file(out_dir.path_join("10-mission-menu.png"))
+		var altered: Dictionary = actual.duplicate(true)
+		var altered_rows: Array = altered.get("rows", [])
+		if altered_rows.size() == 12:
+			var second_row: Dictionary = altered_rows[1]
+			second_row.available = true
+			menu_view.present(altered)
+			await capture("10-mission-menu-second-available")
+		menu_view.present(actual)
+		var second := Image.load_from_file(out_dir.path_join("10-mission-menu-second-available.png"))
+		var differences := 0
+		if base_image != null and second != null and base_image.get_size() == second.get_size():
+			# The documented second node is (70,240), 411x156 on a 640x448 canvas.
+			var scale := minf(float(base_image.get_width()) / 640.0, float(base_image.get_height()) / 448.0)
+			var left := int((base_image.get_width() - 640.0 * scale) * 0.5)
+			var top := int((base_image.get_height() - 448.0 * scale) * 0.5)
+			for y in range(250, 385, 8):
+				for x in range(80, 465, 8):
+					var point := Vector2i(left + int(x * scale), top + int(y * scale))
+					if base_image.get_pixelv(point) != second.get_pixelv(point): differences += 1
+		mark("mission_menu_render", "checked" if menu_view.assets_valid and menu_view.art.size() == 32 and differences > 0 else "refused",
+			{"textures": menu_view.art.size(), "locked_available_changed_samples": differences})
+	if args.has("menu-cancel-only"):
+		var cancel_handled := game_key(KEY_ESCAPE)
+		for i in range(9): await process_frame
+		var cancelled: Dictionary = scene.controller.script_mission_menu_state()
+		var cancel_ok: bool = cancel_handled and int(cancelled.get("state", -1)) == 4 and int(cancelled.get("counter", 1)) <= 0 and not cancelled.get("open", true) and not scene.mission_menu_panel.visible
+		mark("mission_menu_cancel", "checked" if cancel_ok else "refused",
+			{"handled": cancel_handled, "closed": not cancelled.get("open", true), "counter": cancelled.get("counter", 1)})
+		save_json()
+		quit(0 if cancel_ok else 1)
+		return
+	var locked_move_handled := game_key(KEY_DOWN)
+	var locked_move_state: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_menu_locked_navigation", "checked" if locked_move_handled and int(locked_move_state.get("row", -1)) == 0 and int(locked_move_state.get("column", -1)) == 0 else "refused",
+		{"handled": locked_move_handled, "row": locked_move_state.get("row", -1), "column": locked_move_state.get("column", -1)})
 	var selected: bool = trigger_opened_menu and scene.mission_menu_select_first_story()
 	var pending: Dictionary = scene.controller.script_level_request()
 	mark("mission_1_story_request", "blood1" if selected and str(pending.get("name", "")) == "blood1" else "refused",

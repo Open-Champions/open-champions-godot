@@ -1370,17 +1370,53 @@ Dictionary ChampionsSessionController::script_level_request() const {
 }
 Dictionary ChampionsSessionController::script_mission_menu_state() const {
   Dictionary out;
-  out["ok"] = bool(scripts_ && scripts_->campaign().rows().size() == 13);
+  out["ok"] = bool(scripts_ && executable_ && scripts_->campaign().rows().size() == 13);
   if (!bool(out["ok"])) return out;
-  const auto &campaign = scripts_->campaign();
-  const auto &menu = campaign.menu();
-  out["open"] = campaign.menu_open() && menu.pending.empty();
-  out["state"] = int64_t(menu.state);
-  out["row"] = int64_t(menu.row);
-  out["column"] = int64_t(menu.col);
-  out["chooser"] = int64_t(campaign.chooser());
-  out["first_story_available"] = bool(campaign.mission_available(1));
-  out["pending"] = String::utf8(menu.pending.c_str());
+  try {
+    const auto &campaign = scripts_->campaign();
+    const auto &menu = campaign.menu();
+    out["open"] = campaign.menu_open() && menu.pending.empty() &&
+                  !(menu.state == 4 && menu.counter <= 0);
+    out["state"] = int64_t(menu.state);
+    out["row"] = int64_t(menu.row);
+    out["column"] = int64_t(menu.col);
+    out["counter"] = int64_t(menu.counter);
+    out["mark"] = int64_t(menu.mark);
+    out["evil"] = bool(campaign.evil());
+    out["network"] = campaign.network();
+    out["chooser"] = int64_t(campaign.chooser());
+    out["first_story_available"] = bool(campaign.mission_available(1));
+    out["pending"] = String::utf8(menu.pending.c_str());
+    Array rows;
+    constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
+    for (std::uint32_t i = 0; i < 12; ++i) {
+      const auto base = table + i * stride;
+      const auto name = [&](std::uint32_t offset) {
+        const auto ptr = executable_->word(base + offset);
+        return ptr ? executable_->string(ptr) : std::string();
+      };
+      const auto &info = campaign.rows()[i];
+      const int mission = int(i) + 1;
+      const bool available = campaign.mission_available(mission) != 0;
+      const bool complete = campaign.mission_complete(mission) != 0;
+      const auto medal_byte = campaign.record(0).medals[mission];
+      const int medal = medal_byte < 128 ? int(medal_byte) : int(medal_byte) - 256;
+      Dictionary row;
+      row["key"] = String::utf8(name(0x00).c_str());
+      row["evil_key"] = String::utf8(name(0x04).c_str());
+      row["image"] = String::utf8(name(0x18).c_str());
+      row["evil_image"] = String::utf8(name(0x1c).c_str());
+      row["x"] = int64_t(std::int32_t(executable_->word(base + 0x2c)));
+      row["y"] = int64_t(std::int32_t(executable_->word(base + 0x30)));
+      row["available"] = available;
+      row["complete"] = complete;
+      row["medal"] = int64_t(medal);
+      row["medal_column"] = bool(rta::quests::helper_value(6, info, available, complete, medal));
+      row["bonus_column"] = bool(rta::quests::helper_value(10, info, available, complete, medal));
+      rows.push_back(row);
+    }
+    out["rows"] = rows;
+  } catch (const std::exception &e) { return failure(e); }
   return out;
 }
 Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits, int64_t fade) {
@@ -1390,7 +1426,7 @@ Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits
     constexpr std::uint32_t allowed = rta::quests::BTN_CROSS | rta::quests::BTN_CIRCLE |
                                       rta::quests::BTN_SELECT | rta::quests::BTN_UP |
                                       rta::quests::BTN_DOWN | rta::quests::BTN_LEFT |
-                                      rta::quests::BTN_RIGHT;
+                                      rta::quests::BTN_RIGHT | 0x200000u | 0x400000u;
     if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 || fade < 0 || fade > 128)
       throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
     rta::quests::MenuInputs inputs;
