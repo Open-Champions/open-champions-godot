@@ -86,6 +86,16 @@ func capture(label: String) -> void:
 	else:
 		refusal(label, "screenshot write failed")
 
+func capture_player_view(label: String) -> void:
+	if DisplayServer.get_name() == "headless": return
+	for i in range(2): await process_frame
+	RenderingServer.force_draw()
+	var image: Image = scene.viewport.get_texture().get_image()
+	if image == null or image.is_empty() or image.save_png(out_dir.path_join(label + ".png")) != OK:
+		refusal(label, "player viewport capture failed")
+	else:
+		screenshots += 1
+
 # Compare two rendered viewport captures with the dialog view shown and hidden.
 # The box bounds come from docs/DIALOG.md; a nonzero count proves that its
 # pixels, rather than only native draw calls or a decoded texture, reached play.
@@ -139,6 +149,7 @@ func player_pose_pixels() -> Dictionary:
 	var idle_mesh: Mesh = scene.actor_visual.mesh
 	scene.asset_label.text = "Explicit class-0 idle clip sample · diagnostic pose"
 	await capture("03-player-idle")
+	await capture_player_view("03-player-idle-view")
 	var idle_image: Image
 	if DisplayServer.get_name() != "headless":
 		RenderingServer.force_draw()
@@ -150,6 +161,7 @@ func player_pose_pixels() -> Dictionary:
 		return walk
 	scene.asset_label.text = "Explicit class-0 walk clip sample · diagnostic pose"
 	await capture("03-player-walk")
+	await capture_player_view("03-player-walk-view")
 	var walk_mesh: Mesh = scene.actor_visual.mesh
 	var walk_image: Image
 	if DisplayServer.get_name() != "headless":
@@ -186,6 +198,51 @@ func advance(command := 0, count := 1) -> void:
 		if not r.get("ok", false): refusal("tick", r.get("error", "native step refused"))
 		collect("tick")
 		scene.held_commands = 0
+
+func inside_trigger(point: Vector3, target: Dictionary) -> bool:
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	return point.x >= lo.x and point.x <= hi.x and point.y >= lo.y and point.y <= hi.y
+
+func trigger_distance(point: Vector3, target: Dictionary) -> float:
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	return maxf(maxf(lo.x - point.x, point.x - hi.x), 0.0) + \
+		maxf(maxf(lo.y - point.y, point.y - hi.y), 0.0)
+
+func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
+	var began: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+	if inside_trigger(began, target): return {"entered": false, "ticks": 0}
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	var aim := Vector3((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, 0)
+	var moved := false
+	var entered := false
+	var ticks := 0
+	var still := 0
+	var without_progress := 0
+	var best_distance := trigger_distance(began, target)
+	while ticks < max_ticks and not scene.controller.script_level_request().get("queued", false):
+		var before: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		var command := 0
+		if before.x < lo.x or before.x > hi.x:
+			command = 1 if before.x < aim.x else 2
+		elif before.y < lo.y or before.y > hi.y:
+			command = 4 if before.y < aim.y else 8
+		advance(command)
+		ticks += 1
+		var after: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if after.distance_to(before) > 0.001: moved = true; still = 0
+		else: still += 1
+		if moved and not inside_trigger(before, target) and inside_trigger(after, target): entered = true
+		var distance := trigger_distance(after, target)
+		if distance < best_distance - 0.25:
+			best_distance = distance
+			without_progress = 0
+		else: without_progress += 1
+		if still >= 20 or without_progress >= 600 or scene.stopped: break
+		if command == 0 and ticks % 15 == 0 and not scene.controller.script_level_request().get("queued", false): break
+	return {"entered": entered, "ticks": ticks, "navigation_stalled": without_progress >= 600}
 
 func help_close() -> void:
 	for i in range(200):
@@ -243,7 +300,7 @@ func walk_exit_probe() -> void:
 		pending = scene.controller.script_level_request()
 		if pending.get("queued", false): continue
 		var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
-		if walk_targets.size() < 4: continue
+		if walk_targets.is_empty(): continue
 		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
 		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
 		for target in walk_targets:
@@ -279,7 +336,7 @@ func walk_exit_probe() -> void:
 		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
 		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
 		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
-	mark("level_change", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
+	mark("walk_in_exit_trigger", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
 		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
 		"queued_by_walk": queued_by_walk,
@@ -297,7 +354,7 @@ func walk_exit_probe() -> void:
 		"campaign_image_restored": scene.last_campaign_image_restored,
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
 		"quest_vars_after": int(quests_after.get("vars", 0))})
-	await capture("10-level-change")
+	await capture("11-walk-exit-level-change")
 
 func run() -> void:
 	if not args.has("game-folder") or not args.has("out"):
