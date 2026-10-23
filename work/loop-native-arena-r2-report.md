@@ -14,8 +14,8 @@ observations, but does not make the current native client a live match.
 
 - `rtaModelHull` reads all eight signed xyz points for a selected mesh from
   `.vif` header byte `+0x25` and its 24-byte entries. `World::bind_prop_model`
-  validates every active prop mesh before copying caller-owned bytes into the
-  model resource address. Missing, truncated or out-of-range hulls refuse.
+  validates every active prop mesh before copying caller-owned bytes into a
+  World-owned fixture extent. Missing, truncated or out-of-range hulls refuse.
   The caller still has to load/bind the disc model; no asset is shipped.
 - `World::begin_arena_intro` and `arena_intro_visit` preserve the mode-B
   180-positive-visit lock and visit-181 transition to `0xffff` with all three
@@ -83,3 +83,38 @@ full live match remain **unverified and refused**.
 
 No private bytes, extracted assets or proprietary names are tracked. No
 process was killed, and there was no push, PR or issue action.
+
+## Audit fixes
+
+- **NA-R2-1:** Constructor-verified PhProp and GutChunk instances now retain
+  their expected model pointer in the World. Binding refuses a different actor,
+  table or pointer, validates all active hulls, reserves an exact World-owned
+  fixture extent, checks its capacity, copies there, and only then publishes
+  that address at `+0x4c`. The unowned constructor resource address is never
+  a write destination. The fixture allocator preflights its existing 1 MiB
+  address boundary before advancing. Oversized resources remain refused.
+- **NA-R2-2:** The prop-run test now requires a normal return and checks the
+  terrain height written after the hull loop in an authored stationary case.
+  It separately checks missing/truncated hulls and rejects an unrelated actor
+  and a tampered model pointer without changing the foreign destination. The
+  prior broad `std::exception` catch hid a missing horizontal sweep handler;
+  this stationary fixture does not request that unbound service.
+- Focused arm64 Release CTest:
+  `ctest --test-dir build/native -j 3 --output-on-failure -R '^(model-parser|world-queries-host|world-queries-exact|combat-runtime-3-host|combat-runtime-3-exact)$'`:
+  **5/5 PASS** after `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`
+  and `cmake --build build/native -j 4`. Full arm64 Release CTest:
+  `ctest --test-dir build/native -j 3 --output-on-failure`:
+  **214/214 PASS** in 828.61 seconds, including `player-exact` and the
+  affected prop tests.
+- Reconfigured and rebuilt `gdextension`, `gdextension/creature_anim`, and
+  `gdextension/level_texture` with Release `template_debug` and the pinned
+  `GODOT_CPP_DIR` above: all three builds PASS. `python3
+  work/native-arena/run-godot.py`: **45/45 commands exited 0**. The
+  `combined-full-combat` `FULL_TRACE` remains 36,402 bytes, SHA-256
+  `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+  This fixture still does not enter mode B.
+- `python3 work/native-arena/run-sweep.py` (read-only private input): four
+  slices exited 0, **111 tried / 111 loaded / 111 played**, 119 passed checks,
+  zero failures and zero script faults. This is a level regression sweep,
+  not a native arena encounter. No private bytes or decoded content were
+  added to tracked files.

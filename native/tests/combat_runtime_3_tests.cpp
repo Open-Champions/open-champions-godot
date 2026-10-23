@@ -203,20 +203,44 @@ void host() {
       vif[0x40 + i] = std::uint8_t(i - 12);
     h.w->bind_prop_model(chunk, {vif.data(), vif.size()});
     const auto model = h.w->read(chunk + 0x4c);
-    check(model != 0 && h.w->read(C::Address(model) + 0x25, 1) == 4 &&
+    check(model != 0xA10000 && h.w->read(C::Address(model) + 0x25, 1) == 4 &&
               h.w->read(C::Address(model) + 0x40, 1) == std::uint8_t(-12),
-          "the PhProp model pointer resolves an owner-supplied signed VIF hull");
-    std::string run_refusal;
-    try { h.w->run_actor(chunk); }
-    catch (const std::exception &e) { run_refusal = e.what(); }
-    check(run_refusal.find("model_getHullPoints returned null") == std::string::npos,
-          "the prop run passes its previously missing hull lookup");
+          "the PhProp model pointer resolves an owned signed VIF hull");
+    // This authored stationary case does not need the unbound horizontal
+    // terrain sweep service. The hull loop and remaining tick still execute.
+    h.w->write(chunk + 0x1bc, 4, 0);
+    h.w->write(chunk + 0x1c0, 4, 0);
+    h.ground = ONE;
+    h.w->run_actor(chunk);
+    check(h.w->read(chunk + 0x228) == ONE,
+          "the completed prop tick records the supplied terrain height");
     vif[0x25] = 0;
     bool refused = false;
     try { h.w->bind_prop_model(chunk, {vif.data(), vif.size()}); }
     catch (const champions::FormatError &) { refused = true; }
     check(refused && h.w->read(C::Address(model) + 0x25, 1) == 4,
           "a missing disc hull refuses without replacing the bound model");
+    check(h.w->read(chunk + 0x4c) == model,
+          "invalid hull leaves the owned destination selected");
+    vif[0x25] = 4;
+    bool truncated = false;
+    try { h.w->bind_prop_model(chunk, {vif.data(), 0x40 + 23}); }
+    catch (const champions::FormatError &) { truncated = true; }
+    check(truncated && h.w->read(chunk + 0x4c) == model,
+          "a truncated hull refuses without replacing the owned destination");
+    auto other = h.creature({0, 0, 0});
+    bool wrong_actor = false;
+    try { h.w->bind_prop_model(other, {vif.data(), vif.size()}); }
+    catch (const C::Unsupported &) { wrong_actor = true; }
+    check(wrong_actor, "an unrelated actor cannot bind a prop model");
+    constexpr C::Address foreign = 0xA10000;
+    h.w->write(foreign, 4, 0x12345678);
+    h.w->write(chunk + 0x4c, 4, foreign);
+    bool wrong_pointer = false;
+    try { h.w->bind_prop_model(chunk, {vif.data(), vif.size()}); }
+    catch (const C::Unsupported &) { wrong_pointer = true; }
+    check(wrong_pointer && h.w->read(foreign) == 0x12345678,
+          "a modified model destination is refused before writing");
   }
   {
     Host h;
