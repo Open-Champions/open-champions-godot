@@ -302,10 +302,16 @@ struct Fight::Impl {
       in.hit_event = events & 1;
       in.next_event = events & 2;
       in.animation_over = !(read(a + 0x11a, 2) & 8);
-      in.has_target = W().creature_sees_target(a);
+      // Slot 25's `force` argument is not documented for WarBoar, so the
+      // sight call is refused (state 0 then refuses) rather than guessed.
+      in.sight_refused = true;
       in.away_home = W().creature_away_from_home(a);
-      // The documented run-list registration point: the frame the class
-      // registered on the 60-frame list.
+      // LABEL: the state-0 entry age is Unknown. The research gives
+      // +0xf4 = entry + 180 (monsters-2.md WarBoar) but not what sets +0xf4 or
+      // the entry age in the constructor. The frame the class registered on
+      // the 60-frame list (0, "as asked" in the round-1 report) stands in; it
+      // is used only to decide when state 0 refuses (campaign_actors
+      // tick_boar), never to produce a state-1 transition.
       in.state_entry_frame = registered_frame[a];
       return in;
     };
@@ -348,6 +354,8 @@ struct Fight::Impl {
                                     : campaign_actors::Kind::WarBoar;
     // Rank: the record carries no boss rank in this host (Creature_ctor's
     // bossRank is 0 for an unnamed creature); death loot refuses otherwise.
+    // LABEL: entry age of state 0 is Unknown (see tick_input); 0 is the
+    // registration frame stand-in, not a documented value.
     registered_frame[request.address] = 0;
     actors->adopt(kind, *request.object, request.angle, std::int64_t(0));
     counts.actors_built += 1;
@@ -407,6 +415,15 @@ struct Fight::Impl {
     }
     player = world->spawn_player(0, spawn);
     player_handle = world->retain(player);
+    refuse("net_getCamFlag: host-sourced (1 only while a script dialog is open; inventory, shop and cutscene camera modes not covered)");
+    refuse("net_getCamYaw: host-sourced (the Godot sandbox camera's yaw, not Camera_getYaw; movement is relative to the host camera)");
+    // VF-1: player_giveStartingItems 0x1acc78 is not ported and the research
+    // does not establish which item the class 6 / model 11 character has
+    // equipped on this route (campaign-combat-handoff.md: "the normal campaign
+    // route's equipped player remains Unknown"). The record keeps weapon class
+    // 5 (unarmed, docs/player.md) with no equipment as a host stand-in; damage
+    // or kill results in this mode are not campaign evidence.
+    refuse("starting_equipment: refused_unknown (player_giveStartingItems not ported; weapon class 5 unarmed stand-in, not campaign evidence)");
     const Address def = read(player + 0x24);
     const auto table = PLAYER_DEFINITIONS.at(start.model_index);
     // The block the player's slot words are read from: lump word, then for
@@ -576,10 +593,11 @@ void Fight::tick(std::uint32_t command) {
       p.attack_was_held = held;
       p.adapter->pad_input(0, in);
       // net_getCamFlag offline is "the camera is not in follow mode"
-      // (movement-camera.md 7.2, mode != 1). The camera is in follow mode
-      // (mode 1) except while this machine's inventory, shop, dialog camera or
-      // a cutscene is up (research-ui docs/monsters-2.md 7.1 M6), so the flag
-      // is 1 only while a dialog is open here.
+      // (docs/spec/movement-camera.md 7.1, `mode != 1`). Mode 1 holds except
+      // while this machine's inventory, shop, dialog camera or a cutscene is up
+      // (research-ui docs/monsters-2.md M6). HOST-SOURCED: only the dialog case
+      // is covered, so the flag is 1 only while a dialog is open here; the
+      // inventory, shop and cutscene modes do not set it (labelled at start).
       p.bundle.set_camera_flag(0, p.dialog_open && p.dialog_open() ? 1 : 0);
     }
     p.world->clear_history();
@@ -602,6 +620,7 @@ void Fight::tick(std::uint32_t command) {
     p.refuse(std::string("World tick stopped: ") + e.what());
   }
 }
+// DIAGNOSTIC ONLY: unchecked write (no terrain or bounds test); see the header.
 std::string Fight::place_player(const Vec3 &position, Raw facing) {
   auto &p = *p_;
   if (!p.player_ok) return "no player";

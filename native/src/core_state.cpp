@@ -235,10 +235,11 @@ void HandlePool::clear_nodes(Cell &head) {
       node = following;
       continue;
     }
-    if (following && following == node->partner)
-      throw HandleError("both partners in cleared list");
-    unlink(node);
+    // Runs from a World destructor, so it must not throw: when the partner is
+    // the very next node both leave together and the walk resumes after it.
     auto *partner = node->partner;
+    if (following && following == partner) following = partner->next;
+    unlink(node);
     if (partner) {
       unlink(partner);
       release(partner);

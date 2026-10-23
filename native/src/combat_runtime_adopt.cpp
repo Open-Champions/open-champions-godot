@@ -54,10 +54,6 @@ bool World::creature_away_from_home(Address a) {
   s_->actor(a);
   return s_->model.is_away_from_home(a);
 }
-bool World::creature_sees_target(Address a) {
-  s_->actor(a);
-  return number(s_->model.vcall(a, 25, {iv(1)})) != 0;
-}
 bool World::creature_filter_state(Address a, std::uint32_t requested) {
   s_->actor(a);
   const auto result = s_->model.filter_state(a, requested);

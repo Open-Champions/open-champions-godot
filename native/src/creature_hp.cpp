@@ -270,7 +270,13 @@ void Memory::checkpoint(detail::Checkpoint &a) {
   a.history(log_);
   if (a.reading)
     log_prefix_ = a.deferred() ? a.records(log_) : 0;
-  if (a.reading) host_extra_ = 0;
+  // The snapshot format (version 1) does not carry which entries the script
+  // store created, so after a restore every restored byte is treated as
+  // host-owned: the combat budget then counts only entries added afterwards,
+  // and a script store never makes a later combat addition throw (WA-F4). The
+  // restore is already capped at memory_bytes entries (below), so total
+  // growth stays bounded.
+  if (a.reading) host_extra_ = bytes_.size();
   detail::Checkpoint::require(bytes_.size() <= limits_.memory_bytes &&
                                   log_prefix_ + log_.size() <=
                                       limits_.history_entries,

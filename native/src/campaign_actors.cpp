@@ -468,6 +468,9 @@ void Runtime::set_state(Actor &a, std::uint32_t state) {
 void Runtime::tick_boar(Actor &a, const TickInput &in) {
   switch (a.state) {
   case 0:
+    // State 0's first test is "sees target -> 3" (monsters-2.md WarBoar).
+    if (in.sight_refused)
+      throw Unsupported("WarBoar_run/state0: slot 25 force argument for WarBoar not documented");
     if (in.has_target || in.away_home)
       throw Unsupported("WarBoar_run/state0: sight or home transition Unknown");
     if (!in.state_entry_frame)

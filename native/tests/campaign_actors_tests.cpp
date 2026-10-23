@@ -286,6 +286,11 @@ int main() {
   }
   input.state_entry_frame = 0;
   world.frame = 1;
+  // Audit VF-2: a host that cannot cite WarBoar's slot-25 `force` argument
+  // refuses state 0 instead of passing a guessed value.
+  input.sight_refused = true;
+  refuses([&] { actors.tick(large.object->addr); }, "state0 refuses an uncited sight call");
+  input.sight_refused = false;
   input.has_target = true;
   refuses([&] { actors.tick(large.object->addr); }, "state0 target Unknown refusal");
   large.state = 3; // reference state's explicit test input

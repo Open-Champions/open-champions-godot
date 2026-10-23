@@ -115,6 +115,7 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("dialog_voice_state", "voice"), &ChampionsSessionController::dialog_voice_state);
   ClassDB::bind_method(D_METHOD("fight_restore_player", "position", "facing", "hp_raw"),
                        &ChampionsSessionController::fight_restore_player);
+  // DIAGNOSTIC ONLY (unchecked placement; scripted test runs and the .fight load).
   ClassDB::bind_method(D_METHOD("fight_place_player", "position", "facing"),
                        &ChampionsSessionController::fight_place_player);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
@@ -1083,6 +1084,30 @@ Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &posit
   // A load replaced the scene before play started: the fight begins from the
   // loaded scene, then the saved player is put back.
   if (fight_ && !fight_->started() && control_) start_fight(control_->observation());
+  // Refuse a malformed companion before writing anything (docs/NATIVE_SAVE.md,
+  // ".fight companion"): finite position, 16-bit facing, 0 < hp <= max hp.
+  // The position is not checked against the level's bounds (no documented
+  // bounds contract is bound here).
+  auto refuse = [](const char *why) {
+    Dictionary bad;
+    bad["ok"] = false;
+    bad["error"] = why;
+    return bad;
+  };
+  if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+    return refuse("saved position is not finite");
+  if (facing < 0 || facing > 0xffff) return refuse("saved facing is outside 16 bits");
+  if (!fight_ || !fight_->player_ready()) return refuse("no shared-World player");
+  if (hp_raw < 0 || hp_raw > 0xffffffffll) return refuse("saved hit points are outside 32 bits");
+  {
+    const auto raw = static_cast<rta::Raw>(hp_raw);
+    float hp = 0, max_hp = 0;
+    const auto max_raw = fight_->player().max_hp;
+    std::memcpy(&hp, &raw, sizeof(hp));
+    std::memcpy(&max_hp, &max_raw, sizeof(max_hp));
+    if (!std::isfinite(hp) || !(hp > 0.0f) || !(hp <= max_hp))
+      return refuse("saved hit points are outside (0, max]");
+  }
   Dictionary out = fight_place_player(position, facing);
   if (!bool(out.get("ok", false))) return out;
   const auto error = fight_->restore_health(rta::Raw(hp_raw & 0xffffffffll));
@@ -1093,6 +1118,9 @@ Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &posit
   cache_state(o, true);
   return out;
 }
+// DIAGNOSTIC ONLY, not an original routine: writes an unchecked position and
+// facing (no terrain or bounds test). Used by scripted test runs and, through
+// fight_restore_player, the .fight save load. Ordinary play never calls it.
 Dictionary ChampionsSessionController::fight_place_player(const Vector3 &position, int64_t facing) {
   Dictionary out;
   out["ok"] = false;
@@ -2730,6 +2758,10 @@ Dictionary ChampionsSessionController::fight_observation() const {
   if (player.present) {
     out["fight_player_action_state"] = int64_t(player.action_state);
     out["fight_player_weapon_class"] = int64_t(player.weapon_class);
+    // Host stand-in: the research does not document the route's starting
+    // equipment, so the class-5 (unarmed) record is a labelled fallback.
+    out["fight_starting_equipment"] = "refused_unknown";
+    out["fight_player_weapon_class_source"] = "unarmed_fallback_standin";
     out["gold"] = int64_t(player.gold);
   }
   return out;

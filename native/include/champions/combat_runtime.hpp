@@ -241,7 +241,6 @@ public:
   bool creature_update_active(Address);
   Raw creature_step_anim(Address, Raw speed);
   bool creature_away_from_home(Address);
-  bool creature_sees_target(Address);
   // Creature_filterState 0x10a9c0: true when the requested state is allowed.
   bool creature_filter_state(Address, std::uint32_t requested);
   // Creature_onDeath 0x10beb8 (virtual slot 28).

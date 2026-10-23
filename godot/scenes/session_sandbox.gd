@@ -134,7 +134,9 @@ func _capture_player_camera() -> void:
 		return
 	var native_forward := _native_camera_vector(forward)
 	var yaw := roundi(atan2(native_forward.y, native_forward.x) * 65536.0 / TAU) & 0xffff
-	# Camera3D has no source for the original live follow mode.
+	# HOST-SOURCED: the yaw above is this sandbox camera's, not Camera_getYaw
+	# (+0x68), so Player_move steers relative to the host camera. Camera3D also
+	# has no source for the original live follow mode (flag stays null).
 	controller.set_player_camera(0, yaw, null, _native_camera_vector(camera.global_position), sides)
 
 func _input(event: InputEvent) -> void:
@@ -247,6 +249,10 @@ func _observe(result: Dictionary) -> void:
 		health_label.text += " · Mana %.2f / %.2f\nPending HP %.2f · Mana %.2f" % [result.mana, result.max_mana, result.pending_health, result.pending_mana]
 	if result.get("facing_enabled", false) and not result.get("fight_player_ready", false):
 		health_label.text += "\nFacing test · angle %d · velocity %d · mode %d" % [result.facing_raw, result.angular_velocity_raw, result.turn_mode]
+	if result.get("fight_player_ready", false):
+		health_label.text += "\nStarting equipment: %s · weapon class %d (%s, not campaign evidence)" % [
+			str(result.get("fight_starting_equipment", "unknown")), int(result.get("fight_player_weapon_class", -1)),
+			str(result.get("fight_player_weapon_class_source", "unknown"))]
 	animation_cache_label.visible = result.get("animation_cache_enabled", false)
 	if animation_cache_label.visible:
 		animation_cache_label.text = "Animation-cache diagnostic · synthetic data, no model pose\nTrack %s · sample track %s · time raw %s · event %s\nRaw joint values %s" % [result.animation_track, result.animation_sample_track, result.animation_time_raw, result.animation_event, str(result.animation_joints_raw)]

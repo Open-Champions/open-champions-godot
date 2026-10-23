@@ -3,7 +3,9 @@
 // the combat World runs through an external owner. Authored fixtures only.
 #include "champions/campaign_actors.hpp"
 #include "champions/combat_runtime.hpp"
+#include "champions/core_state.hpp"
 #include "champions/creature_hp.hpp"
+#include "champions/detail/checkpoint.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -57,6 +59,64 @@ void memory_budget() {
     refused = true;
   }
   check(refused, "combat-owned bytes still obey the 1 MiB budget");
+}
+
+// Audit VF-8: the WA-F4 property (a script store never makes a combat addition
+// throw) must also hold after a checkpoint round trip.
+void memory_budget_after_checkpoint() {
+  using Codec = R::detail::Checkpoint;
+  using Access = R::detail::CheckpointAccess;
+  R::creature_hp::Memory original;
+  // 60,000 script bytes (a checkpoint restores at most 65,536 sparse entries)
+  // plus one combat word. If every restored byte counted as combat, a 1,000,000
+  // byte combat addition (under the 1 MiB budget alone) would exceed it.
+  std::vector<std::uint8_t> script(60000);
+  for (std::size_t i = 0; i < script.size(); ++i) script[i] = std::uint8_t(1 + i % 250);
+  original.write_host_bytes(0x1000000, script);
+  original.store(0x2000, 4, 0x11223344);
+  Codec out;
+  Access::run(original, out);
+  R::creature_hp::Memory restored;
+  Codec in(out.bytes);
+  Access::run(restored, in);
+  in.finish();
+  check(restored.bytes().size() == original.bytes().size(), "checkpoint restores every byte");
+  std::vector<std::uint8_t> addition(1000000, 9);
+  restored.write_bytes(0x3000000, addition);
+  check(restored.load(0x3000000, 1) == 9, "combat addition after a restore with a large script store");
+  bool refused = false;
+  try {
+    std::vector<std::uint8_t> too_much(100000, 7);
+    restored.write_bytes(0x5000000, too_much);
+  } catch (const R::creature_hp::ResourceLimit &) {
+    refused = true;
+  }
+  check(refused, "combat additions after a restore still obey the 1 MiB budget");
+}
+
+// Audit VF-7: clearing a list that holds a node and its partner back to back
+// must neither throw (the World destructor is noexcept) nor leak a node.
+void clear_nodes_adjacent_partners() {
+  R::HandlePool pool(8);
+  pool.init();
+  const auto free_before = pool.count_free();
+  R::Cell head, other;
+  R::Object *none = nullptr;
+  pool.link_both(head, none, head, none); // both partners in one list, adjacent
+  check(head.next && head.next->next && head.next->partner == head.next->next,
+        "fixture: adjacent partners");
+  pool.add(head, none);                   // a plain node ahead of the pair
+  pool.link_both(head, none, other, none); // a pair split across two lists
+  bool threw = false;
+  try {
+    pool.clear_nodes(head);
+  } catch (...) {
+    threw = true;
+  }
+  check(!threw, "clear_nodes does not throw for adjacent partners");
+  check(head.next == nullptr, "list cleared");
+  check(other.next == nullptr, "a partner in another list is unlinked too");
+  check(pool.count_free() == free_before, "every node returned to the pool");
 }
 
 void adopt_and_run() {
@@ -141,6 +201,8 @@ void adopt_and_run() {
 int main() {
   try {
     memory_budget();
+    memory_budget_after_checkpoint();
+    clear_nodes_adjacent_partners();
     adopt_and_run();
   } catch (const std::exception &error) {
     std::cerr << "campaign fight adoption test failed: " << error.what() << "\n";

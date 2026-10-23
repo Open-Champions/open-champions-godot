@@ -540,6 +540,8 @@ func run() -> void:
 		"fight_counts": fight_counts, "fight_refusals": after.get("fight_refusals", {}),
 		"player_action_state": int(after.get("fight_player_action_state", -1)),
 		"player_weapon_class": int(after.get("fight_player_weapon_class", -1)),
+		"starting_equipment": str(after.get("fight_starting_equipment", "")),
+		"player_weapon_class_source": str(after.get("fight_player_weapon_class_source", "")),
 		"player_start": player_before, "player_end": after.get("position", Vector3.ZERO),
 		"walk_ticks": walk_ticks, "start_distance": start_distance, "end_distance": last_distance,
 		"reached_enemy_by_walking": organic_reached, "walk_end_distance": organic_end_distance, "placed_for_swing": placed, "swing_cycles": swings,

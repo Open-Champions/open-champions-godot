@@ -1243,3 +1243,55 @@ Limits:
   per drawn frame).
 - A bridge mutation made from GDScript outside the controller is captured only through
   the bridge snapshot, not replayed.
+
+## `.fight` companion (valor fight, 2026-10-23)
+
+When a real-data session has a shared-World player (the first valor fight,
+`native/src/campaign_fight.cpp`), `real_data_play.gd` writes a `path + ".fight"`
+JSON companion next to `.player`, `.campaign` and `.level`. The `.level`
+manifest's `fight_sha256` binds it (empty when the session has no shared-World
+player). It is not part of the native image and is not an original save format.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `position` | 3 numbers | The player object's native world position (`+0x10..+0x18`, display floats). |
+| `facing` | integer | The player's 16-bit facing (`+0x38`). |
+| `hp_raw` | integer | The player's current hit points as the raw 32-bit float pattern (`+0x228` and the record's `PLAYERS+0xac`). |
+
+Restored on load (`fight_restore_player`): position and facing are written to
+the player object and its grid cell, and `hp_raw` to the object and the record.
+**Not saved or restored:** enemies, loot and every other active object (they
+are rebuilt by the level factory), the player's animation state, and any
+inventory or equipment (none is modelled; see below).
+
+Load refuses, with a visible status and no state written, when the companion is
+absent or its SHA-256 differs from the manifest, is longer than 4096 bytes, is
+not a JSON object with a three-number `position` and numeric `facing` and
+`hp_raw`, has a non-finite position, a facing outside 0..65535, or `hp_raw`
+outside 32 bits or not a finite positive float no larger than the character's
+max hit points. The position is not checked against the level's bounds (no
+bounds contract is bound in the host). The manifest is not signed, so a
+self-consistent edit of companion and manifest is accepted if it passes these
+checks.
+
+### Limits of the fight session that these files do not hide
+
+- **Starting equipment: `refused_unknown`.** The research does not establish
+  the item a new class 6 / model 11 character has equipped on the normal route
+  (`player_giveStartingItems` 0x1acc78 is not ported). The player keeps weapon
+  class 5 (unarmed) with no equipment as a host stand-in, counted in
+  `fight_refusals` and reported as `fight_starting_equipment` /
+  `fight_player_weapon_class_source = "unarmed_fallback_standin"`. Damage,
+  `hp_change` and `enemy_damaged` in this mode are not campaign evidence.
+- **Camera inputs are host-sourced.** `net_getCamYaw` is the Godot sandbox
+  camera's yaw, so movement is relative to the host camera, not
+  `Camera_getYaw`. `net_getCamFlag` is 1 only while a script dialog is open;
+  the inventory, shop and cutscene camera modes are not covered. Both are
+  counted in `fight_refusals`.
+- **Boar sight is refused.** The `force` argument of slot 25
+  (`Creature_canSeeTarget`) is not documented for WarBoar, so the call is not
+  made and each boar's state-0 AI refuses with a label. The state-0 entry age
+  behind `+0xf4` (entry + 180) is also Unknown; the registration frame stands
+  in only to decide when that refusal applies.
+- `fight_place_player` (and the probe's `--near` / `--weak`) are diagnostics,
+  not original routines; ordinary play never calls them.

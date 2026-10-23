@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     else if (a == "--walk") walk = true;
     else if (a == "--near") near_boar = true;
     else if (a == "--weak") weak = true;
-    else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk]\n"; return 2; }
+    else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk] [--near (DIAGNOSTIC: start 40 units from a boar)] [--weak (DIAGNOSTIC: set HP 1.0 on boars within 400 units to exercise the death path)]\n"; return 2; }
   }
   if (root.empty() || !fs::is_directory(root)) { std::cerr << "need --game DIR\n"; return 2; }
   std::map<std::string, fs::path> files;

@@ -120,7 +120,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. Enemy AI past idle, hit reactions, loot objects, Gold and the Minotaurs remain refused."
+			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. The player is unarmed (starting equipment refused_unknown). Enemy AI (sight and everything past idle), hit reactions, loot objects, Gold and the Minotaurs remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -400,7 +400,11 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; load refused: shared-World player companion is absent or differs."
 			return false
 		var saved = JSON.parse_string(fight_file.get_as_text())
-		if not (saved is Dictionary) or not (saved.get("position") is Array) or saved.position.size() != 3:
+		var numbers_ok: bool = saved is Dictionary and saved.get("position") is Array and saved.position.size() == 3
+		if numbers_ok:
+			for field in [saved.position[0], saved.position[1], saved.position[2], saved.get("facing"), saved.get("hp_raw")]:
+				numbers_ok = numbers_ok and (typeof(field) == TYPE_INT or typeof(field) == TYPE_FLOAT)
+		if not numbers_ok:
 			status_label.text = "Session replaced; load refused: shared-World player companion is malformed."
 			return false
 		var put: Dictionary = controller.fight_restore_player(Vector3(float(saved.position[0]), float(saved.position[1]), float(saved.position[2])),

@@ -34,6 +34,12 @@ struct TickInput {
   // Frame at which state 0 was entered. The class sets +0xf4 to this age plus
   // the fixed 180 on entry; the boar constructor alone does not establish it.
   std::optional<std::int64_t> state_entry_frame;
+  // Slot 25 (Creature_canSeeTarget) takes a `force` argument that switches
+  // the ray mode (tools/ref_arena_monsters.py slot25_can_see_target). The
+  // research documents the argument for other classes but not for WarBoar
+  // (docs/monsters-2.md WarBoar says only "sees target"). A host that cannot
+  // cite it leaves has_target unset and sets this: state 0 then refuses.
+  bool sight_refused = false;
 };
 struct Services {
   // Creature_run, updateActive, stepAnim, knockback, pickTarget and the
