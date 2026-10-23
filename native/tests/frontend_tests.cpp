@@ -567,6 +567,32 @@ void layout_screen_vectors() {
   f.frame(CROSS);
   f.frame(0);
   expect(f.screen() == Screen::Main, "main menu");
+  auto check_card_art = [](const Scene &s) {
+    bool frame = false, title = false, false_slot = false;
+    for (const auto &d : s.draws) {
+      frame = frame || (d.kind == Draw::Kind::Frame && d.evidence == Evidence::Executed &&
+                        d.x == 60 && d.y == 122 && d.w == 521 && d.h == 105 &&
+                        d.layer == 6 && d.style == 2 && d.colour == 0x7f616369);
+      title = title || (d.kind == Draw::Kind::Text && d.x == 320 && d.y == 110 &&
+                        d.font == Font::Small && d.evidence == Evidence::Host);
+      false_slot = false_slot || (d.kind == Draw::Kind::Rect ||
+                                  (d.kind == Draw::Kind::Text && d.y >= 128 && d.y <= 213));
+    }
+    expect(s.host_layout && frame && title && !false_slot,
+           "card screen paints executed art and refuses fabricated slot rows");
+  };
+  {
+    Flow load = to_main();
+    tap(load, DOWN);
+    tap(load, CROSS);
+    expect(load.screen() == Screen::LoadGame, "load screen opened from main");
+    check_card_art(load.layout());
+    Flow save = to_main();
+    save.attach_play();
+    save.request_save();
+    expect(save.screen() == Screen::SaveGame, "save screen opened from play");
+    check_card_art(save.layout());
+  }
   {
     const auto s = f.layout();
     expect(!s.host_layout && has_resource(s, "title.tex") && count_kind(s, Draw::Kind::Frame) == 3 &&

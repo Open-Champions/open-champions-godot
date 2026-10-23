@@ -101,6 +101,10 @@ func run() -> void:
 	fe.tap(DOWN)
 	fe.tap(CROSS)
 	await shot("08-load-game")
+	if not fe.fonts_loaded() or int(fe.view_painter.drawn.frame_piece) != 40 or int(fe.view_painter.drawn.text_fallback) != 0:
+		printerr("load screen did not paint the documented tile frame and game font")
+		quit(1)
+		return
 	fe.tap(CIRCLE)
 	fe.tap(0x1000)
 	fe.tap(CROSS)
@@ -142,5 +146,9 @@ func run() -> void:
 	fe.tap(CIRCLE)
 	fe.open_save_screen()
 	await shot("21-save-game")
+	if not fe.fonts_loaded() or int(fe.view_painter.drawn.frame_piece) != 40 or int(fe.view_painter.drawn.text_fallback) != 0:
+		printerr("save screen did not paint the documented tile frame and game font")
+		quit(1)
+		return
 	print("captures ", saved)
 	quit(0 if saved == 21 else 1)

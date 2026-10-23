@@ -365,34 +365,48 @@ Scene Flow::layout() const {
     host_text(s, 320, 200, "Credits: the data layout is not documented. Circle returns.", Align::Centred);
     s.unknown = {"credits data layout and line spacing, imagery, the exit input and sound"};
     break;
-  case Screen::LoadGame: case Screen::SaveGame: case Screen::Saved: {
-    host("card rows with real file data, the slot cursor and the card sounds are Unknown");
-    // memcard_slotList 0x21c3a4: small-font layer-6 batch 0x1e6464 (alpha = fade),
-    // title centred (320,110), prompt (320,320), row-highlight rectangle
-    // (66,133)-(574,152) colour 0x366876 (an Inferred highlight).
-    const char *title = screen_ == Screen::LoadGame ? "Load Game" : screen_ == Screen::SaveGame ? "Save Game" : "Saved";
+  case Screen::LoadGame: case Screen::SaveGame: {
+    host("card directory and cached headers unavailable; host file actions below the original frame");
+    // research-save-screen 0a3419b, memcard_slotList 0x21d814: the wrapper
+    // adjusts (61,126,519,97) to (60,122,521,105), forces style 2, and
+    // submits the nine tile*.tex pieces from INTERFAC.LMP. Its settled
+    // fixture tint is not a constant across fades.
+    Draw slot_frame;
+    slot_frame.kind = Draw::Kind::Frame;
+    slot_frame.evidence = Evidence::Executed;
+    slot_frame.x = 60;
+    slot_frame.y = 122;
+    slot_frame.w = 521;
+    slot_frame.h = 105;
+    slot_frame.layer = 6;
+    slot_frame.colour = 0x7f616369;
+    slot_frame.style = 2;
+    slot_frame.role = "slot-list tile frame (settled fixture)";
+    slot_frame.site = "0x21d814";
+    const char *title = screen_ == Screen::LoadGame ? "Load Game" : "Save Game";
     Draw slot_title = text(Font::Small, Align::Centred, 6, 320, 110, 0x001E6464, title,
-                           Evidence::Inferred, "slot-list title (text Host)", "0x21d6e8");
+                           Evidence::Host, "slot-list title (localized text unavailable)", "0x21d6e8");
     slot_title.settled = true;
     s.draws.push_back(slot_title);
+    s.draws.push_back(slot_frame);
+    // The five row anchors, date/clock calls and selected-header preview were
+    // executed with an authored card cache. This flow has no card directory or
+    // cached PS2 headers. In particular, indexed row/header strides are
+    // Inferred and AM/PM conversion is Unknown, so no slot data is fabricated.
     for (std::size_t i = 0; i < list.size(); ++i) {
-      const int y = 133 + 22 * static_cast<int>(i); // row 0 is the documented rectangle; the step is Host
-      // The row text is submitted before the highlight: inside a layer the later
-      // submission is painted first, so the highlight lies behind the label.
-      s.draws.push_back(text(Font::Small, Align::Centred, 6, 320, y + 2, 0x323c3c, list[i].label,
-                             Evidence::Host, "slot-list row"));
-      if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(66, y, 574, y + 19, 6, 0x80366876,
-                               Evidence::Host, "slot-list row highlight", "0x21e508"));
+      host_text(s, 320, 348 + 22 * static_cast<int>(i),
+                (static_cast<int>(i) == cur ? "> " : "  ") + list[i].label,
+                Align::Centred);
     }
-    Draw slot_prompt = text(Font::Small, Align::Centred, 6, 320, 320, 0x001E6464,
-                           screen_ == Screen::Saved ? "Cross: close" : "Cross: choose   Circle: back",
-                           Evidence::Inferred, "slot-list prompt (text Host)", "0x21c8b0");
-    slot_prompt.settled = true;
-    s.draws.push_back(slot_prompt);
-    s.unknown = {"per-row text positions with real file data, the spinner and the error sound"};
+    s.unknown = {"card directory, indexed row/header mapping (Inferred), AM/PM conversion (Unknown), localized title and prompts, retail pixels and backdrop"};
     break;
   }
+  case Screen::Saved:
+    host("the saved confirmation box art and localized text are not established");
+    host_text(s, 320, 220, "Saved", Align::Centred);
+    host_text(s, 320, 348, "Cross: close", Align::Centred);
+    s.unknown = {"saved confirmation box frame, localized text, fade and sound"};
+    break;
   case Screen::CharClass: {
     host("class art, the 3D model pose, cursor and highlight and the per-race animation are Unknown");
     // Class selection has no phase of its own in the research (frontend-layout.md),
