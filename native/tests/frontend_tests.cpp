@@ -801,8 +801,16 @@ void card_cache_vectors() {
              save_free[1].number == "2." && !save_free[2].new_save,
          "save marks only the first free row");
   const auto empty_save = layout::visible_card_rows({}, {}, 0, 0, true);
-  expect(empty_save.size() == 1 && empty_save[0].new_save &&
-             empty_save[0].number == "1.", "empty save shows a first free row");
+  expect(empty_save.size() == 5, "empty save keeps five numbered rows");
+  for (int r = 0; r < 5; ++r)
+    expect(empty_save[static_cast<std::size_t>(r)].index == r &&
+               empty_save[static_cast<std::size_t>(r)].y == 128 + 17 * r &&
+               empty_save[static_cast<std::size_t>(r)].number == std::to_string(r + 1) + "." &&
+               empty_save[static_cast<std::size_t>(r)].new_save == (r == 0) &&
+               !empty_save[static_cast<std::size_t>(r)].populated &&
+               empty_save[static_cast<std::size_t>(r)].date.empty() &&
+               empty_save[static_cast<std::size_t>(r)].clock.empty(),
+           "empty save numbers all five rows and marks only row one as free");
   expect(layout::visible_card_rows({}, {}, 0, 0, false).empty(),
          "empty load has no rows");
   const auto preview = layout::card_preview(headers, 8, 2);

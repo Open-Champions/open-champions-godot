@@ -41,9 +41,11 @@ func shot(label: String) -> void:
 		if label in ["08a-load-card-synthetic", "22-save-card-synthetic"] and bright_pixels(image, Rect2i(140, 290, 960, 175), 4) < 50:
 			printerr("rendered card rows absent: ", label)
 			return
-		if label == "23-save-empty-card" and bright_pixels(image, Rect2i(140, 290, 160, 175), 2) < 20:
-			printerr("rendered first free row absent")
-			return
+		if label == "23-save-empty-card":
+			for row in range(5):
+				if bright_pixels(image, Rect2i(148, 286 + 34 * row, 38, 29), 1) < 10:
+					printerr("rendered empty save row number absent: ", row + 1)
+					return
 	if image != null and image.save_png(capture_dir.path_join(label + ".png")) == OK:
 		saved += 1
 	else:
@@ -234,15 +236,22 @@ func run() -> void:
 		return
 	fe._refresh()
 	var free_rows := 0
+	var number_rows := 0
 	for draw in fe.scene_view.get("draws", []):
+		if str(draw.get("role", "")) == "supplied card number":
+			if number_rows >= 5 or int(draw.x) != 77 or int(draw.y) != 128 + 17 * number_rows or str(draw.font) != "small" or str(draw.text) != "%d." % (number_rows + 1):
+				printerr("empty save row number, anchor or font changed")
+				quit(1)
+				return
+			number_rows += 1
 		if str(draw.get("role", "")) == "save-only free row (localized wording unknown)":
 			if int(draw.x) != 100 or int(draw.y) != 128 or str(draw.font) != "small":
 				printerr("save free row anchor or font changed")
 				quit(1)
 				return
 			free_rows += 1
-	if free_rows != 1:
-		printerr("empty save did not expose one free row")
+	if free_rows != 1 or number_rows != 5:
+		printerr("empty save did not expose five numbers and one free row")
 		quit(1)
 		return
 	await shot("23-save-empty-card")

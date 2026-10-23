@@ -105,8 +105,6 @@ std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata
       row.new_save = true;
     }
     out.push_back(std::move(row));
-    if (count == 0)
-      break;
   }
   return out;
 }
