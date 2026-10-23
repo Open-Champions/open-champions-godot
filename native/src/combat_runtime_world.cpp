@@ -175,8 +175,18 @@ void World::State::link(Address a, Address back, Address obj) {
   auto *o = authority->find(obj);
   if (!o || (!objects.count(obj) && !authority->is_factory(obj)))
     throw Error("not a registered combat or ported factory object");
-  auto i = heads.find(back);
-  Cell *back_cell = i == heads.end() ? nullptr : i->second;
+  Cell *back_cell = nullptr;
+  // A script-host factory object's own head wins over any cached combat head
+  // left at its address by a reused pool block.
+  if (back == obj && authority->is_factory(obj)) {
+    auto external = authority->objects->objects.find(obj);
+    if (external != authority->objects->objects.end())
+      back_cell = &external->second->heads[0];
+  }
+  if (!back_cell) {
+    auto i = heads.find(back);
+    if (i != heads.end()) back_cell = i->second;
+  }
   if (!back_cell && back == obj) {
     auto external = authority->objects->objects.find(obj);
     if (external != authority->objects->objects.end())

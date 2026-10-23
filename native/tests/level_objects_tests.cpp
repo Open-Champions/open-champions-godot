@@ -226,6 +226,57 @@ int main(int argc, char **argv) {
                   "factory allocation reuses the shared pool address");
             check(!combat_world.target(handle) && !adapter.factory_object(handle),
                   "retired handle does not alias replacement generation");
+            // The factory identity guard: a retained handle whose node is still
+            // linked, but whose address is now registered to a different Object.
+            const auto live_handle = combat_world.retain(address);
+            check(adapter.factory_object(live_handle) == authority->objects->objects.at(address),
+                  "fresh handle resolves the replacement factory object");
+            auto *original = authority->find(address);
+            authority->unregister_object(*original);
+            rta::Object stand_in;
+            stand_in.id = address;
+            authority->register_object(stand_in);
+            authority->register_factory(address);
+            check(combat_world.target(live_handle) == address &&
+                      !adapter.factory_object(live_handle),
+                  "factory_object rejects a registry object that is not the graph object");
+            authority->unregister_object(stand_in);
+            authority->register_object(*original);
+            authority->register_factory(address);
+            check(adapter.factory_object(live_handle) == authority->objects->objects.at(address),
+                  "factory identity restored");
+            // Script writes to bytes the combat overlay covers are not refused
+            // (script memory keeps its original store semantics).
+            bool refused = false;
+            try {
+              replacement.variables().memory.write(address, {0x5a});
+              replacement.variables().memory.write(address + 0x34, {0x12, 0x34});
+            } catch (const std::exception &) {
+              refused = true;
+            }
+            check(!refused && replacement.variables().memory.u8(address + 0x34) == 0x12,
+                  "script write to a combat-overlay byte is not refused");
+          }
+          {
+            // A combat actor is freed, then a factory object reuses its pool
+            // block: a retained handle must link to the object's own head.
+            auto reuse_authority = std::make_shared<rta::WorldAuthority>();
+            combat::World reuse_world(reuse_authority, combat::Services{});
+            const auto actor = reuse_world.spawn_skelight();
+            reuse_world.destroy(actor);
+            sc::Host reuse(reuse_authority);
+            rta::SharedRandom reuse_seed(seed0);
+            reuse.bind_seed(&reuse_seed);
+            reuse.set_executable(image.view());
+            check(reuse.adopt_objects(bytes.data(), bytes.size()), "reuse adoption");
+            check(reuse_authority->objects->objects.size() == 1, "one reused object graph entry");
+            const auto reused = reuse_authority->objects->objects.begin()->first;
+            check(reused == actor, "factory object reuses the freed combat actor's block");
+            const auto reuse_handle = reuse_world.retain(reused);
+            check(reuse_world.target(reuse_handle) == reused &&
+                      reuse_world.factory_object(reuse_handle) ==
+                          reuse_authority->objects->objects.at(reused),
+                  "handle on a reused block links the factory object's own head");
           }
           shared_authority_checked = true;
         }

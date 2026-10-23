@@ -81,6 +81,12 @@ public:
   // Unlogged byte writes, including embedded NULs. Empty data does not access
   // its address. Nonempty spans/budgets/overlays are preflighted atomically.
   void write_bytes(Address, const std::vector<std::uint8_t> &);
+  // Level-script byte store semantics (the script host's original unbounded,
+  // zero-backed store): no sparse budget, no read-only overlay refusal (the
+  // overlay still wins every read), and a zero byte erases its backing entry
+  // unless an underlying delegate is present. Unlogged; the span must lie
+  // within unsigned 32-bit space (the caller splits wrapping writes).
+  void write_host_bytes(Address, const std::vector<std::uint8_t> &);
   // Actual sparse backing only; a covered backing byte may differ from its
   // effective read. Neither load nor effective_bytes materializes missing
   // bytes.

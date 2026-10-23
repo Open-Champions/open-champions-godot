@@ -295,6 +295,73 @@ void test_variables_and_seed() {
   check(host.counts().faults == 0, "documented variable commands do not fault");
 }
 
+// Host() and Host(authority) must run the same script commands to identical
+// results, and the shared combat memory type must not change script-host byte
+// semantics: unbounded zero-backed store, 32-bit address wrap, HostFault errors.
+struct HostTrace {
+  std::string text;
+  void add(const std::string &key, std::uint64_t value) { text += key + '=' + std::to_string(value) + ';'; }
+};
+HostTrace run_equivalence(const std::shared_ptr<champions::simulation::rta::WorldAuthority> &authority) {
+  HostTrace trace;
+  auto built = build_calls({{"start", {{"setv", {2000, 7}}, {"getv", {2000}}, {"getRand", {}}}}},
+                           {{2000, "quest"}}, true);
+  // A refused command (no session seed) must take the same stop/fault path.
+  {
+    const auto rand = static_cast<std::size_t>(index_of("getRand"));
+    auto refused_build = build_calls({{"start", {{"getRand", {}}}}}, {});
+    auto refused = authority ? std::make_unique<sc::Host>(authority) : std::make_unique<sc::Host>();
+    plant(*refused, refused_build);
+    trace.add("refused-run", std::uint64_t(refused->run("start")));
+    trace.add("refused", refused->counts().refused[rand]);
+    trace.add("refused-exec", refused->counts().executed[rand]);
+    trace.add("refused-faults", refused->counts().faults);
+  }
+  auto host_owner = authority ? std::make_unique<sc::Host>(authority) : std::make_unique<sc::Host>();
+  sc::Host &host = *host_owner;
+  SharedRandom live(20973);
+  host.bind_seed(&live);
+  plant(host, built);
+  trace.add("run", std::uint64_t(host.run("start")));
+  trace.add("quest", std::uint64_t(host.variables().quest_get("quest")));
+  trace.add("seed", live.state);
+  trace.add("seedword", host.variables().memory.word(0x404464));
+  trace.add("faults", host.counts().faults);
+  auto &memory = host.variables().memory;
+  // More than 1 MiB of distinct non-zero bytes: the original store was unbounded.
+  const std::uint32_t base = 0x10000000u;
+  std::vector<std::uint8_t> chunk(1 << 19);
+  for (unsigned part = 0; part < 3; ++part) {
+    for (std::size_t i = 0; i < chunk.size(); ++i) chunk[i] = std::uint8_t(1 + (i + part) % 250);
+    memory.write(base + part * std::uint32_t(chunk.size()), chunk);
+  }
+  std::uint64_t sum = 0;
+  for (std::uint32_t at = base; at < base + 3 * chunk.size(); at += 997) sum += memory.u8(at) * (at & 255);
+  trace.add("sum", sum);
+  // Zero writes are erased, never counted, and read back as zero.
+  memory.write(base + 100, std::vector<std::uint8_t>(5000, 0));
+  trace.add("zeroed", memory.u64(base + 100) | memory.u64(base + 4000));
+  trace.add("after", memory.u8(base + 5100));
+  memory.write(0x20000000u, std::vector<std::uint8_t>(2 << 20, 0));
+  trace.add("zero-big", memory.u32(0x20100000u));
+  // A span crossing 0xffffffff wraps to address zero, as the paged store did.
+  memory.write(0xfffffffcu, {1, 2, 3, 4, 5, 6, 7, 8});
+  trace.add("wrap-tail", memory.u32(0xfffffffcu));
+  trace.add("wrap-head", memory.u32(0));
+  trace.add("wrap-read", memory.u64(0xfffffffcu));
+  trace.add("cstr", memory.cstr(0xfffffffeu, 16).size());
+  trace.add("writes", memory.writes.size());
+  return trace;
+}
+
+void test_authority_equivalence() {
+  const auto plain = run_equivalence(nullptr);
+  auto authority = std::make_shared<champions::simulation::rta::WorldAuthority>();
+  const auto shared = run_equivalence(authority);
+  check(plain.text == shared.text, "Host() and Host(authority) agree: " + plain.text + " vs " + shared.text);
+  check(plain.text.find("run=") != std::string::npos, "equivalence trace recorded");
+}
+
 void test_seed_refused_without_session_seed() {
   const auto rand = static_cast<std::size_t>(index_of("getRand"));
   auto built = build_calls({{"start", {{"getRand", {}}}}}, {});
@@ -1395,6 +1462,7 @@ int main(int argc, char **argv) {
   test_table(argv[1]);
   test_host_vectors(argv[2]);
   test_variables_and_seed();
+  test_authority_equivalence();
   test_seed_refused_without_session_seed();
   test_offline_seed_policy();
   test_single_player();

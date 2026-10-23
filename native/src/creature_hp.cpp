@@ -85,7 +85,8 @@ void Memory::poke(Address address, std::size_t size, std::uint64_t value) {
   std::size_t additions = 0;
   for (std::size_t i = 0; i < size; ++i)
     additions += !bytes_.count(std::uint32_t(address + i));
-  if (additions > limits_.memory_bytes - bytes_.size())
+  if (bytes_.size() > limits_.memory_bytes ||
+      additions > limits_.memory_bytes - bytes_.size())
     throw ResourceLimit("sparse memory byte budget exceeded");
   for (std::size_t i = 0; i < size; ++i)
     bytes_[std::uint32_t(address + i)] = std::uint8_t(value >> (8 * i));
@@ -110,10 +111,22 @@ void Memory::write_bytes(Address address, const std::vector<std::uint8_t> &data)
       throw Error("raw write intersects read-only overlay");
     additions += !bytes_.count(a);
   }
-  if (additions > limits_.memory_bytes - bytes_.size())
+  if (bytes_.size() > limits_.memory_bytes ||
+      additions > limits_.memory_bytes - bytes_.size())
     throw ResourceLimit("sparse memory byte budget exceeded");
   for (std::size_t i = 0; i < data.size(); ++i)
     bytes_[std::uint32_t(address + i)] = data[i];
+}
+void Memory::write_host_bytes(Address address,
+                              const std::vector<std::uint8_t> &data) {
+  if (data.empty()) return;
+  if (address > UINT32_MAX || data.size() > UINT64_C(0x100000000) - address)
+    throw ResourceLimit("host byte write outside supported memory span");
+  for (std::size_t i = 0; i < data.size(); ++i) {
+    const auto a = std::uint32_t(address + i);
+    if (data[i] || under_) bytes_[a] = data[i];
+    else bytes_.erase(a);
+  }
 }
 const std::map<std::uint32_t, std::uint8_t> &Memory::bytes() const noexcept {
   return bytes_;

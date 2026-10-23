@@ -310,6 +310,8 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
   // home_cell reads the standalone base projection only during initial linking.
   auto &base=static_cast<objects::GameObject &>(*obj);
   base.flags=object_flags; base.pos=position; base.angle=facing&65535;
+  // Register first so an address collision throws before any state is added.
+  if (authority_) authority_->register_object(*obj);
   world->register_external(base);
   try {
     world->handles.link(world->home_cell(base,true),base.heads[2],&base);
@@ -317,13 +319,13 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
     setup_objects.push_back(obj);
   } catch (...) {
     world->unregister_external(base);
+    if (authority_) authority_->unregister_object(*obj);
     throw;
   }
   for(const auto &name:names) object_names.add(name,obj.get());
   if(obj->props) for(const auto &entry:*obj->props)
     if(entry.compare(0,5,"name=")==0) object_names.add(entry.substr(5),obj.get());
   world->objects[*address]=obj.get();
-  if (authority_) authority_->register_object(*obj);
   named_objects[*address]=obj;
   object_properties[*address]=obj->props ? std::optional<std::vector<std::string>>(*obj->props) : std::nullopt;
   return obj;
@@ -394,6 +396,17 @@ X::X(std::uint32_t address,std::string integers,std::int64_t float_count,
      std::int64_t stack_count,std::string result,std::string documentation)
     : addr(address), ints(std::move(integers)), floats(float_count),
       stack(stack_count), ret(std::move(result)), note(std::move(documentation)) {}
+namespace {
+// Shared World memory errors are host faults on the script path, never the
+// combat memory's own exception types.
+std::uint8_t canonical_byte(const creature_hp::Memory &memory, std::uint32_t address) {
+  try {
+    return std::uint8_t(memory.load(address, 1));
+  } catch (const creature_hp::Error &error) {
+    throw amx::HostFault(error.what());
+  }
+}
+} // namespace
 Memory::Page &Memory::ensure_page(std::uint32_t index) const {
   auto found = pages.find(index);
   if (found != pages.end()) return found->second;
@@ -415,7 +428,12 @@ Memory::Page &Memory::page(std::uint32_t index) {
   return result;
 }
 const std::map<std::uint32_t,std::uint8_t> &Memory::nonzero_bytes() const {
-  if (canonical) return canonical->bytes();
+  if (canonical) {
+    bytes.clear();
+    for (const auto &entry : canonical->bytes())
+      if (entry.second) bytes.insert(bytes.end(), entry);
+    return bytes;
+  }
   for (auto index : exposed) {
     const auto &data=pages.at(index);
     auto base=index<<12;
@@ -428,7 +446,7 @@ const std::map<std::uint32_t,std::uint8_t> &Memory::nonzero_bytes() const {
   return bytes;
 }
 std::uint8_t Memory::read(std::uint32_t address) const {
-  if (canonical) return std::uint8_t(canonical->load(address, 1));
+  if (canonical) return canonical_byte(*canonical, address);
   const auto &data=ensure_page(address >> 12);
   auto offset=address & 4095;
   return offset<data.size() ? data[offset] : 0;
@@ -437,8 +455,9 @@ std::vector<std::uint8_t> Memory::read(std::uint32_t address, std::size_t size) 
   if (canonical) {
     std::vector<std::uint8_t> result;
     result.reserve(size);
+    // Addresses wrap at 32 bits exactly as the original paged store did.
     for (std::size_t i = 0; i < size; ++i)
-      result.push_back(std::uint8_t(canonical->load(std::uint64_t(address) + i, 1)));
+      result.push_back(canonical_byte(*canonical, address + std::uint32_t(i)));
     return result;
   }
   std::vector<std::uint8_t> result;
@@ -498,10 +517,16 @@ std::string Memory::cstr(std::uint32_t address,std::size_t limit) const {
 void Memory::write(std::uint32_t address,const std::vector<std::uint8_t> &data) {
   if(data.empty()) return;
   if (canonical) {
-    if (std::uint64_t(address) + data.size() > UINT64_C(0x100000000))
-      throw amx::HostFault("shared World memory write exceeds address space");
-    canonical->write_bytes(address, data);
     writes.emplace_back(address, data.size());
+    // The original store wrapped a write crossing 0xffffffff to address 0.
+    auto head = std::min<std::size_t>(data.size(), UINT64_C(0x100000000) - address);
+    try {
+      canonical->write_host_bytes(address, {data.begin(), data.begin() + head});
+      if (head < data.size())
+        canonical->write_host_bytes(0, {data.begin() + head, data.end()});
+    } catch (const creature_hp::Error &error) {
+      throw amx::HostFault(error.what());
+    }
     return;
   }
   writes.emplace_back(address,data.size());
