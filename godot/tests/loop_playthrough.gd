@@ -224,14 +224,23 @@ func run() -> void:
 		{"level_index": scene.real.current, "session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
 	await capture("03-level")
-	var class_mesh: bool = scene.actor_visual.mesh != null and scene.actor_visual.mesh != scene._default_mesh \
+	var class_mesh: bool = scene.real_player != null and scene.real_player.body_drawn \
+		and scene.real_player.model_index == int(scene.controller.get_observation().get("player_model_index", -1)) \
+		and scene.actor_visual.visible and scene.actor_visual.mesh is ArrayMesh \
+		and scene.actor_visual.mesh != null and scene.actor_visual.mesh != scene._default_mesh \
 		and not (scene.actor_visual.mesh is CapsuleMesh) and not (scene.actor_visual.mesh is SphereMesh) \
 		and not scene.asset_label.text.begins_with("Practice figure")
 	var actor_pixels := await player_actor_pixels() if DisplayServer.get_name() != "headless" else 0
 	mark("player_visual", "not_applicable_headless" if DisplayServer.get_name() == "headless" else \
 		("class_mesh" if class_mesh and actor_pixels > 0 else "refused"),
 		{"class_mesh": class_mesh, "mesh_type": scene.actor_visual.mesh.get_class(), "actor_pixels": actor_pixels,
-		"practice_label": scene.asset_label.text.begins_with("Practice figure")})
+		"practice_label": scene.asset_label.text.begins_with("Practice figure"),
+		"body_drawn": scene.real_player.body_drawn, "model_match": scene.real_player.model_index == int(scene.controller.get_observation().get("player_model_index", -1)),
+		"actor_visible": scene.actor_visual.visible})
+	if args.has("visual-only"):
+		save_json()
+		quit(0 if class_mesh and (DisplayServer.get_name() == "headless" or actor_pixels > 0) else 1)
+		return
 	if scene.real.current < 0 and not scene.real.levels.is_empty():
 		var direct: bool = scene.load_real_level(0)
 		mark("direct_level_diagnostic", "loaded" if direct else "refused", {"level_index": scene.real.current})

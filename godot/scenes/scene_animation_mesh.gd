@@ -1,6 +1,15 @@
 extends RefCounted
 
 # Presentation geometry only. The bridge supplies the positions in native Z-up.
+static func prepare_rest(model: Dictionary) -> Dictionary:
+	if not model.get("ok", false):
+		return {"ok": false, "error": str(model.get("error", "The body rest pose is unavailable."))}
+	# The model reader returns the same bounded per-corner geometry as a sample.
+	# Supply only the shape metadata expected by the shared mesh builder.
+	return prepare({"ok": true, "pairing_verified": false, "duration_ticks": 0,
+		"tick": 0.0, "meshes": model.get("meshes", []),
+		"triangle_count": model.get("triangle_count", -1)})
+
 static func prepare(sample: Dictionary) -> Dictionary:
 	if typeof(sample.get("ok")) != TYPE_BOOL or not sample["ok"]:
 		return {"ok": false, "error": str(sample.get("error", "The selected pair could not be sampled."))}

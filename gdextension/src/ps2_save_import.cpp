@@ -155,6 +155,9 @@ private:
         out["name"] = latin1(c.name);
         out["class_index"] = int64_t(c.class_index);
         out["model_index"] = int64_t(c.model_index);
+        Array appearance;
+        for (auto value : c.appearance) appearance.push_back(int64_t(value));
+        out["appearance"] = appearance;
         out["level"] = int64_t(c.level);
         out["acknowledged"] = int64_t(c.acknowledged_level);
         out["experience"] = int64_t(c.experience);
