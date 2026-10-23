@@ -464,7 +464,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       return Build::NotBuilt;
     }
     counts_.build_refusals[boar ? "WarBoar class tick and shared actor runtime unavailable" :
-                                  "Minotaur class tick and shared actor runtime unavailable"] += 1;
+                                  "Minotaur: base Creature_ctor flags, hide variant and hand writes Unknown; Minotaur_run not in the research"] += 1;
     return Build::NotBuilt;
   }
   if (outcome.constructor() == 0x158928) {

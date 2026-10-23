@@ -113,6 +113,8 @@ void ChampionsSessionController::_bind_methods() {
                        DEFVAL(Dictionary()));
   ClassDB::bind_method(D_METHOD("dialog_events"), &ChampionsSessionController::dialog_events);
   ClassDB::bind_method(D_METHOD("dialog_voice_state", "voice"), &ChampionsSessionController::dialog_voice_state);
+  ClassDB::bind_method(D_METHOD("fight_restore_player", "position", "facing", "hp_raw"),
+                       &ChampionsSessionController::fight_restore_player);
   ClassDB::bind_method(D_METHOD("fight_place_player", "position", "facing"),
                        &ChampionsSessionController::fight_place_player);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
@@ -1033,8 +1035,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_use_pending_ = false;
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
-    // The previous level's fight dies before its host.
-    reset_fight();
+    // The previous host is released first, then its fight.
     scripts_ = std::move(next);
     fight_ = std::move(next_fight);
     fight_level_ = level_name.utf8().get_data();
@@ -1061,6 +1062,37 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   }
 }
 void ChampionsSessionController::reset_fight() { fight_.reset(); }
+void ChampionsSessionController::start_fight(const rta::session_control::Observation &state) {
+  if (!fight_ || fight_->started()) return;
+  // The session's player is the ported Player in the shared World. The dry
+  // scene stays only as the ready-tick clock and save spine.
+  rta::campaign_fight::Fight::PlayerStart start;
+  start.position = state.position;
+  start.facing = state.facing & 0xffffu;
+  start.level_name = fight_level_;
+  if (player_) {
+    const auto p = observed_player();
+    start.model_index = unsigned(p.model);
+    start.hp = p.current_known ? p.hp : p.max_hp;
+  } else {
+    start.hp = state.hp;
+  }
+  fight_->start(start);
+}
+Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &position, int64_t facing, int64_t hp_raw) {
+  // A load replaced the scene before play started: the fight begins from the
+  // loaded scene, then the saved player is put back.
+  if (fight_ && !fight_->started() && control_) start_fight(control_->observation());
+  Dictionary out = fight_place_player(position, facing);
+  if (!bool(out.get("ok", false))) return out;
+  const auto error = fight_->restore_health(rta::Raw(hp_raw & 0xffffffffll));
+  out["ok"] = error.empty();
+  if (!error.empty()) out["error"] = String::utf8(error.c_str());
+  auto o = control_ ? control_->observation() : current_;
+  apply_fight(o);
+  cache_state(o, true);
+  return out;
+}
 Dictionary ChampionsSessionController::fight_place_player(const Vector3 &position, int64_t facing) {
   Dictionary out;
   out["ok"] = false;
@@ -1083,8 +1115,8 @@ Dictionary ChampionsSessionController::fight_place_player(const Vector3 &positio
 Dictionary ChampionsSessionController::disable_level_script() {
   remember_script_fade();
   release_help_pause();
-  reset_fight();
   scripts_.reset();
+  reset_fight();
   script_level_objects_.clear();
   script_seed_.reset();
   script_world_.reset();
@@ -1685,22 +1717,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       script_seed_->state = control_->shared_seed();
       script_world_ = script_seed_->state;
     }
-    if (fight_ && !fight_->started()) {
-      // The session's player is the ported Player in the shared World. The
-      // dry scene stays only as the ready-tick clock and save spine.
-      rta::campaign_fight::Fight::PlayerStart start;
-      start.position = state.position;
-      start.facing = state.facing & 0xffffu;
-      start.level_name = fight_level_;
-      if (player_) {
-        const auto p = observed_player();
-        start.model_index = unsigned(p.model);
-        start.hp = p.current_known ? p.hp : p.max_hp;
-      } else {
-        start.hp = state.hp;
-      }
-      fight_->start(start);
-    }
+    start_fight(state);
     current_ = std::move(state);
     previous_position_ = current_position_ = position;
     previous_facing_ = current_facing_ = facing;
@@ -1713,8 +1730,8 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
 Dictionary ChampionsSessionController::reset_session() {
   try {
     remember_script_fade();
-    reset_fight();
     scripts_.reset();
+    reset_fight();
     world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
     help_paused_ = false;
     loaded_presentation_.reset();
@@ -1763,8 +1780,8 @@ Dictionary ChampionsSessionController::release_input() {
 Dictionary ChampionsSessionController::stop_session() {
   try {
     remember_script_fade();
-    reset_fight();
     scripts_.reset();
+    reset_fight();
     world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
     help_paused_ = false;
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
@@ -2238,11 +2255,17 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     const double facing =
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     unpair_script_seed_if_paired();
-    reset_fight(); // it borrows the replaced player bundle
+    // The fight borrows the player bundle. Reloading the terrain the fight was
+    // built on (a save of the same level) keeps it and its bundle; any other
+    // terrain replaces the bundle and so ends the fight.
+    const bool keep_fight = fight_ && pending_->name == terrain_name_;
+    if (!keep_fight) reset_fight();
     control_.swap(pending_->control);
-    player_services_ = std::move(pending_->player_services);
-    player_water_image_ = std::move(pending_->player_water_image);
-    player_service_level_ = std::move(pending_->player_service_level);
+    if (!keep_fight) {
+      player_services_ = std::move(pending_->player_services);
+      player_water_image_ = std::move(pending_->player_water_image);
+      player_service_level_ = std::move(pending_->player_service_level);
+    }
     combat_.reset();
     level_.reset();
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
@@ -2714,7 +2737,11 @@ Dictionary ChampionsSessionController::fight_observation() const {
 rta::session_control::Observation ChampionsSessionController::active_observation() const {
   if (combat_) return combat_->observation();
   if (level_) return level_->observation();
-  return control_->observation();
+  auto o = control_->observation();
+  // The shared-World player is what the scene presents (a stopped fight keeps
+  // its last player state); the dry scene supplies only the clock fields.
+  if (fight_ && fight_->player_ready()) apply_fight(o);
+  return o;
 }
 rta::session_control::Observation ChampionsSessionController::active_advance(uint32_t mask) {
   const auto before=active_observation().ready_ticks;
@@ -2727,10 +2754,8 @@ rta::session_control::Observation ChampionsSessionController::active_advance(uin
   // stand-in with movement only.
   const uint32_t dry_mask = fight_ && fight_->player_ready() ? (fighting ? 0u : (mask & ~uint32_t(rta::session_control::DAMAGE))) : mask;
   auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(dry_mask));
-  if (fighting && !next.failed && next.ready_ticks>before) {
-    fight_->tick(mask);
-    apply_fight(next);
-  }
+  if (fighting && !next.failed && next.ready_ticks>before) fight_->tick(mask);
+  if (!combat_ && !level_ && fight_ && fight_->player_ready()) apply_fight(next);
   if(!next.failed && next.ready_ticks>before) {
     if(combat_) {
       Dictionary visual; Array events;

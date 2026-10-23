@@ -103,6 +103,11 @@ World::State::State(std::shared_ptr<WorldAuthority> owner, Services v, int mode,
   install_services();
 }
 World::State::~State() {
+  // Handle nodes still linked into this World's own list heads (a creature's
+  // target list, an external retained handle) are unlinked from both lists
+  // first: their other list belongs to a host-owned object that may outlive
+  // this World.
+  for (auto &entry : owned_heads) handles.clear(*entry.second);
   overlay->s = nullptr;
   mem.detach_overlay(overlay);
   for (const auto &entry : objects) authority->unregister_object(*entry.second);

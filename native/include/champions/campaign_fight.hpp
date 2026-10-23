@@ -79,6 +79,8 @@ public:
   // scripted run can start a fight without path finding through the level.
   // Updates the grid cell; ground contact settles on the next ticks.
   std::string place_player(const Vec3 &position, Raw facing);
+  // Puts a saved health word back on the player object and its record.
+  std::string restore_health(Raw hp);
   bool started() const;
   bool player_ready() const;
   bool failed() const;

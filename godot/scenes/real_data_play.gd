@@ -297,7 +297,21 @@ func save_session_file(path: String) -> bool:
 		return false
 	if not scripted and FileAccess.file_exists(path + ".campaign"):
 		DirAccess.remove_absolute(path + ".campaign")
+	# The shared-World player is not in the native image: its position, facing and
+	# health go in a companion (enemies and other active objects are not saved).
+	var fight_obs: Dictionary = controller.get_observation()
+	var has_fight: bool = fight_obs.get("fight_player_ready", false)
+	if has_fight:
+		var where: Vector3 = fight_obs.get("position", Vector3.ZERO)
+		var fight_state := {"position": [where.x, where.y, where.z], "facing": int(fight_obs.get("facing_raw", 0)),
+			"hp_raw": int(fight_obs.get("hp_raw", 0))}
+		if not _write_companion(path + ".fight", JSON.stringify(fight_state).to_utf8_buffer()):
+			status_label.text = "Save refused: shared-World player companion could not be written."
+			return false
+	elif FileAccess.file_exists(path + ".fight"):
+		DirAccess.remove_absolute(path + ".fight")
 	var manifest := {"version": 1, "save_sha256": FileAccess.get_sha256(path),
+		"fight_sha256": FileAccess.get_sha256(path + ".fight") if has_fight else "",
 		"player_sha256": player_hash,
 		"level_index": real.current, "level_stem": str(level.stem),
 		"world_sha256": world_hash, "tex_sha256": tex_hash,
@@ -378,7 +392,24 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
 			return false
 		_observe(restored)
-	status_label.text = "Loaded level, player, quests and position. World objects restart from level data."
+	var fight_hash := str(manifest.get("fight_sha256", ""))
+	if not fight_hash.is_empty():
+		var fight_path := path + ".fight"
+		var fight_file := FileAccess.open(fight_path, FileAccess.READ)
+		if fight_file == null or fight_file.get_length() > 4096 or FileAccess.get_sha256(fight_path) != fight_hash:
+			status_label.text = "Session replaced; load refused: shared-World player companion is absent or differs."
+			return false
+		var saved = JSON.parse_string(fight_file.get_as_text())
+		if not (saved is Dictionary) or not (saved.get("position") is Array) or saved.position.size() != 3:
+			status_label.text = "Session replaced; load refused: shared-World player companion is malformed."
+			return false
+		var put: Dictionary = controller.fight_restore_player(Vector3(float(saved.position[0]), float(saved.position[1]), float(saved.position[2])),
+			int(saved.get("facing", 0)), int(saved.get("hp_raw", 0)))
+		if not put.get("ok", false):
+			status_label.text = "Session replaced; shared-World player could not be restored: " + str(put.get("error", "unknown"))
+			return false
+		_observe(controller.get_observation())
+	status_label.text = "Loaded level, player, quests and position. Active world objects are not saved."
 	return true
 
 func _prepare_native_save(path: String) -> Dictionary:

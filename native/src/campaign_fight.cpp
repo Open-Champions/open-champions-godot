@@ -610,6 +610,13 @@ std::string Fight::place_player(const Vec3 &position, Raw facing) {
   p.world->update_grid(p.player);
   return {};
 }
+std::string Fight::restore_health(Raw hp) {
+  auto &p = *p_;
+  if (!p.player_ok) return "no player";
+  p.world->write(p.player + 0x228, 4, hp);
+  p.world->write(PLAYERS + 0xac, 4, hp);
+  return {};
+}
 bool Fight::started() const { return p_->started; }
 bool Fight::player_ready() const { return p_->player_ok; }
 bool Fight::failed() const { return p_->failed; }

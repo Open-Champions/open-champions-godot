@@ -617,7 +617,7 @@ func run() -> void:
 		and scene.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01 \
 		and quests_match
 	mark("load_and_carry", "restored" if carried else "refused",
-		{"screen": fe.screen(), "load_attempted": load_attempted,
+		{"screen": fe.screen(), "load_attempted": load_attempted, "status": scene.status_label.text,
 		"level_index_before": level_before,
 		"level_index_after": scene.real.current, "gold_before": saved_gold,
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,

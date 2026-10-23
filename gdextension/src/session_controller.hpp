@@ -62,20 +62,24 @@ class ChampionsSessionController : public godot::RefCounted {
   std::unique_ptr<champions::simulation::rta::world_queries::Level> player_service_level_;
   std::unique_ptr<champions::real_world::WaterImage> player_water_image_;
   std::unique_ptr<champions::simulation::rta::player_services::Bundle> player_services_;
+  // The first real enemy fight (native/include/champions/campaign_fight.hpp):
+  // the session Player and the level factory's WarBoar-family actors in the one
+  // shared World. Declared before the host so the host's objects are released
+  // first (a host reset must precede reset_fight()).
+  std::unique_ptr<champions::simulation::rta::campaign_fight::Fight> fight_;
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
-  // The first real enemy fight (native/include/champions/campaign_fight.hpp):
-  // the session Player and the level factory's WarBoar-family actors in the one
-  // shared World. Declared after the host so it is destroyed first.
-  std::unique_ptr<champions::simulation::rta::campaign_fight::Fight> fight_;
   std::string fight_level_;
   void reset_fight();
+  void start_fight(const champions::simulation::rta::session_control::Observation &);
   void apply_fight(champions::simulation::rta::session_control::Observation &) const;
   godot::Dictionary fight_observation() const;
 public:
   // DIAGNOSTIC, not an original routine (scripted runs only).
   godot::Dictionary fight_place_player(const godot::Vector3 &position, int64_t facing);
+  // Save/load: put the saved player position and health back (not an original routine).
+  godot::Dictionary fight_restore_player(const godot::Vector3 &position, int64_t facing, int64_t hp_raw);
 private:
   // Parsed records belong to this level's script image and are replaced with it.
   std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
