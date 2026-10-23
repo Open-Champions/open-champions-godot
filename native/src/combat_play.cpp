@@ -482,9 +482,9 @@ std::array<C::Address, 2> Session::spawn_mounted_horseman(
   auto pair = s_->world->spawn_mounted_horseman(variant, rider, mount);
   s_->handles[7] = s_->world->retain(pair[0]);
   s_->handles[8] = s_->world->retain(pair[1]);
-  // Synthetic event timeline for the three documented mounted swing entries.
+  // Synthetic event timeline for the four documented mounted swing entries.
   auto def = Raw(s_->world->read(pair[0] + 0x24));
-  for (Raw off : {0x8cu, 0x94u, 0x9cu}) {
+  for (Raw off : {0x8cu, 0x94u, 0x9cu, 0xc4u}) {
     auto clip = Raw(s_->world->read(def + off));
     s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
   }

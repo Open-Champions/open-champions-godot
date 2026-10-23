@@ -33,6 +33,17 @@ std::optional<combat::Descriptor> stack_descriptor(const Value &v) {
   }
   return d;
 }
+// WeaponShield slot 17 returns its embedded four-row damage descriptor.
+combat::Descriptor holder_descriptor(const World::State &s, Address address) {
+  combat::Descriptor d;
+  for (unsigned k = 0; k < 4; ++k) {
+    std::vector<std::int64_t> row;
+    for (unsigned f = 0; f < 4; ++f)
+      row.push_back(s16(Raw(s.model.mem.load(address + 0x24 + 8 * k + 2 * f, 2))));
+    d.push_back(std::move(row));
+  }
+  return d;
+}
 struct DescriptorScope {
   World::State &s;
   const combat::Descriptor *saved;
@@ -1019,8 +1030,15 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "creature_canSeeObj")
     return iv(can_see(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6), ar(7)));
   if (n == "Creature_hitTargetInArc" || n == "Creature_hitAllEnemiesInArc") {
-    if (ar(7))
-      throw Unsupported("weapon descriptor");
+    std::optional<combat::Descriptor> descriptor;
+    if (ar(7)) {
+      const auto holder = u(ar(0) + 0x50);
+      if (!full() || actor(ar(0)).kind != Kind::Creature || !holder ||
+          holder + 0x50 != ar(7) || u(holder) != 0x50cda0)
+        throw Unsupported("weapon descriptor outside actor holder");
+      descriptor = holder_descriptor(*this, ar(7));
+    }
+    DescriptorScope scope(*this, descriptor ? &*descriptor : nullptr);
     Arc x;
     x.facing = ar(1);
     x.angle = ar(2);

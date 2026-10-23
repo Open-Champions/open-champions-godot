@@ -41,6 +41,12 @@ int main() {
     check(world.target(r + 0x3c8) == m && world.target(m + 0x3c8) == r,
           "rider and mount link both directions");
     check(world.read(r + 0x232, 2) == 0x1b, "rider starts mounted");
+    auto holder = r + 0x3d0;
+    check(world.read(r + 0x50) == holder &&
+              world.read(holder) == 0x50cda0 &&
+              world.read(holder + 8, 1) == 0x1b &&
+              world.read(holder + 0x98, 1) == 0x23,
+          "rider has the equipped WeaponShield holder");
     world.relink(m + TARGET, p);
     world.run_every_frame(r);
     world.run_every_frame(m);
@@ -103,19 +109,26 @@ int main() {
     check(world.read(r + 0x232, 2) == 0x23, "mount death dismounts rider");
     check(world.target(m + 0x3c8) == 0 && world.target(r + 0x3c8) == 0,
           "death and dismount clear both handles");
-    world.take_damage(r, p, 0, from_int(1));
-    world.process_damage(r);
-    check(world.read(r + 0x232, 2) == 0x14,
-          "the dismounted rider can enter ordinary on-foot death");
+    // Keep the synthetic rider alive through the mount's deletion flush;
+    // the earlier linked-rider lethal probe intentionally left its HP below zero.
+    world.write(r + 0x228, 4, from_int(1));
     for (int i = 0; i < 100; ++i) world.run_actor(m);
     check(world.read(m + 0x3cc, 2) >= 100 &&
               (world.read(m + 12) & 0x4002) == 0x4002,
           "dead mount fades for 100 runs and queues deletion");
     world.tick();
     check(!world.contains(m), "run-list flush deletes faded mount");
+    world.take_damage(r, p, 0, from_int(2));
+    world.process_damage(r);
+    check(world.read(r + 0x232, 2) == 0x14,
+          "the dismounted rider can enter ordinary on-foot death");
     auto terrain = session_control::Controller().setup().initial_terrain;
     combat_play::Session fixture(terrain, combat_play::Fixture::Full);
-    auto fixture_pair = fixture.spawn_mounted_horseman(0, rider, mount);
+    Spawn fixture_rider = rider, fixture_mount = mount;
+    fixture_rider.position = fixture_mount.position =
+        {from_int(0), from_int(-20), from_int(0)};
+    fixture_rider.facing = fixture_mount.facing = 0x8000;
+    auto fixture_pair = fixture.spawn_mounted_horseman(0, fixture_rider, fixture_mount);
     check(fixture.world().contains(fixture_pair[0]) &&
               fixture.world().contains(fixture_pair[1]),
           "Full combat fixture registers the mounted pair");
@@ -127,6 +140,8 @@ int main() {
     }
     check(rider_seen && mount_seen,
           "Full combat fixture exposes both mounted actors");
+    check(fixture.world().read(fixture_pair[0] + 0x50) == fixture_pair[0] + 0x3d0,
+          "Full combat fixture rider has a weapon holder");
     auto &fw = fixture.world();
     fw.run_every_frame(fixture_pair[0]);
     fw.run_every_frame(fixture_pair[1]);
@@ -143,6 +158,26 @@ int main() {
       }
     check(rider_ran && mount_ran,
           "both mounted actors pass through the ordinary run-list scheduler");
+    Address fixture_player = 0;
+    for (const auto &actor : fixture.actors())
+      if (actor.slot == 0) fixture_player = fw.target(actor.handle);
+    check(fixture_player != 0, "Full fixture player exists");
+    fw.relink(fixture_pair[1] + TARGET, fixture_player);
+    fw.set_mounted_state(fixture_pair[1], 0x18);
+    check(fw.read(fixture_pair[0] + 0x232, 2) == 0x1f,
+          "mount state 0x18 pushes the fourth rider swing");
+    bool fourth_swing_event = false;
+    for (int i = 0; i < 10; ++i) {
+      frame = fixture.advance(0);
+      check(!frame.failed, "fourth mounted swing completes a ready tick");
+      for (const auto &event : fixture.tick_events())
+        if (event.name == "damage_apply" && event.args.size() >= 2 &&
+            event.args[1] == fixture_pair[0] &&
+            fw.read(fixture_pair[0] + 0x232, 2) == 0x1f)
+          fourth_swing_event = true;
+    }
+    check(fourth_swing_event,
+          "state 0x1f rider hit event fires through the Full fixture");
     std::cout << "mounted fight smoke passed\n";
     return 0;
   } catch (const std::exception &e) {

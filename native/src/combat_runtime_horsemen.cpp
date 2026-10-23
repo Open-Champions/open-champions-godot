@@ -71,6 +71,14 @@ std::array<Address, 2> World::State::spawn_mounted_horseman(
   auto m = place(0x3d8, mount, VT_NIGHTMARE,
                  {{4, NIGHTMARE_RUN}, {5, 0x270b4c}, {10, 0x27142c},
                   {11, 0x271484}, {27, NIGHTMARE_STATE}});
+  // Horsemen_ctor embeds WeaponShield at +0x3d0 and equips both hands.
+  // Its slot 17 supplies the descriptor used by mounted swing states.
+  const Address holder = r + 0x3d0;
+  constexpr Raw holder_table = 0x50cda0;
+  model.init_holder(r, holder, &holder_table);
+  w(r + 0x50, holder);
+  model.holder_call(holder, 1, {iv(1), iv(2 * variant + 0x1b)});
+  model.holder_call(holder, 1, {iv(2), iv(2 * variant + 0x23)});
   w(r + 0x470, 1, variant);
   // The executed Creature_setStats constructor consumes one own-RNG draw
   // before Horsemen_ctor's first cast timer. Fixture stats are supplied above.
