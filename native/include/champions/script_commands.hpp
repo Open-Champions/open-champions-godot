@@ -439,8 +439,8 @@ private:
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,
               std::uint32_t address, const std::vector<std::string> &props);
-  // The Horsemen rider rows (constructor 0x271c70, mounted 1) and the Nightmare row
-  // (0x270968), research docs/spec/horsemen-mount.md sections 1.1 and 2.2.
+  // Mounted and on-foot Horsemen rows (constructor 0x271c70, mounted 1 or 0)
+  // and the Nightmare row (0x270968), horsemen-mount.md sections 1-2.
   Build build_mounted(const level_flow::Record &, const level_factory::Outcome &,
                       std::uint32_t address, const std::vector<std::string> &props);
   // True when the last build_mounted made every shared-seed draw its record owes.

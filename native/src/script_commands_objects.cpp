@@ -62,6 +62,7 @@ constexpr std::uint32_t SNOBADGE_TEST = 0x532a30;
 // rows' name tests give the variant: 0x532cc8, 0x532cd8, 0x532ce8, 0x532cf8 -> 0..3.
 constexpr std::uint32_t HORSEMEN_CTOR = 0x271c70, NIGHTMARE_CTOR = 0x270968;
 constexpr std::uint32_t RIDER_TESTS[] = {0x532cc8, 0x532cd8, 0x532ce8, 0x532cf8};
+constexpr std::uint32_t ON_FOOT_TESTS[] = {0x532dc8, 0x532dd8, 0x532de8, 0x532df8};
 constexpr std::uint32_t MOUNT_BLOCK_SIZE = 0x3d8;
 
 struct Refused : std::runtime_error {
@@ -151,10 +152,12 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
   last_draws_complete_ = false;
-  // Only the four rider rows the research documents (mounted 1) and the Nightmare row. The
-  // other rows that call the same constructor (0x532dc8..0x532df8) are not documented there.
+  // Both sets of Horsemen rows call the same constructor. The factory supplies
+  // the mounted argument; properties always come from the individual record.
   bool rider_row = false;
   for (const auto t : RIDER_TESTS)
+    rider_row = rider_row || outcome.test == t;
+  for (const auto t : ON_FOOT_TESTS)
     rider_row = rider_row || outcome.test == t;
   if ((outcome.constructor() == HORSEMEN_CTOR && rider_row) || outcome.constructor() == NIGHTMARE_CTOR)
     return build_mounted(record, outcome, c, props);
@@ -372,14 +375,14 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   return Build::Built;
 }
 
-// The mounted Horsemen and Nightmare rows, from research t3/research-horsemen-mount
-// 338d459, docs/spec/horsemen-mount.md sections 1-2. The four addressed lists
-// each contain miniboss=1 and a distinct name. One rider record consumes two
-// pool blocks and two shared draws; a placed Nightmare consumes one of each.
+// Horsemen and Nightmare factory rows, from horsemen-mount.md sections 1-2.
+// Mounted riders receive a fixed MiniBoss mount list; on-foot rows consume
+// their own record properties and construct no mount.
 Host::Build Host::build_mounted(const level_flow::Record &record, const level_factory::Outcome &outcome,
                                 std::uint32_t c, const std::vector<std::string> &props) {
   namespace AM = arena_monsters;
   const bool rider = outcome.constructor() == HORSEMEN_CTOR;
+  bool mounted = false;
   if (!external_seed_) {
     counts_.build_refusals["no session seed"] += 1;
     return Build::NotBuilt;
@@ -390,6 +393,10 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     bool known = false;
     for (std::uint32_t k = 0; k < 4; ++k)
       if (outcome.test == RIDER_TESTS[k]) {
+        variant = k;
+        known = true;
+        mounted = true;
+      } else if (outcome.test == ON_FOOT_TESTS[k]) {
         variant = k;
         known = true;
       }
@@ -470,7 +477,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     m.mem.store(self + 0x29, 1, 73);
     m.mem.store(self + 0x44, 4, external_seed_->draw());
     ++draws;
-    if ((rider && draws == 2) || (!rider && draws == 1))
+    if ((mounted && draws == 2) || (!mounted && draws == 1))
       last_draws_complete_ = true;
     return std::int64_t(0);
   };
@@ -565,7 +572,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   const auto facing = static_cast<Raw>(static_cast<std::int32_t>(static_cast<std::int16_t>(record.angle)));
   try {
     if (rider)
-      model.horsemen_ctor(c, type_ptr, record.position, facing, 0, variant, 1);
+      model.horsemen_ctor(c, type_ptr, record.position, facing, 0, variant, mounted ? 1 : 0);
     else
       model.nightmare_ctor(c, type_ptr, record.position, facing, 0);
   } catch (const std::exception &error) {
@@ -581,7 +588,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   }
   // Failed mount allocation leaves an on-foot rider in state 0 (spec 1.1).
   // Keep that partial constructor as a labelled stub; never abort level load.
-  if (rider && !mount_block) {
+  if (mounted && !mount_block) {
     last_draws_complete_ = draws == 1;
     counts_.build_refusals["rider on foot (mount pool exhausted)"] += 1;
     stubs_.insert(objects.at(c)->addr);
