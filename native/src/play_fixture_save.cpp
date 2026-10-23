@@ -20,6 +20,7 @@ enum Op : std::uint8_t {
   ATTACH = 9, DRAW_SLOTS = 10,
   OPEN_GATE = 11, CONFIRM_GATE = 12, REQUEST_LEVEL = 13,
   SPAWN_CREATURE = 14, DROP_POTION = 15, // wave 12, Full only
+  SELECT_DISEASE_BOLT = 16, PRESS_DISEASE_BOLT = 17, RELEASE_DISEASE_BOLT = 18,
 };
 void require(bool ok, const char *what) {
   if (!ok) throw Error(what);
@@ -218,6 +219,15 @@ void CombatScene::set_block(bool held) {
 void CombatScene::cast_holy_strike() {
   record(CAST_HOLY_STRIKE, 0, [&] { session_->cast_holy_strike(); });
 }
+void CombatScene::select_disease_bolt() {
+  record(SELECT_DISEASE_BOLT, 0, [&] { session_->select_disease_bolt(); });
+}
+void CombatScene::press_disease_bolt(bool held) {
+  record(PRESS_DISEASE_BOLT, held, [&] { session_->press_disease_bolt(held); });
+}
+void CombatScene::release_disease_bolt() {
+  record(RELEASE_DISEASE_BOLT, 0, [&] { session_->release_disease_bolt(); });
+}
 void CombatScene::spawn_creature(unsigned own_class) {
   record(SPAWN_CREATURE, own_class, [&] {
     if (own_class >= combat_play::OWN_CLASS_COUNT)
@@ -261,6 +271,11 @@ void CombatScene::apply(const Action &a) {
   case RELEASE_ATTACK: session_->release_attack(); return;
   case SET_BLOCK: valid(a.value <= 1, "journal block value"); session_->set_block(a.value != 0); return;
   case CAST_HOLY_STRIKE: session_->cast_holy_strike(); return;
+  case SELECT_DISEASE_BOLT: session_->select_disease_bolt(); return;
+  case PRESS_DISEASE_BOLT:
+    valid(a.value <= 1, "journal spell press value");
+    session_->press_disease_bolt(a.value != 0); return;
+  case RELEASE_DISEASE_BOLT: session_->release_disease_bolt(); return;
   case SPAWN_CREATURE:
     valid(a.value < combat_play::OWN_CLASS_COUNT, "journal creature class");
     session_->spawn_creature(combat_play::OWN_CLASSES[a.value]);

@@ -250,6 +250,9 @@ public:
   Address spawn_missile(Address owner, const Missile &);
   Address spawn_thrown(Address owner, const Thrown &);
   Address give_skill(int skill_id, const SkillSetup &);
+  // Opt-in authored Full-fixture record for the reviewed rank-1 spell. The
+  // caller supplies current and maximum mana; no character value is inferred.
+  void select_disease_bolt(unsigned slot, Raw mana, Raw max_mana);
   // The cast is made where Player_run state 5 would call Player_castSkill:
   // a player's before its tick tail, a creature's at the end of its run.
   void queue_cast(Address caster, int skill_id, int level = 1,

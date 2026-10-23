@@ -511,6 +511,9 @@ private:
   void mirror_hud();
   Cell *target_cell(std::uint32_t creature, bool create);
 
+  // Linked target cells must outlive Variables teardown, which unregisters
+  // external objects and unlinks their paired handle nodes.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
   std::unique_ptr<script_items::Service> items_;
@@ -525,8 +528,6 @@ private:
   std::deque<strings::Units> formatted_;
   std::optional<std::uint8_t> chime_group_;
   std::uint64_t ui_pulse_starts_ = 0;
-  // Host-owned handle cells for creature +0x234 words linked by link_target.
-  std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;

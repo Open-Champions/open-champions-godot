@@ -169,6 +169,43 @@ func continuation_cases() -> void:
 	print("FULL_TRACE ", JSON.stringify({"sha256": full_trace_drawn.sha256_text(), "bytes": full_trace_drawn.length(), "renderer": DisplayServer.get_name()}))
 	check(fx.refusals.is_empty() or not "game camera refused" in fx.refusals, "game camera derived from the scene camera")
 	print("PLAYABLE_FULL_COMBAT_RESULT ", JSON.stringify({"effects": scene.raw_observation.effects, "refusals": fx.refusals, "runs": fx.last_runs}))
+	# Separate opt-in spell fixture after FULL_TRACE, so the established trace
+	# continues to measure its original scenario without a spell selection.
+	start_full()
+	check(scene.actions.combat_spell_select.visible and scene.actions.combat_spell_cast.disabled,
+		"Full fixture shows spell selection before casting")
+	scene.actions.combat_spell_select.pressed.emit()
+	check(scene.raw_observation.get("combat_spell_selected", false) and not scene.actions.combat_spell_cast.disabled,
+		"spell button selects Disease Bolt in the live scene: %s / %s / %s" % [scene.raw_observation.get("combat_spell_selected", false), scene.actions.combat_spell_cast.disabled, scene.status_label.text])
+	var spell_save := directory.path_join("full-spell-selected.ocplay")
+	check(scene.save_session_file(spell_save), "selected spell fixture continuation saves")
+	check(scene.load_session_file(spell_save), "selected spell fixture continuation loads")
+	scene.resume_session()
+	check(scene.raw_observation.get("combat_spell_selected", false) and not scene.actions.combat_spell_cast.disabled,
+		"selected spell and cast control survive fixture continuation")
+	if not output.is_empty(): await capture("full-spell-selected")
+	var mana_before: float = scene.raw_observation.combat_mana
+	var hp_before: float = actor(1).hp
+	step() # lockstep's initial no-ready submission
+	key(KEY_U, true)
+	key(KEY_U, false) # ordinary kind-0 request survives release before animation fires
+	var bolt_spawned := false
+	var bolt_hit := false
+	for i in range(50):
+		step()
+		bolt_spawned = bolt_spawned or tick_has("diseasebolt_spawn")
+		bolt_hit = bolt_hit or tick_has("diseasebolt_hit")
+		if tick_has("diseasebolt_spawn"):
+			check(scene.raw_observation.combat_mana < mana_before, "cast spends mana after animation admission")
+		if bolt_hit: break
+	check(bolt_spawned and bolt_hit and actor(1).hp < hp_before,
+		"scene input spawns Disease Bolt and damages a Full-fixture enemy")
+	check(scene.stopped and "unverified destructor" in scene.status_label.text,
+		"projectile expiry stops the fixture with its explicit research refusal")
+	print("PLAY_SPELLS_SCENE ", JSON.stringify({"selected": true, "spawned": bolt_spawned,
+		"hit": bolt_hit, "mana_spent": scene.raw_observation.combat_mana < mana_before,
+		"fixture_hp_lost": actor(1).hp < hp_before}))
+	if not output.is_empty(): await capture("full-spell-hit")
 
 	scene.full_choice.button_pressed = false
 	scene.combat_choice.button_pressed = false

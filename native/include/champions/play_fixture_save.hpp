@@ -81,6 +81,9 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike();
+  void select_disease_bolt();
+  void press_disease_bolt(bool held);
+  void release_disease_bolt();
   // Wave-12 Full-fixture extensions (combat_play::Session).
   void spawn_creature(unsigned own_class); // index into combat_play::OWN_CLASSES
   void drop_potion(unsigned kind);

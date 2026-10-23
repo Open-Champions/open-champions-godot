@@ -78,6 +78,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("combat_release_attack"), &ChampionsSessionController::combat_release_attack);
   ClassDB::bind_method(D_METHOD("combat_block", "held"), &ChampionsSessionController::combat_block);
   ClassDB::bind_method(D_METHOD("combat_cast_holy_strike"), &ChampionsSessionController::combat_cast_holy_strike);
+  ClassDB::bind_method(D_METHOD("combat_select_disease_bolt"), &ChampionsSessionController::combat_select_disease_bolt);
+  ClassDB::bind_method(D_METHOD("combat_press_disease_bolt", "held"), &ChampionsSessionController::combat_press_disease_bolt, DEFVAL(true));
+  ClassDB::bind_method(D_METHOD("combat_release_disease_bolt"), &ChampionsSessionController::combat_release_disease_bolt);
   ClassDB::bind_method(D_METHOD("combat_spawn_creature", "own_class"), &ChampionsSessionController::combat_spawn_creature);
   ClassDB::bind_method(D_METHOD("combat_drop_potion", "kind"), &ChampionsSessionController::combat_drop_potion);
   ClassDB::bind_static_method("ChampionsSessionController", D_METHOD("own_creature_classes"), &ChampionsSessionController::own_creature_classes);
@@ -2129,6 +2132,12 @@ Dictionary ChampionsSessionController::combat_observation() const {
   out["combat_actors"] = actors;
   if (combat_->full()) {
     out["combat_sim_frame"] = int64_t(combat_->world().read(rta::combat_runtime::FRAME));
+    const auto rec = rta::combat_runtime::PLAYERS;
+    out["combat_spell_selected"] = combat_->world().read(rec + 0x4440 + 0x20, 2) == 4;
+    out["combat_mana_raw"] = int64_t(combat_->world().read(rec + 0xc0));
+    out["combat_max_mana_raw"] = int64_t(combat_->world().read(rec + 0xc4));
+    out["combat_mana"] = display_float(rta::Raw(combat_->world().read(rec + 0xc0)));
+    out["combat_max_mana"] = display_float(rta::Raw(combat_->world().read(rec + 0xc4)));
     out["effect_constants"] = fx_constants_source_;
     if (const auto *fx_sim = effects()) {
       const auto &c = fx_sim->counts();
@@ -2207,6 +2216,27 @@ Dictionary ChampionsSessionController::combat_cast_holy_strike() {
   try {
     if (!combat_ || !combat_->full()) throw std::runtime_error("Holy Strike needs the Full combat fixture.");
     combat_->cast_holy_strike();
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_select_disease_bolt() {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt selection needs the Full combat fixture.");
+    combat_->select_disease_bolt();
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_press_disease_bolt(bool held) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt input needs the Full combat fixture.");
+    combat_->press_disease_bolt(held);
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_release_disease_bolt() {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt input needs the Full combat fixture.");
+    combat_->release_disease_bolt();
     return observation();
   } catch (const std::exception &e) { return failure(e); }
 }

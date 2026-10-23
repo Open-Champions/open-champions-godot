@@ -139,7 +139,7 @@ func _build_flow() -> void:
 	animated_choice.text = "Animated fixture: Agony dispatch + synthetic combat carriers (90 ticks)"
 	menu.add_child(animated_choice)
 	full_choice = CheckButton.new()
-	full_choice.text = "Full combat fixture: stick walk, attack / combo, block, Holy Strike (native effects every tick)"
+	full_choice.text = "Full combat fixture: J attack, K block, L Holy Strike, U Disease Bolt"
 	menu.add_child(full_choice)
 	animated_choice.toggled.connect(func(on):
 		if on:
@@ -191,7 +191,7 @@ func _build_flow() -> void:
 			var result: Dictionary = controller.combat_hit_event(0, 1)
 			if not result.get("ok", false): status_label.text = str(result.get("error")))
 	bar.add_child(actions.combat_hit)
-	# Full fixture pad buttons (keys J / K held / L). Masks are the client's
+	# Full fixture pad buttons (keys J / K held / L / U). Masks are the client's
 	# controller mapping; the executed Player_run decides swings and blocks.
 	actions["combat_attack"] = _button("Attack (J)", func(): pass)
 	actions.combat_attack.button_down.connect(func(): _combat_call("combat_attack", [true]))
@@ -203,6 +203,12 @@ func _build_flow() -> void:
 	bar.add_child(actions.combat_block)
 	actions["combat_cast"] = _button("Holy Strike (L)", func(): _combat_call("combat_cast_holy_strike", []))
 	bar.add_child(actions.combat_cast)
+	actions["combat_spell_select"] = _button("Select Disease Bolt", _select_disease_bolt)
+	bar.add_child(actions.combat_spell_select)
+	actions["combat_spell_cast"] = _button("Cast Disease Bolt (U)", func(): pass)
+	actions.combat_spell_cast.button_down.connect(func(): _combat_call("combat_press_disease_bolt", [true]))
+	actions.combat_spell_cast.button_up.connect(func(): _combat_call("combat_release_disease_bolt", []))
+	bar.add_child(actions.combat_spell_cast)
 	# Wave 12: authored Full-fixture set-up that reaches merged executed bodies:
 	# one own-machine creature (creature-ai) at (0, 80), thrown potions 1..3
 	# at the player (combat-runtime-4). Placement is the fixture's, not spawn data.
@@ -298,9 +304,12 @@ func _update_menu() -> void:
 	var full: bool = combat and raw_observation.get("full_enabled", false)
 	actions.combat_hit.visible = combat and not full
 	actions.combat_hit.disabled = stopped or paused or raw_observation.get("animated_enabled", false)
-	for id in ["combat_attack", "combat_block", "combat_cast", "combat_potion_1", "combat_potion_2", "combat_potion_3"]:
+	for id in ["combat_attack", "combat_block", "combat_cast", "combat_spell_select", "combat_spell_cast", "combat_potion_1", "combat_potion_2", "combat_potion_3"]:
 		actions[id].visible = full
 		actions[id].disabled = stopped or paused
+	if full:
+		actions.combat_spell_select.disabled = stopped or paused or raw_observation.get("combat_spell_selected", false)
+		actions.combat_spell_cast.disabled = stopped or paused or not raw_observation.get("combat_spell_selected", false)
 	if creature_choice != null:
 		creature_choice.visible = full
 		var spawned := false
@@ -314,7 +323,7 @@ func _update_menu() -> void:
 	if raw_observation.get("animated_enabled", false):
 		mode_label.text = "Animated fixture · real Agony dispatch / player idle; authored meshes and combat carriers. No player action timing or saves."
 	if full:
-		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike. Synthetic clips, services and effect constants; fixture continuation saves (with the effect world)."
+		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike, U selected Disease Bolt. Synthetic clips, services and effect constants; fixture continuation saves (with the effect world)."
 	if not mode_known:
 		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
 	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known
@@ -408,12 +417,16 @@ func _dialog_cancelled() -> void:
 	status_label.text = "Selection cancelled. Current session retained; use Resume when ready."
 	_show_menu(flow)
 
-const FULL_KEYS := {KEY_J: "attack", KEY_K: "block", KEY_L: "cast"}
+const FULL_KEYS := {KEY_J: "attack", KEY_K: "block", KEY_L: "cast", KEY_U: "disease_bolt"}
 
 func _combat_call(method: String, arguments: Array) -> void:
 	if controller == null or paused or stopped: return
 	var result: Dictionary = controller.callv(method, arguments)
 	if not result.get("ok", false): status_label.text = str(result.get("error", method + " refused"))
+
+func _select_disease_bolt() -> void:
+	if controller == null or paused or stopped: return
+	_observe(controller.combat_select_disease_bolt())
 
 func _full_key(event: InputEvent) -> bool:
 	if not event is InputEventKey or event.echo or not raw_observation.get("full_enabled", false): return false
@@ -425,6 +438,7 @@ func _full_key(event: InputEvent) -> bool:
 		"block": _combat_call("combat_block", [event.pressed])
 		"cast":
 			if event.pressed: _combat_call("combat_cast_holy_strike", [])
+		"disease_bolt": _combat_call("combat_press_disease_bolt" if event.pressed else "combat_release_disease_bolt", [true] if event.pressed else [])
 	return true
 
 func handle_input_event(event: InputEvent) -> bool:
@@ -502,7 +516,9 @@ func _observe(result: Dictionary) -> void:
 	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
 		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
 		if raw_observation.get("full_enabled", false):
-			status_label.text = "Full combat · tick %d · HP %.1f · WASD walk · J attack · K block · L Holy Strike · Esc pauses" % [int(raw_observation.get("ready_ticks", 0)), float(raw_observation.get("hp", 0.0))]
+			status_label.text = "Full combat · tick %d · HP %.1f · WASD walk · J attack · K block · L Holy Strike · U Disease Bolt · Esc pauses" % [int(raw_observation.get("ready_ticks", 0)), float(raw_observation.get("hp", 0.0))]
+			if raw_observation.get("combat_spell_selected", false):
+				status_label.text += " · Mana %.2f / %.2f" % [raw_observation.get("combat_mana", 0.0), raw_observation.get("combat_max_mana", 0.0)]
 	if raw_observation.get("animated_enabled", false):
 		status_label.text = "Agony animation hit timing · tick %s / 90 · synthetic audio cues" % raw_observation.get("ready_ticks", 0)
 	if components.has("animation"):
@@ -859,6 +875,8 @@ func _present_combat() -> void:
 		combat_displays[slot].visible = slot in visible_slots and not (slot == 0 and cosmetic_active)
 	actor_visual.visible = not cosmetic_active and not raw_observation.get("animated_enabled", false)
 	combat_status.text = "Authored actor markers · " + " | ".join(labels) if not rows.is_empty() else ""
+	if raw_observation.get("full_enabled", false) and raw_observation.get("combat_spell_selected", false):
+		combat_status.text += " · Disease Bolt selected · mana %.2f / %.2f" % [raw_observation.get("combat_mana", 0.0), raw_observation.get("combat_max_mana", 0.0)]
 	combat_status.visible = not rows.is_empty()
 
 func _present_level() -> void:
