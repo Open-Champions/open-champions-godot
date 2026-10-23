@@ -366,8 +366,9 @@ func run() -> void:
 	for actor in actors_before:
 		if int(actor.get("slot", 0)) > 0 and actor.get("present", false) and not actor.get("dead", false):
 			var enemy_hp := float(actor.get("hp", -1.0))
-			enemy_hp_before[int(actor.slot)] = enemy_hp
-			enemy_hp_before_total += enemy_hp
+			if int(actor.get("handle", 0)) > 0 and enemy_hp > 0.0:
+				enemy_hp_before[int(actor.handle)] = enemy_hp
+				enemy_hp_before_total += enemy_hp
 	var attack_handled := false
 	# Exercise pressed edges throughout the fight window. A single tap cannot
 	# establish damage, a death, or a drop in the live session.
@@ -390,19 +391,27 @@ func run() -> void:
 	var enemy_died := false
 	var enemy_hp_after_total := 0.0
 	var live_enemies_after := 0
-	var enemy_slots_after := {}
+	var matched_enemies := 0
+	var unmatched_enemies := 0
 	for actor in actors_after:
 		var slot := int(actor.get("slot", 0))
-		enemy_slots_after[slot] = true
 		if slot > 0 and actor.get("present", false) and not actor.get("dead", false):
 			live_enemies_after += 1
-		if enemy_hp_before.has(slot):
+		if enemy_hp_before.has(int(actor.get("handle", 0))):
 			var enemy_hp := float(actor.get("hp", -1.0))
-			enemy_hp_after_total += enemy_hp
-			enemy_damaged = enemy_damaged or enemy_hp < float(enemy_hp_before[slot])
-			enemy_died = enemy_died or actor.get("dead", false) or not actor.get("present", true)
-	for slot in enemy_hp_before:
-		enemy_died = enemy_died or not enemy_slots_after.has(slot)
+			if actor.has("hp"):
+				matched_enemies += 1
+				enemy_hp_after_total += enemy_hp
+				enemy_damaged = enemy_damaged or enemy_hp < float(enemy_hp_before[int(actor.handle)])
+				# Round 8 observed this same actor crossing zero, then its
+				# next-frame death and drop calls. A missing actor is no kill witness.
+				enemy_died = enemy_died or (enemy_hp <= 0.0 and
+					bool(actor.get("death_drop_observed", false)))
+			else:
+				unmatched_enemies += 1
+		elif slot > 0:
+			unmatched_enemies += 1
+	unmatched_enemies += maxi(0, enemy_hp_before.size() - matched_enemies)
 	var drops_before := int(before.get("combat_drops", 0))
 	var drops_after := int(after.get("combat_drops", 0))
 	var gold_after := int(after.get("gold", -1))
@@ -429,7 +438,8 @@ func run() -> void:
 		"live_enemies_after": live_enemies_after,
 		"enemy_hp_before_total": enemy_hp_before_total,
 		"enemy_hp_after_total": enemy_hp_after_total,
-		"enemy_hp_change_total": enemy_hp_after_total - enemy_hp_before_total,
+		"matched_enemy_hp_after_total": enemy_hp_after_total,
+		"matched_enemies": matched_enemies, "unmatched_enemies": unmatched_enemies,
 		"scene_paused": scene.paused, "frontend_screen": fe.screen(),
 		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
 		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
