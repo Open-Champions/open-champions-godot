@@ -11,11 +11,15 @@
 #include "champions/player_state.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/world_geometry.hpp"
+#include "champions/player_services.hpp"
+#include "champions/real_world.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <array>
 #include <godot_cpp/variant/array.hpp>
 #include <cstdint>
@@ -54,6 +58,9 @@ class ChampionsSessionController : public godot::RefCounted {
     return combat_ ? combat_->effects() : nullptr;
   }
   std::unique_ptr<champions::simulation::rta::fixture_save::LevelScene> level_;
+  std::unique_ptr<champions::simulation::rta::world_queries::Level> player_service_level_;
+  std::unique_ptr<champions::real_world::WaterImage> player_water_image_;
+  std::unique_ptr<champions::simulation::rta::player_services::Bundle> player_services_;
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
@@ -263,6 +270,12 @@ public:
   godot::Dictionary save_snapshot_file(const godot::String &path);
   godot::Dictionary prepare_save_file(const godot::String &path, bool reuse_loaded_level = false);
   godot::Dictionary load_terrain_file(const godot::String &path);
+  void set_player_camera(int64_t slot, int64_t yaw, const godot::Variant &flag,
+                         const godot::Vector3 &position,
+                         const godot::PackedVector3Array &side_normals);
+  champions::simulation::rta::player_services::Bundle *player_services() noexcept {
+    return player_services_.get();
+  }
   godot::Dictionary prepare_terrain_file(const godot::String &path, bool build_display = true);
   // Level-spawn story start for the next terrain prepared from exactly `path`:
   // that level's objects.ob bytes (level_flow::story_start_ground). Empty

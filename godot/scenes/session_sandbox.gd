@@ -110,6 +110,32 @@ func _apply_presentation() -> void:
 	# Camera motion is display-only and follows the interpolated actor.
 	camera.position = actor.position + Vector3(56, 70, 80)
 	camera.look_at(actor.position + Vector3(0, 3, 0), Vector3.UP)
+	_capture_player_camera()
+
+func _native_camera_vector(v: Vector3) -> Vector3:
+	return Vector3(v.x, -v.z, v.y)
+
+func _capture_player_camera() -> void:
+	# The camera and viewport are host presentation state. The native bundle
+	# flattens these four actual side planes at each queried player's height.
+	if controller == null or camera == null:
+		return
+	var forward := -camera.global_transform.basis.z.normalized()
+	var inside := camera.global_position + forward * 10.0
+	var sides := PackedVector3Array()
+	for plane in camera.get_frustum():
+		var normal: Vector3 = plane.normal
+		if absf(normal.dot(forward)) > 0.99:
+			continue
+		if plane.distance_to(inside) < 0.0:
+			normal = -normal
+		sides.push_back(_native_camera_vector(normal))
+	if sides.size() != 4:
+		return
+	var native_forward := _native_camera_vector(forward)
+	var yaw := roundi(atan2(native_forward.y, native_forward.x) * 65536.0 / TAU) & 0xffff
+	# Camera3D has no source for the original live follow mode.
+	controller.set_player_camera(0, yaw, null, _native_camera_vector(camera.global_position), sides)
 
 func _input(event: InputEvent) -> void:
 	if handle_input_event(event):
