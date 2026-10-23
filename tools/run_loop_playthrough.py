@@ -5,7 +5,7 @@ Example:
   python3 tools/run_loop_playthrough.py --godot /path/to/Godot \
       --game-folder /path/to/read-only/rta-disc
 
-Outputs stay under ignored work/play-exits/playthrough. The game folder is only read.
+Outputs stay under ignored work/playthrough. The game folder is only read.
 """
 
 import argparse
@@ -26,7 +26,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--godot", type=pathlib.Path, required=True)
     parser.add_argument("--game-folder", type=pathlib.Path, required=True)
-    parser.add_argument("--out", type=pathlib.Path, default=ROOT / "work/play-exits/playthrough")
+    parser.add_argument("--out", type=pathlib.Path, default=ROOT / "work/playthrough")
     args = parser.parse_args()
     godot = args.godot.resolve(strict=True)
     disc = args.game_folder.resolve(strict=True)

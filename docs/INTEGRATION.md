@@ -3632,3 +3632,58 @@ at **31,622 bytes**. A refused command still stops its script. The one
 process mixer, per-run user folders, and the Full fight's Skeleton exclusion
 remain intact. The [wave-23 report](../work/loop-playable-integration-r23-report.md)
 records the full native, export and real-data smoke results.
+
+## Playable integration wave 24 — combat constructors, player state, wading and dialog gaps — 2026-10-22
+
+From wave 23 `c86c539`, this wave merges only `codex/combat-ctors`
+`08dbc72` (`0c59778`), `codex/player-state` `010eba3` (`274e1d5`),
+`codex/wading` `94446c4` (`c67feef`) and `codex/dialog-gaps`
+`fcfc7ac` (`2e57376`). The combat test conflict retains both sets of
+tests. The player-state controller conflict retains wave 23's music and
+fade carry as well as the new player binding; the script-command test keeps
+the researched initial fade behavior. No other branch was merged.
+
+The arm64 Release CTest passes **231/231**. Four universal macOS extension
+builds pass, and the Godot dev matrix passes **54/54**. Dev Full headless
+passes **2,620 checks** with zero failures, with **FULL_TRACE
+`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**
+at **36,402 bytes**. Relative to wave 23's `4da57055…78d9`, the Full
+fixture now places a Skeleton in slot 5 beside the already-present
+AntQueen in slot 4. The Skeleton's constructor and equipped-holder draws
+advance the shared seed, later rolls shift, and each trace line includes
+another actor pair. This is the authored fixture consequence documented in
+[COMBAT_RUNTIME.md](COMBAT_RUNTIME.md), not an original-game placement
+claim. The other three merges do not change this Full trace.
+
+The first full native x86_64 CTest under Rosetta passed **228/231** while
+the machine was heavily loaded; three timeout-only cases were retained as
+failures in that log. With the original CTest definitions restored, those
+three pass **3/3** on a serial rerun under lower load. Every x86_64 case
+therefore has a passing execution; the initial timeouts and the Mac restart
+during an intermediate timeout-only attempt remain in the wave-24 report.
+
+Both read-only 111-level sweeps still try, load and play **111/111**, with
+**230 checks** each, zero failures and no refusals. `codex/wading` adds
+`water.wading_refused` **2,832** in both sweeps because the default scene
+does not invent missing input and frame services. `codex/dialog-gaps` adds
+`dialog.camera_steps` **126** and `dialog.camera_views` **1** in the
+scripted sweep. All other deterministic counts match wave 23; runtime and
+drawn-frame variations are listed in [REAL_DATA.md](REAL_DATA.md).
+
+The universal macOS export is `build/exports/wave24/OpenChampions.zip`:
+**8** members, no game-data members or private-path markers; its app and
+both extension libraries contain `x86_64 arm64`. The exported app's
+read-only 60-tick smoke passes **12/12** levels without scripts,
+**12/12** with scripts and **3/3** arena levels, with zero failures and
+empty refusal lists. The [wave-24 report](../work/loop-playable-integration-r24-report.md)
+records the Rosetta and export-matrix results, including any isolated
+retries.
+
+The exported matrix has a passing run for all **22** entries. Full headless
+and 960×720 rendered pass in the matrix; the 800×600 rendered entry passes
+on its isolated rerun. The 1280×720 rendered **36,000-tick** run passes
+on its third attempt with **108,826 checks**, zero failures, and the same
+`FULL_TRACE`; an additional headless 36,000-tick run passes **108,700**
+checks. The initial rendered 36,000-tick attempt stalled and the next
+reached the endpoint but failed three subsequent Full checks; those
+failed attempts remain recorded in the report.

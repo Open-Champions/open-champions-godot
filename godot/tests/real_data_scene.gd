@@ -139,6 +139,8 @@ func run() -> void:
 		add("fx.full_fixture_available" if scene.play_capabilities.get("full_fixture_available", false) else "fx.full_fixture_unavailable")
 	add("hud.play_art_loaded", int(scene.hud_art_counts.get("loaded", 0)))
 	add("hud.play_art_refused", int(scene.hud_art_counts.get("refused", 0)) + int(scene.hud_art_counts.get("missing", 0)))
+	add("hud.extras_green_loaded", int(scene.hud_extras_counts.get("loaded", 0)))
+	add("hud.extras_green_refused", int(scene.hud_extras_counts.get("refused", 0)))
 	add("hud.play_font_loaded" if scene.hud_font_loaded else "hud.play_font_missing")
 	await hud_art()
 	var wanted := int(args.get("levels", "3"))
@@ -461,10 +463,13 @@ func take_script_counts() -> void:
 	add("scripts.callee_refusals", int(counts.get("callee_refusals", 0)))
 
 	for key in ["objects_built", "objects_unbuilt", "objects_not_created", "objects_pool_refused",
-			"objects_unclassified", "load_draws_unmodelled"]:
+			"objects_unclassified", "load_draws_unmodelled",
+			"item_load_gate_refusals", "item_load_draws_inferred"]:
 		add("scripts." + key, int(counts.get(key, 0)))
 	var refusals: Dictionary = counts.get("build_refusals", {})
 	for reason in refusals: add("scripts.build_refused." + str(reason), int(refusals[reason]))
+	var stub_reasons: Dictionary = counts.get("stub_refusal_reasons", {})
+	for reason in stub_reasons: add("scripts.stub_refusal." + str(reason), int(stub_reasons[reason]))
 	if counts.get("seed_bound", false): add("scripts.seed_bound")
 	if counts.get("seed_paired", false): add("scripts.seed_paired")
 	if counts.get("seed_unpaired", false): add("scripts.seed_unpaired")

@@ -184,6 +184,10 @@ World build(const Vectors &v, const Case &c, const std::shared_ptr<champions::si
                            "vars_get", "text_lookup", "player_countPotions", "player_recalcStats",
                            "player_resetIdleAnim", "vars_set", "hud_showHelpMessage", "inventory_selectIdleAnim",
                            "inventory_equipItem", "ItemProp_ctor2"}) {
+    // givePlayerRandom's vectors run the ground item itself (one shared and one
+    // own draw, the block bytes), so it is not delegated there.
+    if (c.kind == "givePlayerRandom" && std::string(name) == "ItemProp_ctor2")
+      continue;
     std::uint64_t answer = 0;
     const auto found = c.answers.find(name);
     if (found != c.answers.end())
@@ -560,7 +564,8 @@ void synthetic_tests() {
     check(host.counts().refused[index_of("givePlayerItem")] == 1, "a give with no item tables refuses");
     check(!host.stopped_on_refusal(), "an unused refused answer does not stop the entry");
   }
-  // Service defaults: a ground item, a bad equip address and missing complements refuse.
+  // Service defaults: a ground item without resource and bounds services,
+  // a bad equip address and missing complements refuse.
   {
     auto memory = std::make_shared<b::Memory>();
     b::Variables v(memory);
@@ -571,7 +576,14 @@ void synthetic_tests() {
     } catch (const si::Refused &) {
       refused = true;
     }
-    check(refused, "pool_new refuses: ItemProp_ctor2's draw is open");
+    check(refused, "ground item refuses before pool allocation");
+    refused = false;
+    try {
+      s.call("ItemProp_ctor2", {0x01300000u, std::array<std::uint32_t, 3>{0, 0, 0}});
+    } catch (const si::Refused &) {
+      refused = true;
+    }
+    check(refused, "ground item refuses without resource and bounds services");
     refused = false;
     try {
       s.call("inventory_equipItem", {0u, si::bag_entry(0, 0, -1), 0u});
@@ -603,10 +615,13 @@ void synthetic_tests() {
     mem.word(r1 + si::P_CLASS, 3);
     mem.w64(si::G_CLASS_SKILLS + 2 * si::CLASS_SKILLS_SIZE + 4 * si::CLASS_SKILL_ROW, si::PASSIVE_LOAD);
     mem.byte(r0 + si::P_PASSIVES + 4, 2);              // slot 0's level: 2
-    mem.word(si::G_LOAD_BONUS, 1);
+    mem.word(si::G_LOAD_BONUS, 1); // no writer exists: the walk must not read it
     si::recalc_load_limits(v);
     check(mem.word(r0 + si::P_LOAD_LIMIT) == 0x12345678, "a record with no object keeps its limit");
-    check(mem.word(r1 + si::P_LOAD_LIMIT) == si::load_limit(46, 2, 1), "the passive is the object's slot's");
+    check(mem.word(r1 + si::P_LOAD_LIMIT) == si::load_limit(46, 2, 0),
+          "the passive is the object's slot's, and the bonus word is the constant 0");
+    check(si::LOAD_BONUS_VALUE == 0 && si::load_limit(46, 2, 1) != si::load_limit(46, 2, 0),
+          "the bonus branch is kept for parity but never taken");
     check(si::load_limit(46, 0, 0) == 0x432b0000, "171.0");
     check(si::load_limit(9000, 0, 1) == si::F_9999, "+5000 then the 9999 cap");
   }
@@ -709,6 +724,20 @@ int main(int argc, char **argv) {
     check(index == std::stoi(f[2]) && asked == f[3], "cm1 scan order and index");
   }
   synthetic_tests();
+  if (argc > 3) {
+    // The former random-giver vector set remains a research artifact, not a
+    // claim that the native handler can execute an unknown stack record.
+    auto memory = std::make_shared<b::Memory>();
+    b::Variables variables(memory);
+    si::Service service(variables);
+    bool refused = false;
+    try {
+      service.call("level_monsterLevelTimesDifficulty", {});
+    } catch (const si::Refused &) {
+      refused = true;
+    }
+    check(refused && service.record()[0] == 0, "random giver refuses before record mutation");
+  }
   for (const auto &entry : ran)
     std::cout << entry.first << ' ' << entry.second << '\n';
   std::cout << "checks " << checks << " failures " << failures << '\n';

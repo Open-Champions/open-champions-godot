@@ -257,11 +257,14 @@ void World::State::missile_arrow_run(Address self, std::int32_t kind) {
       return;
     Raw c0 = kind12 ? F_LIGHT_A : 0, c1 = F_LIGHT_B,
         c2 = kind12 ? 0 : F_LIGHT_A, c3 = F_LIGHT_C;
+    // research-combat-ctors-3 combat-round3.md:111-119 pins these colours and
+    // stack floats. This missile call's follow and tag arguments were not
+    // executed there; zero is inferred from the prior World path and the
+    // zero-initialized block. arrow-hit.md:3 pins zero only for Explode.
     note("LightEffect_ctor", {block, pos[0], pos[1], pos[2], c0, c1, c2, c3, 0,
                               0, 0, 0, F_LIGHT_D, F_LIGHT_E, ONE, ONE});
-    // Life is the twelfth float, ONE. Colours stay on the call; the simulation
-    // part does not store them.
-    light_effect_ctor(block, pos, 0, ONE);
+    combat_ctors::light_effect_ctor(model,block,pos,0,0,
+        {c0,c1,c2,c3,0,0,0,0,F_LIGHT_D,F_LIGHT_E,ONE,ONE});
   };
   if (res) {
     Raw sample = kind == 5 ? S_KIND5_IMPACT

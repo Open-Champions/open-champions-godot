@@ -1,0 +1,18 @@
+{
+  "research_commit": "ecf9742",
+  "policy": "rta-creature-class-v1",
+  "files": {
+    "docs/spec/hide-monster.md": "ae368ab5c9c772ee4b6f3d5624f111ea41b00836030bfbb467adfad12ec15736",
+    "docs/spec/items-gaps.md": "45be1683799b972d49ca1e30c1d30c28eba9c979c37c8f924a23dabf0c2179cd",
+    "tools/objects_census.py": "ac56ba5eaa03ab1c638c281abeebb1f0d3260d75a8cba7c74eff992fb1d44a38",
+    "tools/ref_hide_monster.py": "3958c4d5495f6bcccce9e810dbe246f6a3c16ed39ef666e60ae9e7fd87619c35",
+    "tools/ee_emu.py": "e41dde52442978a6bf24e4dcce5f2ace5cd62d861a54d4da5f4173102360ffdc"
+  },
+  "rows": 201,
+  "counts": {
+    "creature": 97,
+    "non-creature": 100,
+    "unknown": 4,
+    "skipped": 5
+  }
+}

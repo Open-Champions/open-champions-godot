@@ -86,6 +86,107 @@ func capture(label: String) -> void:
 	else:
 		refusal(label, "screenshot write failed")
 
+func capture_player_view(label: String) -> void:
+	if DisplayServer.get_name() == "headless": return
+	for i in range(2): await process_frame
+	RenderingServer.force_draw()
+	var image: Image = scene.viewport.get_texture().get_image()
+	if image == null or image.is_empty() or image.save_png(out_dir.path_join(label + ".png")) != OK:
+		refusal(label, "player viewport capture failed")
+	else:
+		screenshots += 1
+
+# Compare two rendered viewport captures with the dialog view shown and hidden.
+# The box bounds come from docs/DIALOG.md; a nonzero count proves that its
+# pixels, rather than only native draw calls or a decoded texture, reached play.
+func dialog_box_pixels() -> int:
+	RenderingServer.force_draw()
+	var shown: Image = scene.viewport.get_texture().get_image()
+	scene.npc_dialog.hide()
+	await process_frame
+	RenderingServer.force_draw()
+	var hidden: Image = scene.viewport.get_texture().get_image()
+	scene.npc_dialog.show()
+	await process_frame
+	if shown == null or hidden == null or shown.is_empty() or hidden.is_empty(): return 0
+	var size: Vector2 = scene.npc_dialog.size
+	var factor := minf(size.x / 640.0, size.y / 448.0)
+	var origin := Vector2((size.x - 640.0 * factor) * 0.5, (size.y - 448.0 * factor) * 0.5)
+	var box := Rect2i(Vector2i(origin + Vector2(35, 280) * factor), Vector2i(Vector2(560, 156) * factor))
+	var bounds := box.intersection(Rect2i(Vector2i.ZERO, shown.get_size()))
+	var changed := 0
+	for y in range(bounds.position.y, bounds.end.y, 3):
+		for x in range(bounds.position.x, bounds.end.x, 3):
+			if shown.get_pixel(x, y) != hidden.get_pixel(x, y): changed += 1
+	return changed
+
+# The level screenshot is paired with an actor-hidden viewport capture. The
+# count checks that the inspected mesh actually contributed visible pixels.
+func player_actor_pixels() -> int:
+	RenderingServer.force_draw()
+	var shown: Image = scene.viewport.get_texture().get_image()
+	scene.actor_visual.hide()
+	await process_frame
+	RenderingServer.force_draw()
+	var hidden: Image = scene.viewport.get_texture().get_image()
+	scene.actor_visual.show()
+	await process_frame
+	if shown == null or hidden == null or shown.is_empty() or hidden.is_empty(): return 0
+	var changed := 0
+	for y in range(0, shown.get_height(), 3):
+		for x in range(0, shown.get_width(), 3):
+			if shown.get_pixel(x, y) != hidden.get_pixel(x, y): changed += 1
+	return changed
+
+# Explicit diagnostic samples from the selected model's animation lump. The
+# level session does not yet expose weapon class, so row 0 is a stated test
+# input, never an inferred equipped class or automatic action transition.
+func player_pose_pixels() -> Dictionary:
+	if scene.real_player == null or not scene.real_player.body_drawn:
+		return {"ok": false, "error": "class body unavailable"}
+	var idle: Dictionary = scene.real_player.draw_selected_pose(0, 0, 1.0)
+	if not idle.get("ok", false): return idle
+	var idle_mesh: Mesh = scene.actor_visual.mesh
+	scene.asset_label.text = "Explicit class-0 idle clip sample · diagnostic pose"
+	await capture("03-player-idle")
+	await capture_player_view("03-player-idle-view")
+	var idle_image: Image
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.force_draw()
+		idle_image = scene.viewport.get_texture().get_image()
+	var walk: Dictionary = scene.real_player.draw_selected_pose(0, 1, 1.0)
+	if not walk.get("ok", false):
+		scene.real_player.restore_rest_pose()
+		scene.asset_label.text = scene.real_player.status
+		return walk
+	scene.asset_label.text = "Explicit class-0 walk clip sample · diagnostic pose"
+	await capture("03-player-walk")
+	await capture_player_view("03-player-walk-view")
+	var walk_mesh: Mesh = scene.actor_visual.mesh
+	var walk_image: Image
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.force_draw()
+		walk_image = scene.viewport.get_texture().get_image()
+	var pose_corners := 0
+	if idle_mesh.get_surface_count() == walk_mesh.get_surface_count():
+		for surface in range(idle_mesh.get_surface_count()):
+			var first: PackedVector3Array = idle_mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			var second: PackedVector3Array = walk_mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			if first.size() != second.size(): continue
+			for index in range(first.size()):
+				if first[index] != second[index]: pose_corners += 1
+	var changed := 0
+	if idle_image != null and walk_image != null and not idle_image.is_empty() \
+			and idle_image.get_size() == walk_image.get_size():
+		for y in range(0, idle_image.get_height(), 3):
+			for x in range(0, idle_image.get_width(), 3):
+				if idle_image.get_pixel(x, y) != walk_image.get_pixel(x, y): changed += 1
+	scene.real_player.restore_rest_pose()
+	scene.asset_label.text = scene.real_player.status
+	return {"ok": pose_corners > 0 and (changed > 0 or DisplayServer.get_name() == "headless"),
+		"idle_slot": int(idle.slot), "walk_slot": int(walk.slot),
+		"pose_corners": pose_corners, "pose_pixels": changed, "sample_tick": 1.0}
+
 func tap(bits: int) -> void:
 	fe.tap(bits)
 	collect("frontend")
@@ -190,6 +291,95 @@ func save_json() -> void:
 	if file != null: file.store_string(JSON.stringify(summary, "  ", true) + "\n")
 	print("PLAYTHROUGH_RESULT " + JSON.stringify(summary))
 
+func walk_exit_probe() -> void:
+	# Step 6: walk the native player into a real Trigger's inclusive x/y box.
+	var transition_before: int = scene.real.current
+	var exit_targets: Array = scene.controller.script_exit_targets()
+	var pending: Dictionary = scene.controller.script_level_request()
+	var walk_attempts := 0
+	var walked_into := false
+	var queued_by_walk := false
+	var entered_without_change := 0
+	var navigation_stalls := 0
+	var sources_examined := 1
+	var candidate_indices: Array[int] = []
+	for index in range(scene.real.levels.size()):
+		var level: Dictionary = scene.real.levels[index]
+		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+		if objects.is_empty(): continue
+		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
+		if inventory.get("ok", false) and int(inventory.get("triggers", 0)) >= 4:
+			candidate_indices.append(index)
+	var sources: Array[int] = [-1]
+	sources.append_array(candidate_indices)
+	for index in sources:
+		if index >= 0:
+			if index == transition_before: continue
+			if not scene.load_real_level(index, true): continue
+			scene.start_play()
+			help_close()
+			if scene.paused and scene.session_started: scene.resume_session()
+			sources_examined += 1
+			exit_targets = scene.controller.script_exit_targets()
+		pending = scene.controller.script_level_request()
+		if pending.get("queued", false): continue
+		var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
+		if walk_targets.is_empty(): continue
+		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
+		for target in walk_targets:
+			walk_attempts += 1
+			var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
+			var walk: Dictionary = walk_into_trigger(target, 45000)
+			if walk.get("navigation_stalled", false): navigation_stalls += 1
+			walked_into = bool(walk.get("entered", false))
+			pending = scene.controller.script_level_request()
+			var dispatch: Dictionary = scene.controller.script_trigger_status()
+			queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
+				int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
+				int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
+				str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
+			if walked_into and not pending.get("queued", false): entered_without_change += 1
+			if pending.get("queued", false): break
+		if queued_by_walk:
+			transition_before = scene.real.current
+			break
+	var record_before: Dictionary = scene.controller.get_observation()
+	var trigger_status: Dictionary = scene.controller.script_trigger_status()
+	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var record_after: Dictionary = scene.controller.get_observation()
+	var start: Dictionary = scene.controller.get_terrain().get("start", {})
+	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
+	var marker_position: Vector3 = start.get("position", Vector3.ZERO)
+	var arrival_at_marker: bool = transition_ok and start.has("position") and \
+		arrived_position.distance_to(marker_position) < 0.01
+	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
+		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
+		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
+	mark("walk_in_exit_trigger", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current,
+		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
+		"queued_by_walk": queued_by_walk,
+		"entered_without_change": entered_without_change,
+		"navigation_stalls": navigation_stalls,
+		"trigger_samples": int(trigger_status.get("samples", 0)),
+		"trigger_dispatches": int(trigger_status.get("dispatches", 0)),
+		"trigger_queued_dispatches": int(trigger_status.get("queued_dispatches", 0)),
+		"trigger_missing": int(trigger_status.get("missing", 0)),
+		"arrival_at_marker": arrival_at_marker,
+		"arrival_pre_search": bool(start.get("pre_search", false)),
+		"arrival_rank": int(start.get("rank", 0)),
+		"sources_examined": sources_examined,
+		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
+		"campaign_image_restored": scene.last_campaign_image_restored,
+		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
+		"quest_vars_after": int(quests_after.get("vars", 0))})
+	await capture("11-walk-exit-level-change")
+
 func run() -> void:
 	if not args.has("game-folder") or not args.has("out"):
 		printerr("--game-folder and --out are required")
@@ -251,6 +441,26 @@ func run() -> void:
 		{"level_index": scene.real.current, "session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
 	await capture("03-level")
+	var class_mesh: bool = scene.real_player != null and scene.real_player.body_drawn \
+		and scene.real_player.model_index == int(scene.controller.get_observation().get("player_model_index", -1)) \
+		and scene.actor_visual.visible and scene.actor_visual.mesh is ArrayMesh \
+		and scene.actor_visual.mesh != null and scene.actor_visual.mesh != scene._default_mesh \
+		and not (scene.actor_visual.mesh is CapsuleMesh) and not (scene.actor_visual.mesh is SphereMesh) \
+		and not scene.asset_label.text.begins_with("Practice figure")
+	var actor_pixels := await player_actor_pixels() if DisplayServer.get_name() != "headless" else 0
+	mark("player_visual", "not_applicable_headless" if DisplayServer.get_name() == "headless" else \
+		("class_mesh" if class_mesh and actor_pixels > 0 else "refused"),
+		{"class_mesh": class_mesh, "mesh_type": scene.actor_visual.mesh.get_class(), "actor_pixels": actor_pixels,
+		"practice_label": scene.asset_label.text.begins_with("Practice figure"),
+		"body_drawn": scene.real_player.body_drawn, "model_match": scene.real_player.model_index == int(scene.controller.get_observation().get("player_model_index", -1)),
+		"actor_visible": scene.actor_visual.visible})
+	var pose: Dictionary = await player_pose_pixels()
+	mark("player_pose_sample", "sampled" if pose.get("ok", false) else "refused", pose)
+	if args.has("visual-only"):
+		save_json()
+		quit(0 if class_mesh and pose.get("ok", false) and \
+			(DisplayServer.get_name() == "headless" or actor_pixels > 0) else 1)
+		return
 	if scene.real.current < 0 and not scene.real.levels.is_empty():
 		var direct: bool = scene.load_real_level(0)
 		mark("direct_level_diagnostic", "loaded" if direct else "refused", {"level_index": scene.real.current})
@@ -286,21 +496,44 @@ func run() -> void:
 		"walk_displacement": walk_start.distance_to(walk_end),
 		"nearest_target_known": false, "paused": scene.paused,
 		"menu_visible": scene.menu.visible})
+	var dialog_choice_completed := false
 	if opened_dialog:
-		for i in range(3): await process_frame
+		# Opening the dialog starts a camera swoop. Its draw task returns no
+		# operations until that move has arrived; sample only a drawable frame.
+		for i in range(4000):
+			advance()
+			await process_frame
+			if not scene.controller.dialog_status().get("camera_moving", false) and \
+					 not scene.npc_dialog.frame.get("sprites", []).is_empty() and \
+					 scene.npc_dialog.frame.get("glyphs", []).size() > 40: break
 		var frame: Dictionary = scene.npc_dialog.frame
 		for why in frame.get("refusals", []): refusal("dialog_draw", why)
+		await capture("04-dialog-attempt")
+		var box_pixels := await dialog_box_pixels() if DisplayServer.get_name() != "headless" else 0
 		var visual_result := "not_applicable_headless" if DisplayServer.get_name() == "headless" else \
-			("drawn" if frame.get("open", false) and
-			(not frame.get("sprites", []).is_empty() or not frame.get("glyphs", []).is_empty()) else "refused")
+			("drawn" if frame.get("open", false) and not frame.get("sprites", []).is_empty() and \
+			 not frame.get("glyphs", []).is_empty() and box_pixels > 0 else "refused")
 		mark("dialog_visual", visual_result,
 			{"box_sprites": frame.get("sprites", []).size(),
 			"glyphs": frame.get("glyphs", []).size(),
+			"box_pixels": box_pixels,
+			"camera_moving": scene.controller.dialog_status().get("camera_moving", false),
 			"frame_open": frame.get("open", false),
 			"paused": scene.paused, "menu_visible": scene.menu.visible,
 			"font_ready": scene.npc_dialog.font_texture != null,
 			"box_ready": scene.npc_dialog.box_texture != null})
-	await capture("04-dialog-attempt")
+		# The later prompt is absent during the opening text reveal. Capture it
+		# before sending a choice so its text and cursor can be inspected too.
+		var prompt_drawn := false
+		for i in range(4000):
+			advance()
+			await process_frame
+			if int(scene.npc_dialog.frame.get("cursor_glyph_quads", 0)) > 0:
+				prompt_drawn = true
+				break
+		mark("dialog_prompt", "drawn" if prompt_drawn else "unavailable",
+			{"cursor_glyph_quads": int(scene.npc_dialog.frame.get("cursor_glyph_quads", 0))})
+		if prompt_drawn: await capture("04-dialog-prompt")
 	if opened_dialog:
 		game_key(KEY_DOWN)
 		var closed := false
@@ -316,98 +549,72 @@ func run() -> void:
 		var dialog_counts: Dictionary = scene.controller.dialog_status().get("counts", {})
 		for why in dialog_counts.get("refused_reasons", {}):
 			refusal("dialog", "%s count=%d" % [safe(why), int(dialog_counts.refused_reasons[why])])
-		mark("dialog_choice_close", "closed" if closed and int(dialog_counts.get("choices_taken", 0)) > 0 else "refused",
+		dialog_choice_completed = closed and int(dialog_counts.get("choices_taken", 0)) > 0
+		mark("dialog_choice_close", "closed" if dialog_choice_completed else "refused",
 			{"closed": closed, "choices_taken": int(dialog_counts.get("choices_taken", 0)),
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
-	# Step 6: walk the native player into a real Trigger's inclusive x/y box.
+	# The opening choice and this hub PushTrigger are checked separately in
+	# research-story-route. Exercise their native integration in this session.
 	var transition_before: int = scene.real.current
-	var exit_targets: Array = scene.controller.script_exit_targets()
-	var pending: Dictionary = scene.controller.script_level_request()
-	var walk_attempts := 0
-	var walked_into := false
-	var queued_by_walk := false
-	var entered_without_change := 0
-	var navigation_stalls := 0
-	var sources_examined := 1
-	var candidate_indices: Array[int] = []
-	for index in range(scene.real.levels.size()):
-		var level: Dictionary = scene.real.levels[index]
-		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
-		if objects.is_empty(): continue
-		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
-		if inventory.get("ok", false) and int(inventory.get("triggers", 0)) >= 4:
-			candidate_indices.append(index)
-	var sources: Array[int] = [-1]
-	sources.append_array(candidate_indices)
-	for index in sources:
-		if index >= 0:
-			if index == transition_before: continue
-			if not scene.load_real_level(index, true): continue
-			scene.start_play()
-			help_close()
-			if scene.paused and scene.session_started: scene.resume_session()
-			sources_examined += 1
-			exit_targets = scene.controller.script_exit_targets()
-		pending = scene.controller.script_level_request()
-		if pending.get("queued", false): continue
-		var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
-		if walk_targets.size() < 4: continue
-		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
-		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
-		for target in walk_targets:
-			walk_attempts += 1
-			var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
-			var walk: Dictionary = walk_into_trigger(target, 45000)
-			if walk.get("navigation_stalled", false): navigation_stalls += 1
-			walked_into = bool(walk.get("entered", false))
-			pending = scene.controller.script_level_request()
-			var dispatch: Dictionary = scene.controller.script_trigger_status()
-			queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
-				int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
-				int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
-				str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
-			if walked_into and not pending.get("queued", false): entered_without_change += 1
-			if pending.get("queued", false): break
-		if queued_by_walk:
-			transition_before = scene.real.current
+	var at_hub: bool = transition_before >= 0 and str(scene.real.levels[transition_before].stem) == "hub"
+	var menu_before: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_1_unlock", "available" if at_hub and menu_before.get("first_story_available", false) else "refused",
+		{"at_hub": at_hub, "available": menu_before.get("first_story_available", false)})
+	var hub_trigger_found := false
+	for target in scene.controller.script_exit_targets():
+		if int(target.index) == 11 and str(target.kind) == "PushTrigger" and target.get("script_action", false):
+			hub_trigger_found = true
 			break
+	var menu_was_closed: bool = menu_before.get("ok", false) and not menu_before.get("open", false)
+	var trigger_result: Dictionary = scene.controller.script_run_exit(11) if at_hub and hub_trigger_found and dialog_choice_completed and menu_was_closed and not scene.controller.dialog_status().get("open", false) else {"ok": false}
+	var menu_after: Dictionary = scene.controller.script_mission_menu_state()
+	var menu_open: bool = bool(menu_after.get("ok", false) and menu_after.get("open", false))
+	var trigger_opened_menu: bool = hub_trigger_found and menu_was_closed and trigger_result.get("ok", false) and menu_open
+	scene._refresh_mission_menu()
+	mark("hub_trigger_mission_menu", "opened" if trigger_opened_menu else "refused",
+		{"hub_trigger_found": hub_trigger_found, "dialog_choice_completed": dialog_choice_completed,
+		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false), "menu_open": menu_open,
+		"host_panel_visible": scene.mission_menu_panel.visible})
+	await capture("10-mission-menu")
+	var selected: bool = trigger_opened_menu and scene.mission_menu_select_first_story()
+	var pending: Dictionary = scene.controller.script_level_request()
+	mark("mission_1_story_request", "blood1" if selected and str(pending.get("name", "")) == "blood1" else "refused",
+		{"queued": pending.get("queued", false), "orientation": pending.get("orientation", -1)})
 	var record_before: Dictionary = scene.controller.get_observation()
-	var trigger_status: Dictionary = scene.controller.script_trigger_status()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var transition_ok: bool = selected and bool(scene._apply_level_change())
 	var record_after: Dictionary = scene.controller.get_observation()
-	var start: Dictionary = scene.controller.get_terrain().get("start", {})
-	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
-	var marker_position: Vector3 = start.get("position", Vector3.ZERO)
-	var arrival_at_marker: bool = transition_ok and start.has("position") and \
-		arrived_position.distance_to(marker_position) < 0.01
 	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var mission1_still_available: bool = bool(scene.controller.script_mission_menu_state().get("first_story_available", false))
 	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
 		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("player_class", -1)) == int(record_before.get("player_class", -2)) \
 		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
 		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
-		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
-	mark("level_change", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2)) \
+		and int(record_after.get("record_max_hp_raw", -1)) == int(record_before.get("record_max_hp_raw", -2)) \
+		and int(record_after.get("record_max_mana_raw", -1)) == int(record_before.get("record_max_mana_raw", -2))
+	var at_blood1: bool = scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "blood1"
+	mark("blood1_arrival", "arrived" if record_carried and at_blood1 and mission1_still_available else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
-		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
-		"queued_by_walk": queued_by_walk,
-		"entered_without_change": entered_without_change,
-		"navigation_stalls": navigation_stalls,
-		"trigger_samples": int(trigger_status.get("samples", 0)),
-		"trigger_dispatches": int(trigger_status.get("dispatches", 0)),
-		"trigger_queued_dispatches": int(trigger_status.get("queued_dispatches", 0)),
-		"trigger_missing": int(trigger_status.get("missing", 0)),
-		"arrival_at_marker": arrival_at_marker,
-		"arrival_pre_search": bool(start.get("pre_search", false)),
-		"arrival_rank": int(start.get("rank", 0)),
-		"sources_examined": sources_examined,
 		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
 		"campaign_image_restored": scene.last_campaign_image_restored,
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
-		"quest_vars_after": int(quests_after.get("vars", 0))})
+		"quest_vars_after": int(quests_after.get("vars", 0)),
+		"mission1_still_available": mission1_still_available,
+		"mission_available_before": int(quests_before.get("mission_available_bits", 0)),
+		"mission_available_after": int(quests_after.get("mission_available_bits", 0))})
+	mark("level_change", "changed" if record_carried and at_blood1 else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current})
 	await capture("10-level-change")
+	if args.has("route-only"):
+		save_json()
+		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
+		return
+	# Exercise physical Trigger entry after the hub story route has reached blood1.
+	await walk_exit_probe()
 	# Normal E/use on an owner-supplied level record; the selected action is
 	# never invoked by the diagnostic menu.
 	var push_sources: Array[int] = []
@@ -506,8 +713,14 @@ func run() -> void:
 		"position_matches_start": portal_at_spot,
 		"object_grid_verified": false, "constructor_seed_verified": false})
 	await capture("12-portal-arrival")
+	# Valor is a separate fight diagnostic; the story route above enters blood1.
+	var valor_index := -1
+	for index in range(scene.real.levels.size()):
+		if str(scene.real.levels[index].stem) == "valor": valor_index = index
+	var valor_loaded: bool = valor_index >= 0 and scene.load_real_level(valor_index)
+	if valor_loaded: scene.start_play()
+	mark("valor_fight_setup", "loaded" if valor_loaded else "refused")
 	var before: Dictionary = scene.controller.get_observation()
-	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
 	var gold_before := int(before.get("gold", -1))
 	var actors_before: Array = before.get("combat_actors", [])
@@ -515,12 +728,32 @@ func run() -> void:
 	advance(0, 120)
 	var after: Dictionary = scene.controller.get_observation()
 	var actors_after: Array = after.get("combat_actors", [])
-	mark("enemy_fight", "combat_observed" if after.get("combat_enabled", false) else "refused",
+	mark("valor_fight", "combat_observed" if valor_loaded and after.get("combat_enabled", false) else "refused",
 		{"attack_input_handled": attack_handled, "actors_before": actors_before.size(),
 		"actors_after": actors_after.size(), "hp_before": hp_before,
 		"hp_after": float(after.get("hp", -1.0)), "gold_before": gold_before,
 		"gold_after": int(after.get("gold", -1)), "drops_observed": 0})
 	await capture("05-fight-attempt")
+	# The first story level can have one terrain element. Select a real level
+	# with multiple elements for the save probe; the level loader supplies its
+	# WORLD collision and textured display independently of the save image.
+	var terrain_elements := int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+	if terrain_elements <= 1:
+		for index in range(scene.real.levels.size()):
+			if index == scene.real.current: continue
+			if not scene.load_real_level(index): continue
+			terrain_elements = int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+			if terrain_elements > 1:
+				if not scene.play_mode: scene.start_play()
+				break
+	mark("multi_surface_level", "loaded" if scene.real.current >= 0 and terrain_elements > 1 and scene.play_mode else "refused",
+		{"terrain_elements": terrain_elements})
+	var level_before: int = scene.real.current
+	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
+	var saved_state: Dictionary = scene.controller.get_observation()
+	var saved_hp := float(saved_state.get("hp", -1.0))
+	var saved_gold := int(saved_state.get("gold", -1))
+	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	help_close()
 	if scene.controller.dialog_status().get("open", false):
 		refusal("pause", "dialog remained open before pause")
@@ -529,19 +762,23 @@ func run() -> void:
 	mark("pause", fe.screen())
 	await capture("06-pause")
 	var pause_save_entry := false
+	var pause_entries: int = fe.view.get("entries", []).size()
 	if fe.screen() == "pause":
 		for entry in fe.view.get("entries", []):
 			if str(entry.get("id", "")) == "save": pause_save_entry = true
-	mark("pause_save", "available" if pause_save_entry else "refused")
-	if fe.screen() == "pause": tap(0x20)
+	# Research gives the original pause exactly five entries, with no Save.
+	# The host's F5 route opens the documented in-game save screen.
+	var native_pause_intact: bool = fe.screen() == "pause" and pause_entries == 5 and not pause_save_entry
 	var save_path := out_dir.path_join("playthrough.ocplay")
-	for suffix in ["", ".player", ".menus"]:
+	for suffix in ["", ".player", ".menus", ".level", ".campaign"]:
 		if FileAccess.file_exists(save_path + suffix): DirAccess.remove_absolute(save_path + suffix)
 	fe.queue_path("save_session", save_path)
-	var save_request: Dictionary = fe.open_save_screen()
-	if save_request.get("ok", false) and fe.screen() == "save-game": tap(CROSS)
-	var saved := FileAccess.file_exists(save_path)
-	mark("host_save_fallback", "saved" if saved else "refused", {"screen": fe.screen()})
+	var route_handled := game_key(KEY_F5)
+	mark("pause_save", "routed" if native_pause_intact and route_handled and fe.screen() == "save-game" else "refused",
+		{"original_pause_entries": pause_entries})
+	if fe.screen() == "save-game": tap(CROSS)
+	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign")
+	mark("in_game_save", "saved" if saved else "refused", {"screen": fe.screen()})
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)
 	if fe.screen() == "playing": tap(START)
@@ -563,16 +800,62 @@ func run() -> void:
 			load_attempted = true
 			tap(CROSS)
 	var restored: Dictionary = scene.controller.get_observation()
+	var restored_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var quests_match := true
+	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
+		quests_match = quests_match and saved_campaign.get(key, -1) == restored_campaign.get(key, -2)
 	var carried: bool = quit_ok and load_attempted and fe.screen() == "playing" and scene.real.current == level_before \
-		and int(restored.get("gold", -1)) == gold_before \
-		and is_equal_approx(float(restored.get("hp", -1.0)), hp_before)
+		and int(scene.controller.get_play_capabilities().get("terrain_elements", 0)) == terrain_elements \
+		and scene.terrain_root.has_meta("level_texture_pair") \
+		and int(restored.get("gold", -1)) == saved_gold \
+		and is_equal_approx(float(restored.get("hp", -1.0)), saved_hp) \
+		and scene.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01 \
+		and quests_match
 	mark("load_and_carry", "restored" if carried else "refused",
 		{"screen": fe.screen(), "load_attempted": load_attempted,
+		"terrain_elements": terrain_elements,
 		"level_index_before": level_before,
-		"level_index_after": scene.real.current, "gold_before": gold_before,
-		"gold_after": int(restored.get("gold", -1)), "hp_before": hp_before,
-		"hp_after": float(restored.get("hp", -1.0))})
+		"level_index_after": scene.real.current, "gold_before": saved_gold,
+		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
+		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match})
 	await capture("09-loaded")
+	# A new scene has no in-memory WORLD/TEX save association. The load must
+	# recover the level from the selected folder and its saved identity. Remove
+	# the first scene before creating another process-lifetime audio mixer.
+	scene.queue_free()
+	await process_frame
+	scene = null
+	fe = null
+	var cold = load("res://scenes/real_data_play.tscn").instantiate()
+	cold.automatic_steps = false
+	root.add_child(cold)
+	await process_frame
+	cold.components.library.history_path = out_dir.path_join("cold-library.json")
+	cold.components.library._entries.clear()
+	cold.frontend.options_path = out_dir.path_join("cold-options.img")
+	cold.real.cache_dir = out_dir.path_join("cold-cache")
+	var cold_opened: bool = cold.open_game_folder(str(args["game-folder"]))
+	var cold_loaded: bool = cold_opened and cold.level_textures.saves.is_empty() and cold.load_session_file(save_path)
+	var cold_state: Dictionary = cold.controller.get_observation()
+	var cold_campaign: Dictionary = cold.controller.script_command_counts().get("campaign", {})
+	var cold_match: bool = cold_loaded and cold.real.current == level_before and cold.terrain_root.has_meta("level_texture_pair") and \
+		int(cold.controller.get_play_capabilities().get("terrain_elements", 0)) == terrain_elements and \
+		int(cold_state.get("gold", -1)) == saved_gold and is_equal_approx(float(cold_state.get("hp", -1.0)), saved_hp) and \
+		cold.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01
+	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
+		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
+	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded,
+		"terrain_elements": int(cold.controller.get_play_capabilities().get("terrain_elements", 0))})
+	# A displayed level with different collision must not be reused for this save.
+	var other_index := 0 if level_before != 0 else 1
+	var other_loaded: bool = cold.load_real_level(other_index)
+	var mismatch: Dictionary = cold.controller.prepare_save_file(save_path, true) if other_loaded else {}
+	var mismatch_refused: bool = other_loaded and not mismatch.get("ok", false) and \
+		"collision differs" in str(mismatch.get("error", ""))
+	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
+		{"different_level_loaded": other_loaded})
+	cold.queue_free()
+	await process_frame
 	save_json()
 	var incomplete := false
 	for row in rows:

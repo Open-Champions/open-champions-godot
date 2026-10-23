@@ -1,4 +1,5 @@
 #include "session_controller.hpp"
+#include "champions/ui_text_gaps.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/ui_layout.hpp"
@@ -7,6 +8,7 @@
 #include "champions/level_flow.hpp"
 #include "champions/objects.hpp"
 #include "champions/arena_executable.hpp"
+#include "champions/hud_extras.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
@@ -23,6 +25,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace godot;
@@ -50,6 +53,26 @@ Dictionary failure(const std::exception &error) {
   out["ok"] = false;
   out["error"] = String::utf8(error.what());
   return out;
+}
+// US v2.00 mission table, research-story-route and docs/QUESTS.md. Read the
+// owner's executable at run time; no retail table or text enters the project.
+std::vector<rta::quests::MissionRow> mission_rows(const rta::arena_modes::Executable &exe) {
+  constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
+  std::vector<rta::quests::MissionRow> rows;
+  rows.reserve(13);
+  for (std::uint32_t i = 0; i < 13; ++i) {
+    const auto base = table + i * stride;
+    auto name = [&](std::uint32_t offset) {
+      const auto ptr = exe.word(base + offset);
+      return ptr ? exe.string(ptr) : std::string();
+    };
+    rows.push_back({name(0x08), name(0x0c), name(0x10), name(0x14),
+                    std::int32_t(exe.word(base + 0x20)), std::int32_t(exe.word(base + 0x24)),
+                    std::int32_t(exe.word(base + 0x28))});
+  }
+  if (rows.front().story != "blood1")
+    throw std::runtime_error("The selected executable does not establish the first story mission.");
+  return rows;
 }
 void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
           double z) {
@@ -94,8 +117,9 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits"),
-                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)));
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)),
+                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()));
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -112,6 +136,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
   ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_state"), &ChampionsSessionController::script_mission_menu_state);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
+                       &ChampionsSessionController::script_mission_menu_tick);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
   ClassDB::bind_method(D_METHOD("inspect_exit_records", "objects"), &ChampionsSessionController::inspect_exit_records);
   ClassDB::bind_method(D_METHOD("script_trigger_status"), &ChampionsSessionController::script_trigger_status);
@@ -126,12 +153,16 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::save_player_companion);
   ClassDB::bind_method(D_METHOD("load_player_companion", "path"),
                        &ChampionsSessionController::load_player_companion);
+  ClassDB::bind_method(D_METHOD("save_campaign_bytes"),
+                       &ChampionsSessionController::save_campaign_bytes);
+  ClassDB::bind_method(D_METHOD("load_campaign_bytes", "bytes"),
+                       &ChampionsSessionController::load_campaign_bytes);
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
                        &ChampionsSessionController::save_snapshot_file);
-  ClassDB::bind_method(D_METHOD("prepare_save_file", "path"),
-                       &ChampionsSessionController::prepare_save_file);
+  ClassDB::bind_method(D_METHOD("prepare_save_file", "path", "reuse_loaded_level"),
+                       &ChampionsSessionController::prepare_save_file, DEFVAL(false));
   ClassDB::bind_method(D_METHOD("advance_time", "elapsed_usec", "command_mask"),
                        &ChampionsSessionController::advance_time);
   ClassDB::bind_method(D_METHOD("get_presentation"),
@@ -158,6 +189,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::stop_session);
   ClassDB::bind_method(D_METHOD("get_observation"),
                        &ChampionsSessionController::get_observation);
+  ClassDB::bind_method(D_METHOD("probe_full_walk_weight_test"),
+                       &ChampionsSessionController::probe_full_walk_weight_test);
   ClassDB::bind_method(D_METHOD("get_terrain"),
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
@@ -292,6 +325,7 @@ Dictionary ChampionsSessionController::present_observation(
   if (player_) {
     const auto p = observed_player();
     result["player_ready"] = true;
+    result["player_record_revision"] = static_cast<int64_t>(player_record_revision_);
     // The character record is not linked to the simulated player: the original
     // mirrors record HP into the object inside Player_run (research-menus
     // docs/player.md), and native play has no such mirror. So hp, max_hp, mana
@@ -301,6 +335,7 @@ Dictionary ChampionsSessionController::present_observation(
     result["player_record_currents_known"] = p.current_known;
     result["name"] = String::utf8(p.name.c_str());
     result["player_class"] = p.player_class;
+    result["player_model_index"] = p.model;
     result["level"] = p.level;
     result["acknowledged_level"] = p.acknowledged;
     result["experience"] = p.experience;
@@ -327,6 +362,27 @@ Dictionary ChampionsSessionController::present_observation(
 Dictionary ChampionsSessionController::get_observation() const {
   try {
     return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::probe_full_walk_weight_test() {
+  try {
+    if (!combat_ || !combat_->full())
+      throw std::runtime_error("Walk-cell probe requires the synthetic Full fixture.");
+    const auto player = combat_->actors().at(0);
+    const auto address = combat_->world().target(player.handle);
+    const auto expected = combat_->world().read(address + 0x144);
+    const auto observed = combat_->probe_walk_life_zero([&] {
+      const Array actors = combat_observation()["combat_actors"];
+      const Dictionary row = actors[0];
+      return rta::Raw(int64_t(row["locomotion_walk_weight_raw"]));
+    });
+    Dictionary out;
+    out["ok"] = true;
+    out["expected_weight_raw"] = int64_t(expected);
+    out["observed_weight_raw"] = int64_t(observed);
+    return out;
   } catch (const std::exception &e) {
     return failure(e);
   }
@@ -534,6 +590,7 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["policy"] = rta::play_session::POLICY;
   result["history_policy"] = "windowed";
   result["history_window"] = int64_t((combat_ || level_) ? 0 : rta::play_session::DEFAULT_WINDOW);
+  result["terrain_elements"] = int64_t(active_setup().initial_terrain.data.elements.size());
   Array formats;
   if (!combat_ && !level_) formats.push_back("play-continuation-v1");
   else {
@@ -630,6 +687,7 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       rta::script_commands::DialogInputs in;
       in.pad = dialog_pad_;
       dialog_pad_ = 0;
+      in.fade = scripts_->ui_ramps().fade[0]; // g_uiFadeIn[0] gates message 3 (docs/ui-text-gaps.md 1)
       if (dialog_voice_) {
         in.voice.queue_count = (*dialog_voice_)[0];
         in.voice.status = (*dialog_voice_)[1];
@@ -639,6 +697,8 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     }
     scripts_->on_ready_tick();
     note_help_box();
+    if (!ui_frame_driven_)
+      scripts_->ui_frame_step();
   }
 }
 bool ChampionsSessionController::run_level_use() {
@@ -890,8 +950,11 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
       if (!bool(character.get("ready", false))) throw std::runtime_error("Character creation has not finished.");
       next = rta::player_state::create(named, cls,
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
+      // Creation has no live Player recalc or record-to-object current mirror.
+      // Keep current-dependent script commands refused until that event exists.
     }
     player_ = std::move(next);
+    ++player_record_revision_;
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true;
     return result;
@@ -932,6 +995,7 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const String dest = path + String(".player");
     if (!FileAccess::file_exists(dest)) {
       player_.reset();
+      ++player_record_revision_;
       if (scripts_) scripts_->set_player_currents_known(true); // no created record is held any more
       Dictionary result = observation(); result["ok"] = true; result["loaded"] = false; return result;
     }
@@ -943,15 +1007,40 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
     auto next = rta::player_state::load(bytes, *player_tables_);
     player_ = std::move(next);
+    ++player_record_revision_;
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true; result["loaded"] = true; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::save_campaign_bytes() {
+  try {
+    if (!scripts_) throw std::runtime_error("A level script is required to save campaign state.");
+    const auto bytes = scripts_->save_campaign();
+    PackedByteArray packed;
+    packed.resize(bytes.size());
+    std::copy(bytes.begin(), bytes.end(), packed.ptrw());
+    Dictionary result; result["ok"] = true; result["bytes"] = packed; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::load_campaign_bytes(const PackedByteArray &packed) {
+  try {
+    if (!scripts_) throw std::runtime_error("Load this level's script before campaign state.");
+    if (packed.is_empty() || packed.size() > 1024 * 1024)
+      throw std::runtime_error("Campaign save is empty or exceeds 1 MiB.");
+    const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
+    scripts_->load_campaign(bytes);
+    Dictionary result = observation(); result["ok"] = true; return result;
   } catch (const std::exception &e) { return failure(e); }
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
                                                           const Dictionary &dialog,
-                                                          int64_t music_volume_bits) {
+                                                          int64_t music_volume_bits,
+                                                          const String &level_name,
+                                                          const PackedByteArray &balance,
+                                                          const PackedByteArray &world) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -995,6 +1084,28 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    if (executable_)
+      next->campaign().set_rows(mission_rows(*executable_));
+    // Malformed statistics or WORLD are refused and counted; the script still
+    // attaches without them.
+    if (executable_ && !level_name.is_empty() && !balance.is_empty()) {
+      try {
+        next->set_level_stats(std::string(level_name.utf8().get_data()), balance.ptr(),
+                              static_cast<std::size_t>(balance.size()));
+      } catch (const std::exception &) {
+        next->count_refusal("Level statistics refused");
+      }
+    }
+    if (!world.is_empty()) {
+      try {
+        next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
+      } catch (const std::exception &) {
+        next->count_refusal("Level WORLD refused");
+      }
+    }
+    // The original checks hud.lmp residency. This attach path does not know
+    // it, so the host records the inferred draw count without moving the seed.
+    next->advance_first_level_items(std::string(level_name.utf8().get_data()));
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {
@@ -1373,10 +1484,10 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     out["open"] = d.is_open();
     out["stalled"] = scripts_->dialog_stalled();
     out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
-    // g_uiFadeIn[0] is passed as 1.0 (its pattern is not documented, docs/DIALOG.md
-    // "Not modelled"). The cursor and "more" glyph is the byte game_initCamera leaves at
-    // 0x41b978: 0x7e with the executable's initial layout byte 1 (docs/spec/dialog-gaps.md 5).
-    const auto ops = scripts_->dialog_draw(rta::ONE, int(text_option), int(scripts_->dialog_cursor_glyph()), 0);
+    // The host's displayed-frame ramp supplies g_uiFadeIn[0]. The observed layout
+    // supplies the cursor and "more" glyph (docs/UI_TEXT_GAPS.md).
+    const auto ops = scripts_->dialog_draw(scripts_->ui_ramps().fade[0], int(text_option),
+                                           int(scripts_->dialog_cursor_glyph()), 0);
     Array sprites, glyphs, refusals;
     const auto *font = dialog_data_ && dialog_data_->font ? &*dialog_data_->font : nullptr;
     if (!ops.empty() && !font)
@@ -1439,7 +1550,9 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])), units, std::size_t(num(a[3])));
       } else if (e.kind == "ascii") {
         // text_drawAscii of "%c" with the glyph byte: one character at (x, y).
-        cursor_quads += std::int64_t(emit(int(num(a[0])), int(num(a[1])), D::Wide{std::uint16_t(num(a[2]))}, 1));
+        const auto code = std::uint16_t(num(a[2]) & 0xff);
+        if (code != 0)
+          cursor_quads += std::int64_t(emit(int(num(a[0])), int(num(a[1])), D::Wide{code}, 1));
       } else if (e.kind == "sprite") {
         Dictionary box;
         box["x"] = num(a[0]);
@@ -1489,11 +1602,17 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_pool_refused"] = static_cast<int64_t>(counts.objects_pool_refused);
   result["objects_unclassified"] = static_cast<int64_t>(counts.objects_unclassified);
   result["load_draws_unmodelled"] = static_cast<int64_t>(counts.load_draws_unmodelled);
+  result["item_load_gate_refusals"] = static_cast<int64_t>(counts.item_load_gate_refusals);
+  result["item_load_draws_inferred"] = static_cast<int64_t>(counts.item_load_draws_inferred);
   result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
   Dictionary build_refusals;
   for (const auto &kv : counts.build_refusals)
     build_refusals[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
   result["build_refusals"] = build_refusals;
+  Dictionary stub_reasons;
+  for (const auto &kv : counts.stub_refusal_reasons)
+    stub_reasons[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
+  result["stub_refusal_reasons"] = stub_reasons;
   result["seed_bound"] = bool(script_seed_);
   result["seed_paired"] = script_world_.has_value();
   result["seed_unpaired"] = script_seed_unpaired_;
@@ -1577,6 +1696,39 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
   return result;
+}
+Dictionary ChampionsSessionController::script_mission_menu_state() const {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && scripts_->campaign().rows().size() == 13);
+  if (!bool(out["ok"])) return out;
+  const auto &campaign = scripts_->campaign();
+  const auto &menu = campaign.menu();
+  out["open"] = campaign.menu_open() && menu.pending.empty();
+  out["state"] = int64_t(menu.state);
+  out["row"] = int64_t(menu.row);
+  out["column"] = int64_t(menu.col);
+  out["chooser"] = int64_t(campaign.chooser());
+  out["first_story_available"] = bool(campaign.mission_available(1));
+  out["pending"] = String::utf8(menu.pending.c_str());
+  return out;
+}
+Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits, int64_t fade) {
+  try {
+    if (!scripts_ || scripts_->campaign().rows().size() != 13 || !scripts_->campaign().menu_open())
+      throw std::runtime_error("No documented mission menu is open.");
+    constexpr std::uint32_t allowed = rta::quests::BTN_CROSS | rta::quests::BTN_CIRCLE |
+                                      rta::quests::BTN_SELECT | rta::quests::BTN_UP |
+                                      rta::quests::BTN_DOWN | rta::quests::BTN_LEFT |
+                                      rta::quests::BTN_RIGHT;
+    if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 || fade < 0 || fade > 128)
+      throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
+    rta::quests::MenuInputs inputs;
+    inputs.fade = int(fade);
+    const bool launched = scripts_->tick_mission_menu(int(pad_bits), inputs);
+    auto out = script_mission_menu_state();
+    out["launched"] = launched;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
 }
 Array ChampionsSessionController::script_exit_targets() const {
   Array result;
@@ -1878,41 +2030,46 @@ Dictionary ChampionsSessionController::present_terrain(
   if (data.elements.size() > 256)
     throw std::runtime_error(
         "This terrain has too many surfaces for the scene preview.");
-  if (data.elements.size() != 1 || data.elements.front().flags != 0)
-    throw std::runtime_error(
-        "This scene currently displays one plain terrain surface at a time.");
-  const auto &only = data.elements.front();
-  for (const auto coordinate :
-       {only.min_x, only.min_y, only.max_x, only.max_y, only.x, only.y, only.z})
-    if (coordinate < -1048576 || coordinate > 1048576)
-      throw std::runtime_error(
-          "This terrain exceeds the scene display's coordinate range.");
   if (data.grid.empty() || data.grid.size() > 16384)
     throw std::runtime_error(
         "This terrain grid cannot be displayed in the scene yet.");
-  for (const auto &cell : data.grid) {
-    if (cell.empty() || std::any_of(cell.begin(), cell.end(), [](int64_t ref) {
-          return ref != 0 && ref != -1;
-        }))
-      throw std::runtime_error("This terrain has partial surface coverage that "
-                               "the scene cannot display yet.");
-  }
-  if (only.min_x < double(data.tg_x0) * 160 ||
-      only.min_y < double(data.tg_y0) * 160 ||
-      only.max_x >= (double(data.tg_x0) + data.tg_w) * 160 ||
-      only.max_y >= (double(data.tg_y0) + data.tg_h) * 160)
-    throw std::runtime_error(
-        "This terrain surface extends beyond its query grid.");
   rta::ScopedFpu fixed{rta::Fpu{rta::Fpu::Model::Ps2, false, false}};
   rta::world_queries::Level query(data);
   Array surfaces;
   std::size_t tiles = 0;
-  for (const auto &e : data.elements) {
+  for (std::size_t element_index = 0; element_index < data.elements.size(); ++element_index) {
+    const auto &e = data.elements[element_index];
     if (e.flags & 2)
       continue;
+    for (const auto coordinate :
+         {e.min_x, e.min_y, e.max_x, e.max_y, e.x, e.y, e.z})
+      if (coordinate < -1048576 || coordinate > 1048576)
+        throw std::runtime_error(
+            "This terrain exceeds the scene display's coordinate range.");
     if (e.flags != 0 || e.cos != 32767 || e.sin != 0)
       throw std::runtime_error(
           "This scene currently displays plain, unrotated terrain only.");
+    if (e.min_x < double(data.tg_x0) * 160 ||
+        e.min_y < double(data.tg_y0) * 160 ||
+        e.max_x >= (double(data.tg_x0) + data.tg_w) * 160 ||
+        e.max_y >= (double(data.tg_y0) + data.tg_h) * 160)
+      throw std::runtime_error(
+          "This terrain surface extends beyond its query grid.");
+    if (e.min_x >= e.max_x || e.min_y >= e.max_y)
+      throw std::runtime_error("This terrain surface has no visible area.");
+    // The preview draws the whole element rectangle. Refuse holes: every grid
+    // cell touched by that rectangle must list this element for collision.
+    const auto col0 = (e.min_x - data.tg_x0 * 160) / 160;
+    const auto col1 = (e.max_x - data.tg_x0 * 160) / 160;
+    const auto row0 = (e.min_y - data.tg_y0 * 160) / 160;
+    const auto row1 = (e.max_y - data.tg_y0 * 160) / 160;
+    for (auto row = row0; row <= row1; ++row)
+      for (auto col = col0; col <= col1; ++col) {
+        const auto &cell = data.grid[std::size_t(row * data.tg_w + col)];
+        if (std::find(cell.begin(), cell.end(), int64_t(element_index)) == cell.end())
+          throw std::runtime_error("This terrain has partial surface coverage that "
+                                   "the scene cannot display yet.");
+      }
     const auto index =
         e.hf < 0 ? int64_t(data.heightfields.size()) + e.hf : e.hf;
     const auto &hf = data.heightfields.at(static_cast<std::size_t>(index));
@@ -2457,7 +2614,7 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
     return failure(e);
   }
 }
-Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
+Dictionary ChampionsSessionController::prepare_save_file(const String &path, bool reuse_loaded_level) {
   try {
     if (next_candidate_ == std::numeric_limits<int64_t>::max())
       throw std::runtime_error("Restart the scene before loading more saves.");
@@ -2499,13 +2656,27 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
     if (setup.config.movement !=
         rta::session_control::MovementPolicy::DryCreature)
       throw std::runtime_error("This scene requires a DryCreature save.");
-    // Saves contain collision state, not selected WORLD rendering bytes.
-    // Restore an explicitly labelled illustration or refuse unsupported
-    // display.
-    const Dictionary terrain = present_terrain(setup.initial_terrain.data);
-    prepared->terrain = terrain;
-    prepare_meshes(prepared->terrain);
-    prepared->name = "Restored collision ground";
+    // The native continuation contains collision data, not the level's
+    // rendering bytes. The real-data host may first reload and verify the
+    // selected level's WORLD/TEX files, then reuse that prepared display.
+    if (reuse_loaded_level) {
+      if (!control_ || String(terrain_.get("mode", "")) != "static_world")
+        throw std::runtime_error("Load and verify the saved level's own data first.");
+      rta::native_save::Bytes saved_collision;
+      rta::native_save::Bytes displayed_collision;
+      rta::native_save::terrain_codec::encode_terrain(saved_collision,
+                                                     setup.initial_terrain);
+      rta::native_save::terrain_codec::encode_terrain(displayed_collision,
+                                                     control_->setup().initial_terrain);
+      if (saved_collision != displayed_collision)
+        throw std::runtime_error("The displayed level's collision differs from the save.");
+      prepared->terrain = terrain_;
+      prepared->name = terrain_name_;
+    } else {
+      prepared->terrain = present_terrain(setup.initial_terrain.data);
+      prepare_meshes(prepared->terrain);
+      prepared->name = "Restored collision ground";
+    }
     const Dictionary restored =
         present_observation(prepared->control->observation());
     prepared->observation = restored;
@@ -2563,6 +2734,23 @@ Dictionary ChampionsSessionController::combat_observation() const {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));
       value["action_state"] = int64_t(combat_->world().read(address + 0x58c));
+      if (a.slot == 0) {
+        // These are the executed Player_move mode-0 cells, not a position
+        // delta inferred by presentation. Other play policies have no such
+        // cells and must not advertise original player locomotion.
+        value["locomotion_speed_raw"] = int64_t(combat_->world().read(address + 0x468));
+        value["locomotion_blend_raw"] = int64_t(combat_->world().read(address + 0x46c));
+        value["locomotion_walk_weight_raw"] = int64_t(combat_->world().read(address + 0x144));
+        value["locomotion_run1_weight_raw"] = int64_t(combat_->world().read(address + 0x164));
+        value["locomotion_run2_weight_raw"] = int64_t(combat_->world().read(address + 0x184));
+        const auto slot = combat_->world().read(address + 0x3c8);
+        if (slot < 4) {
+          const auto record = 0x4d8af0u + static_cast<std::uint32_t>(slot) * 0x4c30u;
+          value["player_model_index"] = int64_t(combat_->world().read(record + 0x54));
+          value["weapon_animation_class"] = int64_t(static_cast<std::int8_t>(
+              combat_->world().read(record + 0x4a86, 1)));
+        }
+      }
     }
     value["present"] = a.present;
     value["dead"] = a.dead;

@@ -112,9 +112,10 @@ func run() -> void:
 	var skelight: Dictionary = out.classes.get("Skelight", {})
 	check(skelight.get("spawn", "") == "ok" and int(skelight.get("ticks", 0)) == TICKS - 1 and str(skelight.get("error", "x")).is_empty(), "Skelight builds and its hits on the Soul do nothing")
 	# The AntQueen at (0, 80) bleeds when hit. GutChunk_ctor now builds the
-	# chunk; its run waits for the unmodelled rigid-body initialization output.
+	# chunk. Its rigid body now initializes, then the synthetic fixture refuses
+	# at the missing loaded model hull record before collision integration.
 	var queen: Dictionary = out.classes.get("AntQueen", {})
-	check(queen.get("spawn", "") == "ok" and "PhProp_run needs" in str(queen.get("error", "")), "AntQueen builds a blood chunk and stops at its physics frame")
+	check(queen.get("spawn", "") == "ok" and "model_getHullPoints returned null" in str(queen.get("error", "")), "AntQueen's blood chunk reaches its missing model hull")
 	# Skeleton_run and the line-of-fire body are executed in round 3. The
 	# spawned Skeleton continues for the whole authored 300-tick case.
 	var skeleton: Dictionary = out.classes.get("Skeleton", {})

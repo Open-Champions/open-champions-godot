@@ -5,8 +5,12 @@ extends "res://scenes/play_flow.gd"
 # archives are read from it at run time and never become project resources.
 const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
+const RealPlayer = preload("res://real_data/real_player.gd")
 const TextHud = preload("res://ui/text_hud.gd")
 var real: Node
+var real_player: RefCounted
+var imported_appearance: Array = []
+var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
 var text_hud: Control
 var text_sources := {}
@@ -20,15 +24,20 @@ var level_script: CheckButton
 var real_exit_choice: OptionButton
 var gate_destination_choice: OptionButton
 var _gate_menu_was_open := false
+var mission_menu_panel: PanelContainer
+var mission_menu_status: Label
+var mission_first_story: Button
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
 var last_campaign_carried := false
 var last_campaign_image_restored := false
 var hud_art_counts: Dictionary = {}
+var hud_extras_counts: Dictionary = {}
 var hud_font_loaded := false
 const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
 var npc_dialog: Control
+var restoring_real_level := false
 # Talk to an NPC: E (use), Up / Down (choice), Enter or Space (confirm).
 const TALK_KEYS := {KEY_E: "use", KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40}
 
@@ -38,6 +47,7 @@ func _ready() -> void:
 	real = RealData.new()
 	add_child(real)
 	real.configure(self, "user://real-data-cache")
+	real_player = RealPlayer.new()
 	if viewport != null:
 		text_hud = TextHud.new()
 		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -104,6 +114,27 @@ func _ready() -> void:
 	gate_destination_choice.add_item("Gate destinations", -1)
 	menu.add_child(gate_destination_choice)
 	_add_action("gate_travel", "Confirm gate destination", confirm_gate_destination)
+	mission_menu_panel = PanelContainer.new()
+	mission_menu_panel.set_anchors_preset(Control.PRESET_CENTER)
+	mission_menu_panel.custom_minimum_size = Vector2(380, 160)
+	mission_menu_panel.offset_left = -190
+	mission_menu_panel.offset_top = -80
+	mission_menu_panel.offset_right = 190
+	mission_menu_panel.offset_bottom = 80
+	mission_menu_panel.visible = false
+	var mission_box := VBoxContainer.new()
+	mission_menu_panel.add_child(mission_box)
+	var mission_title := Label.new()
+	mission_title.text = "Mission menu · host layout"
+	mission_box.add_child(mission_title)
+	mission_menu_status = Label.new()
+	mission_box.add_child(mission_menu_status)
+	mission_first_story = Button.new()
+	mission_first_story.text = "Mission 1 · Story"
+	mission_first_story.pressed.connect(mission_menu_select_first_story)
+	mission_box.add_child(mission_first_story)
+	if viewport != null: viewport.add_child(mission_menu_panel)
+	else: add_child(mission_menu_panel)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -121,6 +152,9 @@ func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
 		status_label.text = "Game folder refused: " + real.last_error
 		return false
+	_clear_imported_appearance()
+	real_player.clear()
+	super.restore_default_actor()
 	real_level_choice.clear()
 	real_level_choice.add_item("Game-folder level (%d)" % real.levels.size(), -1)
 	for i in range(real.levels.size()): real_level_choice.add_item(str(real.levels[i].stem), i)
@@ -137,6 +171,13 @@ func open_game_folder(path: String) -> bool:
 	real_font_choice.disabled = found.is_empty()
 	hud_art_counts = real.load_hud_art()
 	hud_font_loaded = play_hud != null and play_hud.set_font(real.hud_font_bytes())
+	hud_extras_counts = {"loaded": 0, "refused": 0}
+	var hud_lmp: String = real.files.get("hud.lmp", "")
+	if play_hud != null and not hud_lmp.is_empty():
+		var extra: Dictionary = load("res://ui/original_art/hud_extras_art.gd").load_green(inspector, hud_lmp)
+		hud_extras_counts = {"loaded": int(extra.loaded), "refused": int(extra.refused)}
+		play_hud.set_extras_art(extra.images)
+		play_hud.configure_gold(0)
 	# The string tables and help chime from the folder, for the level script.
 	text_sources = RealText.install(real, controller)
 	if text_hud != null: text_hud.configure(real, controller, inspector)
@@ -145,6 +186,11 @@ func open_game_folder(path: String) -> bool:
 		npc_dialog.set_font(real.dialog_font())
 		npc_dialog.set_box(real.dialog_box())
 	return true
+
+func reset_session() -> void:
+	_clear_imported_appearance()
+	super.reset_session()
+	if real != null and real.current >= 0: _install_player_model()
 
 # Loose LMPs that are not a level name; each is only an explicit candidate.
 func creature_archives() -> PackedStringArray:
@@ -162,6 +208,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	if not result.ok:
 		status_label.text = "Level refused at %s. %s" % [result.stage, str(result.get("error", ""))]
 		return false
+	_install_player_model()
 	var scripted := false
 	if level_script != null and level_script.button_pressed: scripted = attach_level_script(carry_campaign)
 	else: controller.disable_level_script()
@@ -170,6 +217,198 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
 	return true
+
+func restore_default_actor() -> void:
+	super.restore_default_actor()
+	if real != null and real.current >= 0: _install_player_model()
+
+# Host-viewer camera constants below frame the mesh bounds. The original
+# level camera is unported; these values are presentation choices only.
+func _apply_presentation() -> void:
+	super._apply_presentation()
+	_frame_player_camera()
+
+func _frame_player_camera() -> void:
+	if real_player == null or not real_player.body_drawn or actor_visual.mesh == null or camera == null: return
+	var height: float = actor_visual.mesh.get_aabb().size.y
+	if height <= 0.0: return
+	var focus := actor.position + Vector3(0, height * 0.5, 0) # Host-viewer focus.
+	var half_fov := deg_to_rad(camera.fov * 0.5)
+	var distance := maxf(120.0, height * 0.7 / tan(half_fov)) # Host-viewer distance.
+	camera.position = focus + Vector3(56, 70, 80).normalized() * distance # Host-viewer direction.
+	camera.look_at(focus, Vector3.UP)
+
+func _clear_imported_appearance() -> void:
+	imported_appearance = []
+	imported_record = {}
+
+func _imported_record_matches(record: Dictionary) -> bool:
+	return not imported_record.is_empty() and record.get("player_ready", false) \
+		and int(record.get("player_record_revision", -1)) == int(imported_record.revision) \
+		and str(record.get("name", "")) == str(imported_record.name) \
+		and int(record.get("player_class", -1)) == int(imported_record.class_index) \
+		and int(record.get("player_model_index", -1)) == int(imported_record.model_index)
+
+func _install_player_model() -> void:
+	if real == null or real.current < 0 or real_player == null: return
+	var record: Dictionary = controller.get_observation()
+	if not record.get("player_ready", false):
+		_clear_imported_appearance()
+		asset_label.text = "Practice figure · no player record selected"
+		return
+	var model := int(record.get("player_model_index", -1))
+	var player_count := int(frontend.view.get("num_players", 1)) if frontend != null else 1
+	if not imported_record.is_empty() and not _imported_record_matches(record):
+		_clear_imported_appearance()
+	var appearance := imported_appearance if _imported_record_matches(record) else []
+	if real_player.install(real, actor_visual, inspector, model, appearance, player_count,
+			int(record.get("player_class", -1))):
+		displayed_asset_name = "Class body model %d" % model
+		_frame_player_camera()
+	else:
+		super.restore_default_actor()
+	asset_label.text = real_player.status
+
+func _show_ps2_import(result: Dictionary) -> Dictionary:
+	var accepted: Dictionary = super._show_ps2_import(result)
+	if accepted.get("ok", false):
+		var record: Dictionary = controller.get_observation()
+		_clear_imported_appearance()
+		if record.get("player_ready", false) and str(record.get("name", "")) == str(accepted.get("name", "")) \
+				and int(record.get("player_class", -1)) == int(accepted.get("class_index", -1)) \
+				and int(record.get("player_model_index", -1)) == int(accepted.get("model_index", -1)):
+			imported_appearance = accepted.get("appearance", []).duplicate()
+			imported_record = {"revision": int(record.get("player_record_revision", -1)),
+				"name": str(record.name), "class_index": int(record.player_class),
+				"model_index": int(record.player_model_index)}
+		if real != null and real.current >= 0: _install_player_model()
+	return accepted
+# The OCPLAY image owns simulation and position. This small host association
+# identifies the level data the user selected; it never embeds disc content.
+func save_session_file(path: String) -> bool:
+	if real == null or real.current < 0:
+		return super.save_session_file(path)
+	var talk: Dictionary = controller.dialog_status()
+	if talk.get("open", false) or talk.get("mutex_held", false) or controller.text_hud().get("help_open", false):
+		status_label.text = "Save refused: finish the current dialog or help box first."
+		return false
+	var level: Dictionary = real.levels[real.current]
+	var source: String = str(real.cache_dir.path_join("level-%03d.world" % real.current))
+	var world_hash := FileAccess.get_sha256(source)
+	var tex_hash := FileAccess.get_sha256(str(level.tex))
+	if world_hash.is_empty() or tex_hash.is_empty():
+		status_label.text = "Save refused: this level's WORLD/TEX data cannot be verified."
+		return false
+	var scripted: bool = controller.get_play_capabilities().get("level_script_enabled", false)
+	var campaign := PackedByteArray()
+	if scripted:
+		var state: Dictionary = controller.save_campaign_bytes()
+		if not state.get("ok", false):
+			status_label.text = "Save refused: campaign state could not be captured."
+			return false
+		campaign = state.bytes
+	if not super.save_session_file(path): return false
+	var player_hash := FileAccess.get_sha256(path + ".player")
+	if player_hash.is_empty():
+		status_label.text = "Save refused: the player record companion is absent."
+		return false
+	if scripted and not _write_companion(path + ".campaign", campaign):
+		status_label.text = "Save refused: campaign companion could not be written."
+		return false
+	if not scripted and FileAccess.file_exists(path + ".campaign"):
+		DirAccess.remove_absolute(path + ".campaign")
+	var manifest := {"version": 1, "save_sha256": FileAccess.get_sha256(path),
+		"player_sha256": player_hash,
+		"level_index": real.current, "level_stem": str(level.stem),
+		"world_sha256": world_hash, "tex_sha256": tex_hash,
+		"scripted": scripted,
+		"campaign_sha256": FileAccess.get_sha256(path + ".campaign") if scripted else ""}
+	if manifest.save_sha256.is_empty() or (scripted and manifest.campaign_sha256.is_empty()) or \
+			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
+		status_label.text = "Save refused: level association could not be written."
+		return false
+	status_label.text = "Saved level, player, quests and position. World-object and in-flight script continuation refused."
+	return true
+
+func _write_companion(path: String, bytes: PackedByteArray) -> bool:
+	var temporary := path + ".tmp"
+	if FileAccess.file_exists(temporary): return false
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	if file == null: return false
+	file.store_buffer(bytes)
+	file.flush()
+	var ok := file.get_error() == OK
+	file.close()
+	if not ok or DirAccess.rename_absolute(temporary, path) != OK:
+		DirAccess.remove_absolute(temporary)
+		return false
+	return true
+
+func load_session_file(path: String) -> bool:
+	if not FileAccess.file_exists(path + ".level"):
+		return super.load_session_file(path)
+	var file := FileAccess.open(path + ".level", FileAccess.READ)
+	if file == null or file.get_length() > 4096:
+		status_label.text = "Load refused: level association is unreadable or too large."
+		return false
+	var manifest = JSON.parse_string(file.get_as_text())
+	if not (manifest is Dictionary) or manifest.get("version", -1) != 1 or \
+			FileAccess.get_sha256(path) != manifest.get("save_sha256", ""):
+		status_label.text = "Load refused: level association does not match this native save."
+		return false
+	if FileAccess.get_sha256(path + ".player") != manifest.get("player_sha256", ""):
+		status_label.text = "Load refused: player companion is absent or differs."
+		return false
+	if real == null or real.levels.is_empty():
+		status_label.text = "Load refused: open the original game folder first."
+		return false
+	var index := int(manifest.get("level_index", -1))
+	if index < 0 or index >= real.levels.size() or str(real.levels[index].stem) != str(manifest.get("level_stem", "")):
+		status_label.text = "Load refused: saved level is absent from this game folder."
+		return false
+	var level: Dictionary = real.levels[index]
+	if FileAccess.get_sha256(str(level.tex)) != manifest.get("tex_sha256", ""):
+		status_label.text = "Load refused: saved level TEX differs from the selected folder."
+		return false
+	var scripted: bool = manifest.get("scripted", false)
+	var campaign := PackedByteArray()
+	if scripted:
+		var campaign_path := path + ".campaign"
+		var source := FileAccess.open(campaign_path, FileAccess.READ)
+		if source == null or source.get_length() > 1024 * 1024 or \
+				FileAccess.get_sha256(campaign_path) != manifest.get("campaign_sha256", ""):
+			status_label.text = "Load refused: campaign companion is absent or differs."
+			return false
+		campaign = source.get_buffer(source.get_length())
+	level_script.set_pressed_no_signal(scripted)
+	if not load_real_level(index): return false
+	var world_path: String = str(real.cache_dir.path_join("level-%03d.world" % index))
+	if FileAccess.get_sha256(world_path) != manifest.get("world_sha256", ""):
+		status_label.text = "Level reloaded; load refused: saved WORLD differs from the selected folder."
+		return false
+	restoring_real_level = true
+	var loaded := super.load_session_file(path)
+	restoring_real_level = false
+	if not loaded:
+		status_label.text = "Level reloaded; " + status_label.text.replace("Current session retained; ", "")
+		return false
+	if scripted:
+		var restored: Dictionary = controller.load_campaign_bytes(campaign)
+		if not restored.get("ok", false):
+			status_label.text = "Session replaced; load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
+			return false
+		_observe(restored)
+	status_label.text = "Loaded level, player, quests and position. World-object continuation refused; scripts restart from level data."
+	return true
+
+func _prepare_native_save(path: String) -> Dictionary:
+	return controller.prepare_save_file(path, restoring_real_level)
+
+func _prepare_level_restore(path: String) -> void:
+	if restoring_real_level and terrain_root.has_meta("level_texture_pair"):
+		level_textures.restore = terrain_root.get_meta("level_texture_pair")
+	else:
+		super._prepare_level_restore(path)
 
 func _level_script_toggled(on: bool) -> void:
 	if real == null or real.current < 0: return
@@ -200,7 +439,11 @@ func attach_level_script(carry_campaign := false) -> bool:
 	controller.set_level_text(RealText.level_tables(real, level))
 	# The NPC dialog is attached before the level entry runs (docs/DIALOG.md).
 	var volume_bits: int = audio.music_volume_bits if audio != null else -1
-	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits)
+	var world: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", ".world")
+	var balance := PackedByteArray()
+	if real.files.has("balance.lmp"):
+		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
+	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
 	if result.get("ok", false): _refused_level_request = ""
@@ -245,6 +488,39 @@ func activate_selected_exit() -> Dictionary:
 	if not out.get("ok", false): status_label.text = "Level action refused: " + str(out.get("error", "unknown"))
 	if out.get("queued", false): _queue_level_change()
 	return out
+
+func mission_menu_select_first_story() -> bool:
+	var menu_state: Dictionary = controller.script_mission_menu_state()
+	if not menu_state.get("ok", false) or not menu_state.get("open", false) or not menu_state.get("first_story_available", false):
+		status_label.text = "Mission selection refused: mission 1 is not available."
+		return false
+	# The native state machine supplies the row, availability gate, fade and
+	# direct pending-world write. The host button submits its documented pad.
+	for i in range(17):
+		if int(menu_state.get("state", -1)) == 2: break
+		menu_state = controller.script_mission_menu_tick(0, 0)
+		if not menu_state.get("ok", false): return false
+	if int(menu_state.get("state", -1)) != 2 or int(menu_state.get("row", -1)) != 0 or int(menu_state.get("column", -1)) != 0:
+		status_label.text = "Mission selection refused: the first story row is not selected."
+		return false
+	menu_state = controller.script_mission_menu_tick(0x40, 0)
+	for i in range(4):
+		if not menu_state.get("ok", false): return false
+		menu_state = controller.script_mission_menu_tick(0, 128)
+	if not menu_state.get("launched", false) or str(menu_state.get("pending", "")) != "blood1":
+		status_label.text = "Mission selection refused: the documented first story request was not produced."
+		return false
+	mission_menu_panel.visible = false
+	_queue_level_change()
+	return true
+
+func _refresh_mission_menu() -> void:
+	if mission_menu_panel == null or controller == null: return
+	var state: Dictionary = controller.script_mission_menu_state()
+	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false))
+	if mission_menu_panel.visible:
+		mission_first_story.disabled = not bool(state.get("first_story_available", false))
+		mission_menu_status.text = "Mission 1 is available." if not mission_first_story.disabled else "Mission 1 is locked."
 
 func _queue_level_change() -> void:
 	if _level_change_queued or _level_change_loading: return
@@ -314,10 +590,18 @@ func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
 	if not _level_change_loading and controller != null:
+		_refresh_mission_menu()
 		var pending: Dictionary = controller.script_level_request()
 		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:
 			_queue_level_change()
 	# The preview rebuilds its mesh when it samples a new tick.
+	var appearance_expired := not imported_record.is_empty() and not _imported_record_matches(raw_observation)
+	if appearance_expired: _clear_imported_appearance()
+	if real.current >= 0 and raw_observation.get("player_ready", false):
+		if appearance_expired or real_player.model_index != int(raw_observation.get("player_model_index", -1)):
+			_install_player_model()
+		if real_player.body_drawn and asset_label.text != real_player.status: asset_label.text = real_player.status
+	# Creature preview playback remains separate from the static player rest pose.
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	_present_npc_dialog()

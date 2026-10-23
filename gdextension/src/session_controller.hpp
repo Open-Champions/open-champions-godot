@@ -87,9 +87,12 @@ class ChampionsSessionController : public godot::RefCounted {
   std::string gate_prompt_refusal_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
+  bool ui_frame_driven_ = false;
   void remember_script_fade();
   std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
   std::optional<champions::simulation::rta::player_state::Record> player_;
+  // Presentation identity: advances whenever a session player record is replaced.
+  std::uint64_t player_record_revision_ = 0;
   void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
                               const champions::simulation::rta::player_state::Record &);
   champions::simulation::rta::player_state::Record observed_player() const;
@@ -213,7 +216,10 @@ public:
                                         const godot::PackedByteArray &objects,
                                         bool carry_campaign = false,
                                         const godot::Dictionary &dialog = godot::Dictionary(),
-                                        std::int64_t music_volume_bits = -1);
+                                        std::int64_t music_volume_bits = -1,
+                                        const godot::String &level_name = godot::String(),
+                                        const godot::PackedByteArray &balance = godot::PackedByteArray(),
+                                        const godot::PackedByteArray &world = godot::PackedByteArray());
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,
@@ -241,6 +247,8 @@ public:
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
   godot::Dictionary script_level_request() const;
+  godot::Dictionary script_mission_menu_state() const;
+  godot::Dictionary script_mission_menu_tick(int64_t pad_bits, int64_t fade);
   godot::Array script_exit_targets() const;
   godot::Dictionary inspect_exit_records(const godot::PackedByteArray &) const;
   godot::Dictionary script_trigger_status() const;
@@ -256,12 +264,22 @@ public:
   godot::Dictionary set_level_text(const godot::Array &tables);
   // The HUD text state the five commands wrote, for drawing.
   godot::Dictionary text_hud() const;
+  // Session step 13 (docs/UI_TEXT_GAPS.md): once per displayed frame, after the
+  // draw. Returns the g_uiPulse / g_uiFadeIn the frame drew with (raw floats),
+  // then steps them. Until a presentation calls set_ui_frame_driver(true), every
+  // ready tick counts as one displayed frame (the documented one tick per frame).
+  godot::Dictionary ui_frame();
+  godot::Dictionary set_ui_frame_driver(bool driven);
+  // The visible units of a text key without advancing the miss ring.
+  godot::PackedInt32Array text_key_units(const godot::String &key) const;
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);
   godot::Dictionary set_player_character(const godot::Dictionary &character);
   godot::Dictionary save_player_companion(const godot::String &path) const;
   godot::Dictionary load_player_companion(const godot::String &path);
+  godot::Dictionary save_campaign_bytes();
+  godot::Dictionary load_campaign_bytes(const godot::PackedByteArray &bytes);
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);
@@ -271,10 +289,11 @@ public:
   godot::Dictionary release_input();
   godot::Dictionary stop_session();
   godot::Dictionary get_observation() const;
+  godot::Dictionary probe_full_walk_weight_test();
   godot::Dictionary get_terrain() const;
   godot::Dictionary save_file(const godot::String &path);
   godot::Dictionary save_snapshot_file(const godot::String &path);
-  godot::Dictionary prepare_save_file(const godot::String &path);
+  godot::Dictionary prepare_save_file(const godot::String &path, bool reuse_loaded_level = false);
   godot::Dictionary load_terrain_file(const godot::String &path);
   godot::Dictionary prepare_terrain_file(const godot::String &path, bool build_display = true);
   // Level-spawn story start for the next terrain prepared from exactly `path`:

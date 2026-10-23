@@ -1,6 +1,7 @@
 #include "champions/frontend.hpp"
 #include "champions/dialog_gaps.hpp"
 
+#include "champions/native_audio.hpp"
 #include "champions/netwire.hpp"
 #include "champions/ps2_save.hpp"
 
@@ -13,16 +14,14 @@ namespace ps2 = champions::simulation::rta::ps2_save;
 namespace netwire = champions::simulation::rta::netwire;
 
 namespace {
-constexpr const char *LAYOUT_GAP =
-    "Positions, frames, font and colour of this screen are not in the research; the host draws its own layout.";
 constexpr const char *SOUND_GAP =
-    "No sound sample is documented for this screen's cursor, confirm or cancel (menu_cursorInput 0x1c6570 names a browse sound only).";
+    "Menu sounds: the FX.LMP resource names are documented (move menu_main_toggle, select menu_main_accept, back menu_main_back) and requested at the documented triggers. They are not voiced: the clips' variation draws and the group-67 volume word 0x41bac8 are not in the research.";
 constexpr const char *BACK_GAP =
     "Circle as back is host behaviour: the cancel mask 0x20 is documented, the front end's back transitions are not.";
 constexpr const char *CURSOR_GAP =
     "Cursor wrap at the list ends is not documented; the host clamps. Moves read the auto-repeat word pad +0x10 (Inferred), confirm and cancel the press word +0xc.";
 constexpr const char *FADE_GAP =
-    "No screen-to-screen fade of the front end is documented; changes are immediate.";
+    "No screen-to-screen fade of the front end is documented; changes are immediate. The alpha byte of the colour words is fade state; the host uses the settled 0x80 (Inferred).";
 
 std::uint32_t word_at(const std::array<std::uint8_t, 0x58> &pad, std::size_t at) {
   return std::uint32_t(pad[at]) | std::uint32_t(pad[at + 1]) << 8 | std::uint32_t(pad[at + 2]) << 16 |
@@ -150,12 +149,56 @@ std::vector<Request> Flow::take_requests() {
   return out;
 }
 
+// music_playGlobal 0x2110e0 queues only at or above the volume gate (docs/frontend-layout.md,
+// "Menu sound and first theme"); the request keeps its original flags.
+void Flow::music(const char *kind, const char *name, std::uint32_t flags) {
+  if (!audio::music_gate_open(music_.live)) { // the one gate: native_audio.cpp
+    ++gated_music_;
+    return;
+  }
+  request(kind, name, flags);
+}
+
+void Flow::sound(menu_sound which) {
+  request("menu_sound", menu_sound_resource(which));
+}
+
 void Flow::go(Screen next, int cursor) {
   screen_ = next;
+  card_cache_supplied_ = false;
+  card_metadata_.clear();
+  card_headers_.clear();
+  card_count_ = 0;
+  card_scroll_base_ = 0;
+  card_preview_index_ = -1;
+  card_debug_time_ = false;
   cursor_ = cursor;
   frames_ = 0;
   slider_timer_ = 0;
   error_.clear();
+}
+
+void Flow::set_card_cache(std::vector<std::uint8_t> metadata,
+                          std::vector<std::uint8_t> headers, int count, int scroll_base) {
+  if (screen_ != Screen::LoadGame && screen_ != Screen::SaveGame)
+    throw Refusal("card cache requires the save or load screen");
+  (void)layout::visible_card_rows(metadata, headers, count, scroll_base,
+                                  screen_ == Screen::SaveGame);
+  card_metadata_ = std::move(metadata);
+  card_headers_ = std::move(headers);
+  card_count_ = count;
+  card_scroll_base_ = scroll_base;
+  card_cache_supplied_ = true;
+  card_preview_index_ = -1;
+  card_debug_time_ = false;
+}
+
+void Flow::set_card_preview(int header_index, bool debug_time) {
+  if (!card_cache_supplied_)
+    throw Refusal("selected card preview requires a supplied card cache");
+  (void)layout::card_preview(card_headers_, card_count_, header_index);
+  card_preview_index_ = header_index;
+  card_debug_time_ = debug_time;
 }
 
 bool Flow::in_frontend() const {
@@ -205,7 +248,9 @@ void Flow::enter_frontend(int code) {
   load_from_frontend_ = 1;
   music_.add_core_tasks();
   request("apply_music_volume", {}, music_.live);
-  request("front_end_music", "mx_maintheme_l.vag");
+  // frontend_run 0x1e09b0/0x1e09c4 requests flags 1 or 5; the condition that
+  // selects 5 is not documented, so this host always asks for 1 (see notes()).
+  music("front_end_music", "mx_maintheme_l.vag", 1);
   options_return_ = Screen::Main;
   load_return_ = Screen::Main;
   go(Screen::Main);
@@ -335,19 +380,33 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     if (pressed && frames_ > INTRO_PRESS_AFTER)
       enter_frontend(0);
     break;
-  case Screen::Main:
+  case Screen::Main: {
+    const int before = cursor_;
     move_cursor(repeat);
+    if (cursor_ != before)
+      sound(menu_sound::move); // an actual move looks up menu_main_toggle.anm (Executed, 0x1a03fc)
     if (confirm) {
+      // main_accept: every accept first plays menu_main_accept.anm (0x1e15b8), then
+      // row 0 -> state 1, row 1 -> memcard_requestLoad, row 2 -> options setup and
+      // state 11, row 3 -> credits music and credits_load (state 15). Dispatch is by key.
+      sound(menu_sound::select);
       if (id == "new_game") go(Screen::GameType);
       else if (id == "load_game") { load_return_ = Screen::Main; load_from_frontend_ = 1; go(Screen::LoadGame); }
       else if (id == "options") { options_return_ = Screen::Main; go(Screen::Options, 1); }
-      else if (id == "credits") go(Screen::Credits);
+      else if (id == "credits") {
+        music("credits_music", "mx_endcredits_ext_l.vag", 3); // 0x1e16f4, flags 3
+        go(Screen::Credits);
+      }
     }
     break;
+  }
   case Screen::GameType:
     move_cursor(repeat);
     if (confirm && id == "normal") go(Screen::Players);
-    else if (pressed & CANCEL) go(Screen::Main);
+    else if (pressed & CANCEL) {
+      sound(menu_sound::back); // cancel from the game-type list: menu_main_back.anm (Executed, 0x1e1d80)
+      go(Screen::Main);
+    }
     break;
   case Screen::Players:
     move_cursor(repeat);
@@ -382,7 +441,13 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     else if (pressed & CANCEL) go(Screen::Options, 1);
     break;
   case Screen::Credits:
-    if (pressed & CANCEL) go(Screen::Main, 3);
+    if (pressed & CANCEL) {
+      // credits_exit (CREDITS_EXIT_FINISHED): the front-end theme is requested again
+      // with flags 1 (0x1e114c), then state 0. The exit input is host behaviour: what
+      // ends credits_run is Unknown. The 0x211338(2) call before it is not modelled.
+      music("front_end_music", "mx_maintheme_l.vag", 1);
+      go(Screen::Main, 3);
+    }
     break;
   case Screen::LoadGame:
     move_cursor(repeat);
@@ -414,6 +479,8 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       import_context_ = "char"; // page 1 triangle: Import, card state 9
       request("import_ps2", "char");
     } else if (confirm) {
+      // No menu sound here: PLAYERSEL_SOUNDS belongs to phase 1 (import selection),
+      // and class selection has no phase of its own (REFUSED, docs/FRONTEND.md).
       character_ = Character{};
       character_.model = cursor_;
       character_.class_index = class_of_model(cursor_);
@@ -435,8 +502,12 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     if ((repeat & RIGHT) && ability_remaining() > 0)
       ++character_.spent[static_cast<std::size_t>(cursor_)];
     if (pressed & CONFIRM) {
-      if (ability_remaining() == 0) go(Screen::CharName);
-      else error_ = "20 ability points must be spent before the screen can be left";
+      if (ability_remaining() == 0) {
+        // The phase-3 sound sites have no documented trigger condition.
+        go(Screen::CharName);
+      } else {
+        error_ = "20 ability points must be spent before the screen can be left";
+      }
     } else if (pressed & CANCEL) {
       go(Screen::CharAppearance);
     }
@@ -629,9 +700,14 @@ std::vector<Entry> Flow::entries() const {
     break;
   case Screen::Players:
     out.push_back(entry("one", "One player", "first entry of table 0x4f6de8 reaches state 4 (Ran)"));
+    for (int i = 1; i < 4; ++i) // the table has four rows (Executed); their text and effect are not recorded
+      out.push_back(entry("row", "(row " + std::to_string(i) + ")", "row of table 0x4f6de8; text and effect not documented", false,
+                          "this row's text and effect are not documented"));
     break;
   case Screen::Mode:
     out.push_back(entry("missions", "Mission game", "first entry of table 0x4f6c68 (Ran)"));
+    out.push_back(entry("row", "(row 1)", "second row of table 0x4f6c68; text and effect not documented", false,
+                        "this row's text and effect are not documented"));
     break;
   case Screen::Difficulty:
     out.push_back(entry("easy", "Easy", "menu_easy2, first of table 0x4f6e38 (Read); g_difficultyIdx 1"));
@@ -642,12 +718,26 @@ std::vector<Entry> Flow::entries() const {
                           "unlock test options_get4f8f38Level 0x1ec448 was not executed"));
     break;
   case Screen::Options: {
+    if (!in_frontend()) {
+      // The in-game table 0x44f218 was not captured. Keep only host controls
+      // whose behaviour this flow implements; do not borrow the 13-row table.
+      out.push_back(entry("entry0", "(entry 0)", "pause option row unknown", false,
+                          "the in-game option table was not captured"));
+      auto music = entry("music", "Music", "host pause music control");
+      music.type = 4;
+      music.value = music_.live;
+      out.push_back(music);
+      break;
+    }
     out.push_back(entry("entry0", "(entry 0)", "list entry 0 is not documented", false,
                         "entry order is documented only for music at index 1"));
     auto music = entry("music", "Music", "menu_music, index 1, type 4 float slider (Executed)");
     music.type = 4;
     music.value = music_.live;
     out.push_back(music);
+    for (int i = 2; i < 13; ++i) // thirteen rows in table 0x4f6e88 (Executed)
+      out.push_back(entry("entry", "(entry " + std::to_string(i) + ")", "row of the options table; text and effect not documented", false,
+                          "this option's order and type are not documented"));
     break;
   }
   case Screen::OptionsLoad:
@@ -728,11 +818,12 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("Intro film: MPEG-2 640x448 at 29.97 is not decoded by this client, so movie_isFinished never holds; a press after 30 frames ends it. porko_l.vag is queued held on stream 0 and released only when the movie is ready, so nothing plays.");
     break;
   case Screen::Main:
-    n.push_back("Only the first entry's key and place are known; the other three are the on-screen texts seen, in host order.");
+    n.push_back("The first theme is requested with flags 1; the research lists flags 1 or 5 at 0x1e09b0/0x1e09c4 and does not document the condition that selects 5.");
+    n.push_back("Row destinations are Executed (main_accept: game type, card load, options, credits with its music), dispatched by key. The row texts are the on-screen texts seen (Ran), host-authored: their lookup keys are not recorded.");
     n.push_back("Ran: the main menu takes input about 240 frames after the front end starts, and a choice in its first second can find the character screens' data unloaded. This host does not wait.");
     break;
   case Screen::GameType: case Screen::Players: case Screen::Mode:
-    n.push_back("Other entries of this table are not documented and are not offered.");
+    n.push_back("The table's row count is Executed; the text and effect of its other rows are not recorded, so they are drawn dim and refused.");
     n.push_back("g_pvpModeA, g_pvpModeB, 0x4f7124 and the kill limit are written by the offline setup, but their values per choice are not documented; this flow leaves them at main's zero.");
     break;
   case Screen::Difficulty:
@@ -751,7 +842,7 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("memcard_optionsScreen state 0 message box 'options_warn' (0x3C, -1, 0, 0). Which on-screen choice is 1 and which is 2 is not documented.");
     break;
   case Screen::Credits:
-    n.push_back("credits_load 0x223c64 and credits_run 0x223d3c were not read. Refused; circle returns.");
+    n.push_back("credits_load 0x223c64 loads credits.lmp and credits_run 0x223d3c scrolls it (medium font, layer 7, shadow pass +2); the data layout is Unknown, so no line is drawn. Circle returns and requests the front-end theme again with flags 1 (credits_exit); what ends credits_run is Unknown.");
     break;
   case Screen::LoadGame:
     n.push_back("memcard_requestLoad 0x2176e0 stores g_inFrontend in 0x8e1ab8. The card browser, slot list and its frames are not documented; the host opens a file chooser.");
@@ -762,6 +853,7 @@ std::vector<std::string> Flow::notes() const {
     break;
   case Screen::CharClass:
     n.push_back("Which models the page shows, and in which order, is not documented; all twelve are listed in model order. Triangle imports a PS2 character (page 8 sheet).");
+    n.push_back("Refused: class selection has no phase of its own in the research (phase 1 is import selection), so it plays no menu sound and draws no phase-1 text; the page footer is Host.");
     if (!start_known_)
       n.push_back("Class start stats g_classStartStats 0x4ef400 are read from the user's executable; none is loaded, so rows show spent points only.");
     break;
@@ -779,14 +871,15 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("Start opens the pause menu (Ran).");
     break;
   case Screen::Pause:
-    n.push_back("Pause text: font word 0x4f7100, layer 7, colour 0x80464646 (Observed). Positions are Unknown. Kick Player is a net-game host entry and is hidden offline.");
+    n.push_back("Pause list: medium font, layer 7, colour 0x80464646, five rows from y=179 and the three frame calls (Executed). Kick Player is a net-game host entry and is hidden offline.");
     n.push_back("Closing with start or circle is host behaviour; warpMenu commits the options when the menu closes (0x18e2f8).");
     break;
   case Screen::ExitConfirm:
     n.push_back("Yes sends hudmsg_sendExitCountdown (countdown 1 offline). The exit code that leads back to the front end is not documented.");
     break;
   }
-  n.push_back(LAYOUT_GAP);
+  for (const auto &u : layout().unknown)
+    n.push_back("Unknown: " + u);
   n.push_back(SOUND_GAP);
   if (!entries().empty()) {
     n.push_back(CURSOR_GAP);

@@ -1,0 +1,36 @@
+STATUS: COMPLETE — the documented UI text gaps are ported, replayed against the pinned research and wired into the play scene. CTest 227/227 on arm64, Godot dev matrix 54/54, FULL_TRACE unchanged, sweep 111/111. The compass mesh and the chime slot's life stay refused: the research marks them Unknown and Inferred.
+
+# Native UI text extras, round 1 — 2026-10-21
+
+Branch `codex/native-ui-text`, from wave-23 head `c86c539`. Source: `t3/research-ui-text-gaps` 523b3db (audit PASS after its fix round): `docs/ui-text-gaps.md`, `docs/spec/ui-text-gaps.md`, `tools/ref_ui_text_gaps.py`. Commits: `1f11988` (native port), `08b2eaf` (wiring), `b18bdba` (test fixes). `docs/UI_TEXT_GAPS.md` lists what is ported, wired and refused.
+
+## What was added
+
+- **Native port** (`native/src/ui_text_gaps.cpp`): fade 0.12 and pulse 0.8 ramps (session step 13); button layout words and the glyph byte (0x7e for the observed layout byte); `help_task` (inner ctile frame of height h+76, glyph, `Affirmation` label, no-break confirm loop, draw gate that does not stop a confirm); `hud_drawBust` (gamefontsmall caption, one wrap per branch, alphas 110/128, neutral RGB 0x808080, meter fill on the run-time maximum); `ui_emitSpriteQuad` field rule and `woven_line`; `hud_drawCompass` world matrix and two passes; `soundSeq_updateAll` free rules. A quoted showName key is already handled by `strings::TextTable::lookup`; it is now tested against the research cases.
+- **Corrections to earlier native code:** `helpBox().inner_height` is h+76 (research corrected research-ui); `hud_dynamic::bustPanel`, which refused a maximum and guessed the font, is removed in favour of `hudDrawBust`. `hud_r3.tsv` was regenerated from the corrected reference; only the four `help_box` rows changed. The text HUD's colour scaling also scaled the alpha byte; the original copies it, so the native plan now does the scaling.
+- **Wiring:** the script host owns `g_uiPulse` / `g_uiFadeIn`; a dialog's `fade_restart` sets the fade to 0.0 and the end handler waits for exactly 1.0. `controller.ui_frame()` is step 13 (driven at 60 Hz by the play scene's text HUD; one step per ready tick until a presentation drives it). The dialog cursor and "more" prompt draw glyph 0x7e. `text_hud.gd` draws the help box, both bust branches and the compass label from native plans.
+
+## Evidence
+
+- `tools/generate_ui_text_gaps_vectors.py` imports the pinned models and writes 3,698 rows (seeds 20973 and 7) to `native/tests/vectors/ui_text_gaps.tsv`, with `ui_text_gaps_contract.json` holding the research file hashes. `ui-text-gaps-exact` replays every row (ramps, layouts, pad glyphs, help task calls and state, bust calls, sprite quads, woven lines, compass matrix and calls, sound-slot updates, showName lookups) and states the documented facts directly: **13,941 checks, 0 failures**.
+- `dialog_host_tests`: a whole conversation with the host's stepped fade. The first tick that reads exactly 1.0 follows the ninth step after the closing restart, and the dialog ends within a tick of that. (The research text says message 3 runs 9 frames after closing; this host's tick order puts the first 1.0 read after nine steps, with the end one tick later. That is the dialog machine's existing ordering, not changed.)
+
+## Verification
+
+- **CTest, native arm64 Release, full:** 227/227 passed in 667 s (`work/native-ui-text/ctest2.log`). One earlier full run had 226/227: my first fade assertion was wrong (it asserted 9 ticks later; the host gives 8 from the baseline, 9 steps to 1.0). Fixed in `b18bdba`, then the whole suite was rerun. `file` identifies `champions-ui-text-gaps-tests` as arm64. The count is 227 against 226 in wave 23 (+ `ui-text-gaps-exact`). Rosetta x64 CTest was not run.
+- **Godot dev matrix (debug universal extension):** 54/54 (`work/native-ui-text/godot-results.json`). The three creature-anim runs first failed in 0.1 s because that extension was not built in the fresh worktree; after building it they pass (32 checks). `ui_layout_dynamic_smoke` now checks the bust plan (gamefontsmall caption, 11 calls without a maximum, meter plan, refusal on a missing size).
+- **FULL_TRACE:** `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, 31,622 bytes, 2,620 checks, 0 failures — identical to wave 23.
+- **Real-data smoke, new feature (read-only disc, counts only):** `real_data_text.gd`, 111 levels loaded, 22 checks, 0 failures. A real help box drew **70** inner ctile frame pieces (tint 0x3f000000) plus title, body, glyph and label text, paused the session, and closed on confirm (delay 60, lockout 60). A real bust meter panel was reached once: exactly one clipped bar and one gamefontsmall caption. A no-maximum bust panel drew. No setInfo message was reached in 300 ticks per level (reported, not required, as before). `real_data_dialog.gd`: 24 talks opened and 24 closed, 0 failures, 135,343 glyphs drawn, no `cursor glyph` refusal left (it was refused before).
+- **111-level sweep** (four slices, 60 ready ticks, `uion --scripts` and `uioff`): both **111/111 tried, loaded and played**, **230 checks** each, zero failures. The deterministic script counts equal wave 23: `scripts.refusal_stops` 14, `scripts.stub_refusals` 266, `scripts.callee_refusals` 0, empty dialog refusal list. No count changed, so there is nothing to explain.
+
+## Refused and labelled (Unknown or Inferred in the research)
+
+- **Compass mesh:** the draw needs the game camera's view matrix and a model path in the scene; the second pass's light state is Unknown. Only the label is drawn, and the host does not model the gate words 0x4f8424 and 0x4f841c (assumed open, labelled in `text_hud.gd`). All three disc calls are in levels outside the level table, so the sweep never shows it.
+- **Chime slot life:** two updates is Inferred and needs the sound cursor of `anim_advance`, which the native runtime refuses. `soundSeqUpdateAll` is ported and replayed, but the play host's chime slots are not freed and the research's `chime_frames` rows are not replayed.
+- **Layout byte other than 1** (layout 0 is inferred from code), the **initial value of g_uiFadeIn** (host starts at 1.0), **g_simFrame** as the ready-tick count for the bar frame, the **bust hide latch** (host never sets it), the **notice-box half** of `help_task`, and raster-exact odd-top sprite fields (the client weaves, the research's inferred progressive rule).
+
+## Not done
+
+Release/universal export, the Rosetta x64 CTest and the 36,000-tick run were not part of this job and were not run; no original-client comparison exists. The visual layout of the help box and meter was checked through draw-item counts on real data, not by pixel comparison with the console.
+
+Commands: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`, `cmake --build build/native -j 4`, `ctest --test-dir build/native --output-on-failure -j 3`; `work/native-ui-text/build-ext.sh`; `python3 work/native-ui-text/run-godot.py`; `work/run-slices-r24.sh uion --scripts` and `work/run-slices-r24.sh uioff`; `real_data_text.gd` and `real_data_dialog.gd` with `--game-folder` on the disc. Logs are under ignored `work/native-ui-text/` and `work/private/`. No private bytes, names or decoded content were added to any tracked file.

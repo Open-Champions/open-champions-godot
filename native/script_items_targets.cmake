@@ -6,7 +6,8 @@ include_guard(GLOBAL)
 set(CHAMPIONS_SCRIPT_ITEMS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 add_library(champions-script-items
     "${CHAMPIONS_SCRIPT_ITEMS_ROOT}/src/script_items.cpp"
-    "${CHAMPIONS_SCRIPT_ITEMS_ROOT}/src/monster_build.cpp")
+    "${CHAMPIONS_SCRIPT_ITEMS_ROOT}/src/monster_build.cpp"
+    "${CHAMPIONS_SCRIPT_ITEMS_ROOT}/src/net_launch.cpp")
 target_include_directories(champions-script-items PUBLIC "${CHAMPIONS_SCRIPT_ITEMS_ROOT}/include")
 target_link_libraries(champions-script-items PUBLIC champions-script-builtins champions-messages champions-items champions-core)
 set_target_properties(champions-script-items PROPERTIES POSITION_INDEPENDENT_CODE ON)

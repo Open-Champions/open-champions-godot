@@ -274,6 +274,10 @@ public:
                         Props stale_props = {});
   GameObject *new_object(std::uint32_t, const Vec3 &,
                          std::shared_ptr<ClassDef> = {}, Props = {});
+  // The script binder owns its Obj instances. Register one already linked
+  // through this World so spatial queries can validate its grid node.
+  void register_external(GameObject &);
+  void unregister_external(GameObject &);
   void destroy(GameObject &, std::int64_t flags = 3);
   void delete_object(GameObject &);
   void flush_delete_list();

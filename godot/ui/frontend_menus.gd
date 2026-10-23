@@ -1,12 +1,13 @@
 extends Control
 
-# Host layout around the native front-end flow (ChampionsFrontendService,
-# docs/FRONTEND.md). Every screen change, timing, slider step and commit is
-# native. This script maps host keys to pad bits, performs the flow's requests
-# (file choosers, the play session, audio) and draws a HOST layout: the
-# research does not document these screens' positions, frames, colours or
-# sounds, so nothing drawn here is presented as the original picture. The one
-# documented style used is the pause text colour 0x80464646.
+# The front end over the native flow (ChampionsFrontendService, docs/FRONTEND.md).
+# Every screen change, timing, slider step and commit is native, and so is the
+# layout: Flow::layout() returns the draw calls research-menus-layout dc458d5
+# documents (positions, frames, sprites, fonts, layers, colours). This script
+# maps host keys to pad bits, performs the flow's requests (file choosers, the
+# play session, music, menu sounds) and paints the calls through ui/frontend_view.gd
+# with the user's own fonts and textures. What the research lists as Unknown is
+# drawn as a labelled host layout ("HOST LAYOUT" on screen).
 
 const FRAME_SECONDS := 1.0 / 60.0
 # Host keyboard -> PS2 pad bits (bits from the research; the key choice is host).
@@ -18,15 +19,17 @@ const PAD_KEYS := {
 }
 # On the name page only these keys stay pad buttons; the rest type.
 const NAME_PAD_KEYS := [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE, KEY_TAB]
-const KEY_HELP := "Host keys: arrows = d-pad · Enter/Space/X = cross · Backspace/C/Esc = circle · T/Tab = triangle · P = start"
-const PAUSE_TEXT := 0x80464646 # pauseMenu_task text_begin colour (Observed)
-const HOST_TEXT := 0x80707070  # host colour: front-end colours are not documented
-const MUSIC_FRONT := "mx_maintheme_l.vag"
+const KEY_HELP := "Host keys: arrows = d-pad · Enter/Space/X = cross · Backspace/C/Esc = circle · T/Tab = triangle · P = start · F5 = Save screen in play"
+const FrontendView = preload("res://ui/frontend_view.gd")
 
 var scene: Control
 var service: RefCounted
-var layout_service: Object
-var dynamic_service: Object
+var view_painter: RefCounted # ui/frontend_view.gd
+var scene_view := {}          # the native scene of the current screen
+var last_scene := {}
+var show_notes := false       # F1: the native notes over the screen
+var sounds := {}              # menu clip resource -> requests seen
+var sounds_voiced := 0        # requests that played (none: the clips are not voiced)
 var view := {}
 var booted := false
 var key_bits := {}
@@ -36,8 +39,6 @@ var queued_paths := {} # request kind -> path, used by tests instead of a dialog
 var log_lines: Array[String] = []
 var host_error := ""
 var name_buffer := ""
-var font_bytes := PackedByteArray()
-var font_texture: ImageTexture
 var start_mode := "" # how the last start_play request was served
 
 func _ready() -> void:
@@ -46,10 +47,7 @@ func _ready() -> void:
 	visible = false
 	if ClassDB.class_exists("ChampionsFrontendService"):
 		service = ClassDB.instantiate("ChampionsFrontendService")
-	if ClassDB.class_exists("ChampionsUiLayoutService"):
-		layout_service = ClassDB.instantiate("ChampionsUiLayoutService")
-	if ClassDB.class_exists("ChampionsUiDynamicLayoutService"):
-		dynamic_service = ClassDB.instantiate("ChampionsUiDynamicLayoutService")
+	view_painter = FrontendView.new()
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--frontend-options="):
 			options_path = argument.trim_prefix("--frontend-options=")
@@ -149,6 +147,11 @@ func handle_key(event: InputEvent) -> bool:
 	if not event is InputEventKey or event.echo:
 		return false
 	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+	# Host route from the researched five-entry pause menu to the documented
+	# save screen. F5 is a client shortcut, not an original pause entry.
+	if key == KEY_F5 and screen() in ["playing", "pause"] and scene != null and scene.session_started and not scene.stopped:
+		if event.pressed: open_save_screen()
+		return true
 	if not active():
 		# In play only start (P) reaches the flow; everything else is the game's.
 		if key != KEY_P or scene == null or not scene.session_started or scene.stopped:
@@ -157,6 +160,11 @@ func handle_key(event: InputEvent) -> bool:
 			if not attach().get("ok", false):
 				return false
 		_set_key(key, event.pressed)
+		return true
+	if key == KEY_F1:
+		if event.pressed:
+			show_notes = not show_notes
+			queue_redraw()
 		return true
 	if screen() == "char-name" and not key in NAME_PAD_KEYS:
 		# Name page: the host keyboard types (the grid's characters are not documented).
@@ -222,7 +230,9 @@ func _handle(requests: Array) -> void:
 		_log("%s %s %d" % [kind, str(request.arg), int(request.value)])
 		match kind:
 			"pause": _pause(int(request.value) == 1)
-			"front_end_music": _front_end_music()
+			"front_end_music": _front_end_music(str(request.arg), int(request.value))
+			"credits_music": _credits_music(str(request.arg), int(request.value))
+			"menu_sound": _menu_sound(str(request.arg))
 			"apply_music_volume": _apply_volume(int(request.value))
 			"preview_music": _preview(str(request.arg), int(request.value))
 			"write_options": _write_options()
@@ -239,9 +249,21 @@ func _pause(on: bool) -> void:
 		return
 	scene.set_paused(on)
 
-func _front_end_music() -> void:
+# The flow already applied the volume gate (music_playGlobal 0x2110e0) and kept the
+# original flags; the audio side gates again on its own volume word.
+func _front_end_music(_name: String, _flags: int) -> void:
 	if scene != null and scene.audio != null:
 		scene.audio.reset(false)
+
+# End-credits music: the same gated music_playGlobal, flags 3.
+func _credits_music(name: String, flags: int) -> void:
+	_preview(name, flags)
+
+# FX.LMP menu clips (move, select, back). The flow requests them at the documented
+# triggers. They are not voiced: the clips' variation draws and the group volume
+# word 0x41bac8 are not in the research (docs/FRONTEND.md).
+func _menu_sound(resource: String) -> void:
+	sounds[resource] = int(sounds.get(resource, 0)) + 1
 
 func _apply_volume(bits: int) -> void:
 	# The flow's live g_musicVolume word goes to the mixer bit for bit.
@@ -379,141 +401,90 @@ func _load_start_stats() -> void:
 	else:
 		_log("class start stats refused: " + str(result.get("error", "")))
 
-func sync_font(art) -> void:
-	if font_texture != null or art == null:
+# The user's fonts and textures are read once the play scene has a game folder.
+func sync_font(_art = null) -> void:
+	_ensure_view()
+
+func _ensure_view() -> void:
+	if view_painter == null or scene == null:
 		return
-	var hud = art.get("hud_view")
-	if hud == null or hud.font_bytes.is_empty() or hud.font_texture == null:
+	var real = scene.get("real")
+	if real == null or real.files.is_empty():
 		return
-	font_bytes = hud.font_bytes
-	font_texture = hud.font_texture
+	if view_painter.real == real and view_painter.has_fonts():
+		return
+	if view_painter.real == real and view_painter.fonts.size() == 0 and view_painter.get_meta("tried", false):
+		return
+	view_painter.set_meta("tried", true)
+	view_painter.configure(real, scene.get("inspector"))
+	last_scene = {}
 	queue_redraw()
+
+func fonts_loaded() -> bool:
+	return view_painter != null and view_painter.has_fonts()
+
+# The native draw calls for the current screen.
+func _scene() -> Dictionary:
+	if service == null or not booted:
+		return {}
+	var result: Dictionary = service.layout()
+	return result if result.get("ok", false) else {}
 
 func _refresh() -> void:
 	visible = active()
 	if scene != null and scene.has_method("_show_menu") and scene.is_inside_tree():
 		scene._show_menu(scene.flow)
+	_ensure_view()
+	scene_view = _scene()
 	queue_redraw()
 
-func _word(tint: int) -> Color:
-	var channel := func(shift: int) -> float:
-		return clampf(float((tint >> shift) & 255) / 128.0, 0.0, 1.0)
-	return Color(channel.call(0), channel.call(8), channel.call(16), 1.0)
+func _is_pause_family() -> bool:
+	var name := screen()
+	return name in ["pause", "exit-confirm"] or (name in ["options", "options-load", "load-game"] and scene != null and scene.session_started and not view.get("in_frontend", true))
 
-func _game_text(x: int, y: int, text: String, colour: int) -> bool:
-	if font_texture == null or font_bytes.is_empty() or layout_service == null or text.is_empty():
-		return false
-	var named: Dictionary = layout_service.hud_text_glyphs(font_bytes, text.to_utf8_buffer(), x, y, colour)
-	if not named.get("ok", false):
-		return false
-	for glyph in named.glyphs:
-		var sw := int(glyph.source_width)
-		var sh := int(glyph.source_height)
-		if sw <= 0 or sh <= 0:
-			continue
-		draw_texture_rect_region(font_texture, Rect2(float(glyph.x_half) * 0.5, float(glyph.y), sw, sh),
-			Rect2(int(glyph.source_x), int(glyph.source_y), sw, sh), _word(int(glyph.tint)), false)
-	return true
-
-func _host_text(pos: Vector2, text: String, size_px: int, colour: Color, width := -1.0, centred := false) -> void:
+func _host_text(pos: Vector2, text: String, size_px: int, colour: Color, width := -1.0) -> void:
 	var font := ThemeDB.fallback_font
-	var align := HORIZONTAL_ALIGNMENT_CENTER if centred else HORIZONTAL_ALIGNMENT_LEFT
 	if width > 0.0:
-		draw_multiline_string(font, pos, text, align, width, size_px, -1, colour)
+		draw_multiline_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, width, size_px, -1, colour)
 	else:
-		draw_string(font, pos, text, align, -1, size_px, colour)
+		draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px, colour)
 
 func _draw() -> void:
 	if not active():
 		return
-	var name := screen()
-	var pause_family: bool = name in ["pause", "exit-confirm"] or (name in ["options", "options-load", "load-game"] and scene != null and scene.session_started and not view.get("in_frontend", true))
+	var pause_family := _is_pause_family()
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.02, 0.03, 0.8 if pause_family else 1.0), true)
-	var scale := minf(size.x / 640.0, size.y / 480.0)
-	if scale <= 0.0:
+	var factor := minf(size.x / 640.0, size.y / 480.0)
+	if factor <= 0.0:
 		return
-	var offset := Vector2((size.x - 640.0 * scale) * 0.5, (size.y - 480.0 * scale) * 0.5)
-	draw_set_transform(offset, 0.0, Vector2(scale, scale * 480.0 / 448.0))
-	var muted := Color(0.62, 0.66, 0.72)
-	var title := "%s" % name
-	if int(view.get("state", -1)) >= 0:
-		title += " · state %d" % int(view.state)
-	_host_text(Vector2(16, 22), "HOST LAYOUT — " + title, 13, Color(0.95, 0.78, 0.35))
-	match name:
-		"soe-logo":
-			_host_text(Vector2(0, 200), "Publisher logo (picture not drawn) · frame %d of 240 · any button skips the logo and the film" % int(view.get("frames", 0)), 13, muted, 640, true)
-		"intro-movie":
-			_host_text(Vector2(0, 200), "Intro film (MPEG-2, not decoded) · a button after frame 30 ends it · frame %d" % int(view.get("frames", 0)), 13, muted, 640, true)
-		"credits":
-			_host_text(Vector2(0, 200), "Credits: credits_run was not read. Refused. Circle returns.", 14, muted, 640, true)
-		"playing":
-			pass
-	var entries: Array = view.get("entries", [])
-	var cursor := int(view.get("cursor", 0))
-	# Host placement: one centred column; two columns for long lists; the exit
-	# prompt side by side because its documented moves are left and right.
-	var per_column := entries.size() if entries.size() <= 8 else int(ceil(entries.size() / 2.0))
-	var bottom := 120
-	var y := 120
-	for index in range(entries.size()):
-		var entry: Dictionary = entries[index]
-		var selected := index == cursor
-		var enabled := bool(entry.enabled)
-		var cx := 320
-		var half := 170
-		if name == "exit-confirm":
-			cx = 240 + index * 160
-			y = 200
-			half = 70
-		elif entries.size() > 8:
-			cx = 190 + (index / per_column) * 260
-			y = 120 + (index % per_column) * 28
-			half = 120
-		if selected:
-			draw_rect(Rect2(cx - half, y - 13, half * 2, 24), Color(0.95, 0.78, 0.35, 0.18), true)
-			_host_text(Vector2(cx - half - 16, y + 4), ">", 15, Color(0.95, 0.78, 0.35))
-		var label := str(entry.label)
-		var colour := PAUSE_TEXT if pause_family else HOST_TEXT
-		if not enabled:
-			colour = 0x80303030
-		if not _game_text(cx, y - 12, label, colour):
-			var tint := Color(0.92, 0.92, 0.92) if enabled else Color(0.45, 0.45, 0.45)
-			if pause_family and enabled:
-				tint = _word(PAUSE_TEXT)
-			_host_text(Vector2(cx - half, y), label, 15, tint, half * 2, true)
-		var step := 28
-		if int(entry.type) == 4:
-			var value := float(_bits_to_float(int(entry.value)))
-			draw_rect(Rect2(270, y + 14, 100, 6), Color(0.2, 0.2, 0.24), true)
-			draw_rect(Rect2(270, y + 14, 100.0 * clampf(value, 0.0, 1.0), 6), Color(0.95, 0.78, 0.35), true)
-			_host_text(Vector2(378, y + 21), "%.4f (0x%08x)" % [value, int(entry.value)], 10, muted)
-			step = 40
-		if not enabled and not str(entry.refusal).is_empty():
-			_host_text(Vector2(500, y), "refused: " + str(entry.refusal), 10, Color(0.85, 0.45, 0.4), 136)
-		bottom = maxi(bottom, y + step - 12)
-		if name != "exit-confirm" and entries.size() <= 8:
-			y += step
-	var character: Dictionary = view.get("character", {})
-	if name.begins_with("char-"):
-		var stats: Array = character.get("stats", [0, 0, 0, 0])
-		_host_text(Vector2(16, 60), "Model %d · class %d · points left %d · stats %s%s" % [int(character.get("model", 0)), int(character.get("class_index", 0)), int(view.get("ability_remaining", 0)), str(stats), "" if character.get("base_known", false) else " (start table not loaded: spent points only)"], 12, muted, 608)
-		if name == "char-name":
-			_host_text(Vector2(16, 80), "Type the name on the host keyboard; Backspace deletes. Then Done.", 12, muted, 608)
-	if name == "options" or name == "options-load":
-		_host_text(Vector2(16, 60), "music live 0x%08x · image 0x%08x · options file %s" % [int(view.get("music_live", 0)), int(view.get("music_image", 0)), "present" if view.get("options_file", false) else "absent"], 12, muted, 608)
-	var notes_y := maxi(300, bottom + 20)
+	var offset := Vector2((size.x - 640.0 * factor) * 0.5, (size.y - 480.0 * factor) * 0.5)
+	draw_set_transform(offset, 0.0, Vector2(factor, factor * 480.0 / 448.0))
+	if scene_view.is_empty():
+		scene_view = _scene()
+	if scene_view != last_scene:
+		view_painter.build(scene_view)
+		last_scene = scene_view.duplicate(true)
+	view_painter.paint(self)
+	# Host labels: what the research leaves Unknown on this screen.
+	var gold := Color(0.95, 0.78, 0.35)
+	if bool(scene_view.get("host_layout", false)):
+		_host_text(Vector2(6, 12), "HOST LAYOUT — " + str(scene_view.get("host_label", "")), 10, gold)
 	var error := host_error if not host_error.is_empty() else str(view.get("error", ""))
+	var notes_y := 412
 	if not error.is_empty():
-		_host_text(Vector2(16, notes_y), "Refused: " + error, 12, Color(0.95, 0.5, 0.45), 608)
-		notes_y += 18
-	for note in view.get("notes", []):
-		var line := "· " + str(note)
-		var height := int(ThemeDB.fallback_font.get_multiline_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, 608, 10).y)
-		if notes_y + height > 434:
-			break
-		_host_text(Vector2(16, notes_y), line, 10, muted, 608)
-		notes_y += height + 2
-	_host_text(Vector2(16, 444), KEY_HELP, 10, Color(0.5, 0.55, 0.6))
+		_host_text(Vector2(6, notes_y), "Refused: " + error, 11, Color(0.95, 0.5, 0.45), 628)
+	if show_notes:
+		var y := 40
+		draw_rect(Rect2(0, 28, 640, 400), Color(0, 0, 0, 0.82), true)
+		_host_text(Vector2(8, y), "%s · state %d · cursor %d · music live 0x%08x image 0x%08x" % [screen(), int(view.get("state", -1)), int(view.get("cursor", 0)), int(view.get("music_live", 0)), int(view.get("music_image", 0))], 10, gold)
+		y += 16
+		for note in view.get("notes", []):
+			var height := int(ThemeDB.fallback_font.get_multiline_string_size("· " + str(note), HORIZONTAL_ALIGNMENT_LEFT, 624, 9).y)
+			if y + height > 424:
+				break
+			_host_text(Vector2(8, y), "· " + str(note), 9, Color(0.72, 0.76, 0.82), 624)
+			y += height + 2
+	_host_text(Vector2(6, 445), KEY_HELP + " · F1 = notes", 9, Color(0.45, 0.5, 0.55))
 
 func _bits_to_float(bits: int) -> float:
 	var buffer := PackedByteArray()

@@ -6,11 +6,14 @@
 // counted refusal. The composition census stays the 9649e6b table.
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
+#include "champions/ui_text_gaps.hpp"
 #include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_factory.hpp"
+#include "champions/world_queries.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
+#include "champions/net_launch.hpp"
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
@@ -58,6 +61,9 @@ struct Row {
 };
 const Row &row(std::size_t index);
 
+// ScriptGenerator's constructor (research items-gaps ecf9742 docs/spec/hide-monster.md 4.1).
+inline constexpr std::uint32_t SCRIPT_GENERATOR_CTOR = 0x265f54;
+
 struct Counts {
   std::uint64_t started = 0;
   std::uint64_t reached_wait = 0;
@@ -82,6 +88,11 @@ struct Counts {
   // Records the original constructs whose shared-seed draws the host did not
   // make (each draws at least once, in GameObject_ctor).
   std::uint64_t load_draws_unmodelled = 0;
+  // An eligible non-front-end load without an observed hud.lmp residency
+  // result cannot apply the 223 item draws. Count the gate and potential
+  // draws separately from constructor draws actually missed.
+  std::uint64_t item_load_gate_refusals = 0;
+  std::uint64_t item_load_draws_inferred = 0;
   // Unbuilt records by constructor address, and build refusals by reason.
   std::map<std::uint32_t, std::uint64_t> unbuilt_constructors;
   std::map<std::string, std::uint64_t> build_refusals;
@@ -90,6 +101,9 @@ struct Counts {
   // object's field no ported code wrote (hit points). Each is also in
   // refused[].
   std::uint64_t stub_refusals = 0;
+  // Why: "command: reason" (an undecided factory row by constructor, a class
+  // the factory made no row for, or an unresolved name argument).
+  std::map<std::string, std::uint64_t> stub_refusal_reasons;
   // Routed commands refused because, for this state, they would reach a
   // callee research did not execute or a case the port refuses: a charm
   // target word the host's handle pool does not hold, a music volume or a
@@ -258,10 +272,44 @@ public:
   // 0x4d8ae0 = 1 and g_difficultyIdx 0x4f719c = 1, the executable image values
   // and the offline setup's stores. Call before run_prestart.
   void start_single_player();
+  // net_launchUpdate's end of launch (docs/spec/items-gaps.md 2.3): record 0, the
+  // host's, sets g_difficultyIdx, the kill limit and the PvP mode words on every
+  // machine, and in modes 2 and 3 game_set4f7110(+0xf4). Nothing in the play
+  // session launches a net game yet; this is the contract's receiving half.
+  void receive_launch(const net_launch::Record &record0);
+  // givePlayerRandom remains refused: its stack-record contents after ten failed
+  // generations are Unknown (item-drops.md 6). The level-name global at
+  // 0x41b721 has no pinned capacity, so bind_level_name also refuses.
+  void bind_monster_level(std::uint32_t raw_float);
+  void bind_level_name(const std::string &name);
   // The owner's executable, for the object factory's strings and the class
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.
   void set_executable(level_factory::Executable);
+  // The selected level and its monsters.bal payload, read from the owner's
+  // game folder at run time. The executable supplies the level table. Until
+  // both are present, a constructed creature's statistics remain unknown.
+  void set_level_stats(const std::string &level_name, const std::uint8_t *balance,
+                       std::size_t size);
+  // The selected level's WORLD payload supplies the terrain queries used by
+  // Player1_ctor's four exact free-spot searches.
+  void set_level_world(const std::uint8_t *world, std::size_t size);
+  // The level-entry inputs of Player1_ctor's marker ranking (research
+  // ref_objects.py player1_marker: prev_level, entrance, gate_travel, and the
+  // start rank 3 after a load from a save, docs/issues/arena-entry.md). Nothing
+  // in this host derives them, so Player1 placement is refused until the
+  // caller supplies them here. The caller owns tracing them to the original's
+  // sources (the previous level's qualified name, the entrance name, the
+  // gate-travel byte 0x41b51e, the load-from-save state).
+  struct Player1Entry {
+    std::string previous_level, entrance;
+    bool gate_travel = false, loaded_from_save = false;
+  };
+  void set_player1_entry(Player1Entry entry) { player1_entry_ = std::move(entry); }
+  // Execute the observed intro/hud.lmp gate. A missing residency result
+  // refuses seed advancement and counts the potentially omitted 223 draws.
+  void advance_first_level_items(const std::string &level_name,
+                                 std::optional<bool> hud_lmp_resident = std::nullopt);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
@@ -275,6 +323,8 @@ public:
   // commands are refused.
   bool register_text(const std::vector<std::uint8_t> &uni);
   bool has_text() const { return text_->entries() != 0; }
+  // The visible units a key would show, without advancing the miss ring.
+  strings::Units text_peek(const std::string &key) const { return text_->peek(key); }
   strings::TextTable &text() { return *text_; }
   const strings::TextTable &text() const { return *text_; }
   // The help chime: byte +0x3c (sound group) of fx.lmp/butn_message.anm from
@@ -289,6 +339,11 @@ public:
   strings::SoundSeqs &sound() { return *sound_; }
   // ui_startPulse(0) calls made by hud_showHelpMessage.
   std::uint64_t ui_pulse_starts() const { return ui_pulse_starts_; }
+  // g_uiPulse / g_uiFadeIn (docs/ui-text-gaps.md 1). The fade starts at 1.0: its
+  // data value is not documented, and a dialog's own restart sets it to 0.0.
+  // ui_frame_step is session step 13: once per displayed frame, after the draw.
+  const ui_text_gaps::Ramps &ui_ramps() const { return ui_ramps_; }
+  void ui_frame_step() { ui_ramps_ = ui_text_gaps::rampsStep(ui_ramps_); }
   // help_task 0x1dcc78 for one displayed frame. A close runs the post action
   // offline (script_runPostAction), within the play session's budget.
   strings::HelpFrame help_task(bool confirm);
@@ -318,6 +373,8 @@ public:
                         unsigned active_player = 0);
 
   const Counts &counts() const { return counts_; }
+  // Records a refused optional input (the host carries on without it).
+  void count_refusal(const std::string &reason) { counts_.build_refusals[reason] += 1; }
   const std::vector<Spawn> &spawns() const { return spawns_; }
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }
@@ -440,13 +497,27 @@ private:
   Stop enter(const std::string &name, bool optional);
   Stop enter_level(const char *name);
   bool seed_refused() const;
-  bool touches_stub(std::size_t index, amx::Machine &machine) const;
+  bool touches_stub(std::size_t index, amx::Machine &machine);
   bool adopt_classified(const std::vector<level_flow::Record> &);
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,
               std::uint32_t address, const std::vector<std::string> &props);
+  // Mounted and on-foot Horsemen rows (constructor 0x271c70, mounted 1 or 0)
+  // and the Nightmare row (0x270968), horsemen-mount.md sections 1-2.
+  Build build_mounted(const level_flow::Record &, const level_factory::Outcome &,
+                      std::uint32_t address, const std::vector<std::string> &props);
+  // True when the last build_mounted made every shared-seed draw its record owes.
+  bool last_draws_complete_ = false;
   void stub(const level_flow::Record &, std::uint32_t address,
             std::vector<std::string> props, std::int64_t size);
+  // The ScriptGenerator constructor 0x265f54: the base object with the
+  // record's property list (research items-gaps ecf9742 docs/spec/hide-monster.md
+  // 4.1 and 5). world_createObject for ScriptGenerator_spawn: the factory row,
+  // then a ported constructor chain; any other constructor refuses.
+  Build build_generator(const level_factory::Outcome &, const level_flow::Record &,
+                        std::uint32_t address, const std::vector<std::string> &props);
+  std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
+                              std::int32_t angle, std::uint32_t props_word);
   void refuse(std::size_t index, amx::Machine &machine);
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
@@ -474,8 +545,11 @@ private:
   std::deque<strings::Units> formatted_;
   std::optional<std::uint8_t> chime_group_;
   std::uint64_t ui_pulse_starts_ = 0;
+  ui_text_gaps::Ramps ui_ramps_;
   // Host-owned handle cells for creature +0x234 words linked by link_target.
   std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
+  // Rider +0x3c8 and mount +0x3c8 are separate host handle-list heads.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> mounted_cells_;
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;
@@ -483,10 +557,32 @@ private:
   SharedRandom *external_seed_ = nullptr;
   SeedPolicy seed_policy_ = SeedPolicy::Exact;
   std::unique_ptr<level_factory::Executable> exe_;
+  struct BalanceRow {
+    std::uint16_t hash = 0;
+    std::array<std::uint32_t, 5> factors{};
+  };
+  std::vector<BalanceRow> balance_rows_;
+  std::uint32_t monster_level_ = 0;
+  std::string level_name_;
+  bool stats_ready_ = false;
+  bool seed_gate_observed_ = false;
+  std::optional<Player1Entry> player1_entry_;
+  std::unique_ptr<world_queries::Level> terrain_level_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
+  std::set<std::uint32_t> stats_built_;
+  // For a stub the factory row decided: whether its class is a Creature, and
+  // its constructor. A stub the row did not decide has no entry's creature
+  // answer (Unknown) and keeps hideMonster / showMonster refused.
+  struct StubInfo {
+    level_factory::Creature creature = level_factory::Creature::Unknown;
+    std::uint32_t constructor = 0;
+    bool load_property_refused = false;
+  };
+  std::map<std::uint32_t, StubInfo> stub_info_;
+  bool monster_level_bound_ = false;
   std::vector<std::uint32_t> record_addresses_;
   Counts counts_;
   bool player_currents_known_ = true;

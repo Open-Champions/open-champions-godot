@@ -4,7 +4,9 @@
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/script_effects.hpp"
+#include "champions/script_items.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -15,6 +17,7 @@
 
 namespace sc = champions::simulation::rta::script_commands;
 namespace se = champions::simulation::rta::script_effects;
+namespace si = champions::simulation::rta::script_items;
 namespace builtins = champions::simulation::rta::builtins;
 namespace a = champions::simulation::rta::amx;
 namespace audio = champions::audio;
@@ -149,7 +152,8 @@ std::vector<std::uint8_t> gate_objects(const char *cls = "Stub") {
 }
 
 // A synthetic objects.ob with several records (class, name). Authored strings.
-std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records) {
+std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records,
+                                       const std::vector<std::string> &extra_props = {}) {
   std::vector<std::uint8_t> strtab{0}, body, out;
   auto intern = [&](const std::string &text) {
     const auto at = static_cast<std::uint32_t>(strtab.size());
@@ -161,13 +165,17 @@ std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, 
     for (int k = 0; k < n; ++k)
       v.push_back(static_cast<std::uint8_t>(value >> (8 * k)));
   };
-  for (const auto &r : records) {
+  for (std::size_t i = 0; i < records.size(); ++i) {
+    const auto &r = records[i];
+    const bool extra = i < extra_props.size() && !extra_props[i].empty();
     put(body, intern(r.first), 4);
-    put(body, 28, 2);
+    put(body, extra ? 32 : 28, 2);
     put(body, 0, 2);
     for (int k = 0; k < 3; ++k)
       put(body, 0, 4);
     put(body, intern("name=" + r.second), 4);
+    if (extra)
+      put(body, intern(extra_props[i]), 4);
     put(body, 0, 4);
   }
   put(out, static_cast<std::uint32_t>(records.size()), 2);
@@ -176,6 +184,11 @@ std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, 
   out.insert(out.end(), body.begin(), body.end());
   out.insert(out.end(), strtab.begin(), strtab.end());
   return out;
+}
+
+std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records,
+                                       const std::string &extra_prop) {
+  return objects_blob(records, std::vector<std::string>(records.size(), extra_prop));
 }
 
 // An authored executable for the object factory: a placeholder string at every
@@ -188,6 +201,7 @@ champions::simulation::rta::level_factory::Executable authored_executable() {
   for (const auto &row : LF::tests())
     (*strings)[row.name] = "Cls" + std::to_string(k++);
   (*strings)[0x532b88] = "Gnaw";
+  (*strings)[0x52fac8] = "dead";
   (*strings)[0x52fad0] = "change%d";
   LF::Executable exe;
   exe.string = [strings](std::uint32_t a) {
@@ -409,7 +423,8 @@ void test_got_item_sound_unknown_currents() {
 }
 
 // docs/script-session.md sections 3-5: the factory decides what is registered;
-// a built creature is readable by hideMonster, its hit points are not.
+// A built creature without selected level statistics is readable by
+// hideMonster, but its hit points remain unknown.
 void test_classified_objects() {
   const auto hide = static_cast<std::size_t>(index_of("hideMonster"));
   const auto hp = static_cast<std::size_t>(index_of("getHitPoints"));
@@ -440,13 +455,397 @@ void test_classified_objects() {
   once.draw();
   check(live.state == once.state, "GameObject_ctor drew once from the session seed");
   host.run_start();
-  check(counts.executed[hide] == 2 && counts.refused[hide] == 1,
-        "hideMonster runs on the built creature and on no object, refuses on the stub");
+  // Cls0 is the factory row whose class the research decided as a non-creature
+  // (creature_class_table.inc): hideMonster runs on its stub too.
+  check(counts.executed[hide] == 3 && counts.refused[hide] == 0,
+        "hideMonster runs on the built creature, on no object and on the decided stub");
   check(counts.refused[hp] == 1 && counts.executed[hp] == 0, "a built creature's hit points refuse");
   const auto flags = host.variables().memory.word(gnaw->addr + 0xc);
   check((flags & 0x20) && (flags & 0x8000), "creature flag and the hidden flag");
   check(host.variables().memory.u8(gnaw->addr + 0x231) & 8, "the inert hidden bit");
-  check(counts.stub_refusals == 2, "both refusals counted");
+  check(counts.stub_refusals == 1, "only the hit-point read of the built creature is counted");
+}
+
+// research t3/research-items-gaps ecf9742 docs/spec/hide-monster.md 3 and 5:
+// hideMonster / showMonster need only whether the class is a Creature. A stub
+// whose factory row the probe decided runs; an undecided row stays refused.
+void test_hide_show_on_stubs() {
+  namespace LF = champions::simulation::rta::level_factory;
+  const auto hide = static_cast<std::size_t>(index_of("hideMonster"));
+  const auto show = static_cast<std::size_t>(index_of("showMonster"));
+  std::string creature, plain, unknown;
+  int k = 0;
+  for (const auto &row : LF::tests()) {
+    const auto name = "Cls" + std::to_string(k++);
+    if (row.name == 0x532870)
+      creature = name; // chain reaches Creature_ctor
+    if (row.name == 0x5323f0)
+      plain = name; // chain reaches GameObject_ctor first
+    if (row.name == 0x532f78)
+      unknown = name; // the probe did not decide
+  }
+  check(!creature.empty() && !plain.empty() && !unknown.empty(), "authored rows found");
+  auto built = build_calls({{"start",
+                             {{"hideMonster", {2000}},
+                              {"hideMonster", {2100}},
+                              {"hideMonster", {2200}},
+                              {"showMonster", {2000}},
+                              {"showMonster", {2100}}}}},
+                           {{2000, "crea"}, {2100, "plain"}, {2200, "mystery"}});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live);
+  host.set_executable(authored_executable());
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = objects_blob({{creature, "crea"}, {plain, "plain"}, {unknown, "mystery"}});
+  check(host.adopt_objects(blob.data(), blob.size()), "stub records adopt");
+  auto *c = host.variables().find_first("crea");
+  auto *p = host.variables().find_first("plain");
+  auto *u = host.variables().find_first("mystery");
+  check(c && p && u && host.is_stub(c->addr) && host.is_stub(p->addr) && host.is_stub(u->addr),
+        "all three are unconstructed stubs");
+  auto &memory = host.variables().memory;
+  memory.byte(c->addr + 0x231, 0x01); // a bit Creature_ctor would have seeded
+  memory.byte(p->addr + 0x231, 0x01);
+  host.run_start();
+  const auto &counts = host.counts();
+  check(counts.executed[hide] == 2 && counts.refused[hide] == 1,
+        "hideMonster runs on the two decided stubs and refuses the undecided one");
+  check(counts.executed[show] == 2 && counts.refused[show] == 0, "showMonster runs on both decided stubs");
+  check(counts.stub_refusals == 1, "the undecided stub is the only refusal");
+  // After the script: both are shown again (the refusal stopped nothing: the
+  // answers are discarded), so check the intermediate state with a second run.
+  check(!(memory.word(c->addr + 0xc) & 0x8000u) && !(memory.word(p->addr + 0xc) & 0x8000u),
+        "showMonster clears the not-run flag");
+  check(memory.u8(c->addr + 0x231) == 0x01, "show keeps the other bits of a creature's byte");
+  check(memory.u8(p->addr + 0x231) == 0x01, "a non-creature's byte is never touched");
+  check(!off_grid(host, c) && !off_grid(host, p), "shown objects are on the grid again");
+  // Hide alone: the flag, the off-grid list and, for the creature only, bit 3.
+  auto hide_only = build_calls({{"start", {{"hideMonster", {2000}}, {"hideMonster", {2100}}}}},
+                               {{2000, "crea"}, {2100, "plain"}});
+  sc::Host second;
+  SharedRandom live2(20973);
+  second.bind_seed(&live2);
+  second.set_executable(authored_executable());
+  plant(second, hide_only);
+  second.run_prestart();
+  const auto blob2 = objects_blob({{creature, "crea"}, {plain, "plain"}});
+  second.adopt_objects(blob2.data(), blob2.size());
+  auto *c2 = second.variables().find_first("crea");
+  auto *p2 = second.variables().find_first("plain");
+  second.variables().memory.byte(c2->addr + 0x231, 0x01);
+  second.variables().memory.byte(p2->addr + 0x231, 0x01);
+  second.run_start();
+  auto &m2 = second.variables().memory;
+  check((m2.word(c2->addr + 0xc) & 0x8000u) && (m2.word(p2->addr + 0xc) & 0x8000u), "both stop running");
+  check(!(m2.word(c2->addr + 0xc) & 0x20u), "the stub's flag word never gains the creature bit");
+  check(m2.u8(c2->addr + 0x231) == 0x09, "a creature's byte gains bit 3 and keeps the rest");
+  check(m2.u8(p2->addr + 0x231) == 0x01, "a non-creature's byte stays");
+  check(off_grid(second, c2) && off_grid(second, p2), "both are on the off-grid list");
+  check(second.counts().stub_refusals == 0, "no refusal");
+
+  auto gated = build_calls({{"start", {{"hideMonster", {2000}}, {"showMonster", {2100}}}}},
+                           {{2000, "hidden"}, {2100, "waiting"}});
+  sc::Host third;
+  SharedRandom live3(20973);
+  third.bind_seed(&live3);
+  third.set_executable(authored_executable());
+  plant(third, gated);
+  const auto blob3 = objects_blob({{creature, "hidden"}, {creature, "waiting"}},
+                                  std::vector<std::string>{"hide=1", "wait=1"});
+  check(third.adopt_objects(blob3.data(), blob3.size()), "property-bearing stubs adopt");
+  third.run_start();
+  check(third.counts().refused[hide] == 1 && third.counts().refused[show] == 1 &&
+            third.counts().stub_refusals == 2,
+        "hide and wait load properties keep unconstructed creature stubs refused");
+  check(third.counts().build_refusals.at("creature stub with hide/wait load property") == 2,
+        "both load-property refusals are counted");
+  unsigned labelled = 0;
+  for (const auto &reason : third.counts().stub_refusal_reasons)
+    if (reason.first.find("hide/wait load property") != std::string::npos)
+      labelled += static_cast<unsigned>(reason.second);
+  check(labelled == 2, "command refusal reasons identify the load property");
+}
+
+// research t3/research-items-gaps ecf9742 docs/spec/hide-monster.md 4.1 and
+// docs/script-items.md 5.1: ScriptGenerator records are built (one shared draw
+// each); generateMonster spawns through the factory row and a ported
+// constructor, and refuses a class whose constructor is not ported.
+void test_generate_monster() {
+  namespace LF = champions::simulation::rta::level_factory;
+  const auto gen = static_cast<std::size_t>(index_of("generateMonster"));
+  std::string generator, plain;
+  int k = 0;
+  for (const auto &row : LF::tests()) {
+    const auto name = "Cls" + std::to_string(k++);
+    if (row.call_count == 1 && row.calls[0] == sc::SCRIPT_GENERATOR_CTOR)
+      generator = name;
+    if (row.name == 0x5323f0)
+      plain = name;
+  }
+  check(!generator.empty() && !plain.empty(), "authored generator row found");
+  auto built = build_calls({{"start", {{"generateMonster", {2000, 2100}}, {"generateMonster", {2000, 2200}}}}},
+                           {{2000, "maker"}, {2100, "gnaw"}, {2200, plain}});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live);
+  host.set_executable(authored_executable());
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = objects_blob({{generator, "maker"}});
+  check(host.adopt_objects(blob.data(), blob.size()), "the generator record adopts");
+  check(host.counts().objects_built == 1 && host.counts().objects_unbuilt == 0, "the generator is built");
+  SharedRandom once(20973);
+  once.draw();
+  check(live.state == once.state, "its GameObject_ctor drew once");
+  auto *maker = host.variables().find_first("maker");
+  check(maker && maker->type_name == "15ScriptGenerator" && !host.is_stub(maker->addr),
+        "the generator is found by name as a ScriptGenerator");
+  const auto &memory = host.variables().memory;
+  check((memory.word(maker->addr + 0xc) & 9u) == 9u && memory.word(maker->addr + 0x48) == 0x514e60,
+        "ScriptGenerator_ctor's flags and table");
+  host.run_start();
+  const auto &counts = host.counts();
+  if (counts.executed[gen] != 1 || counts.refused[gen] != 1)
+    std::cerr << "generateMonster executed " << counts.executed[gen] << " refused " << counts.refused[gen]
+              << " fault: " << host.last_fault() << '\n';
+  check(counts.executed[gen] == 1 && counts.refused[gen] == 1, "the ported class spawns, the plain one refuses");
+  // The spawn carries the generator's name, so the name finds two objects.
+  const auto found = host.variables().find("maker", 0x200);
+  check(found.size() == 2, "the spawned monster carries the generator's name");
+  const champions::simulation::rta::objects::GameObject *spawned = nullptr;
+  for (const auto *obj : found)
+    if (obj != maker)
+      spawned = obj;
+  check(spawned && spawned->type_name == "4Gnaw", "the spawn is the ported Gnaw");
+  check((memory.u64(spawned->addr + 0xa8) & 0x1000000u) != 0, "ScriptGenerator_spawn sets +0xa8 bit 24");
+  check(memory.word(spawned->addr + 0x34) == 0x5d32c8, "+0x34 is the interned class name");
+  check(counts.objects_built == 2, "the spawn is counted as built");
+}
+
+// docs/spec/items-gaps.md 2.3: every machine applies record 0; only modes 2 and
+// 3 copy +0xf4 into 0x4f7110.
+void test_receive_launch() {
+  namespace nl = champions::simulation::rta::net_launch;
+  sc::Host host;
+  host.start_single_player();
+  nl::Record rec;
+  rec.difficulty = 0xfe;
+  rec.kill_limit = 30;
+  rec.mode = 1;
+  rec.cm1 = 4;
+  host.receive_launch(rec);
+  auto &memory = host.variables().memory;
+  check(memory.word(0x4f719c) == 0xfffffffeu && memory.u8(0x4f8408) == 30, "difficulty is signed; kill limit");
+  check(memory.word(0x4f711c) == 0 && memory.word(0x4f7120) == 1 && memory.word(0x4f7124) == 0, "mode 1: B only");
+  check(memory.s32(0x4f7110) == -1, "mode 1 leaves the cm1 word at the image's -1");
+  rec.mode = 3;
+  host.receive_launch(rec);
+  check(memory.word(0x4f711c) == 1 && memory.word(0x4f7124) == 1, "mode 3: A and mode 3");
+  check(memory.s32(0x4f7110) == 4, "mode 3 copies the host's +0xf4 into 0x4f7110");
+  rec.cm1 = 0xffffffffu; // game_set4f7110(-1) rescans this machine's profile: none set -> 9
+  host.receive_launch(rec);
+  check(memory.s32(0x4f7110) == 9, "-1 rescans the profile");
+}
+
+// docs/spec/item-drops.md section 6 leaves the stack record unknown after ten
+// failed generations. The command refuses before any draw even with inputs.
+void test_give_random_gate() {
+  namespace LF = champions::simulation::rta::level_factory;
+  const auto random = static_cast<std::size_t>(index_of("givePlayerRandom"));
+  auto built = build_calls({{"start", {{"givePlayerRandom", {}}}}}, {});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live);
+  host.items().bind_tables(std::make_shared<champions::simulation::rta::items::Tables>());
+  plant(host, built);
+  host.variables().memory.word(0x4d8ae0, 1);
+  check(host.run("start") == sc::Stop::Complete && host.counts().refused[random] == 1 &&
+            host.counts().callee_refusals == 1,
+        "givePlayerRandom stays refused without bound inputs");
+  check(live.state == 20973u, "a gated refusal draws nothing");
+  // Supplying the executable and monster level does not lift the refusal.
+  sc::Host second;
+  SharedRandom live2(20973);
+  second.bind_seed(&live2);
+  second.items().bind_tables(std::make_shared<champions::simulation::rta::items::Tables>());
+  second.set_executable(authored_executable());
+  plant(second, built);
+  second.bind_monster_level(0x40a00000);
+  bool level_name_refused = false;
+  try {
+    second.bind_level_name("somewhere");
+  } catch (const si::Refused &) {
+    level_name_refused = true;
+  }
+  check(level_name_refused && second.variables().memory.cstr(0x41b721).empty(),
+        "level-name global refuses without a traced capacity");
+  second.variables().memory.word(0x4d8ae0, 1);
+  second.run("start");
+  check(second.counts().callee_refusals == 1 && live2.state == 20973u,
+        "random giver still refuses with an executable and monster level");
+}
+
+void test_hit_points_need_faithful_seed() {
+  const auto hp = static_cast<std::size_t>(index_of("getHitPoints"));
+  auto script = build_calls({{"start", {{"getHitPoints", {2000}}}}},
+                            {{2000, "gnawling"}});
+  constexpr std::uint32_t level_name_at = 0x7f0000;
+  auto stat_image = authored_executable();
+  const auto old_string = stat_image.string;
+  const auto old_byte = stat_image.byte;
+  stat_image.string = [old_string](std::uint32_t at) {
+    return at == level_name_at ? std::string("testlevel") : old_string(at);
+  };
+  stat_image.byte = [old_byte](std::uint32_t at) {
+    if (at >= 0x4f7210 && at < 0x4f7214)
+      return static_cast<std::uint8_t>(level_name_at >> (8 * (at - 0x4f7210)));
+    if (at == 0x4f7214 || (at >= 0x4f7240 && at < 0x4f7244))
+      return std::uint8_t{0};
+    return old_byte(at);
+  };
+  const std::uint8_t empty_balance[] = {0, 0};
+  for (int scenario = 0; scenario < 5; ++scenario) {
+    sc::Host host;
+    SharedRandom seed(20973);
+    host.bind_seed(&seed);
+    host.start_single_player();
+    host.set_executable(stat_image);
+    host.set_level_stats("testlevel", empty_balance, sizeof(empty_balance));
+    if (scenario == 1 || scenario >= 3)
+      host.advance_first_level_items("testlevel", true);
+    else if (scenario == 2)
+      host.advance_first_level_items("testlevel");
+    plant(host, script);
+    host.run_prestart();
+    // Scenario 3: an unbuilt record precedes the creature (its draw is not
+    // modelled). Scenario 4: it follows, so the creature's own seed was exact.
+    const auto records = scenario == 3
+        ? objects_blob({{"Cls0", "ghost"}, {"gnaw", "gnawling"}})
+        : scenario == 4 ? objects_blob({{"gnaw", "gnawling"}, {"Cls0", "ghost"}})
+                        : objects_blob({{"gnaw", "gnawling"}});
+    check(host.adopt_objects(records.data(), records.size()), "seed gate records adopt");
+    host.run_start();
+    const bool faithful = scenario == 1 || scenario == 4;
+    check(host.counts().executed[hp] == (faithful ? 1u : 0u) &&
+          host.counts().refused[hp] == (faithful ? 0u : 1u),
+          "getHitPoints requires observed gate and no earlier unbuilt draw");
+    if (scenario >= 3)
+      check(host.counts().load_draws_unmodelled == 1,
+            "earlier unbuilt record makes seed inexact");
+  }
+}
+
+
+// research t3/research-horsemen-mount 397c35c, docs/spec/horsemen-mount.md sections 1.1 and 2.2: a
+// A rider record builds its observed named MiniBoss mount and two reciprocal handles.
+void test_mounted_records() {
+  namespace LF = champions::simulation::rta::level_factory;
+  auto row_class = [](std::uint32_t name) {
+    int k = 0;
+    for (const auto &row : LF::tests()) {
+      if (row.name == name)
+        return "Cls" + std::to_string(k);
+      ++k;
+    }
+    return std::string();
+  };
+  const std::array<std::string, 4> rider_classes = {
+      row_class(0x532cc8), row_class(0x532cd8), row_class(0x532ce8), row_class(0x532cf8)};
+  const auto nightmare_class = row_class(0x532c98);
+  const std::array<std::string, 4> foot_classes = {
+      row_class(0x532dc8), row_class(0x532dd8), row_class(0x532de8), row_class(0x532df8)};
+  for (const auto &cls : rider_classes) check(!cls.empty(), "a mounted factory row exists");
+  for (const auto &cls : foot_classes) check(!cls.empty(), "an on-foot factory row exists");
+  check(!nightmare_class.empty(), "the Nightmare factory row exists");
+  auto built = build_calls({{"start", {}}}, {});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live, sc::SeedPolicy::OfflineSession);
+  host.set_executable(authored_executable());
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = objects_blob({{rider_classes[0], "rider0"}, {rider_classes[1], "rider1"},
+                                  {rider_classes[2], "rider2"}, {rider_classes[3], "rider3"},
+                                  {foot_classes[0], "foot0"}, {foot_classes[1], "foot1"},
+                                  {foot_classes[2], "foot2"}, {foot_classes[3], "foot3"},
+                                  {nightmare_class, "horse"}});
+  check(host.adopt_objects(blob.data(), blob.size()), "mounted records adopt");
+  const auto &counts = host.counts();
+  // Each mounted row draws twice; each on-foot row and the placed mount once.
+  SharedRandom expect(20973);
+  for (int i = 0; i < 13; ++i) expect.draw();
+  check(live.state == expect.state, "four pairs, four on-foot rows and Nightmare shared draws");
+  const std::array<std::string, 4> mount_names = {
+      "horsedisease", "horsewar", "horsepestilence", "horsedeath"};
+  check(counts.build_refusals.empty(), "all four documented mount lists build");
+  const auto &mem = host.variables().memory;
+  for (int i = 0; i < 4; ++i) {
+    auto *rider = host.variables().find_first("rider" + std::to_string(i));
+    auto *mount = host.variables().find_first(mount_names[i]);
+    check(rider && mount && host.is_built(rider->addr) && host.is_built(mount->addr),
+          "rider and named mount build");
+    if (rider && mount) {
+      const auto rider_node = mem.word(rider->addr + 0x3c8);
+      const auto mount_node = mem.word(mount->addr + 0x3c8);
+      check((mem.word(mount->addr + 0xa8) & 1) && !(mem.word(mount->addr + 0x0c) & 0x100000) &&
+                mem.u8(rider->addr + 0x470) == i &&
+                mem.u16(rider->addr + 0x232) == 0x1b && mem.u16(mount->addr + 0x232) == 0,
+            "variant, MiniBoss flag and linked initial states");
+      check(rider_node && mount_node && mem.word(rider_node + 12) == mount->addr &&
+                mem.word(mount_node + 12) == rider->addr,
+            "reciprocal rider-mount handles");
+    }
+  }
+  for (int i = 0; i < 4; ++i) {
+    auto *foot = host.variables().find_first("foot" + std::to_string(i));
+    check(foot && host.is_built(foot->addr), "on-foot Horsemen record builds");
+    check(mem.u8(foot->addr + 0x470) == i && mem.u16(foot->addr + 0x232) == 0 &&
+              mem.word(foot->addr + 0x3c8) == 0,
+          "on-foot variant, initial state and absent mount link");
+  }
+  check(counts.objects_unbuilt == 0 && counts.load_draws_unmodelled == 0,
+        "all documented Horsemen rows have modelled draws");
+  auto *horse = host.variables().find_first("horse");
+  check(horse && host.is_built(horse->addr) && counts.objects_built == 9, "all documented rows build");
+  check(mem.word(horse->addr + 0x48) == 0x5155e8 && mem.u8(horse->addr + 0xb4) == 10 &&
+            mem.word(horse->addr + 0xe0) == 0xc1a00000 && mem.u8(horse->addr + 0x28) == 0x32,
+        "the built Nightmare carries its table, kind, seat offset and byte 0x28");
+  check(counts.objects_registered == 13, "four pairs, four on-foot rows and Nightmare are registered");
+
+  // Leave exactly one rider-sized block, with no larger fallback block.
+  // The rider's pool_new succeeds and its mount's pool_new returns zero.
+  sc::Host exhausted;
+  SharedRandom one(20973);
+  exhausted.bind_seed(&one, sc::SeedPolicy::OfflineSession);
+  exhausted.set_executable(authored_executable());
+  plant(exhausted, built);
+  exhausted.run_prestart();
+  auto &pool = exhausted.variables().world->pool;
+  for (int i = 0; i < 511; ++i) check(pool.allocate(0x478) != 0, "reserve rider pool block");
+  for (int i = 0; i < 32; ++i) check(pool.allocate(3000) != 0, "reserve large fallback pool block");
+  const auto one_blob = objects_blob({{rider_classes[0], "unmounted"}});
+  check(exhausted.adopt_objects(one_blob.data(), one_blob.size()), "mount allocation refusal stays in level load");
+  const auto &no_mount = exhausted.counts();
+  check(no_mount.objects_pool_refused == 1 && no_mount.objects_unbuilt == 1 &&
+            no_mount.objects_registered == 1 && no_mount.load_draws_unmodelled == 0 &&
+            no_mount.build_refusals.count("rider on foot (mount pool exhausted)") == 1,
+        "exhausted mount is a labelled stub with its one shared draw accounted");
+
+  sc::Host placed_refusal;
+  SharedRandom placed_seed(20973);
+  placed_refusal.bind_seed(&placed_seed, sc::SeedPolicy::OfflineSession);
+  placed_refusal.set_executable(authored_executable());
+  plant(placed_refusal, built);
+  placed_refusal.run_prestart();
+  const auto dead_blob = objects_blob({{nightmare_class, "dead_horse"}}, "dead=1");
+  check(placed_refusal.adopt_objects(dead_blob.data(), dead_blob.size()),
+        "placed Nightmare refusal stays in level load");
+  const auto &dead = placed_refusal.counts();
+  check(dead.objects_unbuilt == 1 && dead.objects_registered == 1 &&
+            dead.load_draws_unmodelled == 0 && dead.build_refusals.count("Creature_init dead") == 1,
+        "placed Nightmare refusal preserves its completed GameObject draw");
 }
 
 void test_entrance_grid_and_particle() {
@@ -1009,6 +1408,12 @@ int main(int argc, char **argv) {
   test_got_item_sound_unknown_currents();
   test_check_alive_which_unknown_currents();
   test_classified_objects();
+  test_hit_points_need_faithful_seed();
+  test_hide_show_on_stubs();
+  test_generate_monster();
+  test_receive_launch();
+  test_give_random_gate();
+  test_mounted_records();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();

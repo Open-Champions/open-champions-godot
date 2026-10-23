@@ -12,6 +12,7 @@
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
 #include "champions/skinning.hpp"
+#include "champions/arena_executable.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -306,8 +307,167 @@ protected:
                             &ChampionsArchiveInspector::sample_animation);
         ClassDB::bind_method(D_METHOD("sample_skinned_model", "path", "model_row_index", "animation_row_index", "profile", "archive_fingerprint", "tick"),
                             &ChampionsArchiveInspector::sample_skinned_model);
+        ClassDB::bind_method(D_METHOD("sample_skinned_resources", "model_bytes", "animation_bytes", "tick"),
+                            &ChampionsArchiveInspector::sample_skinned_resources);
+        ClassDB::bind_method(D_METHOD("read_player_resource", "path", "row_index", "archive_fingerprint", "expected_name"),
+                            &ChampionsArchiveInspector::read_player_resource);
+        ClassDB::bind_method(D_METHOD("player_model_resources", "executable_bytes", "model_index"),
+                            &ChampionsArchiveInspector::player_model_resources);
     }
 public:
+    Dictionary player_model_resources(const PackedByteArray &executable_bytes,
+            int64_t model_index) const {
+        Dictionary failure;
+        failure["ok"] = false;
+        failure["error"] = String();
+        try {
+            // Player_ctor's 12 model definitions, research-player-model
+            // 7f13899 docs/spec/player-model-resources.md. The table strings
+            // themselves remain in the owner's executable at run time.
+            constexpr std::array<std::uint32_t, 12> definitions{{
+                0x4ecc58, 0x4ec8d0, 0x4ee188, 0x4ede00,
+                0x4eda78, 0x4ed6f0, 0x4ee898, 0x4ee510,
+                0x4ecfe0, 0x4ed368, 0x4eec20, 0x4eefa8}};
+            constexpr std::array<const char *, 12> body_codes{{
+                "bm", "bf", "wem", "wef", "hem", "hef",
+                "em", "ef", "dem", "def", "vm", "im"}};
+            constexpr std::array<int, 12> classes{{0, 0, 3, 3, 1, 1, 4, 4, 2, 2, 5, 6}};
+            if (model_index < 0 || model_index >= static_cast<int64_t>(definitions.size()))
+                throw champions::FormatError("Player model index is outside the traced 0..11 table.");
+            if (executable_bytes.is_empty() || executable_bytes.size() > 16 * 1024 * 1024)
+                throw champions::FormatError("Owner executable is missing or exceeds the 16 MiB limit.");
+            champions::simulation::rta::arena_modes::Executable exe;
+            if (!exe.load(std::vector<std::uint8_t>(executable_bytes.ptr(),
+                    executable_bytes.ptr() + executable_bytes.size())))
+                throw champions::FormatError("Owner executable could not be mapped as RTA ELF32.");
+            const auto index = static_cast<std::size_t>(model_index);
+            const auto table = definitions[index];
+            const auto animation_lump = exe.string(exe.word(table));
+            if (!champions::hasExtension(animation_lump, ".lmp"))
+                throw champions::FormatError("Player animation definition does not name an LMP.");
+            Array slots;
+            for (std::uint32_t slot = 1; slot <= 111; ++slot) {
+                const auto name = exe.string(exe.word(table + slot * 8));
+                if (!champions::hasExtension(name, ".anm") &&
+                    !champions::hasExtension(name, ".vag"))
+                    throw champions::FormatError("Player animation slot names an unsupported resource.");
+                slots.push_back(String::utf8(name.c_str()));
+            }
+            if (exe.word(table + 112 * 8) != 0)
+                throw champions::FormatError("Player animation definition has no traced terminator.");
+            Dictionary result;
+            result["ok"] = true;
+            result["body_code"] = String(body_codes[index]);
+            result["class_index"] = classes[index];
+            result["animation_lump"] = String::utf8(animation_lump.c_str());
+            result["clip_slots_1_to_111"] = slots;
+            return result;
+        } catch (const std::exception &error) {
+            failure["error"] = String::utf8(error.what());
+        }
+        return failure;
+    }
+
+    // Copy a selected player resource from the same fingerprinted snapshot used
+    // to validate its row. The caller never reopens saved offsets after listing.
+    Dictionary read_player_resource(const String &path, int64_t row_index,
+            const String &archive_fingerprint, const String &expected_name) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["bytes"] = PackedByteArray();
+        result["error"] = String();
+        try {
+            const auto selected = read_selected(path, row_index, archive_fingerprint);
+            const std::string expected = expected_name.utf8().get_data();
+            if (selected.name != expected ||
+                (!champions::hasExtension(expected, ".vif") &&
+                 !champions::hasExtension(expected, ".anm") &&
+                 !champions::hasExtension(expected, ".tex")))
+                throw champions::FormatError("The selected player resource name changed or is unsupported.");
+            if (selected.bytes.size == 0 || selected.bytes.size > 16 * 1024 * 1024)
+                throw champions::FormatError("The selected player resource size is invalid.");
+            PackedByteArray bytes;
+            if (bytes.resize(static_cast<int64_t>(selected.bytes.size)) != OK)
+                throw std::bad_alloc();
+            std::copy(selected.bytes.data, selected.bytes.data + selected.bytes.size, bytes.ptrw());
+            result["bytes"] = bytes;
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to read the selected player resource.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        }
+        return result;
+    }
+
+    // The player constructor fetches its body from SELECT and its clip from a
+    // class-specific LMP. Keep both source archives outside the project and
+    // pass only bounded, read-only entry bytes to the existing native decoder.
+    Dictionary sample_skinned_resources(const PackedByteArray &model_bytes,
+            const PackedByteArray &animation_bytes, double tick) const {
+        Dictionary failure;
+        failure["ok"] = false;
+        failure["error"] = String();
+        try {
+            if (model_bytes.is_empty() || animation_bytes.is_empty() ||
+                model_bytes.size() > 16 * 1024 * 1024 || animation_bytes.size() > 16 * 1024 * 1024)
+                throw champions::FormatError("Player model or clip entry is empty or exceeds the 16 MiB limit.");
+            if (!std::isfinite(tick) || tick < 0)
+                throw champions::FormatError("Choose a finite animation tick at or above zero.");
+            const champions::Bytes model_input{model_bytes.ptr(), static_cast<std::size_t>(model_bytes.size())};
+            const champions::Bytes animation_input{animation_bytes.ptr(), static_cast<std::size_t>(animation_bytes.size())};
+            const auto model = champions::decodeRtaModel(model_input);
+            if (model.attachment_slot != -1)
+                throw champions::FormatError("The body model unexpectedly requires a parent attachment.");
+            const auto animation = champions::decodeRtaAnimationKeys(animation_input);
+            if (animation.skeleton.joint_mask != 0)
+                throw champions::FormatError("The selected player clip is partial-body.");
+            const auto pose = champions::sampleRtaAnimationPose(animation, tick);
+            const auto transforms = champions::buildRtaAnimationTransforms(animation.skeleton, pose);
+            const auto skinned = champions::skinRtaModelPositions(model, transforms);
+            const auto skinned_normals = champions::skinRtaModelNormals(model, transforms);
+            Array meshes;
+            std::size_t corners = 0;
+            for (std::size_t i = 0; i < skinned.meshes.size(); ++i) {
+                const auto &mesh = skinned.meshes[i];
+                const auto &normal_mesh = skinned_normals.meshes[i];
+                PackedVector3Array positions, normals;
+                if (positions.resize(static_cast<int64_t>(mesh.positions.size())) != OK ||
+                    normals.resize(static_cast<int64_t>(normal_mesh.normals.size())) != OK) throw std::bad_alloc();
+                for (std::size_t corner = 0; corner < mesh.positions.size(); ++corner) {
+                    const auto &point = mesh.positions[corner];
+                    const auto &normal = normal_mesh.normals[corner];
+                    const Vector3 p(point[0], point[1], point[2]);
+                    const Vector3 n(normal[0], normal[1], normal[2]);
+                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+                        !std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.z))
+                        throw champions::FormatError("Player pose contains nonfinite positions or normals.");
+                    positions.set(static_cast<int64_t>(corner), p);
+                    normals.set(static_cast<int64_t>(corner), n);
+                }
+                Dictionary item;
+                item["index"] = static_cast<int64_t>(mesh.index);
+                item["visible_by_default"] = model.meshes[i].visible_by_default;
+                item["positions"] = positions;
+                item["normals"] = normals;
+                meshes.push_back(item);
+                corners += mesh.positions.size();
+            }
+            Dictionary result;
+            result["ok"] = true;
+            result["pairing_verified"] = false;
+            result["duration_ticks"] = static_cast<int64_t>(animation.skeleton.duration_ticks);
+            result["tick"] = pose.tick;
+            result["meshes"] = meshes;
+            result["triangle_count"] = static_cast<int64_t>(corners / 3);
+            return result;
+        } catch (const std::bad_alloc &) {
+            failure["error"] = "Not enough memory to sample the player model.";
+        } catch (const std::exception &error) {
+            failure["error"] = String::utf8(error.what());
+        }
+        return failure;
+    }
     // The scene supplies a picture filename and HDR bytes; caller controls
     // the per-frame streaming cache and slices DAT using the returned sector
     // range before passing that payload to decode_inventory_icon.

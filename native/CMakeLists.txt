@@ -948,7 +948,8 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_player_vectors.py"
         --native "$<TARGET_FILE:champions-player-trace>"
         --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/player.tsv.gz")
-    set_tests_properties(player-exact PROPERTIES TIMEOUT 240)
+    # 274,304 full-state vectors exceed 240 s on the arm64 HUD worktree.
+    set_tests_properties(player-exact PROPERTIES TIMEOUT 900)
     add_executable(champions-monsters-1-trace tools/monsters_1_trace.cpp)
     target_link_libraries(champions-monsters-1-trace PRIVATE champions-monsters-1)
     add_executable(champions-monsters-1-tests tests/monsters_1_tests.cpp)
@@ -1001,6 +1002,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/menus_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_recovery_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_facing_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/horsemen_mount_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/control_anim_cache_targets.cmake")
 
@@ -1101,3 +1103,5 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/real_data_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/script_commands_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/ps2_save_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/frontend_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/ui_text_gaps_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/hud_extras_targets.cmake")

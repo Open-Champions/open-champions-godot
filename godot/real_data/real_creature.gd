@@ -36,13 +36,36 @@ func bind(archive: String, rows: Array, model: int) -> Dictionary:
 	if not ClassDB.class_exists("ChampionsRealWorld"): return {"ok": false, "error": "adapter unavailable"}
 	var vif: Dictionary = rows[model]
 	var want := str(ClassDB.class_call_static("ChampionsRealWorld", "companion_texture_name", str(vif.get("name", "")))).to_lower()
+	return bind_named(archive, rows, model, want)
+
+# The player constructor selects a variant texture independently of bodyv1.vif.
+func bind_named(archive: String, rows: Array, model: int, texture_name: String,
+		reader: RefCounted = null, fingerprint := "") -> Dictionary:
+	if not ClassDB.class_exists("ChampionsRealWorld"): return {"ok": false, "error": "adapter unavailable"}
+	var vif: Dictionary = rows[model]
+	var want := texture_name.to_lower()
 	var tex := {}
-	for row in rows:
+	var tex_index := -1
+	for i in range(rows.size()):
+		var row = rows[i]
 		if typeof(row) == TYPE_DICTIONARY and str(row.get("name", "")).to_lower() == want and str(row.get("parent", "")) == str(vif.get("parent", "")):
 			tex = row
+			tex_index = i
 			break
 	if tex.is_empty(): return {"ok": false, "error": "no same-base texture in the model's lump"}
-	var result: Dictionary = ClassDB.class_call_static("ChampionsRealWorld", "model_texture", _row_bytes(archive, vif), _row_bytes(archive, tex))
+	var model_bytes := PackedByteArray()
+	var texture_bytes := PackedByteArray()
+	if reader != null:
+		var model_read: Dictionary = reader.read_player_resource(archive, model, fingerprint, str(vif.get("name", "")))
+		var texture_read: Dictionary = reader.read_player_resource(archive, tex_index, fingerprint, str(tex.get("name", "")))
+		if not model_read.get("ok", false) or not texture_read.get("ok", false):
+			return {"ok": false, "error": "player model or texture archive changed during binding"}
+		model_bytes = model_read.bytes
+		texture_bytes = texture_read.bytes
+	else:
+		model_bytes = _row_bytes(archive, vif)
+		texture_bytes = _row_bytes(archive, tex)
+	var result: Dictionary = ClassDB.class_call_static("ChampionsRealWorld", "model_texture", model_bytes, texture_bytes)
 	if not result.get("ok", false): return result
 	var image := Image.create_from_data(int(result.width), int(result.height), false, Image.FORMAT_RGBA8, result.rgba)
 	if image == null: return {"ok": false, "error": "texture image could not be created"}
