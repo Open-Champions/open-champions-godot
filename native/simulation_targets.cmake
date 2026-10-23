@@ -90,7 +90,7 @@ else()
 endif()
 
 # Supplied post-fixup RTA terrain contract; loading and Session movement are separate.
-add_library(champions-world-queries "${CHAMPIONS_SIMULATION_ROOT}/src/world_terrain.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/world_movement.cpp")
+add_library(champions-world-queries "${CHAMPIONS_SIMULATION_ROOT}/src/world_terrain.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/world_movement.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/world_raycast.cpp")
 target_include_directories(champions-world-queries PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 target_link_libraries(champions-world-queries PUBLIC champions-core)
 if(MSVC)

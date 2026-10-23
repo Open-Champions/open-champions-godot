@@ -53,6 +53,9 @@ public:
   Bundle(const Bundle &) = delete;
   Bundle &operator=(const Bundle &) = delete;
   void set_camera(Raw slot, Camera camera);
+  // Updates only the net_getCamFlag word of an already bound snapshot: offline
+  // it is "the camera is not in follow mode" (movement-camera.md 7.2, mode != 1).
+  void set_camera_flag(Raw slot, Raw flag);
   void set_local_slot(Raw slot) { local_slot_ = slot; }
   // The resolver maps the model-definition resource pointer to a registered
   // clip. research-player-model 7f13899 requires slot order from the selected

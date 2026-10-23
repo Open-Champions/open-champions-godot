@@ -102,7 +102,12 @@ void synthetic() {
   memory.poke(0x5008, 4, 0x6000); // authored runtime grid supplied by this test
   check(s.water_disturb({0, 0, 0}, f(100), f(12)) == 1,
         "explicit runtime grid owner permits the authored disturbance");
-  refuses([&] { (void)s.raycast(at, at, 0, 0); }, "unported ray refuses");
+  // terrain_raycast 0x18a5c0 now backs the service: maxT 0 is the documented
+  // empty ray (-1.0), and a downward vertical ray returns O.z - ground.
+  check(s.raycast(at, at, 0, 0) == R::MINUS_ONE, "empty ray reports no hit");
+  const R::Vec3 above{at[0], at[1], f(30)};
+  check(s.raycast(above, {0, 0, R::MINUS_ONE}, 0, R::ONE) == R::sub(f(30), s.height_at_point(above)),
+        "vertical ray returns the distance to the loaded ground (world-queries 9.1)");
   refuses([&] { (void)s.camera_yaw(0); }, "unbound camera refuses");
   P::Camera known;
   known.yaw = 0x4000;

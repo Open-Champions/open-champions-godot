@@ -9,6 +9,11 @@ namespace {
 void Bundle::set_camera(Raw slot, Camera camera) {
   cameras_[slot] = std::move(camera);
 }
+void Bundle::set_camera_flag(Raw slot, Raw flag) {
+  const auto it = cameras_.find(slot);
+  if (it == cameras_.end()) missing("player camera flag: machine camera is not bound");
+  it->second.flag = flag;
+}
 void Bundle::bind_animation(creature_anim::Runtime &runtime,
                             std::function<creature_anim::ClipId(Address, Raw)> clips) {
   actors_.clear();
@@ -85,8 +90,11 @@ combat_runtime::Services Bundle::services(combat_runtime::Services s) {
   s.terrain_blocked = [this](const Vec3 &p, Raw radius) {
     return world_queries::terrain_test_flag1(level_, radius, p);
   };
-  s.raycast = [](const Vec3 &, const Vec3 &, Raw, Raw) -> Raw {
-    missing("player terrain raycast: loaded-level ray contract is not ported");
+  // (origin, direction, terrain flag mask, maxT): terrain_raycast 0x18a5c0
+  // (world-queries.md 9.1). world_raycast's object-circle part is not ported,
+  // so objects do not block these rays.
+  s.raycast = [this](const Vec3 &origin, const Vec3 &direction, Raw mask, Raw max_t) -> Raw {
+    return world_queries::terrain_raycast(level_, max_t, origin, direction, mask);
   };
   s.water_test = [this](const Vec3 &p, Raw radius) {
     if (water_) return Raw(water_->water_test(radius, water_world_, p));
