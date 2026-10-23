@@ -1,7 +1,11 @@
 extends SceneTree
 
-# Swing cycles of the fight step (6 ticks of J held, 24 released).
-const SWING_CYCLES := 120
+# Swing cycles of the fight step (6 ticks of J held, 24 released). The fight
+# runs until the target's hit points reach zero through the real damage path
+# or this bound (about 90,000 ticks) ends it; nothing is forced.
+const SWING_CYCLES := 3000
+# Ticks run after the target dies so the death, XP award and loot roll settle.
+const SETTLE_TICKS := 120
 
 # Private, opt-in journey probe. The same script runs with --headless or a
 # rendered display. Only counts and generic refusal text leave the game folder.
@@ -450,16 +454,28 @@ func run() -> void:
 	var organic_reached := reached
 	var organic_end_distance := last_distance
 	var placed := false
+	var placed_at_weakest := false
 	if not reached:
 		# DIAGNOSTIC: the walk is blind to the level's walls, so a scripted run
-		# puts the player next to the nearest enemy (controller.fight_place_player
-		# is not an original routine). The organic result is reported above.
+		# puts the player next to a boar (controller.fight_place_player is not
+		# an original routine). The target is the boar with the lowest hit
+		# points: an unarmed level-1 player needs about 25,000 ticks for the
+		# smallest boar and several times that for the large ones. Only the
+		# placement is a diagnostic; every hit, miss and the death are the real
+		# damage path. The organic walk result is reported above.
 		var snapshot: Dictionary = scene.controller.get_observation()
+		var weakest := 1.0e30
+		for actor in snapshot.get("fight_enemies", []):
+			if actor.get("dead", false): continue
+			if float(actor.hp) < weakest:
+				weakest = float(actor.hp)
+				target_handle = int(actor.handle)
 		for actor in snapshot.get("fight_enemies", []):
 			if int(actor.handle) != target_handle: continue
 			var spot: Vector3 = actor.position
 			var put: Dictionary = scene.controller.fight_place_player(Vector3(spot.x - 40.0, spot.y, spot.z + 10.0), 0)
 			placed = bool(put.get("ok", false))
+			placed_at_weakest = placed
 			break
 		advance(0, 24)
 		var after_place: Dictionary = scene.controller.get_observation()
@@ -471,17 +487,33 @@ func run() -> void:
 	# Swing: J held for a few ticks, then released for the rest of the cycle.
 	var swings := 0
 	var target_dead := false
+	var target_hp_start := 0.0
+	var target_max_hp := 0.0
+	var target_kind := ""
+	for actor in scene.controller.get_observation().get("fight_enemies", []):
+		if int(actor.handle) == target_handle:
+			target_hp_start = float(actor.hp)
+			target_max_hp = float(actor.max_hp)
+			target_kind = str(actor.kind)
+	var player_level_start := int(scene.controller.get_observation().get("fight_player_level", -1))
+	var player_exp_start := int(scene.controller.get_observation().get("fight_player_experience", -1))
+	var swing_start_msec := Time.get_ticks_msec()
 	for cycle in range(SWING_CYCLES):
 		advance(16, 6)
 		advance(0, 24)
 		swings += 1
-		for actor in scene.controller.get_observation().get("fight_enemies", []):
+		var polled: Dictionary = scene.controller.get_observation()
+		for actor in polled.get("fight_enemies", []):
 			if int(actor.handle) == target_handle and actor.get("dead", false): target_dead = true
-		if target_dead or bool(scene.controller.get_observation().get("fight_failed", false)): break
+		if target_dead or bool(polled.get("fight_failed", false)): break
+	var swing_msec := Time.get_ticks_msec() - swing_start_msec
+	if target_dead: advance(0, SETTLE_TICKS)
 	var after: Dictionary = scene.controller.get_observation()
 	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var saved_hp := float(after.get("hp", -1.0))
 	var saved_gold := int(after.get("gold", -1))
+	var saved_experience := int(after.get("experience", -1))
+	var saved_level := int(after.get("level", -1))
 	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var actors_after: Array = after.get("fight_enemies", [])
 	var enemy_damaged := false
@@ -506,14 +538,32 @@ func run() -> void:
 	var fight_counts: Dictionary = after.get("fight_counts", {})
 	var drops_before := 0
 	var drops_after := int(fight_counts.get("loot_calls", 0))
+	var target_hp_end := 0.0
+	var target_state := -1
+	var target_dead_flag := false
+	for actor in actors_after:
+		if int(actor.get("handle", 0)) == target_handle:
+			target_hp_end = float(actor.hp)
+			target_state = int(actor.get("state", -1))
+			target_dead_flag = bool(actor.get("dead", false))
+	var player_level_end := int(after.get("fight_player_level", -1))
+	var player_exp_end := int(after.get("fight_player_experience", -1))
+	var xp_gained := int(fight_counts.get("xp_gained", 0))
+	var loot_items := int(fight_counts.get("loot_items", 0))
+	var ground_drops: Array = after.get("fight_ground_drops", [])
+	var kill_evidence := enemy_died and target_dead_flag and target_hp_end <= 0.0 and int(fight_counts.get("deaths", 0)) >= 1
 	var gold_after := int(after.get("gold", -1))
 	# Round 8 traced Gold from AutoContainer, separate from the boar's
 	# zero-Gold drop. Require a runtime source witness; none is built here.
 	var auto_container_gold := bool(after.get("gold_from_auto_container", false))
 	var fight_started: bool = bool(after.get("fight_started", false)) and bool(after.get("fight_player_ready", false))
+	# The journey needs the kill, its XP, any generated item picked up and Gold.
+	# Item pickup and Gold are not reachable (refused, labelled), so the step
+	# stays "blocked_unported_combat" while they are missing.
 	var fight_passed: bool = fight_loaded and scene.real.current == fight_level \
 		and fight_started and attack_handled \
-		and not enemy_hp_before.is_empty() and enemy_damaged and enemy_died \
+		and not enemy_hp_before.is_empty() and enemy_damaged and kill_evidence \
+		and xp_gained > 0 and loot_items == 0 \
 		and auto_container_gold and gold_after > gold_before
 	var missing_fight_steps := {}
 	if not fight_loaded or scene.real.current != fight_level: missing_fight_steps["enemy_level_entry"] = 1
@@ -521,7 +571,11 @@ func run() -> void:
 	if not attack_handled: missing_fight_steps["attack_input"] = 1
 	if enemy_hp_before.is_empty(): missing_fight_steps["live_enemy"] = 1
 	if not enemy_damaged: missing_fight_steps["enemy_damage"] = 1
-	if not enemy_died: missing_fight_steps["enemy_death"] = 1
+	if not kill_evidence: missing_fight_steps["enemy_death"] = 1
+	if xp_gained <= 0: missing_fight_steps["kill_xp"] = 1
+	if loot_items > 0:
+		missing_fight_steps["loot_ground_object_spawn"] = loot_items
+		missing_fight_steps["loot_item_pickup"] = loot_items
 	if not auto_container_gold: missing_fight_steps["auto_container_gold_source"] = 1
 	if gold_after <= gold_before: missing_fight_steps["gold_gain"] = 1
 	var object_counts: Dictionary = scene.controller.script_command_counts()
@@ -535,6 +589,19 @@ func run() -> void:
 		"scene_paused": scene.paused, "frontend_screen": fe.screen(),
 		"actors_before": actors_before.size(), "actors_after": actors_after.size(),
 		"enemy_damaged": enemy_damaged, "enemy_died": enemy_died,
+		"kill_evidence": kill_evidence, "target_handle": target_handle, "target_kind": target_kind,
+		"target_hp_start": target_hp_start, "target_max_hp": target_max_hp, "target_hp_end": target_hp_end,
+		"target_state_end": target_state, "target_dead_flag": target_dead_flag,
+		"target_died_by_real_damage": kill_evidence,
+		"placement_diagnostic_at_weakest": placed_at_weakest, "swing_wall_msec": swing_msec,
+		"xp_gained": xp_gained, "player_level_start": player_level_start, "player_level_end": player_level_end,
+		"player_experience_start": player_exp_start, "player_experience_end": player_exp_end,
+		"xp_awards": fight_counts.get("xp_awards", 0), "levels_gained": fight_counts.get("levels_gained", 0),
+		"fight_awards": after.get("fight_awards", []),
+		"loot_items_generated": loot_items, "loot_ground_drops": ground_drops,
+		"loot_shared_draws": fight_counts.get("loot_shared_draws", 0),
+		"loot_roll_yielded_item": loot_items > 0,
+		"gold_reachable": false,
 		"fight_started": fight_started, "fight_failed": bool(after.get("fight_failed", false)),
 		"fight_error": str(after.get("fight_error", "")),
 		"fight_counts": fight_counts, "fight_refusals": after.get("fight_refusals", {}),
@@ -624,7 +691,9 @@ func run() -> void:
 		"level_index_before": level_before,
 		"level_index_after": scene.real.current, "gold_before": saved_gold,
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
-		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match})
+		"hp_after": float(restored.get("hp", -1.0)), "quests_match": quests_match,
+		"experience_before": saved_experience, "experience_after": int(restored.get("experience", -1)),
+		"level_before": saved_level, "level_after": int(restored.get("level", -1))})
 	await capture("09-loaded")
 	# Step 6: the same real-level script host exposes object-record exits and
 	# pending newWorld/newWorldPost. Execute only a documented script action.

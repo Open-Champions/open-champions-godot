@@ -103,6 +103,10 @@ func update(observation: Dictionary) -> int:
 		var scale := SMALL_SCALE if str(row.kind) == "WarBoarSmall" else LARGE_SCALE
 		instance.position = Vector3(p.x, p.z + foot_offset * scale, -p.y)
 		instance.rotation.y = float(int(row.facing) & 0xffff) * TAU / 65536.0
+		# PRESENTATION ONLY: the death-animation clip choice is undocumented, so
+		# a dead boar (hit points at or below zero, state 0x14) keeps the rest
+		# pose and is drawn faded. This is not the original's death look.
+		instance.transparency = 0.6 if bool(row.get("dead", false)) else 0.0
 		instance.visible = true
 		drawn += 1
 	for address in instances.keys():

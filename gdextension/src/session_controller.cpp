@@ -2729,6 +2729,11 @@ Dictionary ChampionsSessionController::fight_observation() const {
   counts["damage_events"] = int64_t(n.damage_events);
   counts["deaths"] = int64_t(n.deaths);
   counts["loot_calls"] = int64_t(n.loot_calls);
+  counts["loot_items"] = int64_t(n.loot_items);
+  counts["loot_shared_draws"] = int64_t(n.loot_shared_draws);
+  counts["xp_awards"] = int64_t(n.xp_awards);
+  counts["xp_gained"] = int64_t(n.xp_gained);
+  counts["levels_gained"] = int64_t(n.levels_gained);
   counts["factory_runs_skipped"] = int64_t(n.factory_runs_skipped);
   out["fight_counts"] = counts;
   Dictionary refusals;
@@ -2763,7 +2768,38 @@ Dictionary ChampionsSessionController::fight_observation() const {
     out["fight_starting_equipment"] = "refused_unknown";
     out["fight_player_weapon_class_source"] = "unarmed_fallback_standin";
     out["gold"] = int64_t(player.gold);
+    // The experience record in the shared bytes (kill XP and level-up).
+    out["fight_player_level"] = int64_t(player.level);
+    out["fight_player_experience"] = int64_t(player.experience);
+    out["fight_player_skill_points"] = int64_t(player.skill_points);
+    out["fight_player_stat_points"] = int64_t(player.stat_points);
+    out["fight_player_mana"] = display_float(player.mana);
+    out["fight_player_max_mana"] = display_float(player.max_mana);
   }
+  Array awards;
+  for (const auto &a : fight_->awards()) {
+    Dictionary value;
+    value["slot"] = int64_t(a.slot);
+    value["amount"] = int64_t(a.amount);
+    value["levels_gained"] = int64_t(a.levels_gained);
+    value["level_before"] = int64_t(a.level_before);
+    value["level_after"] = int64_t(a.level_after);
+    value["experience_before"] = int64_t(a.experience_before);
+    value["experience_after"] = int64_t(a.experience_after);
+    awards.push_back(value);
+  }
+  out["fight_awards"] = awards;
+  // Item records the loot roll generated; no ground object exists for them.
+  Array drops;
+  for (const auto &g : fight_->ground_drops()) {
+    Dictionary value;
+    value["kind"] = String::utf8(g.kind.c_str());
+    value["category"] = int64_t(g.category);
+    value["count"] = int64_t(g.count);
+    value["spawned"] = g.spawned;
+    drops.push_back(value);
+  }
+  out["fight_ground_drops"] = drops;
   return out;
 }
 rta::session_control::Observation ChampionsSessionController::active_observation() const {

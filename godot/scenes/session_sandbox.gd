@@ -253,6 +253,11 @@ func _observe(result: Dictionary) -> void:
 		health_label.text += "\nStarting equipment: %s · weapon class %d (%s, not campaign evidence)" % [
 			str(result.get("fight_starting_equipment", "unknown")), int(result.get("fight_player_weapon_class", -1)),
 			str(result.get("fight_player_weapon_class_source", "unknown"))]
+		var fight_counts: Dictionary = result.get("fight_counts", {})
+		health_label.text += "\nLevel %d · Experience %d · kills %d · loot rolls %d (items %d, no ground object) · Gold %d" % [
+			int(result.get("fight_player_level", -1)), int(result.get("fight_player_experience", -1)),
+			int(fight_counts.get("deaths", 0)), int(fight_counts.get("loot_calls", 0)),
+			int(fight_counts.get("loot_items", 0)), int(result.get("gold", -1))]
 	animation_cache_label.visible = result.get("animation_cache_enabled", false)
 	if animation_cache_label.visible:
 		animation_cache_label.text = "Animation-cache diagnostic · synthetic data, no model pose\nTrack %s · sample track %s · time raw %s · event %s\nRaw joint values %s" % [result.animation_track, result.animation_sample_track, result.animation_time_raw, result.animation_event, str(result.animation_joints_raw)]
