@@ -406,6 +406,7 @@ func run() -> void:
 				# Round 8 observed this same actor crossing zero, then its
 				# next-frame death and drop calls. A missing actor is no kill witness.
 				enemy_died = enemy_died or (enemy_hp <= 0.0 and
+					bool(actor.get("dead", false)) and
 					bool(actor.get("death_drop_observed", false)))
 			else:
 				unmatched_enemies += 1

@@ -895,9 +895,15 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;
       const PackedByteArray image = resource_lumps[name];
-      if (image.is_empty() || image.size() > 64 * 1024 * 1024)
-        throw std::runtime_error("Selected resource archive is empty or too large.");
-      next->load_resource_lmp(name.utf8().get_data(), {image.ptr(), std::size_t(image.size())});
+      if (image.is_empty() || image.size() > 64 * 1024 * 1024) {
+        next->count_refusal("Selected resource archive unreadable");
+        continue;
+      }
+      try {
+        next->load_resource_lmp(name.utf8().get_data(), {image.ptr(), std::size_t(image.size())});
+      } catch (const std::exception &) {
+        next->count_refusal("Selected resource archive malformed");
+      }
     }
     // Malformed statistics or WORLD are refused and counted; the script still
     // attaches without them.
