@@ -225,12 +225,18 @@ func run() -> void:
 			tap(DOWN)
 			tap(CROSS)
 	var created_player: Dictionary = scene.controller.get_observation()
-	mark("character_created", fe.screen(),
+	var expected_character := int(created_player.get("player_class", -1)) == 6 \
+		and int(created_player.get("player_model", -1)) == 11
+	mark("character_created", fe.screen() if expected_character else "refused",
 		{"player_ready": created_player.get("player_ready", false),
 		"player_class": created_player.get("player_class", -1),
-		"player_model": created_player.get("player_model", -1)})
-	if int(created_player.get("player_class", -1)) != 6 or int(created_player.get("player_model", -1)) != 11:
-		refusal("character_created", "character creation did not yield the documented class-6/model-11 pair")
+		"player_model": created_player.get("player_model", -1),
+		"frontend_screen": fe.screen()})
+	if not expected_character:
+		refusal("character_created", "character creation expected class 6 and model 11")
+		save_json()
+		quit(1)
+		return
 	mark("first_level", "entered" if scene.real.current >= 0 and scene.play_mode else "refused",
 		{"level_index": scene.real.current, "session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
