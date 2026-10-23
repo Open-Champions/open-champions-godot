@@ -35,6 +35,7 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
 endif()
 if(BUILD_TESTING AND TARGET champions-campaign-actors AND TARGET champions-combat-runtime)
     add_executable(champions-campaign-fight-adopt-tests "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_fight_adopt_tests.cpp")
+    target_include_directories(champions-campaign-fight-adopt-tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
     target_link_libraries(champions-campaign-fight-adopt-tests PRIVATE champions-campaign-actors champions-combat-runtime)
     add_test(NAME campaign-fight-adopt COMMAND champions-campaign-fight-adopt-tests)
 endif()

@@ -193,6 +193,16 @@ struct Fight::Impl {
   // loot_generateDrops over the shared seed with the executable's item tables.
   void roll_loot(const C::LootDrop &d) {
     counts.loot_calls += 1;
+    // g_levelMonsterLevel 0x4f714c and g_difficultyIdx 0x4f719c are game_loadLevel's
+    // stores (research-pickups data-tables.md section 5); nothing in this World
+    // sets them (they hold a 1.0 constructor default and zero). They come from
+    // the script host's level load, and without them the roll is refused: the
+    // shared seed is left untouched and no item is generated.
+    const auto globals = host ? host->level_load_globals() : std::nullopt;
+    if (!globals) {
+      refuse("loot_generateDrops: the level's monster level and the difficulty are not bound (needs the level load at g_difficultyIdx 1); the roll is not made and the shared seed is untouched");
+      return;
+    }
     if (!loot) {
       const auto reader = [e = exe](std::uint32_t a, std::size_t n) {
         std::vector<std::uint8_t> out;
@@ -202,6 +212,7 @@ struct Fight::Impl {
       };
       loot = std::make_unique<campaign_rewards::Loot>(script_items::image_tables(reader), shared_memory());
     }
+    loot->bind_level_globals(globals->monster_level, globals->difficulty);
     // The reagent filter is a picture-name string address; the boar passes none.
     if (d.filter) throw C::Unsupported("loot_generateDrops: a reagent filter string is not bound");
     const auto out = loot->roll(d, {});

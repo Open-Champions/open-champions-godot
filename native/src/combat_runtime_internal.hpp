@@ -113,6 +113,7 @@ struct World::State {
       iterators; // preserve retired prev links
   std::set<const Link *> ended_iterators;
   std::size_t prune_at = 4096;
+  IteratorRetention retention = IteratorRetention::Lazy;
   void reserve_iterator();
   void end_iterator(Iterator &);
   void prune_iterators();

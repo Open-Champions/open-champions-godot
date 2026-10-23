@@ -186,6 +186,11 @@ struct SkillSetup {
 // Owns one pool, one handle graph and one memory. Address results are
 // transient; keep a handle for anything retained across calls/ticks or
 // allocation reuse.
+// When finished iterators are released (a host policy, not a game rule): Lazy
+// (default) at 4,096 and then at twice what survives; Always before every walk;
+// Never keeps all until the 65,536 retention refusal. The simulated state does
+// not depend on it; the differential test compares the three.
+enum class IteratorRetention { Lazy, Always, Never };
 class World {
 public:
   struct State;
@@ -285,6 +290,7 @@ public:
   void animation_events(Address, Raw mask);
   const std::vector<Event> &events() const;
   void clear_history();
+  void set_iterator_retention(IteratorRetention);
   Raw slot_function(Address, unsigned slot) const;
   [[noreturn]] void refuse(const std::string &feature) const;
 

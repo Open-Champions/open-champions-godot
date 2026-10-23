@@ -476,6 +476,7 @@ func run() -> void:
 			var put: Dictionary = scene.controller.fight_place_player(Vector3(spot.x - 40.0, spot.y, spot.z + 10.0), 0)
 			placed = bool(put.get("ok", false))
 			placed_at_weakest = placed
+			scene.diagnostic_placement_at_weakest = placed
 			break
 		advance(0, 24)
 		var after_place: Dictionary = scene.controller.get_observation()

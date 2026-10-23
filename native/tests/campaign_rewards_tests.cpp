@@ -56,9 +56,15 @@ void seed_record(CR::Memory &m, int level, std::int32_t exp, float hp, float man
   m.write(REC + 0xe8, 4, 0);
   m.write(REC + 0xec, 1, 0);
 }
-Raw maxima_hp(const R::player_state::Tables &t, int level) {
-  return R::player_state::maxima(t, 6, level, {20, 20, 20, 20}).max_hp;
-}
+// Expected maxima, worked by hand from research-combat data-tables.md 4.3
+//   maxHp   = level * hpPerLevel + stamina * hpPerStamina - hpOffset
+//   maxMana = (intelligence - manaIntOffset) * manaPerInt + level * manaPerLevel
+// with test_tables()'s invented constants (offset 10, 1 per int, 0.5 per level,
+// 5 per level, 2 per stamina, hp offset 1) and every statistic 20: not computed
+// with player_state::maxima, which the code under test calls.
+//   level 2: hp 2*5 + 20*2 - 1 = 49, mana (20-10)*1 + 2*0.5 = 11
+//   level 8: hp 8*5 + 20*2 - 1 = 79, mana 10 + 8*0.5 = 14
+constexpr float HAND_HP_L2 = 49.f, HAND_MANA_L2 = 11.f, HAND_HP_L8 = 79.f, HAND_MANA_L8 = 14.f;
 
 void exp_one_level() {
   Bytes b;
@@ -70,9 +76,10 @@ void exp_one_level() {
   check(m.read(REC + 0x59, 1) == 2 && m.read(REC + 0x58, 1) == 1, "earned level up, acknowledged level untouched");
   check(std::int32_t(m.read(REC + 0x5c, 4)) == t.experience[1] + 3, "experience added");
   check(m.read(REC + 0xe8, 4) == 1 && m.read(REC + 0xec, 1) == 3, "1 skill point (level 1 band), 3 stat points");
-  const auto max = R::player_state::maxima(t, 6, 2, {20, 20, 20, 20});
-  check(m.read(REC + 0xb0, 4) == max.max_hp && m.read(REC + 0xc4, 4) == max.max_mana, "maxima recomputed for level 2");
-  check(m.read(REC + 0xac, 4) == max.max_hp && m.read(REC + 0xc0, 4) == max.max_mana, "positive hit points refill both currents");
+  check(m.read(REC + 0xb0, 4) == raw(HAND_HP_L2) && m.read(REC + 0xc4, 4) == raw(HAND_MANA_L2),
+        "maxima recomputed for level 2 equal the hand-worked 49 and 11");
+  check(m.read(REC + 0xac, 4) == raw(HAND_HP_L2) && m.read(REC + 0xc0, 4) == raw(HAND_MANA_L2),
+        "positive hit points refill both currents to the hand-worked maxima");
 }
 void exp_below_threshold() {
   Bytes b;
@@ -95,7 +102,8 @@ void exp_many_levels() {
   check(r.levels_gained == 4 && m.read(REC + 0x59, 1) == 8, "four levels in one award");
   check(m.read(REC + 0xe8, 4) == 1 + 1 + 2 + 2, "skill points by the old level band");
   check(m.read(REC + 0xec, 1) == 12, "three stat points a level");
-  check(m.read(REC + 0xb0, 4) == maxima_hp(t, 8), "maxima are those of the last level");
+  check(m.read(REC + 0xb0, 4) == raw(HAND_HP_L8) && m.read(REC + 0xc4, 4) == raw(HAND_MANA_L8),
+        "maxima are the hand-worked 79 and 14 of the last level");
 }
 void exp_dead_record_and_ceiling() {
   Bytes b;
@@ -104,7 +112,7 @@ void exp_dead_record_and_ceiling() {
   seed_record(m, 1, 0, 0.f, 1.f);
   CR::give_exp(t, m, 0, t.experience[1]);
   check(m.read(REC + 0xac, 4) == 0, "a record with no hit points is not refilled");
-  check(m.read(REC + 0xb0, 4) == maxima_hp(t, 2), "its maxima still follow the level");
+  check(m.read(REC + 0xb0, 4) == raw(HAND_HP_L2), "its maxima still follow the level (hand-worked 49)");
   seed_record(m, 79, 0, 1.f, 1.f);
   const auto r = CR::give_exp(t, m, 0, 0x7fffff00);
   check(std::int32_t(m.read(REC + 0x5c, 4)) == t.experience[80] - 1, "experience clamps at table[80] - 1");
@@ -232,10 +240,11 @@ R::combat_runtime::LootDrop boar_like() {
 void set_game(CR::Memory &m, std::uint32_t seed) {
   m.write(R::combat_runtime::NUM_PLAYERS, 4, 1);
   m.write(REC + 0x50, 4, 0);
-  m.write(0x4f719c, 4, 1);
-  m.write(0x4f714c, 4, 0x41b00000); // level 22.0
   m.write(R::combat_runtime::SHARED_SEED, 4, seed);
 }
+// The level load's values for the test: monster level 22.0, difficulty 1.
+constexpr Raw LEVEL_22 = 0x41b00000;
+void bind(CR::Loot &loot, Raw level = LEVEL_22, std::int32_t difficulty = 1) { loot.bind_level_globals(level, difficulty); }
 void loot_roll() {
   auto tables = std::make_shared<items::Tables>(synthetic_tables());
   bool saw_empty = false, saw_item = false;
@@ -244,6 +253,7 @@ void loot_roll() {
     auto m = b.view();
     set_game(m, seed);
     CR::Loot loot(tables, m);
+    bind(loot);
     const auto out = loot.roll(boar_like(), {});
     check(std::uint32_t(m.read(R::combat_runtime::SHARED_SEED, 4)) == lcg(seed, out.shared_draws),
           "the shared seed advanced by exactly the draws taken");
@@ -263,6 +273,7 @@ void loot_roll() {
       auto m2 = b2.view();
       set_game(m2, seed);
       CR::Loot again(tables, m2);
+      bind(again);
       const auto twin = again.roll(boar_like(), {});
       check(twin.items.size() == out.items.size() && twin.items.front().record == out.items.front().record &&
                 twin.shared_draws == out.shared_draws,
@@ -279,12 +290,60 @@ void loot_gold_refused() {
   auto m = b.view();
   set_game(m, 5);
   CR::Loot loot(tables, m);
+  bind(loot);
   auto d = boar_like();
   d.gold_chance = ONE; // chance 65536: every gold roll succeeds
   bool refused = false;
   try { loot.roll(d, {}); } catch (const CR::Unsupported &) { refused = true; }
   check(refused, "a Gold roll is refused, not replaced by an invented object");
   check(std::uint32_t(m.read(R::combat_runtime::SHARED_SEED, 4)) != 5, "the draws taken before the refusal are kept");
+}
+// The level's monster level and the difficulty are not in the World's bytes in
+// the session; the roll takes them from the level load or does not happen.
+void loot_needs_level_inputs() {
+  auto tables = std::make_shared<items::Tables>(synthetic_tables());
+  Bytes b;
+  auto m = b.view();
+  set_game(m, 77);
+  // Plant the World's own defaults (a 1.0 level, zero difficulty): they must not be used.
+  m.write(0x4f714c, 4, ONE);
+  m.write(0x4f719c, 4, 0);
+  CR::Loot loot(tables, m);
+  bool refused = false;
+  try { loot.roll(boar_like(), {}); } catch (const CR::Unsupported &) { refused = true; }
+  check(refused, "an unbound level and difficulty refuse the roll");
+  check(std::uint32_t(m.read(R::combat_runtime::SHARED_SEED, 4)) == 77, "a refused roll leaves the shared seed alone");
+  for (std::int32_t bad : {-1, 0, 6, 99}) {
+    bool rejected = false;
+    try { loot.bind_level_globals(LEVEL_22, bad); } catch (const CR::Unsupported &) { rejected = true; }
+    check(rejected, "a difficulty outside 1..5 is not bound");
+  }
+  check(!loot.level_globals_bound(), "nothing was bound by the rejected difficulties");
+  // The bound inputs are used, not the bytes: the same seed rolls differently
+  // for another level or difficulty (the budget and generators depend on them).
+  bool level_matters = false, difficulty_matters = false;
+  for (std::uint32_t seed = 1; seed < 400 && !(level_matters && difficulty_matters); ++seed) {
+    auto roll = [&](Raw level, std::int32_t difficulty) {
+      Bytes bytes;
+      auto mem = bytes.view();
+      set_game(mem, seed);
+      mem.write(0x4f714c, 4, ONE);
+      mem.write(0x4f719c, 4, 0);
+      CR::Loot l(tables, mem);
+      bind(l, level, difficulty);
+      return l.roll(boar_like(), {});
+    };
+    const auto base = roll(LEVEL_22, 1);
+    const auto other_level = roll(ONE, 1), other_difficulty = roll(LEVEL_22, 5);
+    auto differs = [&](const CR::LootOutcome &a, const CR::LootOutcome &c) {
+      return a.shared_draws != c.shared_draws || a.items.size() != c.items.size() ||
+             (!a.items.empty() && !c.items.empty() && a.items.front().record != c.items.front().record);
+    };
+    level_matters = level_matters || differs(base, other_level);
+    difficulty_matters = difficulty_matters || differs(base, other_difficulty);
+  }
+  check(level_matters, "the bound monster level changes the roll");
+  check(difficulty_matters, "the bound difficulty changes the roll");
 }
 void loot_needs_tables() {
   bool refused = false;
@@ -300,6 +359,7 @@ int main() {
     exp_dead_record_and_ceiling();
     loot_roll();
     loot_gold_refused();
+    loot_needs_level_inputs();
     loot_needs_tables();
   } catch (const std::exception &error) {
     std::cerr << "campaign rewards test failed: " << error.what() << "\n";

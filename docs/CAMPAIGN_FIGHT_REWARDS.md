@@ -48,10 +48,29 @@ nonzero rank is refused (the skill tables are not bound).
 `Creature_dropLoot` (rank 0, zero Gold chance) calls `loot_generateDrops`
 0x100d54 once. `campaign_rewards::Loot` runs the audited items generator
 (`item_generation.cpp`, the port of `ref_items.loot_generate_drops`) with the
-tables from the executable, the game inputs from the shared bytes (player
-count and classes, difficulty 0x4f719c, PvP flags, level monster level
-0x4f714c) and the shared seed 0x404464: draws happen in the documented order,
-and the seed is written back.
+tables from the executable, the player count, classes and PvP flags from the
+shared bytes and the shared seed 0x404464: draws happen in the documented
+order, and the seed is written back.
+
+**The level's monster level (`g_levelMonsterLevel` 0x4f714c) and the difficulty
+(`g_difficultyIdx` 0x4f719c) are bound, not read from the World.** Nothing in
+the fight path stores them in the World's bytes (they hold a 1.0 constructor
+default and zero), and the original sets them in `game_loadLevel` (research-pickups
+9911a6b `docs/data-tables.md` section 5: level-table byte + 2 on difficulty 1,
+`(byte + 2) x 0.75 + {34, 61, 88, 115}` on difficulties 2-5, 1.0 in `stomedal`,
+2.0 in `innpit`). They come from the script host's own level load
+(`script_commands::Host::level_load_globals`): `level_flow::monster_level` of
+the loaded level's table row and the host's `g_difficultyIdx`, which is 1 in a
+single-player game (the executable image value and the offline setup's store,
+`script_commands.hpp`; research `native-app.md`/`native-rendezvous.md`: difficulty
+1). They are available only while the difficulty word is the 1 the level value
+was computed for, with no PvP; otherwise, or before the level's table is
+loaded, the roll is **refused**: a counted `loot_generateDrops: the level's
+monster level and the difficulty are not bound ...` refusal, no draw is taken
+and the shared seed is untouched. `Loot::roll` itself refuses until
+`bind_level_globals` was called and rejects a difficulty outside 1..5.
+Which difficulty a real campaign run has is not recorded for this session
+beyond that image value (Unverified).
 
 Each "make the item prop" step takes the one shared draw `GameObject_ctor`
 takes (`items.md` section 8) and keeps the generated 0x48-byte record. **No

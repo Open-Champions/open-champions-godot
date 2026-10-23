@@ -586,7 +586,7 @@ std::vector<Address> World::State::box(const Vec3 &lo, const Vec3 &hi,
   return out;
 }
 void World::State::reserve_iterator() {
-  if (iterators.size() >= prune_at) {
+  if (retention == IteratorRetention::Always || (retention == IteratorRetention::Lazy && iterators.size() >= prune_at)) {
     prune_iterators();
     prune_at = std::max<std::size_t>(4096, 2 * iterators.size());
   }
@@ -598,17 +598,30 @@ void World::State::end_iterator(Iterator &it) {
   ended_iterators.insert(&it);
 }
 void World::State::prune_iterators() {
+  // An ended iterator keeps its next/prev/partner (a stale node reference may
+  // read its prev link), so a retained ended iterator keeps every ended
+  // iterator it links to alive too. The kept set is the closure of the roots
+  // (list heads, pool nodes, object heads, live iterators) under the links of
+  // the iterators already kept: no retained iterator is left holding a pointer
+  // to a released one.
   std::set<const Link *> referred;
   authority->objects->collect_link_references(ended_iterators, referred);
+  std::vector<const Link *> pending;
   auto add_refs = [&](const Link &n) {
     for (const auto *ref : {n.next, n.prev, n.partner})
-      if (ref && ended_iterators.count(ref))
-        referred.insert(ref);
+      if (ref && ended_iterators.count(ref) && referred.insert(ref).second)
+        pending.push_back(ref);
   };
+  for (const auto *ref : referred) pending.push_back(ref);
   for (const auto &entry : owned_heads) add_refs(*entry.second);
   for (const auto &entry : heads) add_refs(*entry.second);
   for (const auto &it : iterators)
     if (!ended_iterators.count(it.get())) add_refs(*it);
+  while (!pending.empty()) {
+    const auto *kept_iterator = pending.back();
+    pending.pop_back();
+    add_refs(*kept_iterator);
+  }
   std::vector<std::unique_ptr<Iterator>> kept;
   kept.reserve(iterators.size());
   for (auto &it : iterators) {
@@ -928,6 +941,7 @@ void World::tick() {
   }
 }
 const std::vector<Event> &World::events() const { return s_->trace; }
+void World::set_iterator_retention(IteratorRetention r) { s_->retention = r; }
 void World::clear_history() {
   s_->trace.clear();
   s_->mem.clear_log();

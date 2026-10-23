@@ -618,6 +618,13 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
   return false;
 }
 
+std::optional<Host::LevelLoadGlobals> Host::level_load_globals() const {
+  if (!stats_ready_) return std::nullopt;
+  const auto difficulty = static_cast<std::int32_t>(variables_->memory.u32(script_items::G_DIFFICULTY));
+  // monster_level_ was computed for difficulty 1 (set_level_stats).
+  if (difficulty != 1) return std::nullopt;
+  return LevelLoadGlobals{monster_level_, difficulty};
+}
 void Host::bind_monster_level(std::uint32_t raw) {
   variables_->memory.word(0x4f714c, raw);
   monster_level_bound_ = true;

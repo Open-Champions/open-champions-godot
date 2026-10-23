@@ -8,8 +8,7 @@ constexpr Address PLAYERS = combat_runtime::PLAYERS, RECORD = combat_runtime::RE
                   NUM_PLAYERS = combat_runtime::NUM_PLAYERS, SHARED_SEED = combat_runtime::SHARED_SEED;
 // Globals read from the shared bytes (research-pickups items.md section 8,
 // research-campaign-combat kill-loot-xp.md "loot_generateDrops").
-constexpr Address G_LEVEL_MONSTER_LEVEL = 0x4f714c, G_DIFFICULTY = 0x4f719c,
-                  G_PVP_A = 0x4f711c, G_PVP_B = 0x4f7120;
+constexpr Address G_PVP_A = 0x4f711c, G_PVP_B = 0x4f7120;
 std::int32_t s8(std::uint64_t v) { return std::int32_t(std::int8_t(std::uint8_t(v))); }
 std::int32_t s32(std::uint64_t v) { return std::int32_t(std::uint32_t(v)); }
 bool positive(Raw bits) { return combat::flt(0, bits); }
@@ -97,7 +96,19 @@ Loot::Loot(std::shared_ptr<const items::Tables> tables, Memory mem)
   if (!tables_) throw Unsupported("loot: item tables are not bound");
 }
 
+void Loot::bind_level_globals(Raw monster_level_bits, std::int32_t difficulty) {
+  if (difficulty < 1 || difficulty > 5)
+    throw Unsupported("loot: g_difficultyIdx outside 1..5 (the level-load difficulty is not bound)");
+  level_ = monster_level_bits;
+  difficulty_ = difficulty;
+  level_bound_ = true;
+}
+
 LootOutcome Loot::roll(const combat_runtime::LootDrop &d, const std::string &reagent_filter) {
+  // g_levelMonsterLevel and g_difficultyIdx are set by game_loadLevel
+  // (research-pickups data-tables.md section 5); the World's bytes never hold
+  // them in this session, so an unbound pair is refused, not defaulted.
+  if (!level_bound_) throw Unsupported("loot: the level's monster level and the difficulty are not bound");
   items::Game game;
   const auto players = s32(mem_.read(NUM_PLAYERS, 4));
   if (players < 1 || players > 4) throw Unsupported("loot: player count outside 1..4");
@@ -105,10 +116,10 @@ LootOutcome Loot::roll(const combat_runtime::LootDrop &d, const std::string &rea
   game.classes.assign(4, 0);
   for (std::int32_t k = 0; k < players; ++k)
     game.classes[std::size_t(k)] = s32(mem_.read(PLAYERS + Address(k) * RECORD + 0x50, 4));
-  game.difficulty = s32(mem_.read(G_DIFFICULTY, 4));
+  game.difficulty = difficulty_;
   game.pvp_a = s32(mem_.read(G_PVP_A, 4));
   game.pvp_b = s32(mem_.read(G_PVP_B, 4));
-  game.level = Raw(mem_.read(G_LEVEL_MONSTER_LEVEL, 4));
+  game.level = level_;
   items::Rng rng(std::uint32_t(mem_.read(SHARED_SEED, 4)));
   LootOutcome out;
   RecordingWorld world;

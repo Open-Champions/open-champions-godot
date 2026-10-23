@@ -410,6 +410,17 @@ public:
   // The f12 music_playLevel passes to channel 2. Zero until a call passes the gate.
   std::uint32_t music_channel() const { return music_channel_; }
   builtins::Variables &variables() { return *variables_; }
+  // The two globals game_loadLevel leaves for the loaded level: g_levelMonsterLevel
+  // 0x4f714c (level-table byte + 2 on difficulty 1, research-pickups 9911a6b
+  // docs/data-tables.md section 5; level_flow::monster_level) and g_difficultyIdx
+  // 0x4f719c. Present only once set_level_stats loaded the level's table and
+  // while the difficulty word is the 1 the value was computed for (single
+  // player, no PvP: the only mode this host models); otherwise empty.
+  struct LevelLoadGlobals {
+    std::uint32_t monster_level = 0;
+    std::int32_t difficulty = 0;
+  };
+  std::optional<LevelLoadGlobals> level_load_globals() const;
   amx::Machine *machine() { return machine_.get(); }
   amx::Cell last_value() const { return last_value_; }
   const std::string &last_fault() const { return last_fault_; }

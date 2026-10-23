@@ -15,6 +15,10 @@ var terrain_root: Node3D
 var camera: Camera3D
 var viewport: SubViewport
 var raw_observation: Dictionary = {}
+# Set by a scripted run that put the player beside the lowest-HP boar with
+# controller.fight_place_player (DIAGNOSTIC; not an original routine). Shown on
+# the health label so a screenshot cannot be read as an organic approach.
+var diagnostic_placement_at_weakest := false
 var held_commands := 0
 var pending_damage := false
 var paused := false
@@ -258,6 +262,8 @@ func _observe(result: Dictionary) -> void:
 			int(result.get("fight_player_level", -1)), int(result.get("fight_player_experience", -1)),
 			int(fight_counts.get("deaths", 0)), int(fight_counts.get("loot_calls", 0)),
 			int(fight_counts.get("loot_items", 0)), int(result.get("gold", -1))]
+		if diagnostic_placement_at_weakest:
+			health_label.text += "\nDIAGNOSTIC placement at the lowest-HP boar"
 	animation_cache_label.visible = result.get("animation_cache_enabled", false)
 	if animation_cache_label.visible:
 		animation_cache_label.text = "Animation-cache diagnostic · synthetic data, no model pose\nTrack %s · sample track %s · time raw %s · event %s\nRaw joint values %s" % [result.animation_track, result.animation_sample_track, result.animation_time_raw, result.animation_event, str(result.animation_joints_raw)]

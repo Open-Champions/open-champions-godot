@@ -62,13 +62,25 @@ struct LootOutcome {
 // draw GameObject_ctor takes (items.md section 8) and records the item; no
 // PhProp is built (the loot constructor's lump/model/texture/launch/scale
 // arguments are not in the research). A positive Gold roll is refused.
+//
+// The level's monster level (g_levelMonsterLevel 0x4f714c) and the difficulty
+// (g_difficultyIdx 0x4f719c) are NOT read from the World's bytes: nothing in the
+// fight path stores them there (the World holds a 1.0 constructor default and a
+// zero). The caller binds them from the level load (bind_level_globals); until
+// then, or for a difficulty outside 1..5, roll() refuses rather than rolling
+// with a default.
 class Loot {
 public:
   Loot(std::shared_ptr<const items::Tables>, Memory);
+  void bind_level_globals(Raw monster_level_bits, std::int32_t difficulty);
+  bool level_globals_bound() const { return level_bound_; }
   LootOutcome roll(const combat_runtime::LootDrop &, const std::string &reagent_filter);
   const items::Tables &tables() const { return *tables_; }
 private:
   std::shared_ptr<const items::Tables> tables_;
   Memory mem_;
+  bool level_bound_ = false;
+  Raw level_ = 0;
+  std::int32_t difficulty_ = 0;
 };
 } // namespace champions::simulation::rta::campaign_rewards
