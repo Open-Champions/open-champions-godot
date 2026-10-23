@@ -414,11 +414,11 @@ func run() -> void:
 				matched_enemies += 1
 				enemy_hp_after_total += enemy_hp
 				enemy_damaged = enemy_damaged or enemy_hp < float(enemy_hp_before[int(actor.handle)])
-				# Round 8 observed this same actor crossing zero, then its
-				# next-frame death and drop calls. A missing actor is no kill witness.
+				# The same handle had positive HP before the attack window.
+				# Require its nonpositive HP and dead state after the window;
+				# drop production is measured separately below.
 				enemy_died = enemy_died or (enemy_hp <= 0.0 and
-					bool(actor.get("dead", false)) and
-					bool(actor.get("death_drop_observed", false)))
+					bool(actor.get("dead", false)))
 			else:
 				unmatched_enemies += 1
 		elif slot > 0:
