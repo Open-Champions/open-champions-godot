@@ -1,6 +1,7 @@
 // Level objects for the script host: the object factory, and the creature
 // classes whose constructor chain is ported (research t3/research-script-session
 // 6841b8a, docs/script-session.md sections 3-5).
+#include "champions/arena_monsters.hpp"
 #include <cctype>
 #include "champions/monsters_1.hpp"
 #include "champions/combat_stats.hpp"
@@ -93,6 +94,11 @@ const Ported kPorted[] = {
 constexpr std::uint32_t SNOBADGE_TEST = 0x532a30;
 constexpr std::uint32_t HORSEMEN_RIDER_FIRST = 0x532cc8;
 constexpr std::uint32_t HORSEMEN_FOOT_FIRST = 0x532dc8;
+// Horsemen_ctor and Nightmare_ctor (research docs/spec/horsemen-mount.md section 1). The rider
+// rows' name tests give the variant: 0x532cc8, 0x532cd8, 0x532ce8, 0x532cf8 -> 0..3.
+constexpr std::uint32_t HORSEMEN_CTOR = 0x271c70, NIGHTMARE_CTOR = 0x270968;
+constexpr std::uint32_t RIDER_TESTS[] = {0x532cc8, 0x532cd8, 0x532ce8, 0x532cf8};
+constexpr std::uint32_t MOUNT_BLOCK_SIZE = 0x3d8;
 
 struct Refused : std::runtime_error {
   using std::runtime_error::runtime_error;
@@ -404,7 +410,10 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
       record_addresses_[index] = address;
     }
     counts_.objects_unbuilt += 1;
-    counts_.load_draws_unmodelled += 1;
+    // A mounted record that reached its refusal after both GameObject_ctor draws
+    // has made every shared draw it owes (research horsemen-mount 1.1).
+    if (!(result == Build::Stubbed && last_draws_complete_))
+      counts_.load_draws_unmodelled += 1;
     counts_.unbuilt_constructors[outcome.constructor()] += 1;
   }
   return true;
@@ -412,6 +421,14 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
+  last_draws_complete_ = false;
+  // Only the four rider rows the research documents (mounted 1) and the Nightmare row. The
+  // other rows that call the same constructor (0x532dc8..0x532df8) are not documented there.
+  bool rider_row = false;
+  for (const auto t : RIDER_TESTS)
+    rider_row = rider_row || outcome.test == t;
+  if ((outcome.constructor() == HORSEMEN_CTOR && rider_row) || outcome.constructor() == NIGHTMARE_CTOR)
+    return build_mounted(record, outcome, c, props);
   if (outcome.constructor() == SCRIPT_GENERATOR_CTOR)
     return build_generator(outcome, record, c, props);
   if (outcome.constructor() == 0x158928) {
@@ -818,6 +835,243 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   if (stats_ready_ && seed_gate_observed_ && !counts_.item_load_gate_refusals &&
       !counts_.load_draws_unmodelled) stats_built_.insert(c);
   counts_.objects_registered += 1;
+  return Build::Built;
+}
+
+// The mounted Horsemen and Nightmare rows, from research t3/research-horsemen-mount
+// 338d459, docs/spec/horsemen-mount.md sections 1-2. The four addressed lists
+// each contain miniboss=1 and a distinct name. One rider record consumes two
+// pool blocks and two shared draws; a placed Nightmare consumes one of each.
+Host::Build Host::build_mounted(const level_flow::Record &record, const level_factory::Outcome &outcome,
+                                std::uint32_t c, const std::vector<std::string> &props) {
+  namespace AM = arena_monsters;
+  const bool rider = outcome.constructor() == HORSEMEN_CTOR;
+  if (!external_seed_) {
+    counts_.build_refusals["no session seed"] += 1;
+    return Build::NotBuilt;
+  }
+  auto &exe = *exe_;
+  std::uint32_t variant = 0;
+  if (rider) {
+    bool known = false;
+    for (std::uint32_t k = 0; k < 4; ++k)
+      if (outcome.test == RIDER_TESTS[k]) {
+        variant = k;
+        known = true;
+      }
+    if (!known) {
+      counts_.build_refusals["rider row not recognised"] += 1;
+      return Build::NotBuilt;
+    }
+  }
+  constexpr const char *MOUNT_NAMES[] = {"horsedisease", "horsewar", "horsepestilence", "horsedeath"};
+  M1::Memory mem({}, [&exe](creature_hp::Address a, std::size_t n) -> std::uint64_t {
+    std::uint64_t v = 0;
+    for (std::size_t i = n; i-- > 0;) {
+      std::uint8_t b = 0;
+      try {
+        b = exe.byte(static_cast<std::uint32_t>(a + i));
+      } catch (const std::exception &) {
+        b = 0;
+      }
+      v = (v << 8) | b;
+    }
+    return v;
+  });
+  mem.poke(CREATURE_SERIAL, 1, variables_->memory.u8(CREATURE_SERIAL));
+  std::uint32_t scratch = SCRATCH;
+  auto place = [&](const std::string &text) -> std::uint32_t {
+    const auto at = scratch;
+    if (at + text.size() + 1 >= SCRATCH_END)
+      throw Refused("scratch strings exhausted");
+    for (std::size_t i = 0; i < text.size(); ++i)
+      mem.poke(at + static_cast<std::uint32_t>(i), 1, static_cast<unsigned char>(text[i]));
+    mem.poke(at + static_cast<std::uint32_t>(text.size()), 1, 0);
+    scratch = (at + static_cast<std::uint32_t>(text.size()) + 16) & ~15u;
+    return at;
+  };
+  const auto type_ptr = place(record.cls);
+  AM::Model model(mem);
+  model.nightmare_native = true;
+  std::map<std::uint32_t, std::shared_ptr<builtins::Obj>> objects;
+  std::uint32_t mount_block = 0;
+  std::uint64_t draws = 0;
+  auto is_rider_mount = [&](std::uint32_t self) { return rider && self == mount_block && mount_block; };
+  auto prop_text = [&](std::uint32_t key) -> std::optional<std::string> {
+    return level_factory::prop_find(&props, exe.string(key), exe);
+  };
+  auto num = [](const AM::Value &v) { return std::uint32_t(std::get<std::int64_t>(v)); };
+  model.callbacks["pool_new"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
+    if (num(a.at(0)) != MOUNT_BLOCK_SIZE)
+      throw Refused("pool_new of an unexpected size");
+    const auto block = variables_->world->pool.allocate(MOUNT_BLOCK_SIZE);
+    if (!block) {
+      counts_.objects_pool_refused += 1;
+      return std::int64_t(0);
+    }
+    mount_block = block;
+    return std::int64_t(block);
+  };
+  model.callbacks["GameObject_ctor"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto self = num(a.at(0));
+    const auto pos = std::get<AM::Vec3>(a.at(1));
+    const auto def = num(a.at(2));
+    if (self != c && self != mount_block)
+      throw Refused("GameObject_ctor on another block");
+    // Observed 12-byte lists at 0x500848 + 12*variant, each ending in null.
+    const auto list_props = is_rider_mount(self)
+        ? std::vector<std::string>{"miniboss=1", std::string("name=") + MOUNT_NAMES[variant]}
+        : props;
+    auto list = std::make_shared<std::vector<std::string>>(list_props);
+    const bool is_rider_object = rider && self == c;
+    const auto size = self == c ? outcome.size : MOUNT_BLOCK_SIZE;
+    objects[self] = variables_->new_object({}, 0, pos, record.angle, is_rider_object ? "8Horsemen" : "9Nightmare", list, self, size);
+    const std::pair<std::uint32_t, std::uint64_t> words[] = {
+        {0x00, 0}, {0x04, 0}, {0x08, 0}, {0x48, VT_GAMEOBJECT}, {0x1c, RADIUS_24},
+        {0x20, HEIGHT_72}, {0x0c, 0}, {0x10, pos[0]}, {0x14, pos[1]}, {0x18, pos[2]},
+        {0x34, 0}, {0x24, def}};
+    for (const auto &w : words)
+      m.mem.store(self + w.first, 4, w.second);
+    m.mem.store(self + 0x28, 1, 25);
+    m.mem.store(self + 0x29, 1, 73);
+    m.mem.store(self + 0x44, 4, external_seed_->draw());
+    ++draws;
+    if ((rider && draws == 2) || (!rider && draws == 1))
+      last_draws_complete_ = true;
+    return std::int64_t(0);
+  };
+  model.callbacks["obj_getPropInt"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
+    if (is_rider_mount(num(a.at(0))))
+      return std::int64_t(num(a.at(1)) == 0x52fa60 ? 1 : 0); // MiniBoss key in Creature_ctor.
+    const auto text = prop_text(num(a.at(1)));
+    return std::int64_t(text ? level_factory::atoi(*text, exe) : 0u);
+  };
+  model.callbacks["obj_getPropStr"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
+    if (is_rider_mount(num(a.at(0))))
+      return std::int64_t(exe.string(num(a.at(1))) == "name" ? place(MOUNT_NAMES[variant]) : 0u);
+    const auto text = prop_text(num(a.at(1)));
+    return std::int64_t(text ? place(*text) : 0u);
+  };
+  // As build(): the balance row only feeds Creature_setStats, whose results are not copied.
+  model.callbacks["balance_lookup"] = [](AM::Model &, const std::vector<AM::Value> &) -> AM::Value {
+    return AM::Balance{};
+  };
+  model.callbacks["Creature_setStats"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto self = num(a.at(0));
+    if (num(a.at(1))) {
+      const auto seed = static_cast<std::uint32_t>(m.mem.load(self + 0x44, 4)) * 0x19660du + 0x3c6ef35fu;
+      m.mem.store(self + 0x44, 4, seed);
+    }
+    return std::int64_t(0);
+  };
+  model.callbacks["Creature_init"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto self = num(a.at(0));
+    if (!is_rider_mount(self) && prop_text(KEY_DEAD)) throw Refused("Creature_init dead");
+    if (!is_rider_mount(self) && prop_text(KEY_INIT_SCRIPT)) throw Refused("Creature_init initScript");
+    // Creature_init first calls virtual slot 18 for a MiniBoss. Nightmare
+    // inherits the documented empty Creature slot 18 (docs/creatures.md).
+    std::uint32_t mask = 0;
+    const auto format = exe.string(KEY_CHANGE);
+    const auto at = format.find("%d");
+    if (at == std::string::npos)
+      throw Refused("change key format");
+    for (int n = 0; n < 32; ++n) {
+      auto key = format;
+      key.replace(at, 2, std::to_string(n));
+      if (!is_rider_mount(self) && level_factory::prop_find(&props, key, exe))
+        mask |= 1u << n;
+    }
+    if (mask)
+      m.mem.store(self + 0xe8, 4, mask);
+    if (!is_rider_mount(self) && m.mem.load(self + 0x50, 4))
+      for (const auto key : KEY_WEAPONS)
+        if (const auto text = level_factory::prop_find(&props, exe.string(key), exe))
+          if (level_factory::atoi(*text, exe))
+            throw Refused("Creature_init weapon element");
+    return std::int64_t(0);
+  };
+  auto object_of = [&](const std::vector<AM::Value> &a) -> builtins::Obj & {
+    const auto it = objects.find(num(a.at(0)));
+    if (it == objects.end())
+      throw Refused("run list before GameObject_ctor");
+    return *it->second;
+  };
+  model.callbacks["obj_runEvery60"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
+    variables_->world->run_every_60(object_of(a));
+    return std::int64_t(0);
+  };
+  model.callbacks["handle_clear"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    if (m.mem.load(num(a.at(0)), 4))
+      throw Refused("handle_clear on a list with nodes");
+    return std::int64_t(0);
+  };
+  model.callbacks["handle_link"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto head = num(a.at(0)), target = num(a.at(1));
+    if (!rider || (head != c + 0x3c8 && head != mount_block + 0x3c8) ||
+        (target != c && target != mount_block) || num(a.at(2)) != target)
+      throw Refused("rider-mount handle_link outside observed pair");
+    auto found = objects.find(target);
+    if (found == objects.end()) throw Refused("rider-mount handle_link target absent");
+    auto &cell = mounted_cells_[head];
+    if (!cell) cell = std::make_unique<Cell>();
+    auto *node = variables_->world->handles.link(*cell, found->second->heads[0], found->second.get());
+    const auto word = HandlePool::NODE_BASE + HandlePool::NODE_SIZE * static_cast<std::uint32_t>(node->index);
+    m.mem.store(head, 4, word);
+    m.mem.store(word + 12, 4, target);
+    variables_->memory.word(word + 12, target);
+    return std::int64_t(0);
+  };
+  // Resource and animation calls: their results are not stored by these constructors.
+  for (const char *name : {"anim_clear", "anim_push", "anim_randomizeTopTime", "anim_start", "anim_startBlendInOut",
+                           "anim_syncToSimFrame", "anim_pushChained", "model_buildHideMask", "lump_load",
+                           // Holder.v1 puts an item model in a hand (research arena EXTERNALS): held-part
+                           // presentation. Rider records are refused later and nothing is copied.
+                           "Holder.v1", "Holder.v2", "Holder.v4", "Holder.v6"})
+    model.callbacks[name] = [](AM::Model &, const std::vector<AM::Value> &) -> AM::Value { return std::int64_t(0); };
+  const auto facing = static_cast<Raw>(static_cast<std::int32_t>(static_cast<std::int16_t>(record.angle)));
+  try {
+    if (rider)
+      model.horsemen_ctor(c, type_ptr, record.position, facing, 0, variant, 1);
+    else
+      model.nightmare_ctor(c, type_ptr, record.position, facing, 0);
+  } catch (const std::exception &error) {
+    counts_.build_refusals[error.what()] += 1;
+    if (objects.empty())
+      return Build::NotBuilt;
+    // Each constructed object registered and drew once; they stay stubs.
+    for (const auto &kv : objects) {
+      stubs_.insert(kv.second->addr);
+      counts_.objects_registered += 1;
+    }
+    return Build::Stubbed;
+  }
+  // Failed mount allocation leaves an on-foot rider in state 0 (spec 1.1).
+  // Keep that partial constructor as a labelled stub; never abort level load.
+  if (rider && !mount_block) {
+    last_draws_complete_ = draws == 1;
+    counts_.build_refusals["rider on foot (mount pool exhausted)"] += 1;
+    stubs_.insert(objects.at(c)->addr);
+    counts_.objects_registered += 1;
+    return Build::Stubbed;
+  }
+  // Copy both completed objects (or the placed Nightmare) into the binder.
+  auto skipped = [](std::uint32_t off) {
+    for (const auto &sp : kNotCopied)
+      if (off >= sp.offset && off < sp.offset + sp.size)
+        return true;
+    return false;
+  };
+  for (const auto &entry : objects) {
+    const auto self = entry.first;
+    const auto size = self == c ? outcome.size : MOUNT_BLOCK_SIZE;
+    for (std::uint32_t off = 0; off < size; ++off)
+      if (!skipped(off))
+        variables_->memory.byte(self + off, static_cast<std::uint8_t>(mem.load(self + off, 1)));
+    static_cast<objects::GameObject &>(*entry.second).flags = variables_->memory.word(self + 0x0c);
+    built_.insert(self);
+  }
+  variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
+  counts_.objects_registered += objects.size();
   return Build::Built;
 }
 

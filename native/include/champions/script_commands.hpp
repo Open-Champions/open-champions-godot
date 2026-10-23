@@ -502,6 +502,12 @@ private:
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,
               std::uint32_t address, const std::vector<std::string> &props);
+  // The Horsemen rider rows (constructor 0x271c70, mounted 1) and the Nightmare row
+  // (0x270968), research docs/spec/horsemen-mount.md sections 1.1 and 2.2.
+  Build build_mounted(const level_flow::Record &, const level_factory::Outcome &,
+                      std::uint32_t address, const std::vector<std::string> &props);
+  // True when the last build_mounted made every shared-seed draw its record owes.
+  bool last_draws_complete_ = false;
   void stub(const level_flow::Record &, std::uint32_t address,
             std::vector<std::string> props, std::int64_t size);
   // The ScriptGenerator constructor 0x265f54: the base object with the
@@ -542,6 +548,8 @@ private:
   ui_text_gaps::Ramps ui_ramps_;
   // Host-owned handle cells for creature +0x234 words linked by link_target.
   std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
+  // Rider +0x3c8 and mount +0x3c8 are separate host handle-list heads.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> mounted_cells_;
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;

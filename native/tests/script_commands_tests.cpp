@@ -6,6 +6,7 @@
 #include "champions/script_effects.hpp"
 #include "champions/script_items.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -185,6 +186,11 @@ std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, 
   return out;
 }
 
+std::vector<std::uint8_t> objects_blob(const std::vector<std::pair<std::string, std::string>> &records,
+                                       const std::string &extra_prop) {
+  return objects_blob(records, std::vector<std::string>(records.size(), extra_prop));
+}
+
 // An authored executable for the object factory: a placeholder string at every
 // name test's address, "Gnaw" at the Gnaw row's (level_factory_table.inc), the
 // change-key format Creature_init needs, an ASCII class table. Not the game's.
@@ -195,6 +201,7 @@ champions::simulation::rta::level_factory::Executable authored_executable() {
   for (const auto &row : LF::tests())
     (*strings)[row.name] = "Cls" + std::to_string(k++);
   (*strings)[0x532b88] = "Gnaw";
+  (*strings)[0x52fac8] = "dead";
   (*strings)[0x52fad0] = "change%d";
   LF::Executable exe;
   exe.string = [strings](std::uint32_t a) {
@@ -727,6 +734,109 @@ void test_hit_points_need_faithful_seed() {
       check(host.counts().load_draws_unmodelled == 1,
             "earlier unbuilt record makes seed inexact");
   }
+}
+
+
+// research t3/research-horsemen-mount 397c35c, docs/spec/horsemen-mount.md sections 1.1 and 2.2: a
+// A rider record builds its observed named MiniBoss mount and two reciprocal handles.
+void test_mounted_records() {
+  namespace LF = champions::simulation::rta::level_factory;
+  auto row_class = [](std::uint32_t name) {
+    int k = 0;
+    for (const auto &row : LF::tests()) {
+      if (row.name == name)
+        return "Cls" + std::to_string(k);
+      ++k;
+    }
+    return std::string();
+  };
+  const std::array<std::string, 4> rider_classes = {
+      row_class(0x532cc8), row_class(0x532cd8), row_class(0x532ce8), row_class(0x532cf8)};
+  const auto nightmare_class = row_class(0x532c98);
+  const auto foot_class = row_class(0x532dc8);
+  for (const auto &cls : rider_classes) check(!cls.empty(), "a mounted factory row exists");
+  check(!nightmare_class.empty() && !foot_class.empty(), "the other factory rows exist");
+  auto built = build_calls({{"start", {}}}, {});
+  sc::Host host;
+  SharedRandom live(20973);
+  host.bind_seed(&live, sc::SeedPolicy::OfflineSession);
+  host.set_executable(authored_executable());
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = objects_blob({{rider_classes[0], "rider0"}, {rider_classes[1], "rider1"},
+                                  {rider_classes[2], "rider2"}, {rider_classes[3], "rider3"},
+                                  {foot_class, "foot"}, {nightmare_class, "horse"}});
+  check(host.adopt_objects(blob.data(), blob.size()), "mounted records adopt");
+  const auto &counts = host.counts();
+  // Shared draws: each rider record two (rider, then mount), the placed Nightmare one; the
+  // undocumented on-foot row (same constructor, rows 0x532dc8..) keeps the old accounting.
+  SharedRandom expect(20973);
+  for (int i = 0; i < 9; ++i) expect.draw();
+  check(live.state == expect.state, "four rider records drew twice each and the Nightmare once");
+  const std::array<std::string, 4> mount_names = {
+      "horsedisease", "horsewar", "horsepestilence", "horsedeath"};
+  check(counts.build_refusals.empty(), "all four documented mount lists build");
+  for (int i = 0; i < 4; ++i) {
+    auto *rider = host.variables().find_first("rider" + std::to_string(i));
+    auto *mount = host.variables().find_first(mount_names[i]);
+    check(rider && mount && host.is_built(rider->addr) && host.is_built(mount->addr),
+          "rider and named mount build");
+    if (rider && mount) {
+      const auto &mem = host.variables().memory;
+      const auto rider_node = mem.word(rider->addr + 0x3c8);
+      const auto mount_node = mem.word(mount->addr + 0x3c8);
+      check((mem.word(mount->addr + 0xa8) & 1) && !(mem.word(mount->addr + 0x0c) & 0x100000) &&
+                mem.u8(rider->addr + 0x470) == i &&
+                mem.u16(rider->addr + 0x232) == 0x1b && mem.u16(mount->addr + 0x232) == 0,
+            "variant, MiniBoss flag and linked initial states");
+      check(rider_node && mount_node && mem.word(rider_node + 12) == mount->addr &&
+                mem.word(mount_node + 12) == rider->addr,
+            "reciprocal rider-mount handles");
+    }
+  }
+  check(host.variables().find_first("foot") != nullptr && counts.objects_unbuilt == 1,
+        "only the undocumented on-foot row is unbuilt");
+  check(counts.load_draws_unmodelled == 1, "only the undocumented on-foot row owes an unmodelled draw");
+  auto *horse = host.variables().find_first("horse");
+  check(horse && host.is_built(horse->addr) && counts.objects_built == 5, "all documented rows build");
+  const auto &mem = host.variables().memory;
+  check(mem.word(horse->addr + 0x48) == 0x5155e8 && mem.u8(horse->addr + 0xb4) == 10 &&
+            mem.word(horse->addr + 0xe0) == 0xc1a00000 && mem.u8(horse->addr + 0x28) == 0x32,
+        "the built Nightmare carries its table, kind, seat offset and byte 0x28");
+  check(counts.objects_registered == 10, "four rider-mount pairs, on-foot stub and Nightmare are registered");
+
+  // Leave exactly one rider-sized block, with no larger fallback block.
+  // The rider's pool_new succeeds and its mount's pool_new returns zero.
+  sc::Host exhausted;
+  SharedRandom one(20973);
+  exhausted.bind_seed(&one, sc::SeedPolicy::OfflineSession);
+  exhausted.set_executable(authored_executable());
+  plant(exhausted, built);
+  exhausted.run_prestart();
+  auto &pool = exhausted.variables().world->pool;
+  for (int i = 0; i < 511; ++i) check(pool.allocate(0x478) != 0, "reserve rider pool block");
+  for (int i = 0; i < 32; ++i) check(pool.allocate(3000) != 0, "reserve large fallback pool block");
+  const auto one_blob = objects_blob({{rider_classes[0], "unmounted"}});
+  check(exhausted.adopt_objects(one_blob.data(), one_blob.size()), "mount allocation refusal stays in level load");
+  const auto &no_mount = exhausted.counts();
+  check(no_mount.objects_pool_refused == 1 && no_mount.objects_unbuilt == 1 &&
+            no_mount.objects_registered == 1 && no_mount.load_draws_unmodelled == 0 &&
+            no_mount.build_refusals.count("rider on foot (mount pool exhausted)") == 1,
+        "exhausted mount is a labelled stub with its one shared draw accounted");
+
+  sc::Host placed_refusal;
+  SharedRandom placed_seed(20973);
+  placed_refusal.bind_seed(&placed_seed, sc::SeedPolicy::OfflineSession);
+  placed_refusal.set_executable(authored_executable());
+  plant(placed_refusal, built);
+  placed_refusal.run_prestart();
+  const auto dead_blob = objects_blob({{nightmare_class, "dead_horse"}}, "dead=1");
+  check(placed_refusal.adopt_objects(dead_blob.data(), dead_blob.size()),
+        "placed Nightmare refusal stays in level load");
+  const auto &dead = placed_refusal.counts();
+  check(dead.objects_unbuilt == 1 && dead.objects_registered == 1 &&
+            dead.load_draws_unmodelled == 0 && dead.build_refusals.count("Creature_init dead") == 1,
+        "placed Nightmare refusal preserves its completed GameObject draw");
 }
 
 void test_entrance_grid_and_particle() {
@@ -1294,6 +1404,7 @@ int main(int argc, char **argv) {
   test_generate_monster();
   test_receive_launch();
   test_give_random_gate();
+  test_mounted_records();
   test_entrance_grid_and_particle();
   test_routed_commands();
   test_callee_refusals();

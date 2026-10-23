@@ -1001,6 +1001,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/menus_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_recovery_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_facing_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/horsemen_mount_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/control_anim_cache_targets.cmake")
 
