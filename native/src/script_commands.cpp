@@ -246,7 +246,12 @@ Host::Host()
   // The executable image starts g_hudFade at zero (research-fade 197f52a).
   variables_->memory.word(script_effects::G_FADE, 0);
 }
-Host::~Host() = default;
+Host::~Host() {
+  // Variables unregisters external objects and their handle nodes. Their
+  // host-owned list heads must still exist while that teardown runs.
+  machine_.reset();
+  variables_.reset();
+}
 
 void Host::bind_campaign() {
   auto scene = variables_->scene_service;
