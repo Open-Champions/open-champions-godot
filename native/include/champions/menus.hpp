@@ -158,6 +158,7 @@ int skill_points_for_level(int level_before);
 struct Gap {
   const char *id;
   std::string reason;
+  int column = -1, row = -1;
 };
 // Stable refusals. Asking for a missing coordinate throws Refusal.
 std::vector<Gap> gaps();
@@ -192,6 +193,7 @@ struct HeldIcon {
 };
 struct IconSize {
   int width = -1, height = -1;
+  bool verified_one_row = false;
 };
 struct DrawFrame {
   int x = 0, y = 0, width = 0, height = 0, style = 0;
@@ -296,6 +298,7 @@ private:
   };
   std::array<std::vector<DisplayCell>, BAGS> display_cells_;
   std::array<std::string, BAGS> display_refusals_;
+  std::array<std::pair<int, int>, BAGS> display_refusal_cells_{};
 
   std::uint32_t record() const { return PLAYER; }
   void seed();

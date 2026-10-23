@@ -1,4 +1,4 @@
-STATUS: PARTIAL — pages 1–2 draw bounded one-row display-grid items and drag draws the held picture; taller or unsupported footprints and live drop remain refused.
+STATUS: PARTIAL — controlled one-row display-grid fixtures draw; unverified runtime footprints are labelled and refused on pages 1–2. Held-picture drag draws; live drop remains refused.
 
 ## Evidence and scope
 
@@ -12,6 +12,14 @@ STATUS: PARTIAL — pages 1–2 draw bounded one-row display-grid items and drag
 - The menu uses the executed display-grid stride `page*0xbdd8` for hover and the separate `page*0x1208` counted-bag stride for the observed first-cell equip action. Pages 3–5 dispatch the stat sheet. Highlight tint gives equipped state precedence over blocked state.
 - Importing a player record copies its 0x4c30 bytes into the menu machine and loads item definitions from the selected executable. Equip/unequip changes the native equipment pointer, and the Godot bridge writes the changed record back to the imported player. A no-disc built-in session keeps scalar menu state without claiming live item actions.
 - A native test covers imported-record equip and unequip pointer changes; the rendered capture test covers box submission, underbar absence, hover image change, runtime icon association and imported-record unequip writeback.
+
+## Audit fixes (3)
+
+- INV-R1B-1 (HIGH): `4a8a78a` executed only 0/32/64 widths with height zero and forced one-row rounding. The native builder now requires that exact controlled footprint class and explicit one-row evidence. The runtime picture index supplies dimensions but no such evidence, so its page items refuse even when the numbers look bounded. Intermediate widths, positive heights, missing dimensions and later placement after an unknown item also refuse; an earlier verified copy remains when independent. The refusal gap carries the first unused grid cell as a marker location, not an asserted placement for the unknown item. Godot paints a red `REF` marker inside that cell and shows `ITEM FOOTPRINT REFUSED` in the status.
+- Native regression covers a bounded-looking positive-height refusal, an intermediate-width refusal, preserved preceding cells, and the verified two-column move to the next row. The rendered probe selects a runtime item without recording its private identity and requires refusal on pages 1 and 2. Runtime dimension-to-row conversion remains unknown, so real page-1/2 item pictures are not claimed or drawn until the research verifies their footprint classes.
+- `bash work/inventory-r1/run-slices.sh inventory-fix3 --scripts` completed four successful slices: **111/111** levels tried, loaded and played; **230** checks, **0** failures, **0** summary refusals, **0** script faults, and **14** bounded script refusal stops (the same prior count).
+- On arm64, Release `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`, `cmake --build build/native -j4`, and `cmake --build build/godot-extension -j2` passed. Serial `ctest --test-dir build/native -R '^(menus-exact|inventory-icon-assoc|messages-exact|player-host)$' --output-on-failure -j1` passed **4/4** after the final gate. The full CTest suite was not rerun for this focused fix; the prior round's incomplete full-suite run remains a separate verification limit.
+- `python3 -u work/inventory-r1/run-godot.py` passed **54/54**, including menu and front-end smokes. `FULL_TRACE` stayed **31,622 bytes**, SHA-256 `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`. The matrix began before the final provenance flag rebuild; its affected menu and full-combat entries ran after that rebuild. The rendered `menu_capture.gd` rerun after the final build passed **15 captures**. Page-1, page-2 and taller-item refusal images were inspected; their `REF` markers are inside the first grid cell. These are native host renders, not original-game pixel comparisons.
 
 ## Audit fixes (first round; page-item claim superseded by Audit fixes (2))
 

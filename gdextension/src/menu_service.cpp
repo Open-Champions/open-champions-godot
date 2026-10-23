@@ -130,6 +130,8 @@ public:
         Dictionary row;
         row["id"] = String::utf8(gap.id);
         row["reason"] = String::utf8(gap.reason.c_str());
+        row["column"] = gap.column;
+        row["row"] = gap.row;
         gaps.push_back(row);
       }
       out["texts"] = texts;
@@ -260,7 +262,7 @@ public:
       next->adopt_record(std::vector<std::uint8_t>(record.ptr(), record.ptr() + record.size()),
                          *tables, std::move(pictures),
                          [&image](std::uint32_t at) { return image.byte(at); });
-      std::uint32_t one_row_definition = 0;
+      std::uint32_t unverified_definition = 0;
       if (!picture_index.is_empty()) {
         const auto index = champions::inventory_icons::parse_index(
             picture_index.ptr(), static_cast<std::size_t>(picture_index.size()));
@@ -269,13 +271,15 @@ public:
         for (int bag = 0; bag < M::BAGS; ++bag) {
           for (const auto &name : names[bag]) {
             const auto *entry = champions::inventory_icons::find_entry(index, name);
+            // Index dimensions are runtime observations, not evidence that
+            // the original builder rounds this footprint to one row.
             sizes[bag].push_back(entry ? M::IconSize{entry->width, entry->height}
                                        : M::IconSize{0, 0});
           }
         }
         next->build_display_grid(sizes);
-        // A runtime-selected one-row definition lets the rendered probe use
-        // this disc without recording a private item name or table address.
+        // Select a bounded-looking runtime footprint for the refusal probe
+        // without recording a private item name or table address.
         const auto body = static_cast<std::int32_t>(next->record_word(0x54));
         const auto flags = std::uint64_t(next->record_word(0x138)) |
                            (std::uint64_t(next->record_word(0x13c)) << 32);
@@ -298,7 +302,7 @@ public:
             const auto *entry = champions::inventory_icons::find_entry(index, name);
             if (entry && entry->width >= 0 && entry->width <= 64 &&
                 entry->height > 0 && entry->height <= M::CURSOR_ROW) {
-              one_row_definition = definition->addr;
+              unverified_definition = definition->addr;
               break;
             }
           } catch (const std::exception &) {
@@ -307,7 +311,7 @@ public:
       }
       ledger_ = std::move(next);
       auto result = fill_state(success());
-      result["one_row_definition"] = int64_t(one_row_definition);
+      result["unverified_definition"] = int64_t(unverified_definition);
       return result;
     } catch (const std::exception &error) {
       return failure(error);

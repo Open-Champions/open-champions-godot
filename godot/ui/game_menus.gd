@@ -423,7 +423,12 @@ func _draw() -> void:
 			if str(gap.id) == "inventory-page-grid":
 				draw_string(ThemeDB.fallback_font, Vector2(98, 160), "PAGE ITEMS REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
 			elif str(gap.id) == "inventory-grid-footprint":
-				draw_string(ThemeDB.fallback_font, Vector2(98, 160), "ITEM FOOTPRINT REFUSED", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+				var column := int(gap.get("column", -1))
+				var row := int(gap.get("row", -1))
+				if column >= 0 and row >= 0:
+					var cell := Rect2(97 + column * 32, 119 + row * 34, 32, 32)
+					draw_rect(cell, Color(0.4, 0.0, 0.0, 0.9), true)
+					draw_string(ThemeDB.fallback_font, cell.position + Vector2(2, 20), "REF", HORIZONTAL_ALIGNMENT_LEFT, 30, 10, Color.WHITE)
 		var held_icons: Array = drawn.get("held_icons", [])
 		# The UI queue paints later layer-7 submissions first.
 		for index in range(held_icons.size() - 1, -1, -1):

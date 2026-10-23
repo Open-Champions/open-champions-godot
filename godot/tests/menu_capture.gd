@@ -162,9 +162,9 @@ func run() -> void:
 		quit(1)
 		return
 	var original_record: PackedByteArray = scene.ps2_import.record_bytes()
-	var one_row_definition: int = int(adopted.get("one_row_definition", 0))
-	if one_row_definition == 0:
-		printerr("no runtime one-row item definition was found for the rendered probe")
+	var unverified_definition: int = int(adopted.get("unverified_definition", 0))
+	if unverified_definition == 0:
+		printerr("no bounded-looking runtime item definition was found for the refusal probe")
 		quit(1)
 		return
 	for page in [1, 2]:
@@ -173,7 +173,7 @@ func run() -> void:
 		page_record.encode_u32(0x1330 + base, 1)
 		for byte in range(0x48):
 			page_record[0x130 + base + byte] = original_record[0x130 + byte]
-		page_record.encode_u32(0x130 + base, one_row_definition)
+		page_record.encode_u32(0x130 + base, unverified_definition)
 		if not scene.ps2_import.replace_record(page_record).get("ok", false) or not scene.game_menus.adopt_imported().get("ok", false):
 			printerr("page %d counted item could not be loaded" % page)
 			quit(1)
@@ -182,18 +182,17 @@ func run() -> void:
 		scene.game_menus._refresh_status()
 		var page_frame: Dictionary = scene.game_menus.service.frame("inventory")
 		var refused_grid := false
+		var refused_cell := false
 		for gap in page_frame.get("gaps", []):
 			if str(gap.id) in ["inventory-page-grid", "inventory-grid-footprint"]:
 				refused_grid = true
-		var first_icon: Dictionary = page_frame.get("icons", [])[0] if not page_frame.get("icons", []).is_empty() else {}
-		var art: Dictionary = scene.game_menus._icon(str(first_icon.get("picture", "")))
-		var columns: int = floori(float(art.get("width", -1)) / 32.0) + 1
-		if not page_frame.get("ok", false) or refused_grid or columns < 1 or page_frame.get("icons", []).size() != columns or page_frame.get("frames", []).size() != 1 or page_frame.get("rects", []).size() != 65 + columns or not art.has("texture"):
-			printerr("page %d verified display-grid item was not drawn" % page)
+				refused_cell = str(gap.id) == "inventory-grid-footprint" and int(gap.get("column", -1)) == 0 and int(gap.get("row", -1)) == 0
+		if not page_frame.get("ok", false) or not refused_grid or not refused_cell or not page_frame.get("icons", []).is_empty() or not page_frame.get("frames", []).is_empty() or page_frame.get("rects", []).size() != 65:
+			printerr("page %d unverified runtime footprint was drawn or not labelled in its cell" % page)
 			quit(1)
 			return
-		if scene.game_menus.status.text.contains("REFUSED"):
-			printerr("page %d one-row item was incorrectly labelled refused" % page)
+		if not scene.game_menus.status.text.contains("ITEM FOOTPRINT REFUSED"):
+			printerr("page %d runtime footprint was not labelled refused" % page)
 			quit(1)
 			return
 		scene.game_menus.service.set_cursor(200, 100)

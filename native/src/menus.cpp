@@ -430,6 +430,7 @@ void Ledger::build_display_grid(const std::array<std::vector<IconSize>, BAGS> &s
     cells.assign(GRID_COLS * GRID_ROWS, {});
     auto &refusal = display_refusals_[bag];
     refusal.clear();
+    display_refusal_cells_[bag] = {-1, -1};
     if (counted.n[bag] < 0 || counted.n[bag] > 64 ||
         sizes[bag].size() != static_cast<std::size_t>(counted.n[bag])) {
       refusal = "Display-grid dimensions are unavailable.";
@@ -437,8 +438,13 @@ void Ledger::build_display_grid(const std::array<std::vector<IconSize>, BAGS> &s
     }
     for (int slot = 0; slot < counted.n[bag]; ++slot) {
       const auto size = sizes[bag][static_cast<std::size_t>(slot)];
-      if (size.width < 0 || size.height <= 0 || size.height > CURSOR_ROW) {
-        refusal = "Taller or unknown item footprint refused; later placements depend on it.";
+      // The executed builder fixture supplied only widths 0/32/64, height 0,
+      // and a forced one-row rounding result. A runtime positive height has
+      // no verified dimension-to-row conversion, even when it looks small.
+      if (!size.verified_one_row ||
+          (size.width != 0 && size.width != CURSOR_COL &&
+           size.width != 2 * CURSOR_COL) || size.height != 0) {
+        refusal = "Unverified item footprint refused; later placements depend on it.";
         break;
       }
       const int columns = size.width / CURSOR_COL + 1;
@@ -470,6 +476,16 @@ void Ledger::build_display_grid(const std::array<std::vector<IconSize>, BAGS> &s
         refusal = "Overflowing item footprint refused; later placements depend on it.";
         break;
       }
+    }
+    if (!refusal.empty()) {
+      // This is a refusal marker in the first unused cell, not a claim that
+      // the unknown item would have been placed at that coordinate.
+      for (int row = 0; row < GRID_ROWS && display_refusal_cells_[bag].first < 0; ++row)
+        for (int column = 0; column < GRID_COLS; ++column)
+          if (cells[static_cast<std::size_t>(column * GRID_ROWS + row)].slot < 0) {
+            display_refusal_cells_[bag] = {column, row};
+            break;
+          }
     }
   }
 }
@@ -652,7 +668,9 @@ Frame Ledger::frame(const std::string &screen) {
     if (page() > 0 && display_cells_[page()].empty())
       out.gaps.push_back({"inventory-page-grid", "Display-grid dimensions are unavailable."});
     if (page() > 0 && !display_refusals_[page()].empty())
-      out.gaps.push_back({"inventory-grid-footprint", display_refusals_[page()]});
+      out.gaps.push_back({"inventory-grid-footprint", display_refusals_[page()],
+                          display_refusal_cells_[page()].first,
+                          display_refusal_cells_[page()].second});
     for (int row = 0; row < 10; ++row) {
       for (int column = 0; column < GRID_COLS; ++column) {
       const DisplayCell *copy = nullptr;

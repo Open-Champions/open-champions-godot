@@ -211,7 +211,7 @@ void ledger_vectors() {
     pages.adopt_record(page_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
     std::array<std::vector<IconSize>, BAGS> page_sizes;
     for (int bag = 0; bag < BAGS; ++bag)
-      page_sizes[bag].assign(static_cast<std::size_t>(pages.bag_count(bag)), {32, 32});
+      page_sizes[bag].assign(static_cast<std::size_t>(pages.bag_count(bag)), {32, 0, true});
     pages.build_display_grid(page_sizes);
     pages.set_page(1);
     const auto page_one = pages.frame("inventory");
@@ -234,14 +234,27 @@ void ledger_vectors() {
            "page-two first-cell action uses bag stride");
     pages.set_cursor(49, 100);
     reject([&] { pages.press(2, 0x40); }, "page-two other action cell stays refused");
-    page_sizes[1][0] = {32, 132};
+    page_sizes[1][0] = {32, 0};
     pages.build_display_grid(page_sizes);
     pages.set_page(1);
     const auto tall = pages.frame("inventory");
     expect(tall.rects.size() == 65 && tall.frames.empty() &&
            std::any_of(tall.gaps.begin(), tall.gaps.end(), [](const Gap &gap) {
-             return std::string(gap.id) == "inventory-grid-footprint";
-           }), "taller footprint is labelled and not drawn");
+             return std::string(gap.id) == "inventory-grid-footprint" &&
+                    gap.column == 0 && gap.row == 0;
+           }), "unverified runtime footprint is labelled in its cell and not drawn");
+    page_sizes[1][0] = {32, 32, true};
+    pages.build_display_grid(page_sizes);
+    expect(pages.frame("inventory").rects.size() == 65,
+           "positive height refuses even if one-row evidence is asserted");
+    page_sizes[1][0] = {16, 0, true};
+    pages.build_display_grid(page_sizes);
+    const auto unusual = pages.frame("inventory");
+    expect(unusual.rects.size() == 65 && unusual.icons.empty() &&
+           std::any_of(unusual.gaps.begin(), unusual.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-grid-footprint" &&
+                    gap.column == 0 && gap.row == 0;
+           }), "unverified intermediate width is refused");
     auto next_row_record = page_record;
     for (int slot = 1; slot < 6; ++slot)
       for (std::size_t byte = 0; byte < ITEM_SIZE; ++byte)
@@ -251,7 +264,8 @@ void ledger_vectors() {
       next_row_record[BAG_COUNT + BAG_STRIDE + byte] = static_cast<std::uint8_t>(6u >> (8 * byte));
     Ledger packed;
     packed.adopt_record(next_row_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
-    page_sizes[1] = {{0, 32}, {32, 32}, {0, 32}, {64, 32}, {0, 32}, {32, 32}};
+    page_sizes[1] = {{0, 0, true}, {32, 0, true}, {0, 0, true},
+                     {64, 0, true}, {0, 0, true}, {32, 0, true}};
     packed.build_display_grid(page_sizes);
     packed.set_page(1);
     const auto packed_frame = packed.frame("inventory");
@@ -263,6 +277,16 @@ void ledger_vectors() {
            packed.display_bag_slot(1, 1, 1) == 5 &&
            packed.display_bag_slot(1, 8, 0) == -1,
            "two-column item moves to next display row");
+    page_sizes[1][1] = {32, 32, true};
+    packed.build_display_grid(page_sizes);
+    const auto partial = packed.frame("inventory");
+    expect(packed.display_bag_slot(1, 0, 0) == 0 &&
+           packed.display_bag_slot(1, 1, 0) == -1 &&
+           partial.rects.size() == 66 &&
+           std::any_of(partial.gaps.begin(), partial.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-grid-footprint" &&
+                    gap.column == 1 && gap.row == 0;
+           }), "verified preceding cell survives unknown footprint; later cells refuse");
   }
   {
     Ledger book;
