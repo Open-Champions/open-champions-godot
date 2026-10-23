@@ -134,6 +134,7 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
                        &ChampionsSessionController::script_mission_menu_tick);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
+  ClassDB::bind_method(D_METHOD("script_player_markers"), &ChampionsSessionController::script_player_markers);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
   bind_text_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
@@ -1423,6 +1424,22 @@ Array ChampionsSessionController::script_exit_targets() const {
   }
   return result;
 }
+Array ChampionsSessionController::script_player_markers() const {
+  Array result;
+  if (!scripts_) return result;
+  for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
+    const auto &record = script_level_objects_[i];
+    if (record.cls != "Player1") continue;
+    Dictionary item;
+    item["index"] = int64_t(i);
+    PackedStringArray properties;
+    for (const auto &property : record.props)
+      properties.push_back(String::utf8(property.c_str()));
+    item["properties"] = properties;
+    result.push_back(item);
+  }
+  return result;
+}
 Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   Dictionary result;
   result["ok"] = false;
@@ -1431,6 +1448,7 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
       throw std::runtime_error("No level exit at that index.");
     const auto &record = script_level_objects_[std::size_t(index)];
     const auto &kind = record.cls;
+    const auto portal_before = scripts_->portal_trigger_requests();
     if (kind != "Trigger" && kind != "PushTrigger")
       throw std::runtime_error("Portal arrival and JumpGate prompt have no direct script action in this host.");
     if (unsupported_exit_conditions(record, script_level_objects_))
@@ -1461,6 +1479,7 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
     if (!ran) throw std::runtime_error("This exit has no documented script action.");
     result["ok"] = true;
     result["queued"] = bool(script_level_request().get("queued", false));
+    result["portal_requests"] = int64_t(scripts_->portal_trigger_requests() - portal_before);
   } catch (const std::exception &e) {
     result["error"] = String::utf8(e.what());
   }

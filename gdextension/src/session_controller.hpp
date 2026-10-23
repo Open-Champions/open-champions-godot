@@ -211,6 +211,7 @@ public:
   godot::Dictionary script_mission_menu_state() const;
   godot::Dictionary script_mission_menu_tick(int64_t pad_bits, int64_t fade);
   godot::Array script_exit_targets() const;
+  godot::Array script_player_markers() const;
   godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every

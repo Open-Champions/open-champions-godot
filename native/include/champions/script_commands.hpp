@@ -319,6 +319,9 @@ public:
 
   const Counts &counts() const { return counts_; }
   const std::vector<Spawn> &spawns() const { return spawns_; }
+  // Script trigger(portal, 0) reaches virtual slot 3 on the named object.
+  // The target method and visual result are unverified; count the request only.
+  std::uint64_t portal_trigger_requests() const { return portal_trigger_requests_; }
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }
   champions::rta::fx::sim::EffectWorld &effects() { return *effects_; }
@@ -491,6 +494,7 @@ private:
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;
+  std::uint64_t portal_trigger_requests_ = 0;
   bool level_started_ = false;
   bool waiting_ = false;
   bool faulted_ = false;
