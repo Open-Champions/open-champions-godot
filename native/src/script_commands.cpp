@@ -887,6 +887,7 @@ std::uint32_t Host::scene(const std::string &name,
       // ui_startPulse(0): g_uiPulse[0] = 2.0 (research-ui docs/mainloop.md),
       // a presentation value the caller decays per displayed frame.
       ui_pulse_starts_ += 1;
+      ui_ramps_.pulse[0] = ui_text_gaps::uiStartPulse();
     }
     mirror_hud();
     return 0;

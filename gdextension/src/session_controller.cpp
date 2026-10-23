@@ -1,4 +1,5 @@
 #include "session_controller.hpp"
+#include "champions/ui_text_gaps.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/ui_layout.hpp"
@@ -612,6 +613,7 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       rta::script_commands::DialogInputs in;
       in.pad = dialog_pad_;
       dialog_pad_ = 0;
+      in.fade = scripts_->ui_ramps().fade[0]; // g_uiFadeIn[0] gates message 3 (docs/ui-text-gaps.md 1)
       if (dialog_voice_) {
         in.voice.queue_count = (*dialog_voice_)[0];
         in.voice.status = (*dialog_voice_)[1];
@@ -621,6 +623,8 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     }
     scripts_->on_ready_tick();
     note_help_box();
+    if (!ui_frame_driven_)
+      scripts_->ui_frame_step();
   }
 }
 // Player_run takes no input while a dialog is open and Player_move zeroes the
@@ -1192,10 +1196,10 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     out["open"] = d.is_open();
     out["stalled"] = scripts_->dialog_stalled();
     out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
-    // g_uiFadeIn[0] is passed as 1.0 (its pattern is not documented, docs/DIALOG.md
-    // "Not modelled"). The cursor and "more" glyph is the byte game_initCamera leaves at
-    // 0x41b978: 0x7e with the executable's initial layout byte 1 (docs/spec/dialog-gaps.md 5).
-    const auto ops = scripts_->dialog_draw(rta::ONE, int(text_option), int(scripts_->dialog_cursor_glyph()), 0);
+    // The host's displayed-frame ramp supplies g_uiFadeIn[0]. The observed layout
+    // supplies the cursor and "more" glyph (docs/UI_TEXT_GAPS.md).
+    const auto ops = scripts_->dialog_draw(scripts_->ui_ramps().fade[0], int(text_option),
+                                           int(scripts_->dialog_cursor_glyph()), 0);
     Array sprites, glyphs, refusals;
     const auto *font = dialog_data_ && dialog_data_->font ? &*dialog_data_->font : nullptr;
     if (!ops.empty() && !font)
@@ -1258,7 +1262,9 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
         emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])), units, std::size_t(num(a[3])));
       } else if (e.kind == "ascii") {
         // text_drawAscii of "%c" with the glyph byte: one character at (x, y).
-        cursor_quads += std::int64_t(emit(int(num(a[0])), int(num(a[1])), D::Wide{std::uint16_t(num(a[2]))}, 1));
+        const auto code = std::uint16_t(num(a[2]) & 0xff);
+        if (code != 0)
+          cursor_quads += std::int64_t(emit(int(num(a[0])), int(num(a[1])), D::Wide{code}, 1));
       } else if (e.kind == "sprite") {
         Dictionary box;
         box["x"] = num(a[0]);

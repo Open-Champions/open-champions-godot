@@ -54,6 +54,7 @@ class ChampionsSessionController : public godot::RefCounted {
   std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
+  bool ui_frame_driven_ = false;
   void remember_script_fade();
   std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
   std::optional<champions::simulation::rta::player_state::Record> player_;
@@ -223,6 +224,14 @@ public:
   godot::Dictionary set_level_text(const godot::Array &tables);
   // The HUD text state the five commands wrote, for drawing.
   godot::Dictionary text_hud() const;
+  // Session step 13 (docs/UI_TEXT_GAPS.md): once per displayed frame, after the
+  // draw. Returns the g_uiPulse / g_uiFadeIn the frame drew with (raw floats),
+  // then steps them. Until a presentation calls set_ui_frame_driver(true), every
+  // ready tick counts as one displayed frame (the documented one tick per frame).
+  godot::Dictionary ui_frame();
+  godot::Dictionary set_ui_frame_driver(bool driven);
+  // The visible units of a text key without advancing the miss ring.
+  godot::PackedInt32Array text_key_units(const godot::String &key) const;
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);

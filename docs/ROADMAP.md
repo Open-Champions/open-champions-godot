@@ -13,6 +13,8 @@ and a local file picker. Selected RTA lump entries can preview the documented
 original materials, engine script commands and playable gameplay remain unimplemented. WORLD draw applies the documented environment rows, console layer order, automap tile UVs and chunk alpha and constant-light modes through the existing native-fx lighting model; automap atlas pixels and the HUD window remain unresolved. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
+The [UI text gaps port](UI_TEXT_GAPS.md) adds the help box inner frame, button glyph and label, the bust meter and its font, the dialog fade step, the cursor glyph and the compass label from executed research; the compass mesh and chime slot life stay refused.
+
 The standalone [Return to Arms UI layout service](HUD_LAYOUT.md) computes
 documented static frame, base HUD and font metrics for later scene integration.
 Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,

@@ -142,15 +142,9 @@ struct BustMeter {
   int clip_right = 0;
 };
 BustMeter bustMeter(int value, int maximum, int width, int tick);
-// Submission order of hud_drawBust. portrait/frame sizes are the caller's
-// texture sizes. Text content is caller-owned; an empty string is a placeholder.
-// The two text records share one batch. Sprite RGB is not named by 0x1dfb6c,
-// so the tint word carries only the documented alpha (tint_rgb_known false).
-// has_maximum throws: that batch has a second wrap with undocumented arguments.
-Records bustPanel(bool has_maximum, int value, int maximum, int meter_width,
-                  int tick, std::uint32_t text_alpha, std::uint32_t sprite_alpha,
-                  int portrait_w, int portrait_h, int frame_w, int frame_h,
-                  const std::string &body, const std::string &value_text);
+// hud_drawBust's submissions are champions::ui_text_gaps::hudDrawBust (research
+// t3/research-ui-text-gaps docs/ui-text-gaps.md section 3); the old bustPanel
+// refused a maximum and guessed the font, so it is gone.
 
 int flyingTextLife(int kind);
 int flyingTextDrift(std::uint32_t rand_word);
