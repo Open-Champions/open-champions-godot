@@ -146,84 +146,91 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
   auto *o = world_.new_object(kind == Kind::Minotaur ? 0x470 : 0x3d8,
                               pos, def, std::move(props));
   if (!o) throw Unsupported("GameObject_ctor: object pool exhausted");
-  o->angle = angle;
-  o->class_name = kind == Kind::Minotaur ? "Minotaur" :
-                  kind == Kind::WarBoarSmall ? "WarBoarSmall" : "WarBoar";
-  o->type_name = *o->class_name;
-  std::unique_ptr<Actor> actor;
-  if (kind == Kind::WarBoarSmall)
-    actor = std::make_unique<WarBoarSmall>(o);
-  else if (kind == Kind::WarBoar)
-    actor = std::make_unique<WarBoar>(o);
-  else
-    actor = std::make_unique<Minotaur>(o);
-  // Creature_ctor follows GameObject_ctor and performs its own HP roll before
-  // the class constructor's Minotaur variant draw.
-  actor->hp.mem.store(o->addr + 0x228, 4, initial_hp);
-  actor->hp.mem.store(o->addr + 0x22c, 4, initial_hp);
-  actor->hp.mem.store(o->addr + 0x10, 4, pos[0]);
-  actor->hp.mem.store(o->addr + 0x14, 4, pos[1]);
-  if (base_stats) base_stats(*actor);
-  o->vtable = kind == Kind::Minotaur ? 0x5165f0 : 0x517cf0;
-  if (kind != Kind::Minotaur) {
-    o->radius = 0x41f00000;
-    o->draw_half_width = 40;
+  try {
+    o->angle = angle;
+    o->class_name = kind == Kind::Minotaur ? "Minotaur" :
+                    kind == Kind::WarBoarSmall ? "WarBoarSmall" : "WarBoar";
+    o->type_name = *o->class_name;
+    std::unique_ptr<Actor> actor;
+    if (kind == Kind::WarBoarSmall)
+      actor = std::make_unique<WarBoarSmall>(o);
+    else if (kind == Kind::WarBoar)
+      actor = std::make_unique<WarBoar>(o);
+    else
+      actor = std::make_unique<Minotaur>(o);
+    // Creature_ctor follows GameObject_ctor and performs its own HP roll before
+    // the class constructor's Minotaur variant draw.
+    actor->hp.mem.store(o->addr + 0x228, 4, initial_hp);
+    actor->hp.mem.store(o->addr + 0x22c, 4, initial_hp);
+    actor->hp.mem.store(o->addr + 0x10, 4, pos[0]);
+    actor->hp.mem.store(o->addr + 0x14, 4, pos[1]);
+    if (base_stats) base_stats(*actor);
+    o->vtable = kind == Kind::Minotaur ? 0x5165f0 : 0x517cf0;
+    if (kind != Kind::Minotaur) {
+      o->radius = 0x41f00000;
+      o->draw_half_width = 40;
+    }
+    actor->hp.mem.store(o->addr + 0x48, 4, o->vtable);
+    actor->hp.mem.store(o->addr + 0x1c, 4, o->radius);
+    actor->hp.mem.store(o->addr + 0x28, 1, o->draw_half_width);
+    if (kind != Kind::Minotaur) {
+      actor->creature_flags = UINT64_C(0x200040000);
+      actor->turn_rate = ONE;
+      actor->kind_byte = 3;
+      actor->forward_offset = kind == Kind::WarBoarSmall ? 0xc1200000 : 0xc1700000;
+      actor->scale = kind == Kind::WarBoarSmall ? 0x3f199999 : 0x3f400000;
+      actor->small_marker = kind == Kind::WarBoarSmall ? 1 : 0;
+      actor->hp.mem.store(o->addr + 0xb8, 4, 0);
+      actor->hp.mem.store(o->addr + 0xb0, 4, ONE);
+      actor->hp.mem.store(o->addr + 0x5c, 4, 0xbe4ccccc);
+      actor->hp.mem.store(o->addr + 0xe0, 4, actor->forward_offset);
+      actor->hp.mem.store(o->addr + 0xdc, 4, actor->scale);
+      actor->hp.mem.store(o->addr + 0x3d0, 1, actor->small_marker);
+      actor->hp.mem.store(o->addr + 0xec, 4, 0);
+      actor->hp.mem.store(o->addr + 0xe8, 4, 0);
+      actor->hp.mem.store(o->addr + 0x220, 8, 0);
+    } else {
+      services_.weapon_shield(o->addr + 0x3c8, 1, 0x15, 0x20);
+      services_.weapon_shield(o->addr + 0x3c8, 2, 0x19, 0x20);
+    }
+    if (kind != Kind::Minotaur) {
+      actor->hp.mem.store(o->addr + 0xb0, 4, actor->turn_rate);
+      actor->hp.mem.store(o->addr + 0xb4, 1, actor->kind_byte);
+      actor->hp.mem.store(o->addr + 0xa8, 8, actor->creature_flags);
+    }
+    const auto variant = kind == Kind::Minotaur
+        ? services_.minotaur_variant(o->addr, o->rand()) : 0u;
+    actor->hidden_parts = services_.model_hide_mask(def->entries.at(0).second, variant);
+    services_.animation_init(o->addr, kind != Kind::Minotaur);
+    if (kind == Kind::Minotaur)
+      services_.minotaur_initial_state(o->addr);
+    actor->hp.callbacks["handle_clear"] = [this](creature_hp::Model &, const std::vector<std::uint32_t> &a) {
+      required(services_.handle_clear, "Creature_takeDamage/handle_clear");
+      services_.handle_clear(a.at(0));
+    };
+    actor->hp.callbacks["handle_link"] = [this](creature_hp::Model &, const std::vector<std::uint32_t> &a) {
+      required(services_.handle_link, "Creature_takeDamage/handle_link");
+      services_.handle_link(a.at(0), a.at(1));
+    };
+    world_.run_every_60(*o);
+    if (kind == Kind::Minotaur) {
+      for (const auto &p : MINOTAUR_EVENTS)
+        services_.set_def_entry_params(o->addr, p);
+    } else {
+      for (const auto &p : BOAR_EVENTS)
+        services_.set_def_entry_params(o->addr, p);
+    }
+    services_.creature_init(o->addr);
+    const auto address = o->addr;
+    auto *result = actor.get();
+    actors_.emplace(address, std::move(actor));
+    return *result;
+  } catch (...) {
+    // An unavailable downstream model/animation/terrain service must not
+    // leave a live grid object with no actor dispatch record.
+    world_.destroy(*o);
+    throw;
   }
-  actor->hp.mem.store(o->addr + 0x48, 4, o->vtable);
-  actor->hp.mem.store(o->addr + 0x1c, 4, o->radius);
-  actor->hp.mem.store(o->addr + 0x28, 1, o->draw_half_width);
-  if (kind != Kind::Minotaur) {
-    actor->creature_flags = UINT64_C(0x200040000);
-    actor->turn_rate = ONE;
-    actor->kind_byte = 3;
-    actor->forward_offset = kind == Kind::WarBoarSmall ? 0xc1200000 : 0xc1700000;
-    actor->scale = kind == Kind::WarBoarSmall ? 0x3f199999 : 0x3f400000;
-    actor->small_marker = kind == Kind::WarBoarSmall ? 1 : 0;
-    actor->hp.mem.store(o->addr + 0xb8, 4, 0);
-    actor->hp.mem.store(o->addr + 0xb0, 4, ONE);
-    actor->hp.mem.store(o->addr + 0x5c, 4, 0xbe4ccccc);
-    actor->hp.mem.store(o->addr + 0xe0, 4, actor->forward_offset);
-    actor->hp.mem.store(o->addr + 0xdc, 4, actor->scale);
-    actor->hp.mem.store(o->addr + 0x3d0, 1, actor->small_marker);
-    actor->hp.mem.store(o->addr + 0xec, 4, 0);
-    actor->hp.mem.store(o->addr + 0xe8, 4, 0);
-    actor->hp.mem.store(o->addr + 0x220, 8, 0);
-  } else {
-    services_.weapon_shield(o->addr + 0x3c8, 1, 0x15, 0x20);
-    services_.weapon_shield(o->addr + 0x3c8, 2, 0x19, 0x20);
-  }
-  if (kind != Kind::Minotaur) {
-    actor->hp.mem.store(o->addr + 0xb0, 4, actor->turn_rate);
-    actor->hp.mem.store(o->addr + 0xb4, 1, actor->kind_byte);
-    actor->hp.mem.store(o->addr + 0xa8, 8, actor->creature_flags);
-  }
-  const auto variant = kind == Kind::Minotaur
-      ? services_.minotaur_variant(o->addr, o->rand()) : 0u;
-  actor->hidden_parts = services_.model_hide_mask(def->entries.at(0).second, variant);
-  services_.animation_init(o->addr, kind != Kind::Minotaur);
-  if (kind == Kind::Minotaur)
-    services_.minotaur_initial_state(o->addr);
-  actor->hp.callbacks["handle_clear"] = [this](creature_hp::Model &, const std::vector<std::uint32_t> &a) {
-    required(services_.handle_clear, "Creature_takeDamage/handle_clear");
-    services_.handle_clear(a.at(0));
-  };
-  actor->hp.callbacks["handle_link"] = [this](creature_hp::Model &, const std::vector<std::uint32_t> &a) {
-    required(services_.handle_link, "Creature_takeDamage/handle_link");
-    services_.handle_link(a.at(0), a.at(1));
-  };
-  world_.run_every_60(*o);
-  if (kind == Kind::Minotaur) {
-    for (const auto &p : MINOTAUR_EVENTS)
-      services_.set_def_entry_params(o->addr, p);
-  } else {
-    for (const auto &p : BOAR_EVENTS)
-      services_.set_def_entry_params(o->addr, p);
-  }
-  services_.creature_init(o->addr);
-  const auto address = o->addr;
-  auto *result = actor.get();
-  actors_.emplace(address, std::move(actor));
-  return *result;
 }
 
 Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,

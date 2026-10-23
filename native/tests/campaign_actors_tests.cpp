@@ -171,6 +171,19 @@ int main() {
   services.animation_blend = [&](std::uint32_t, std::uint32_t) {
     calls.emplace_back("blend");
   };
+  {
+    O::World rejected(O::CallbackPolicy::ReferenceBase);
+    rejected.shared.state = 7;
+    auto unavailable = services;
+    unavailable.model_hide_mask = [](std::uint32_t, std::uint32_t) -> std::uint64_t {
+      throw C::Unsupported("model_buildHideMask: result Unknown");
+    };
+    C::Runtime failed(rejected, resources, unavailable);
+    refuses([&] {
+      failed.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100));
+    }, "unknown model service refusal");
+    check(rejected.objects.empty(), "constructor refusal leaves no live World actor");
+  }
   C::Runtime actors(world, resources, services);
   refuses([&] {
     actors.construct(C::Kind::WarBoar, {0, 0, 0}, 0,
