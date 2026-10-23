@@ -687,12 +687,15 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
     auto parts=std::uint64_t(std::get<std::int64_t>(a.at(6)));
     combat_ctors::phprop_ctor(model,ar(1),v(2),ar(3),ar(4),ar(5),parts,ar(7),ar(8),ar(0));
+    prop_model_pointers[ar(1)] = u(ar(1) + 0x4c);
     return iv(0);
   }
   if (n == "PhProp_ctor2")
     { prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
       combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
-        std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));return iv(0); }
+        std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));
+      prop_model_pointers[ar(1)] = u(ar(1) + 0x4c);
+      return iv(0); }
   if (n == "Gold_ctor2")
     { for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},
                                                      {6,0x157a9c}}) {

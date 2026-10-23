@@ -111,6 +111,10 @@ struct World::State {
   std::array<std::uint8_t, 32> music{};
   std::map<Address, std::vector<Cast>> queued_casts;
   std::map<int, Address> skill_objects;
+  // Constructor-verified PhProp model pointers. Binding replaces the current
+  // pointer with a World-owned fixture extent, never writes to a resource hint.
+  std::map<Address, Address> prop_model_pointers;
+  std::map<Address, unsigned> fixture_extents;
   std::vector<std::pair<Raw, Raw>> exp_awards;
   Address typeid_target = 0, pending_dtor = 0;
   bool has_typeid_target = false;

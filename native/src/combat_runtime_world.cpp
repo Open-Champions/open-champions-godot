@@ -204,15 +204,18 @@ void World::State::schedule(Address a, unsigned period) {
 }
 Address World::State::alloc_fixture(unsigned n) {
   auto a = fixture_next;
-  fixture_next += (n + 15) & ~15u;
-  if (fixture_next >= 0x100000)
+  if (!n || n > 0x100000u - a ||
+      ((std::uint64_t(n) + 15) & ~UINT64_C(15)) >= 0x100000u - a)
     throw Error("fixture allocation exhausted");
+  fixture_next += (n + 15) & ~15u;
+  fixture_extents.emplace(a, n);
   return a;
 }
 Address World::State::construct(Address a, const Vec3 &pos, Kind kind) {
   // GameObject_ctor on a fresh block (ref_objects World.construct): heads,
   // bound fields, grid link at the front, then ONE shared draw.
   auto extent = Pool::CLASSES[pool.class_of(a)][0];
+  prop_model_pointers.erase(a);
   forget_heads(a, a + extent);
   for (unsigned k = 0; k < extent; ++k)
     mem.poke(a + k, 1, 0);

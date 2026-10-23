@@ -1,4 +1,5 @@
 #include "combat_runtime_internal.hpp"
+#include "champions/model.hpp"
 // Public entry points of the Full composition (round 2). Set-up helpers are
 // the research runtimes' AUTHORED fixtures, not original constructors.
 namespace champions::simulation::rta::combat_runtime {
@@ -476,6 +477,60 @@ void World::pustule_run(Address obj) {
 void World::arena_run(Address spell, const Vec3 &pos) {
   require_full(*s_);
   s_->arena_run(spell, pos);
+}
+void World::begin_arena_intro() {
+  require_full(*s_);
+  if (!s_->u(G_PVP_B) || s_->u(G_PVP_A))
+    throw Unsupported("arena intro requires mode B without mode A");
+  s_->w(0x5038c8, 2, 180);
+  s_->w(0x503890, 1);
+}
+void World::arena_intro_visit() {
+  require_full(*s_);
+  if (!s_->u(G_PVP_B) || s_->u(G_PVP_A))
+    throw Unsupported("arena intro requires mode B without mode A");
+  const auto counter = s_->mem.load(0x5038c8, 2);
+  if (counter == 0xffff) return;
+  if (counter > 180)
+    throw Unsupported("arena intro counter outside executed 180-visit domain");
+  if (counter) {
+    s_->w(0x5038c8, 2, counter - 1);
+    s_->w(0x41b500, 1);
+    s_->w(0x503890, 1);
+    s_->w(0x41b4fc, 1);
+  } else {
+    s_->w(0x5038c8, 2, 0xffff);
+    s_->w(0x41b500, 0);
+    s_->w(0x503890, 0);
+    s_->w(0x41b4fc, 0);
+  }
+}
+void World::bind_prop_model(Address prop, champions::Bytes vif) {
+  require_full(*s_);
+  s_->actor(prop);
+  const auto model = s_->u(prop + 0x4c);
+  const auto source = s_->prop_model_pointers.find(prop);
+  const auto table = s_->u(prop + 0x48);
+  if (source == s_->prop_model_pointers.end() || !model ||
+      model != source->second || (table != VT_GUTCHUNK && table != 0x511ba8))
+    throw Unsupported("PhProp model pointer or actor identity is not verified");
+  if (!vif.data || !vif.size || vif.size > 16u * 1024u * 1024u)
+    throw Unsupported("PhProp model resource is absent or exceeds the host limit");
+  const auto mask = s_->q(prop + 0xe8);
+  if (!mask)
+    throw Unsupported("PhProp has no active mesh hull");
+  for (unsigned mesh = 0; mesh < 64; ++mesh)
+    if (mask & (UINT64_C(1) << mesh))
+      (void)champions::rtaModelHull(vif, mesh);
+  // The constructor's resource pointer is only a hint: the World does not
+  // own its allocation. Reserve an exact private extent and publish it only
+  // after the complete checked copy succeeds.
+  const auto destination = s_->alloc_fixture(unsigned(vif.size));
+  if (s_->fixture_extents.at(destination) < vif.size)
+    throw Error("PhProp model destination extent is too small");
+  s_->mem.write_bytes(destination, {vif.data, vif.data + vif.size});
+  s_->w(prop + 0x4c, destination);
+  source->second = destination;
 }
 Address World::hornomen_ctor(Raw kind, Address owner, Raw extra) {
   require_full(*s_);
