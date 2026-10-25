@@ -146,6 +146,7 @@ func _build_story_menu() -> void:
 	title.text = "Mission menu · host layout"
 	box.add_child(title)
 	mission_menu_status = Label.new()
+	mission_menu_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(mission_menu_status)
 	for mission in [1, 2]:
 		var button := Button.new()
@@ -163,12 +164,18 @@ func _refresh_mission_menu() -> void:
 	if not mission_menu_panel.visible: return
 	mission_story_buttons[0].disabled = not state.get("first_story_available", false)
 	mission_story_buttons[1].disabled = not state.get("second_story_available", false)
+	var refusal: String = str(state.get("second_story_refusal", ""))
+	if not refusal.is_empty(): mission_story_buttons[1].disabled = true
 	mission_menu_status.text = "Mission 2 is available." if not mission_story_buttons[1].disabled else "Mission 2 is locked. Complete its hub dialog action."
+	if not refusal.is_empty(): mission_menu_status.text = "Mission 2 entry refused: " + refusal
 	status_label.text = mission_menu_status.text
 
 func mission_menu_select_story(mission: int) -> bool:
 	var state: Dictionary = controller.script_mission_menu_state()
 	var available := bool(state.get("first_story_available", false)) if mission == 1 else bool(state.get("second_story_available", false))
+	if mission == 2 and not str(state.get("second_story_refusal", "")).is_empty():
+		status_label.text = "Mission selection refused: " + str(state.second_story_refusal)
+		return false
 	if mission not in [1, 2] or not state.get("open", false) or not available:
 		status_label.text = "Mission selection refused: this story mission is locked."
 		return false
@@ -190,6 +197,7 @@ func mission_menu_frame() -> Dictionary:
 			mission_menu_target = -1
 	state = controller.script_mission_menu_tick(pad, -1)
 	_refresh_mission_menu()
+	if not state.get("ok", false): status_label.text = "Mission selection refused: " + str(state.get("error", "unsupported input"))
 	if state.get("launched", false): _queue_level_change()
 	return state
 
@@ -586,6 +594,9 @@ func _apply_level_change() -> bool:
 	_level_change_queued = false
 	if _level_change_loading or controller == null or real == null: return false
 	var pending: Dictionary = controller.script_level_request()
+	if pending.has("error"):
+		status_label.text = "Level change refused: " + str(pending.error)
+		return false
 	if not pending.get("queued", false): return false
 	var requested: String = str(pending.get("name", ""))
 	if requested == _refused_level_request: return false

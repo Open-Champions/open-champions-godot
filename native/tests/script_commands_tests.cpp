@@ -3,6 +3,7 @@
 #include "champions/core_state.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/campaign_entry.hpp"
 #include "champions/script_effects.hpp"
 #include "champions/script_items.hpp"
 #include <algorithm>
@@ -1456,6 +1457,12 @@ void test_host_vectors(const std::string &path) {
 } // namespace
 
 int main(int argc, char **argv) {
+  if (argc == 3 && std::string(argv[1]) == "--mission2-inventory-fixture") {
+    const auto bytes = mission2_host::inventory_fixture();
+    std::ofstream out(argv[2], std::ios::binary);
+    out.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size()));
+    return out ? 0 : 1;
+  }
   if (argc != 3) {
     std::cerr << "usage: script-commands-tests VECTORS HOST_VECTORS\n";
     return 2;

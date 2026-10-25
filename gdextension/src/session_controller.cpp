@@ -1,5 +1,6 @@
 #include "session_controller.hpp"
 #include "champions/mission_menu_table.hpp"
+#include "champions/campaign_entry.hpp"
 #include "champions/ui_text_gaps.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
@@ -946,6 +947,15 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->set_executable(rta::script_commands::executable_view(executable_));
     if (executable_)
       next->campaign().set_rows(rta::quests::read_mission_rows(*executable_));
+    std::optional<rta::quests::ActTables> act_tables;
+    rta::script_commands::CampaignEntry campaign_entry;
+    if (executable_ && !level_name.is_empty()) {
+      act_tables = rta::quests::read_act_tables(*executable_);
+      campaign_entry = rta::script_commands::prepare_campaign_entry(
+          *next, carried ? scripts_.get() : nullptr, *act_tables,
+          level_name.to_lower().utf8().get_data(), mission2_story(level_name),
+          live_player && live_player->imported);
+    }
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;
       const PackedByteArray image = resource_lumps[name];
@@ -1051,6 +1061,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_pad_ = 0;
     // The previous host is released first, then its fight.
     scripts_ = std::move(next);
+    script_act_tables_ = std::move(act_tables);
     fight_ = std::move(next_fight);
     fight_level_ = level_name.utf8().get_data();
     world_adapter_ = std::move(next_adapter);
@@ -1067,6 +1078,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     result["ok"] = true;
     result["campaign_carried"] = carried;
     result["campaign_image_restored"] = campaign_image_restored;
+    result["campaign_act_changed"] = campaign_entry.changed;
+    result["campaign_act_reset"] = campaign_entry.reset;
     result["script_stopped"] = scripts_->faulted();
     result["script_diagnostic"] = String::utf8(scripts_->last_fault().c_str());
     result["executable"] = bool(executable_);
@@ -1159,6 +1172,7 @@ Dictionary ChampionsSessionController::disable_level_script() {
   remember_script_fade();
   release_help_pause();
   scripts_.reset();
+  script_act_tables_.reset();
   reset_fight();
   script_level_objects_.clear();
   script_seed_.reset();
@@ -1551,6 +1565,8 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   quest["vars"] = int64_t(campaign.vars().size());
   quest["vars_nonzero"] = nonzero;
   const auto &events = campaign.events();
+  quest["act"] = int64_t(campaign.act());
+  quest["act_resets"] = int64_t(events.act_resets);
   quest["menu_opens"] = int64_t(events.menu_opens);
   quest["menu_launches"] = int64_t(events.menu_launches);
   quest["cflag_bit0"] = int64_t(events.cflag_bit0);
@@ -1598,6 +1614,16 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["orientation"] = int64_t(scripts_->variables().memory.read(0x41b720));
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
+  if (bool(result["queued"]) && mission2_story(String::utf8(name.c_str()).get_slice("_", 0))) {
+    try {
+      if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
+      rta::script_commands::require_campaign_act_transfer(
+          *scripts_, *script_act_tables_, name, player_ && player_->imported);
+    } catch (const std::exception &error) {
+      result["queued"] = false;
+      result["error"] = String::utf8(error.what());
+    }
+  }
   return result;
 }
 Dictionary ChampionsSessionController::script_mission_menu_state() const {
@@ -1614,6 +1640,16 @@ Dictionary ChampionsSessionController::script_mission_menu_state() const {
   out["chooser"] = int64_t(campaign.chooser());
   out["first_story_available"] = bool(campaign.mission_available(1));
   out["second_story_available"] = bool(campaign.mission_available(2));
+  String second_refusal;
+  if (bool(out["open"]) && bool(out["second_story_available"])) {
+    try {
+      if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
+      const auto destination = rta::script_commands::mission2_story_destination(campaign);
+      rta::script_commands::require_campaign_act_transfer(
+          *scripts_, *script_act_tables_, destination, player_ && player_->imported);
+    } catch (const std::exception &error) { second_refusal = String::utf8(error.what()); }
+  }
+  out["second_story_refusal"] = second_refusal;
   out["pending"] = String::utf8(menu.pending.c_str());
   return out;
 }
@@ -1632,6 +1668,13 @@ Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits
         (pad_bits != 0 && (std::uint64_t(pad_bits) & (std::uint64_t(pad_bits) - 1)) != 0) ||
         fade < -1 || fade > 128)
       throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
+    const auto &menu = scripts_->campaign().menu();
+    if (menu.state == 2 && menu.row == 1 && menu.col == 0 && pad_bits == rta::quests::BTN_CROSS) {
+      if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
+      const auto destination = rta::script_commands::mission2_story_destination(scripts_->campaign());
+      rta::script_commands::require_campaign_act_transfer(
+          *scripts_, *script_act_tables_, destination, player_ && player_->imported);
+    }
     rta::quests::MenuInputs inputs;
     // -1: the real scene uses the executed hud_stepFade(4) body at state 6,
     // research-quests 7efd3ce section 4 and script-effects 52984db.

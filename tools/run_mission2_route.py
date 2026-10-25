@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--godot", type=pathlib.Path, required=True)
     parser.add_argument("--game-folder", type=pathlib.Path, required=True)
     parser.add_argument("--research-dir", type=pathlib.Path, required=True)
+    parser.add_argument("--fixture-generator", type=pathlib.Path,
+                        default=ROOT / "build/native/champions-script-commands-tests")
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "work/mission2/acceptance")
     args = parser.parse_args()
     out = args.out.resolve()
@@ -37,10 +39,12 @@ def main():
         for available in (False, True):
             calls = [("setMissionAvailable", [1, 1]), ("grantMission", [1]),
                      ("setMissionAvailable", [2, int(available)]),
-                     ("addQuest", [2000, 2100]), ("activateMissionMenu", [])]
-            case = {"strings": {2000: "authored-title", 2100: "authored-body"},
+                     ("addQuest", [2000, 2100]), ("setv", [2200, 7]), ("activateMissionMenu", [])]
+            case = {"strings": {2000: "authored-title", 2100: "authored-body", 2200: "authored-progress"},
                     "publics": [("start", "zero", calls)]}
             (out / ("offered.scr" if available else "locked.scr")).write_bytes(fixtures.image_of(amx, case))
+    subprocess.run([str(args.fixture_generator.resolve(strict=True)), "--mission2-inventory-fixture",
+                    str(out / "inventory.campaign")], check=True)
     before = sum(p.is_file() for p in disc.rglob("*"))
     results = {}
     for variant, flags in (("headless", ["--headless"]), ("rendered", [])):

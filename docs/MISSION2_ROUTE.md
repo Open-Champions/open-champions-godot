@@ -25,6 +25,16 @@ to select the actual fade service. State 8 produces the pending-world
 request, and the existing level loader carries player and campaign state.
 Button chords refuse: the research executed one button per tick.
 
+The executable's documented act tables bind the campaign and level-flow
+models (`research-quests` `7efd3ce`). `campaign_entry.hpp` invokes the native
+act-change contract before the destination script: a cross-act entry clears
+the old journal and quest-variable values, while retaining mission/medal
+flags and player records. Same-act entry preserves that progress. The
+bridge supports one local player with a known empty inventory. Imported
+inventory, a nonempty live or campaign bag, and an unbound source act refuse
+before selection or loading; live bag carry and flag-39 migration are
+unported. It does not silently retain old-act quests or discard inventory.
+
 `Host::require_complete_commands` is enabled for all four documented
 mission-2 story level identities. An unsupported command stops the script
 even when its result is discarded. Deferred actions and later entry calls
@@ -60,13 +70,19 @@ or item reward. Existing movement in a loaded World remains available.
 The `script-commands` CTest includes authored fixtures for the separate
 mission-2 offer, row selection and actual fade, campaign replacement,
 ignored-command/deferred-grant refusal, null exit refusal and restored
-selected-object context.
+selected-object context. Authored act fixtures verify same-act preservation,
+cross-act journal/variable reset, retained mission/player records and
+refusal of unknown inventory or source-act state.
 
 `tools/run_mission2_route.py` runs headless and rendered private acceptance.
 It requires `--godot`, `--game-folder` and `--research-dir`; output must
 stay under ignored `work/`. The existing fixture generator verifies the
 research `9649e6b` reference hashes before building two synthetic hub menu
-scripts. This deliberately controlled offer is labelled in the result.
+scripts. The native `champions-script-commands-tests` fixture generator
+also supplies an authored nonempty-inventory campaign; its path can be
+set with `--fixture-generator`. This deliberately controlled offer is
+labelled in the result. The probe checks the old-act authored quest is
+cleared at entry and verifies inventory refusal without changing the menu.
 The executable table, entry archive, scripts, Player and World are real.
 The other three loads are labelled direct diagnostics. Aggregate counts,
 ready ticks and expected refusals are measured; the result explicitly
