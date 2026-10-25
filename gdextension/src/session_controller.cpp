@@ -157,6 +157,7 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_player_markers"), &ChampionsSessionController::script_player_markers);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
   bind_text_methods();
+  bind_hub_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
                        &ChampionsSessionController::set_player_character);
   ClassDB::bind_method(D_METHOD("save_player_companion", "path"),
@@ -1190,6 +1191,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       trigger_lists_[trigger_list_cursor_].push_back(live_triggers_.size() - 1);
     }
     trigger_level_name_ = start_level_name_;
+    hub_savepoints_.clear();
     script_fade_ = scripts_->fade_level();
     if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
@@ -1300,6 +1302,7 @@ Dictionary ChampionsSessionController::disable_level_script() {
   trigger_queued_destination_.clear();
   trigger_states_.clear();
   trigger_level_name_.clear();
+  hub_savepoints_.clear();
   script_seed_.reset();
   script_world_.reset();
   dialog_data_.reset();
@@ -1359,6 +1362,11 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
 Dictionary ChampionsSessionController::dialog_use() {
   Dictionary out;
   out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open);
+  if (scripts_ && fight_level_ == "hub2") {
+    out["ok"] = false;
+    dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
+    out["error"] = dialog_last_use_;
+  }
   if (out["ok"])
     dialog_use_pending_ = true;
   return out;
@@ -1457,6 +1465,11 @@ Dictionary ChampionsSessionController::dialog_talk_to(int64_t index) {
   Dictionary out;
   out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open) && index >= 0 &&
               std::size_t(index) < scripts_->talkers().size();
+  if (scripts_ && fight_level_ == "hub2") {
+    out["ok"] = false;
+    dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
+    out["error"] = dialog_last_use_;
+  }
   if (out["ok"])
     dialog_talk_pending_ = index;
   return out;
@@ -1891,6 +1904,8 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   try {
     if (!scripts_ || index < 0 || std::size_t(index) >= script_level_objects_.size())
       throw std::runtime_error("No level exit at that index.");
+    if (fight_level_ == "hub2")
+      throw std::runtime_error("Alternate-hub trigger entry effects are not audited; no action was run.");
     const auto &record = script_level_objects_[std::size_t(index)];
     const auto &kind = record.cls;
     const auto portal_before = scripts_->portal_trigger_requests();

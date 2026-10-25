@@ -36,6 +36,7 @@ var hud_extras_counts: Dictionary = {}
 var hud_font_loaded := false
 const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
 var npc_dialog: Control
+var hub_services: RefCounted
 var restoring_real_level := false
 # Talk to an NPC: E (use), Up / Down (choice), Enter or Space (confirm).
 const TALK_KEYS := {KEY_E: "use", KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40}
@@ -118,6 +119,8 @@ func _ready() -> void:
 	mission_menu_panel.visible = false
 	if viewport != null: viewport.add_child(mission_menu_panel)
 	else: add_child(mission_menu_panel)
+	hub_services = preload("res://ui/hub_services.gd").new()
+	hub_services.configure(self, menu)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -634,6 +637,7 @@ func _observe(result: Dictionary) -> void:
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	_present_npc_dialog()
+	if hub_services != null: hub_services.refresh()
 	if real.world == null: return
 	real.world.observe(raw_observation)
 	var extra: String = real.world.label()
