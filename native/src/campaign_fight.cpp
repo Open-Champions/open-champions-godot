@@ -652,7 +652,7 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
     : p_(std::make_unique<Impl>(std::move(authority), std::move(exe), bundle, std::move(dialog_open))) {
   auto &p = *p_;
   p.bundle.bind_animation(*p.anim, [impl = p_.get()](Address, Raw clip) { return impl->clip_for(clip); });
-  p.world = std::make_unique<C::World>(p.authority, p.build_services(), 0, C::Composition::Full);
+  p.world = std::make_unique<C::World>(p.authority, p.build_services(), 1, C::Composition::Full);
   p.adapter = std::make_unique<C::SessionAdapter>(*p.world);
   p.adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
   p.adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
