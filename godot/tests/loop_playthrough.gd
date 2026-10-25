@@ -511,7 +511,7 @@ func run() -> void:
 	if target_dead: advance(0, SETTLE_TICKS)
 	var loot_retry_kills := 0
 	var loot_retry_placements := 0
-	for retry in range(8):
+	for retry in range(24):
 		var observed: Dictionary = scene.controller.get_observation()
 		if not observed.get("fight_ground_drops", []).is_empty() or observed.get("fight_failed", false): break
 		var next_target := {}
@@ -536,6 +536,8 @@ func run() -> void:
 		if not retry_dead: break
 		loot_retry_kills += 1
 		advance(0, SETTLE_TICKS)
+		print("PLAYTHROUGH_LOOT_RETRY ", JSON.stringify({"kills": loot_retry_kills,
+			"ground_objects": scene.controller.get_observation().get("fight_ground_drops", []).size()}))
 	# Follow a real native ground object with ordinary movement. E goes through
 	# pressed-use on Player_run; no pickup call or player placement is injected.
 	var pickup_walk_ticks := 0

@@ -95,6 +95,8 @@ void bounds() {
 struct Ground {
   std::shared_ptr<R::WorldAuthority> authority = std::make_shared<R::WorldAuthority>();
   unsigned bounds_calls = 0, prompts = 0, uses = 0;
+  C::Address prompted = 0;
+  C::InteractionPrompt prompt{1, true};
   std::function<void(C::Address, R::Raw)> pickup;
   C::Services services() {
     auto s = C::flat_fixture_services();
@@ -102,7 +104,7 @@ struct Ground {
     s.resource = [](const C::ResourceQuery &) { return R::Raw(0x00c00000); };
     s.resref = [](R::Raw) { return R::Raw(0); };
     s.terrain_sweep = [](const R::Vec3 &, const R::Vec3 &, R::Raw, R::Raw) { return std::array<R::Raw,3>{R::ONE,0,0}; };
-    s.interact_prompt = [this](C::Address, R::Raw) { ++prompts; return C::InteractionPrompt{1,true}; };
+    s.interact_prompt = [this](C::Address object, R::Raw) { ++prompts; prompted = object; return prompt; };
     s.interact_use = [this](C::Address a, R::Raw slot) { ++uses; if (pickup) pickup(a, slot); };
     return s;
   }
@@ -187,6 +189,33 @@ void carried_equipment() {
   g.world.spawn_player(0,start);
   check(g.world.read(C::PLAYERS+0x4a86,1)==2 && g.world.read(C::PLAYERS+0x4434)==entry,
         "session spawn preserves inventory's carried weapon class and pointer");
+}
+void manual_ranking_and_prompt_status() {
+  Ground ground;
+  const auto player = ground.world.spawn_player(0, {});
+  R::Mat34 matrix{}; matrix[0] = matrix[4] = matrix[8] = R::ONE;
+  const auto above = ground.world.spawn_resting_item({0,0,raw(30)},0x3000,0x3100,0x3200,ground.record(),matrix);
+  const auto beside = ground.world.spawn_resting_item({raw(20),0,0},0x3000,0x3100,0x3200,ground.record(),matrix);
+  ground.world.interact(player,C::PADS);
+  check(ground.prompted == beside, "manual ranking uses all three origin coordinates, not horizontal distance");
+  ground.world.write(above+0x10,4,raw(-10)); ground.world.write(above+0x18,4,0);
+  ground.world.write(beside+0x10,4,raw(10));
+  ground.world.update_grid(above); ground.world.update_grid(beside);
+  const auto candidates = ground.world.collect_box({raw(-48),raw(-48),0},{raw(48),raw(48),raw(60)},256);
+  C::Address first = 0;
+  for (auto object : candidates)
+    if (object == above || object == beside) { first = object; break; }
+  ground.world.interact(player,C::PADS);
+  check(first && ground.prompted == first, "strict nearest comparison preserves the first query candidate on a tie");
+  ground.world.write(0x41b9c0,4,0x80);
+  ground.prompt = {2,true};
+  ground.world.pad(0,0,0x80); ground.world.interact(player,C::PADS);
+  check(ground.uses == 0, "status two ignores the ordinary remapped use press");
+  ground.world.pad(0,0,0x10); ground.world.interact(player,C::PADS);
+  check(ground.uses == 1, "status two activates on pressed bit 0x10");
+  ground.prompt = {1,false};
+  ground.world.pad(0,0,0x80); ground.world.interact(player,C::PADS);
+  check(ground.uses == 1, "an empty prompt never activates slot fourteen");
 }
 void world_to_inventory() {
   Ground g;
@@ -322,7 +351,7 @@ void item_constructors() {
 } // namespace
 int main() {
   try {
-    inventory_limits(); equip_callback(); bounds(); flight_and_settle(); allocation_loss(); manual_input(); carried_equipment(); world_to_inventory();
+    inventory_limits(); equip_callback(); bounds(); flight_and_settle(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
     gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors();
     std::cout << "pickup checks " << checks << " passed\n"; return 0;
   } catch(const std::exception &e) { std::cerr << "pickup check " << checks << ": " << e.what() << '\n'; return 1; }
