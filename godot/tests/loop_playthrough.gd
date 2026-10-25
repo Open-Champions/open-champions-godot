@@ -509,6 +509,33 @@ func run() -> void:
 		if target_dead or bool(polled.get("fight_failed", false)): break
 	var swing_msec := Time.get_ticks_msec() - swing_start_msec
 	if target_dead: advance(0, SETTLE_TICKS)
+	var loot_retry_kills := 0
+	var loot_retry_placements := 0
+	for retry in range(8):
+		var observed: Dictionary = scene.controller.get_observation()
+		if not observed.get("fight_ground_drops", []).is_empty() or observed.get("fight_failed", false): break
+		var next_target := {}
+		for actor in observed.get("fight_enemies", []):
+			if actor.get("dead", false) or float(actor.get("hp", 0.0)) <= 0.0: continue
+			if next_target.is_empty() or float(actor.hp) < float(next_target.hp): next_target = actor
+		if next_target.is_empty(): break
+		var spot: Vector3 = next_target.position
+		var put: Dictionary = scene.controller.fight_place_player(Vector3(spot.x - 40.0, spot.y, spot.z + 10.0), 0)
+		if not put.get("ok", false): break
+		loot_retry_placements += 1
+		advance(0, 24)
+		var retry_dead := false
+		for cycle in range(SWING_CYCLES):
+			advance(16, 6)
+			advance(0, 24)
+			if cycle % 16 != 0: continue
+			var retry_observed: Dictionary = scene.controller.get_observation()
+			for actor in retry_observed.get("fight_enemies", []):
+				if int(actor.handle) == int(next_target.handle): retry_dead = bool(actor.get("dead", false))
+			if retry_dead or retry_observed.get("fight_failed", false): break
+		if not retry_dead: break
+		loot_retry_kills += 1
+		advance(0, SETTLE_TICKS)
 	# Follow a real native ground object with ordinary movement. E goes through
 	# pressed-use on Player_run; no pickup call or player placement is injected.
 	var pickup_walk_ticks := 0
@@ -553,11 +580,12 @@ func run() -> void:
 	var after: Dictionary = scene.controller.get_observation()
 	for drop in after.get("fight_ground_drops", []): picked_up = picked_up or bool(drop.get("picked_up", false))
 	var inventory_units_after := int(after.get("fight_inventory_units", 0))
-	var pickup_passed := not produced or (picked_up and pickup_walked and inventory_units_after > inventory_units_before)
+	var pickup_passed := produced and picked_up and pickup_walked and inventory_units_after > inventory_units_before
 	mark("loot_pickup", "passed" if pickup_passed else "refused",
 		{"drop_produced": produced, "picked_up": picked_up, "walked": pickup_walked,
 		"walk_ticks": pickup_walk_ticks, "inventory_units_before": inventory_units_before,
-		"inventory_units_after": inventory_units_after, "rendered_pickup_verified": false})
+		"inventory_units_after": inventory_units_after, "rendered_pickup_verified": false,
+		"retry_kills": loot_retry_kills, "diagnostic_retry_placements": loot_retry_placements})
 	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var saved_hp := float(after.get("hp", -1.0))
 	var saved_gold := int(after.get("gold", -1))
@@ -618,9 +646,8 @@ func run() -> void:
 	if not enemy_damaged: missing_fight_steps["enemy_damage"] = 1
 	if not kill_evidence: missing_fight_steps["enemy_death"] = 1
 	if xp_gained <= 0: missing_fight_steps["kill_xp"] = 1
-	if loot_items > 0:
-		if not produced: missing_fight_steps["loot_ground_object_spawn"] = loot_items
-		if not pickup_passed: missing_fight_steps["loot_item_pickup"] = loot_items
+	if not produced: missing_fight_steps["loot_ground_object_spawn"] = 1
+	if not pickup_passed: missing_fight_steps["loot_item_pickup"] = 1
 	if gold_after != gold_before: missing_fight_steps["warboar_zero_gold"] = 1
 	var object_counts: Dictionary = scene.controller.script_command_counts()
 	mark("enemy_fight", "passed" if fight_passed else "blocked_unported_combat",
