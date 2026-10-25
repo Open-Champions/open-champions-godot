@@ -119,11 +119,16 @@ func run() -> void:
 		check(int(counts.get("faults", -1)) == 0, "no VM fault")
 		check(scene.controller.get_observation().get("fight_player_ready", false), "real Player bound to level World")
 		var ticks_before := int(scene.controller.get_observation().get("ready_ticks", 0))
+		var world_ticks_before := int(scene.controller.get_observation().get("fight_counts", {}).get("ticks", -1))
 		for tick in range(8):
 			var advanced: Dictionary = scene.advance_step()
 			check(advanced.get("ok", false), "real level ready tick runs")
 		var ticks_after := int(scene.controller.get_observation().get("ready_ticks", 0))
+		var world_after: Dictionary = scene.controller.get_observation()
+		var world_ticks_after := int(world_after.get("fight_counts", {}).get("ticks", -1))
 		check(ticks_after > ticks_before, "real Player/World ready count advances")
+		check(not world_after.get("fight_failed", true) and world_ticks_after > world_ticks_before,
+			"real Player/World runs without a runtime failure")
 		var records := int(counts.get("objects_registered", 0)) + int(counts.get("objects_not_created", 0))
 		var row := {"slot": slot, "direct_diagnostic": slot > 0, "records": records,
 			"built": counts.get("objects_built", 0), "unbuilt": counts.get("objects_unbuilt", 0),
@@ -131,6 +136,7 @@ func run() -> void:
 			"refused": counts.get("refused", {}), "script_stopped": counts.get("script_stopped", false),
 			"quest_lines": counts.get("campaign", {}).get("quest_lines", 0),
 			"ready_ticks": ticks_after - ticks_before,
+			"world_ticks": world_ticks_after - world_ticks_before,
 			"player_bound": scene.controller.get_observation().get("fight_player_ready", false)}
 		if row.script_stopped:
 			check(not scene.controller.script_level_request().get("queued", false), "stopped script cannot leave")
