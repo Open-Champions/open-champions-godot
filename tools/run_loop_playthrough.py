@@ -22,6 +22,14 @@ def file_count(folder: pathlib.Path) -> int:
     return sum(1 for path in folder.rglob("*") if path.is_file())
 
 
+def pickup_verified(steps: list) -> bool:
+    return any(row.get("step") == "loot_pickup" and row.get("result") == "passed"
+               and row.get("drop_produced") is True and row.get("picked_up") is True
+               and row.get("walked") is True
+               and row.get("inventory_units_after", 0) > row.get("inventory_units_before", 0)
+               for row in steps)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--godot", type=pathlib.Path, required=True)
@@ -54,12 +62,13 @@ def main() -> int:
             code = 124
         report = dest / "result.json"
         results[name] = {"exit_code": code,
-                         "result_written": report.is_file()}
+                         "result_written": report.is_file(), "pickup_verified": False}
         if report.is_file():
             data = json.loads(report.read_text(encoding="utf-8"))
             results[name]["screenshots"] = data.get("screenshots", 0)
             results[name]["steps"] = len(data.get("steps", []))
             results[name]["refusal_kinds"] = len(data.get("refusals", {}))
+            results[name]["pickup_verified"] = pickup_verified(data.get("steps", []))
             for row in data.get("steps", []):
                 if row.get("step") == "loot_pickup":
                     results[name]["loot_pickup"] = row
@@ -71,6 +80,7 @@ def main() -> int:
                                                encoding="utf-8")
     print(f"disc files: {before} before, {after} after")
     return int(before != after or any(row["exit_code"] != 0 or not row["result_written"]
+                                      or not row["pickup_verified"]
                                       for row in results.values()))
 
 
