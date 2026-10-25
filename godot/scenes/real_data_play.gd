@@ -229,10 +229,12 @@ func attach_level_script(carry_campaign := false) -> bool:
 func _refresh_exit_targets() -> void:
 	if real_exit_choice == null or controller == null: return
 	real_exit_choice.clear()
-	real_exit_choice.add_item("Level exits and portals", -1)
+	real_exit_choice.add_item("Level triggers, exits and portals", -1)
 	for target in controller.script_exit_targets():
 		var kind: String = str(target.get("kind", "unknown"))
-		var suffix := " · script action" if target.get("script_action", false) else " · arrival/prompt only"
+		var suffix := " · host script action" if target.get("script_action", false) else " · arrival/prompt only"
+		if kind == "Trigger" and target.get("script_action", false):
+			suffix = " · selected-object diagnostic"
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
 
 func activate_selected_exit() -> Dictionary:

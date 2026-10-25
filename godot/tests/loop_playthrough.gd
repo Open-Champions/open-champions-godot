@@ -310,6 +310,148 @@ func run() -> void:
 		save_json()
 		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
 		return
+	# Continue from the real hub route through the host's blood1 entries. The
+	# selected-object Trigger call is a diagnostic; physical occupancy and the
+	# 15-list schedule are separate from this probe.
+	var story: Dictionary = scene.controller.script_story_status()
+	var blood1_census: bool = at_blood1 and int(story.get("records", 0)) == 363 \
+		and int(story.get("script_entries", 0)) == 21 \
+		and int(story.get("arrival_markers", 0)) == 3 \
+		and int(story.get("walkin_triggers", 0)) == 1 \
+		and int(story.get("keyed_exits", 0)) == 2 \
+		and int(story.get("doors", 0)) == 2 \
+		and int(story.get("hostile_placements", 0)) == 140
+	mark("blood1_record_census", "matched" if blood1_census else "refused",
+		{"records": int(story.get("records", 0)), "script_entries": int(story.get("script_entries", 0)),
+		"arrival_markers": int(story.get("arrival_markers", 0)),
+		"walkin_triggers": int(story.get("walkin_triggers", 0)),
+		"keyed_exits": int(story.get("keyed_exits", 0)), "doors": int(story.get("doors", 0)),
+		"hostile_placements": int(story.get("hostile_placements", 0))})
+	var objective_ready: bool = at_blood1 and story.get("mission_1_available", false) \
+		and not story.get("mission_1_complete", true) and int(story.get("quest_lines", 0)) > 0
+	mark("blood1_initial_objective", "recorded" if objective_ready else "refused",
+		{"quest_lines": int(story.get("quest_lines", 0)),
+		"mission_1_available": story.get("mission_1_available", false),
+		"mission_1_complete": story.get("mission_1_complete", false)})
+	mark("blood1_opening_cutscene", "refused_unported_binding" if int(story.get("cutscene_refusals", 0)) > 0 else "not_requested",
+		{"cutscene_refusals": int(story.get("cutscene_refusals", 0)),
+		"actor_cleanup_refusals": int(story.get("actor_cleanup_refusals", 0)),
+		"post_action_pending": story.get("post_action_pending", false),
+		"camera_playback_verified": false})
+	var script_counts: Dictionary = scene.controller.script_command_counts()
+	var executed: Dictionary = script_counts.get("executed", {})
+	var refused: Dictionary = script_counts.get("refused", {})
+	var script_spawn_calls: int = int(executed.get("generateMonster", 0)) + int(refused.get("generateMonster", 0))
+	mark("blood1_hostile_boundary", "authored_placements_unverified" if script_spawn_calls == 0 else "unexpected_script_spawn",
+		{"script_spawn_calls": script_spawn_calls,
+		"hostile_placements": int(story.get("hostile_placements", 0)),
+		"unbuilt_objects": int(story.get("unbuilt_objects", 0)), "combat_verified": false})
+	var walkin := -1
+	var keyed: Array[int] = []
+	for target in scene.controller.script_exit_targets():
+		if str(target.get("kind", "")) == "Trigger" and target.get("script_action", false):
+			walkin = int(target.index)
+		elif str(target.get("kind", "")) == "PushTrigger" and target.get("script_action", false):
+			keyed.append(int(target.index))
+	var trigger_action: Dictionary = scene.controller.script_run_exit(walkin) if at_blood1 and walkin >= 0 else {"ok": false}
+	advance(0, 2)
+	var blood_dialog_open: bool = scene.controller.dialog_status().get("open", false)
+	mark("blood1_npc_trigger_host_action", "dialog_open" if trigger_action.get("ok", false) and blood_dialog_open else "refused",
+		{"trigger_found": walkin >= 0, "selected_object_action_ok": trigger_action.get("ok", false),
+		"dialog_open": blood_dialog_open, "physical_edge_verified": false})
+	var blood_dialog_visual := false
+	var blood_dialog_choice_ready := false
+	if blood_dialog_open:
+		for i in range(300):
+			await process_frame
+			advance()
+			var draw: Dictionary = scene.npc_dialog.frame
+			if not draw.get("sprites", []).is_empty() or not draw.get("glyphs", []).is_empty():
+				blood_dialog_visual = true
+			blood_dialog_choice_ready = scene.controller.dialog_status().get("choice_ready", false)
+			if blood_dialog_visual and blood_dialog_choice_ready: break
+	mark("blood1_dialog_visual", "drawn" if blood_dialog_visual else "unverified",
+		{"drawn": blood_dialog_visual, "font_ready": scene.npc_dialog.font_texture != null,
+		"box_ready": scene.npc_dialog.box_texture != null,
+		"choice_ready": blood_dialog_choice_ready,
+		"glyphs": scene.npc_dialog.frame.get("glyphs", []).size()})
+	await capture("11-blood1-dialog")
+	var choice_closed := false
+	if blood_dialog_open:
+		# The researched graph reaches the evil terminal through node 0's
+		# second edge, node 3's second edge, then node 4's first edge.
+		var evil_second := {0: true, 3: true}
+		var moved_nodes := {}
+		for i in range(1200):
+			await process_frame
+			help_close()
+			if scene.paused and not scene.stopped: scene.resume_session()
+			var state: Dictionary = scene.controller.dialog_status()
+			var node: int = int(state.get("node_index", -1))
+			var move_second: bool = args.has("blood1-choice-evil") and evil_second.has(node) \
+				and int(state.get("visible_choices", 0)) > 1 and state.get("choice_ready", false)
+			if move_second and not moved_nodes.has(node):
+				game_key(KEY_DOWN)
+				moved_nodes[node] = true
+			elif i % 8 == 0 and (not move_second or int(state.get("cursor", 0)) == 1):
+				game_key(KEY_ENTER)
+			advance()
+			if not scene.controller.dialog_status().get("open", false):
+				choice_closed = true
+				break
+	story = scene.controller.script_story_status()
+	var decision_made: bool = choice_closed and int(story.get("decision", 0)) != 0
+	mark("blood1_dialog_decision", "recorded" if decision_made else "refused",
+		{"closed": choice_closed, "decision": int(story.get("decision", 0)),
+		"evil": int(story.get("evil", 0)), "quest_lines": int(story.get("quest_lines", 0)),
+		"requested_evil_choice": args.has("blood1-choice-evil")})
+	mark("blood1_door_sequence", "refused_unported_binding" if decision_made and int(story.get("cutscene_refusals", 0)) > 1 else "not_verified",
+		{"cutscene_refusals": int(story.get("cutscene_refusals", 0)),
+		"door_refusals": int(story.get("door_refusals", 0)),
+		"post_action_pending": story.get("post_action_pending", false),
+		"live_collision_verified": false})
+	mark("blood1_revisit_door_restore", "not_exercised",
+		{"revisit_verified": false, "door_state_verified": false})
+	mark("blood1_evil_shard_post_action", "blocked_by_cutscene" if args.has("blood1-choice-evil") and story.get("post_action_pending", false) else "not_applicable" if not args.has("blood1-choice-evil") else "unverified",
+		{"post_action_pending": story.get("post_action_pending", false),
+		"item_grant_verified": false, "deferred_count_verified": false})
+	await capture("12-blood1-door-boundary")
+	var exit_action := false
+	var requested := ""
+	for index in keyed:
+		var use: Dictionary = scene.controller.script_run_exit(index) if decision_made else {"ok": false}
+		var request: Dictionary = scene.controller.script_level_request()
+		if use.get("ok", false) and request.get("queued", false):
+			exit_action = true
+			requested = str(request.get("name", ""))
+			break
+	var keyed_destination: bool = requested in ["strife", "drundar"]
+	mark("blood1_keyed_exit_host_action", "queued" if exit_action and keyed_destination else "refused",
+		{"keyed_targets": keyed.size(), "selected_object_action_ok": exit_action,
+		"destination_documented": keyed_destination, "physical_use_verified": false})
+	var destination_loaded: bool = exit_action and keyed_destination and scene._apply_level_change()
+	var at_destination: bool = destination_loaded and scene.real.current >= 0 \
+		and str(scene.real.levels[scene.real.current].stem) == requested
+	var destination_state: Dictionary = scene.controller.script_story_status()
+	mark("blood1_destination", "loaded" if at_destination else "refused",
+		{"campaign_carried": scene.last_campaign_carried,
+		"exit_post_action_pending": story.get("post_action_pending", false),
+		"mission_1_complete": destination_state.get("mission_1_complete", false),
+		"completion_branch_verified": false, "hub_return_verified": false})
+	await capture("11-blood1-destination")
+	var hub_branch: Dictionary = scene.controller.script_level_request()
+	var completed_in_destination: bool = at_destination and destination_state.get("mission_1_complete", false)
+	var hub_queued: bool = completed_in_destination and str(hub_branch.get("name", "")) == "hub"
+	var hub_loaded: bool = hub_queued and scene._apply_level_change()
+	mark("mission_1_completion_hub_return", "returned" if hub_loaded and scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "hub" else "branch_unverified",
+		{"completed_in_destination": completed_in_destination,
+		"hub_queued": hub_queued, "hub_loaded": hub_loaded,
+		"destination_counter_inputs_verified": false})
+	if args.has("blood1-only"):
+		save_json()
+		quit(0 if blood1_census and objective_ready and script_spawn_calls == 0 and trigger_action.get("ok", false) \
+			and blood_dialog_open and decision_made and exit_action and keyed_destination and at_destination else 1)
+		return
 	# Combat remains a separate diagnostic until blood1 hostile constructors
 	# yield live enemies. Direct selection of valor is not a campaign route.
 	var valor_index := -1

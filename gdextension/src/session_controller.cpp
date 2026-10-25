@@ -129,6 +129,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
+  ClassDB::bind_method(D_METHOD("script_story_status"),
+                       &ChampionsSessionController::script_story_status);
   ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
   ClassDB::bind_method(D_METHOD("script_mission_menu_state"), &ChampionsSessionController::script_mission_menu_state);
   ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
@@ -1137,6 +1139,11 @@ Dictionary ChampionsSessionController::dialog_status() const {
     return out;
   const auto &d = scripts_->dialog();
   out["open"] = d.is_open();
+  out["node_index"] = int64_t(d.node_index);
+  out["visible_choices"] = int64_t(d.visible.size());
+  out["cursor"] = int64_t(d.cursor);
+  out["cursor_target"] = int64_t(d.cursor_target);
+  out["choice_ready"] = d.reveal_done != 0 && d.at_end != 0 && d.more == 0;
   out["camera_moving"] = d.cam_move != 0;
   out["stalled"] = scripts_->dialog_stalled();
   out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
@@ -1333,6 +1340,50 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   if (scripts_->dialog_attached())
     result["dialog"] = dialog_count_dict(scripts_->dialog_counts());
   return result;
+}
+Dictionary ChampionsSessionController::script_story_status() const {
+  Dictionary out;
+  out["ok"] = bool(scripts_);
+  if (!scripts_) return out;
+  const auto &campaign = scripts_->campaign();
+  const auto &counts = scripts_->counts();
+  out["mission_1_available"] = bool(campaign.mission_available(1));
+  out["mission_1_complete"] = bool(campaign.mission_complete(1));
+  out["decision"] = int64_t(campaign.decision());
+  out["evil"] = int64_t(campaign.evil());
+  out["quest_lines"] = int64_t(campaign.record(0).quest_count);
+  out["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
+  out["script_faulted"] = scripts_->faulted();
+  out["script_refusal_stopped"] = scripts_->stopped_on_refusal();
+  const auto refused_named = [&](const char *name) -> int64_t {
+    for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i)
+      if (std::strcmp(rta::script_commands::row(i).name, name) == 0)
+        return int64_t(counts.refused[i]);
+    return 0;
+  };
+  out["cutscene_refusals"] = refused_named("cutScene");
+  out["door_refusals"] = refused_named("autoPropSetState");
+  out["actor_cleanup_refusals"] = refused_named("deleteMonster");
+  out["unbuilt_objects"] = int64_t(counts.objects_unbuilt);
+  int64_t arrivals = 0, walkins = 0, keyed_exits = 0, doors = 0, hostiles = 0;
+  for (const auto &record : script_level_objects_) {
+    if (record.cls == "Player1") ++arrivals;
+    else if (record.cls == "Trigger") ++walkins;
+    else if (record.cls == "PushTrigger") ++keyed_exits;
+    else if (record.cls == "BFfiredoor" || record.cls == "BFhappydoor") ++doors;
+    else if (record.cls == "Kobold" || record.cls == "Koboldtough" ||
+             record.cls == "koboldshaman" || record.cls == "WarWraith") ++hostiles;
+  }
+  out["records"] = int64_t(script_level_objects_.size());
+  out["script_entries"] = int64_t(scripts_->public_count());
+  out["arrival_markers"] = arrivals;
+  out["walkin_triggers"] = walkins;
+  out["keyed_exits"] = keyed_exits;
+  out["doors"] = doors;
+  out["hostile_placements"] = hostiles;
+  out["pending_world"] = !scripts_->level().pending.name.empty() ||
+      !scripts_->variables().memory.cstr(0x41b6d0).empty();
+  return out;
 }
 namespace {
 bool is_exit_record(const std::string &name) {
