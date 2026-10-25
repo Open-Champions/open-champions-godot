@@ -391,6 +391,12 @@ public:
   void on_ready_tick();
   // One named public. Does not by itself mark the level as started.
   Stop run(const std::string &entry);
+  // Opt-in acceptance boundary for an incomplete story route: even an
+  // ignored refusal stops execution, so a later grant or exit cannot imply
+  // that the missing prerequisite ran. Legacy measurement keeps its policy.
+  void require_complete_commands(bool on = true) { complete_commands_ = on; }
+  bool requires_complete_commands() const { return complete_commands_; }
+  const std::string &last_refusal() const { return last_refusal_; }
   // Object-driven script starter (Trigger_run / obj_runActionScripts): sets
   // the selected object and active player globals around a named public.
   // The index is the original objects.ob record index; a record that made no
@@ -558,7 +564,7 @@ private:
                         std::uint32_t address, const std::vector<std::string> &props);
   std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
                               std::int32_t angle, std::uint32_t props_word);
-  void refuse(std::size_t index, amx::Machine &machine);
+  void refuse(std::size_t index, amx::Machine &machine, const char *reason = nullptr);
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
                       const std::vector<builtins::Variables::ServiceValue> &args);
@@ -634,6 +640,8 @@ private:
   bool waiting_ = false;
   bool faulted_ = false;
   bool refusal_stopped_ = false;
+  bool complete_commands_ = false;
+  std::string last_refusal_;
   bool counted_wait_ = false;
   bool counted_complete_ = false;
   amx::Cell last_value_ = 0;

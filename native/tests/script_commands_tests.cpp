@@ -1452,6 +1452,7 @@ void test_host_vectors(const std::string &path) {
   check(cases == 8, "eight host vector cases");
 }
 #include "text_host_tests.hpp"
+#include "mission2_host_tests.hpp"
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1486,6 +1487,7 @@ int main(int argc, char **argv) {
   text_host::test_charm_live_target();
   test_selected_stub();
   test_object_level_exit();
+  mission2_host::run();
   test_refusals();
   test_wait_then_complete();
   test_prestart_before_objects();
