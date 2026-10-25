@@ -1,4 +1,5 @@
 #include "champions/blood1_actors.hpp"
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -82,14 +83,27 @@ Runtime::Runtime(objects::World &world, resources::Manager &resources, Services 
     : world_(world), resources_(resources), services_(std::move(services)),
       kobold_def_(definition("kobold.lmp", KOBOLD_NAMES)),
       wraith_def_(definition("wwraith.lmp", WRAITH_NAMES)) {
-  if (world_.on_run || world_.res_find)
+  if (world_.on_run || world_.on_destroy || world_.res_find)
     throw Unsupported("constructor: World already has actor or resource dispatch");
   world_.res_find = [this](const std::string &lump, const std::string &entry) {
     return resolve(lump, entry);
   };
   world_.on_run = [this](objects::GameObject &o) { tick(o.addr); };
+  world_.on_destroy = [this](objects::GameObject &o, std::int64_t flags) {
+    const auto address = o.addr;
+    const auto serial = o.serial;
+    world_.destroy(o, flags);
+    if (!(flags & 1)) return;
+    auto it = actors_.find(address);
+    if (it != actors_.end() && it->second->object_serial == serial)
+      actors_.erase(it);
+  };
 }
-Runtime::~Runtime() { world_.on_run = {}; world_.res_find = {}; }
+Runtime::~Runtime() {
+  world_.on_run = {};
+  world_.on_destroy = {};
+  world_.res_find = {};
+}
 
 std::uint32_t Runtime::resolve(const std::string &lump, const std::string &entry) {
   auto handle = resources_.find(lump, entry);
@@ -124,6 +138,9 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
                               pos, def, std::move(props));
   if (!o) throw Unsupported("GameObject_ctor: object pool exhausted");
   try {
+    retire_stale(o->addr);
+    if (actors_.count(o->addr))
+      throw Unsupported("GameObject_ctor: live actor address collision");
     o->angle = angle;
     o->class_name = type_name(kind);
     o->type_name = *o->class_name;
@@ -182,9 +199,10 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
       required(services_.handle_link, "Creature_takeDamage/handle_link");
       services_.handle_link(a.at(0), a.at(1));
     };
-    auto *result = actor.get();
-    actors_.emplace(o->addr, std::move(actor));
-    return *result;
+    auto inserted = actors_.emplace(o->addr, std::move(actor));
+    if (!inserted.second)
+      throw Unsupported("GameObject_ctor: actor insertion failed");
+    return *inserted.first->second;
   } catch (...) {
     world_.destroy(*o);
     throw;
@@ -217,9 +235,21 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
       });
 }
 
-Actor &Runtime::at(std::uint32_t address) {
+void Runtime::retire_stale(std::uint32_t address) {
   auto it = actors_.find(address);
-  if (it == actors_.end() || !it->second->object->alive)
+  if (it == actors_.end()) return;
+  const auto current = world_.objects.find(address);
+  const auto *old = it->second->object;
+  if (!old->alive || old->serial != it->second->object_serial ||
+      current == world_.objects.end() || current->second != old ||
+      current->second->serial != it->second->object_serial)
+    actors_.erase(it);
+}
+
+Actor &Runtime::at(std::uint32_t address) {
+  retire_stale(address);
+  auto it = actors_.find(address);
+  if (it == actors_.end())
     throw Unsupported("actor address is not live in this World");
   return *it->second;
 }
@@ -236,6 +266,12 @@ void Runtime::set_state(std::uint32_t address, std::uint32_t state) {
   required(services_.death_remainder, "class setState/death remainder");
   if (a.kind == Kind::WarWraith)
     required(services_.holder_drop, "WarWraith_setState/holder part drop");
+  required(services_.filter_state, "Creature_filterState/death request");
+  if (services_.filter_state(address, state)) return;
+  // For an accepted state-20 request, Creature_filterState clears these four
+  // timers before derived setState writes or drop calls.
+  for (auto off : {0x31cu, 0x318u, 0x314u, 0x31au})
+    a.hp.mem.store(address + off, 2, 0);
   a.state = state;
   a.hp.mem.store(address + 0x232, 2, state);
   if (a.kind == Kind::WarWraith) {
@@ -257,11 +293,31 @@ void Runtime::tick(std::uint32_t address) {
   services_.creature_run(address);
   const auto in = services_.tick_input(address);
   if (!in.active) return;
+  if (a.state == 0) {
+    if (in.has_target || (a.kind != Kind::WarWraith && in.away_home))
+      throw Unsupported("class run/state0: target or home transition Unknown");
+    if (!in.idle_deadline)
+      throw Unsupported("class run/state0: idle deadline answer Unknown");
+  }
+  if (a.state == 3 && in.has_target)
+    throw Unsupported("class run/state3: target decision Unknown");
+  if (a.state == 7 && in.has_target)
+    throw Unsupported("class run/state7 targeted attack or drain Unknown");
+  if ((a.state == 6 || a.state == 7) && !in.animation_over)
+    throw Unsupported("class run/attack animation completion answer Unknown");
+  if (a.state != 0 && a.state != 3 && a.state != 6 && a.state != 7 &&
+      a.state != 0x14)
+    throw Unsupported("class run: state or AI branch Unknown");
+  const bool wraith = a.kind == Kind::WarWraith;
+  auto fade = wraith ? std::uint32_t(a.hp.mem.load(address + 0x3c8, 1)) : 0u;
+  if (wraith && fade > 100)
+    throw Unsupported("WarWraith_run: fade outside documented range");
+  if (wraith && a.state == 0x14 && fade != 100)
+    throw Unsupported("WarWraith_run/dead fade and particle path Unknown");
   required(services_.animation_step, "Creature_stepAnim");
   required(services_.knockback, "Creature_applyKnockback");
-  if (a.kind == Kind::WarWraith) {
+  if (wraith) {
     required(services_.holder_update, "WarWraith_run/holder update");
-    required(services_.turn_target, "Creature_turnToTarget");
     services_.holder_update(address + 0x3d0);
     services_.animation_step(address);
     if (a.state != 0x14) {
@@ -269,7 +325,18 @@ void Runtime::tick(std::uint32_t address) {
       services_.pick_target(address);
     }
     services_.knockback(address);
-    services_.turn_target(address);
+    auto flags = a.hp.mem.load(address + 0xa8, 8);
+    flags = fade >= 21 ? flags | UINT64_C(0x54) : flags & ~UINT64_C(0x54);
+    a.hp.mem.store(address + 0xa8, 8, flags);
+    if (fade >= 99)
+      a.object->flags |= 1u;
+    else if (a.state != 0x14)
+      a.object->flags &= ~1u;
+    a.hp.mem.store(address + 0xc, 4, a.object->flags);
+    if (fade >= 99) {
+      required(services_.turn_target, "WarWraith_run/fade turn");
+      services_.turn_target(address);
+    }
   } else {
     required(services_.pick_target, "Creature_pickTarget");
     required(services_.pick_ally, "Kobold_run/pickAlly");
@@ -280,59 +347,57 @@ void Runtime::tick(std::uint32_t address) {
   }
   switch (a.state) {
   case 0:
-    if (in.has_target || in.away_home)
-      throw Unsupported("class run/state0: target or home transition Unknown");
+    if (wraith)
+      a.hp.mem.store(address + 0x3c8, 1, std::min(fade + 1u, 100u));
     required(services_.can_see_target, "class run/state0 sight check");
     services_.can_see_target(address);
-    if (a.kind != Kind::WarWraith) {
+    if (!wraith) {
       required(services_.away_home_probe, "Kobold_run/state0 home check");
       services_.away_home_probe(address);
     }
+    if (world_.frame > *in.idle_deadline) {
+      required(services_.state_change, "class run/state0 idle expiry");
+      services_.state_change(address, 1);
+    }
     break;
   case 3:
-    if (in.has_target)
-      throw Unsupported("class run/state3: target decision Unknown");
+    if (wraith)
+      a.hp.mem.store(address + 0x3c8, 1,
+                     fade > 60 ? fade - 1 : fade < 60 ? fade + 1 : fade);
     required(services_.state_change, "class run/state3 transition");
-    services_.state_change(address);
+    services_.state_change(address, 0);
     break;
   case 6:
   case 7:
-    if (a.state == 7 && in.has_target)
-      throw Unsupported("class run/state7 targeted attack or drain Unknown");
-    if (a.kind != Kind::WarWraith) {
+    if (wraith)
+      a.hp.mem.store(address + 0x3c8, 1, fade > 2 ? fade - 2 : 0);
+    if (!wraith) {
       required(services_.settle, "Kobold_run/settle");
       services_.settle(address);
       if (in.has_target && in.hit_event) {
         required(services_.hit_target_in_arc, "Creature_hitTargetInArc");
         required(services_.turn_target, "Creature_turnToTarget");
-        required(services_.state_change, "Kobold_run/targeted setState");
         services_.hit_target_in_arc(address,
             a.kind == Kind::KoboldTough ? 0x440008 : 8);
         services_.turn_target(address);
-        services_.state_change(address);
-        return;
       }
     } else if (in.has_target && in.hit_event) {
       required(services_.holder_descriptor, "WarWraith_run/holder descriptor");
       required(services_.hit_target_at_reach, "Creature_hitTargetAtReach");
       required(services_.grid_update, "WarWraith_run/obj_updateGridCell");
-      required(services_.state_change, "WarWraith_run/targeted setState");
+      required(services_.turn_target, "WarWraith_run/targeted turn");
       services_.holder_descriptor(address + 0x3d0);
       services_.hit_target_at_reach(address, 8);
       services_.turn_target(address);
       services_.grid_update(address);
-      services_.state_change(address);
-      return;
     }
-    if (in.has_target || in.animation_over)
-      throw Unsupported("class run/attack follow-up Unknown");
-    required(services_.state_change, "class run/attack no-target transition");
-    services_.state_change(address);
+    if (*in.animation_over) {
+      required(services_.state_change, "class run/attack completion");
+      services_.state_change(address, wraith ? 3 : 5);
+    }
     break;
   case 0x14:
-    if (a.kind == Kind::WarWraith) {
-      if (a.hp.mem.load(address + 0x3c8, 1) != 100)
-        throw Unsupported("WarWraith_run/dead fade and particle path Unknown");
+    if (wraith) {
       required(services_.delete_object, "WarWraith_run/fade deletion");
       services_.delete_object(address);
     } else {
@@ -342,8 +407,6 @@ void Runtime::tick(std::uint32_t address) {
       services_.dead_update(address);
     }
     break;
-  default:
-    throw Unsupported("class run: state or AI branch Unknown");
   }
 }
 

@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 
 // Isolated RTA US v2.00 blood1 actors. The interface mirrors campaign_actors:
 // one World object per actor, caller-owned lower services, no scene binding.
@@ -16,7 +17,10 @@ struct Unsupported : std::runtime_error { using std::runtime_error::runtime_erro
 struct LootArgs { Raw z, throw_speed, gold_scale, gold_chance, quality_row, item_chance; };
 struct TickInput {
   bool active = false, has_target = false, hit_event = false;
-  bool animation_over = false, away_home = false;
+  std::optional<bool> animation_over;
+  bool away_home = false;
+  // Caller answers the class +0xf4 deadline after its state-0 setup.
+  std::optional<std::int64_t> idle_deadline;
 };
 struct Services {
   std::function<void(std::uint32_t)> model_init, animation_init, creature_init;
@@ -28,8 +32,12 @@ struct Services {
   std::function<void(std::uint32_t)> holder_update, holder_descriptor;
   std::function<void(std::uint32_t)> turn_target, grid_update, settle, dead_update;
   std::function<void(std::uint32_t)> can_see_target, away_home_probe, move_by;
-  // Tick probes prove a setState call, not its resulting AI state.
-  std::function<void(std::uint32_t)> state_change;
+  // True means Creature_filterState refused the death request. The caller
+  // supplies its global PvP context; the runtime applies the documented
+  // state-20 timer clearing only after an accepted answer.
+  std::function<bool(std::uint32_t, std::uint32_t)> filter_state;
+  // Tick probes prove a setState request, not its resulting AI state.
+  std::function<void(std::uint32_t, std::uint32_t)> state_change;
   std::function<void(std::uint32_t, std::uint32_t)> hit_target_in_arc;
   std::function<void(std::uint32_t, std::uint32_t)> hit_target_at_reach;
   std::function<void(std::uint32_t)> holder_drop;
@@ -44,11 +52,13 @@ std::array<Raw, 5> balance_lookup(const std::uint8_t *, std::size_t,
 struct Actor {
   Kind kind;
   objects::GameObject *object;
+  std::uint64_t object_serial;
   creature_hp::Model hp;
   combat::MonsterStats stats;
   std::uint32_t state = 0, variant = 0, weapon_part = 0;
   bool death_reported = false;
-  Actor(Kind k, objects::GameObject *o) : kind(k), object(o) {}
+  Actor(Kind k, objects::GameObject *o)
+      : kind(k), object(o), object_serial(o->serial) {}
   virtual ~Actor() = default;
   Raw health() const;
   bool dead() const;
@@ -72,6 +82,7 @@ class Runtime {
   std::shared_ptr<objects::ClassDef> kobold_def_, wraith_def_;
   std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
   std::vector<resources::Handle> handles_;
+  void retire_stale(std::uint32_t);
   std::uint32_t resolve(const std::string &, const std::string &);
   Actor &construct_impl(Kind, const objects::Vec3 &, std::uint32_t,
                         objects::Props, Raw, const std::function<void(Actor &)> &);

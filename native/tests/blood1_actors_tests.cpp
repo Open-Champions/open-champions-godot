@@ -86,9 +86,18 @@ void run_seed(std::uint32_t seed) {
   O::World world(O::CallbackPolicy::ReferenceBase);
   world.shared.state = seed;
   std::vector<std::string> calls;
-  std::vector<std::uint32_t> events, parts, hits;
+  std::vector<std::uint32_t> events, parts, hits, transitions;
   std::vector<B::LootArgs> drops;
-  B::TickInput input{true, false, false, false, false};
+  std::vector<std::array<std::uint64_t, 4>> drop_timers;
+  B::Runtime *active_runtime = nullptr;
+  bool filter_refuse = false;
+  B::TickInput input{true, false, false, false, false, 1000};
+  const auto timers_at = [&](std::uint32_t address) {
+    const auto &m = active_runtime->at(address).hp.mem;
+    return std::array<std::uint64_t, 4>{{
+        m.load(address + 0x31c, 2), m.load(address + 0x318, 2),
+        m.load(address + 0x314, 2), m.load(address + 0x31a, 2)}};
+  };
   B::Services s;
   s.model_init = [&](std::uint32_t) { calls.emplace_back("model"); };
   s.animation_init = [&](std::uint32_t) { calls.emplace_back("animation"); };
@@ -110,7 +119,14 @@ void run_seed(std::uint32_t seed) {
   s.can_see_target = [&](std::uint32_t) { calls.emplace_back("see"); };
   s.away_home_probe = [&](std::uint32_t) { calls.emplace_back("home"); };
   s.move_by = [&](std::uint32_t) { calls.emplace_back("moveBy"); };
-  s.state_change = [&](std::uint32_t) { calls.emplace_back("setState"); };
+  s.filter_state = [&](std::uint32_t, std::uint32_t state) {
+    check(state == 20, "death filter requested state 20");
+    calls.emplace_back("filter");
+    return filter_refuse;
+  };
+  s.state_change = [&](std::uint32_t, std::uint32_t state) {
+    calls.emplace_back("setState"); transitions.push_back(state);
+  };
   s.hit_target_in_arc = [&](std::uint32_t, std::uint32_t flags) {
     calls.emplace_back("hitArc"); hits.push_back(flags);
   };
@@ -120,14 +136,17 @@ void run_seed(std::uint32_t seed) {
   s.dead_update = [&](std::uint32_t) { calls.emplace_back("deadUpdate"); };
   s.delete_object = [&](std::uint32_t) { calls.emplace_back("delete"); };
   s.holder_drop = [&](std::uint32_t) { calls.emplace_back("holderDrop"); };
-  s.drop_loot = [&](std::uint32_t, const B::LootArgs &args) {
+  s.drop_loot = [&](std::uint32_t address, const B::LootArgs &args) {
+    drop_timers.push_back(timers_at(address));
     calls.emplace_back("dropLoot"); drops.push_back(args);
   };
-  s.loot_generate = [&](std::uint32_t, const B::LootArgs &args) {
+  s.loot_generate = [&](std::uint32_t address, const B::LootArgs &args) {
+    drop_timers.push_back(timers_at(address));
     calls.emplace_back("generateDrops"); drops.push_back(args);
   };
   s.death_remainder = [&](std::uint32_t) { calls.emplace_back("deathRemainder"); };
   B::Runtime actors(world, resources, s);
+  active_runtime = &actors;
   const std::array<B::Kind, 4> kinds{{B::Kind::Kobold, B::Kind::KoboldTough,
                                       B::Kind::KoboldShaman, B::Kind::WarWraith}};
   const std::array<const char *, 4> names{{"Kobold", "Koboldtough", "koboldshaman", "WarWraith"}};
@@ -168,32 +187,128 @@ void run_seed(std::uint32_t seed) {
     }
     for (auto state : {0u,3u,6u,7u,20u}) {
       a.state = state;
-      calls.clear();
+      world.frame = 0;
+      input = {true, false, false, false, false, 1000};
+      if (i == 3) {
+        a.hp.mem.store(address + 0x3c8, 1, 100);
+        a.hp.mem.store(address + 0xa8, 8, 0);
+        a.object->flags = 0;
+      }
+      calls.clear(); transitions.clear();
       actors.tick(address);
-      const std::vector<std::string> prefix = i == 3
+      std::vector<std::string> expected = i == 3
           ? state == 20 ? std::vector<std::string>{"damage","run","holder","step","knockback","turn"}
                         : std::vector<std::string>{"damage","run","holder","step","target","knockback","turn"}
           : std::vector<std::string>{"damage","run","step","knockback","target","ally"};
-      check(calls.size() == prefix.size() + (state == 0 ? (i == 3 ? 1u : 2u) :
-            state == 3 ? 1u : state == 6 || state == 7 ? (i == 3 ? 1u : 2u) :
-            i == 3 ? 1u : 2u),
-            "bounded tick call count");
-      check(std::equal(prefix.begin(), prefix.end(), calls.begin()),
-            "reference tick prefix order");
-      check(calls.back() == (state == 0 ? (i == 3 ? "see" : "home") : state == 3 || state == 6 || state == 7
-            ? "setState" : i == 3 ? "delete" : "deadUpdate"),
-            "reference tick tail");
+      if (state == 0) {
+        expected.emplace_back("see");
+        if (i != 3) expected.emplace_back("home");
+      } else if (state == 3) {
+        expected.emplace_back("setState");
+      } else if (state == 6 || state == 7) {
+        if (i != 3) expected.emplace_back("settle");
+      } else if (i == 3) {
+        expected.emplace_back("delete");
+      } else {
+        expected.emplace_back("moveBy");
+        expected.emplace_back("deadUpdate");
+      }
+      check(calls == expected, "bounded tick call order and completion gate");
+      check(transitions == (state == 3 ? std::vector<std::uint32_t>{0} :
+                            std::vector<std::uint32_t>{}),
+            "state request only on documented branch");
+      if (i == 3) {
+        const auto expected_fade = state == 3 ? 99u :
+                                   state == 6 || state == 7 ? 98u : 100u;
+        check(a.hp.mem.load(address + 0x3c8, 1) == expected_fade &&
+              (a.hp.mem.load(address + 0xa8, 8) & 0x54) == 0x54 &&
+              (a.object->flags & 1) == 1 &&
+              (a.hp.mem.load(address + 0xc, 4) & 1) == 1,
+              "WarWraith fade, creature flags, and object flag after tick");
+      }
     }
     a.state = 6; input.has_target = true; input.hit_event = true;
-    calls.clear();
+    input.animation_over = false;
+    if (i == 3) a.hp.mem.store(address + 0x3c8, 1, 100);
+    calls.clear(); transitions.clear();
     actors.tick(address);
-    check(calls.size() == (i == 3 ? 12u : 10u) &&
-          calls.back() == "setState", "reference targeted dispatch order");
+    check(calls.size() == (i == 3 ? 11u : 9u) &&
+          calls.back() == (i == 3 ? "grid" : "turn") && transitions.empty(),
+          "running attack dispatches hit without completion transition");
     check(!hits.empty() && hits.back() == (i == 1 ? 0x440008u : 8u),
           "targeted hit dispatch flags, no landed damage claim");
+    const auto hit_count = hits.size();
+    input.animation_over.reset();
+    refuses([&] { actors.tick(address); },
+            "missing attack completion answer refuses before hit dispatch");
+    check(hits.size() == hit_count, "unknown completion does not dispatch another hit");
+    input.animation_over = false;
+    if (i == 3) {
+      check(a.hp.mem.load(address + 0x3c8, 1) == 98 &&
+            (a.hp.mem.load(address + 0xa8, 8) & 0x54) == 0x54 &&
+            (a.object->flags & 1) == 1,
+            "WarWraith attack fades 100 to 98 after pre-fade flag writes");
+      input.has_target = false; input.hit_event = false;
+      calls.clear();
+      actors.tick(address);
+      check(a.hp.mem.load(address + 0x3c8, 1) == 96 &&
+            (a.object->flags & 1) == 0 &&
+            std::find(calls.begin(), calls.end(), "turn") == calls.end(),
+            "WarWraith fade below 99 clears flag and skips prefix turn");
+      a.hp.mem.store(address + 0x3c8, 1, 21);
+      a.hp.mem.store(address + 0xa8, 8, 0x100);
+      actors.tick(address);
+      check(a.hp.mem.load(address + 0x3c8, 1) == 19 &&
+            (a.hp.mem.load(address + 0xa8, 8) & 0x154) == 0x154,
+            "fade threshold tests pre-tick value 21 and preserves other flags");
+      actors.tick(address);
+      check(a.hp.mem.load(address + 0x3c8, 1) == 17 &&
+            (a.hp.mem.load(address + 0xa8, 8) & 0x154) == 0x100,
+            "fade below 21 clears only the 0x54 creature flags");
+      a.state = 3;
+      a.hp.mem.store(address + 0x3c8, 1, 59);
+      actors.tick(address);
+      check(a.hp.mem.load(address + 0x3c8, 1) == 60,
+            "WarWraith chase fade rises toward 60");
+      a.hp.mem.store(address + 0x3c8, 1, 61);
+      actors.tick(address);
+      check(a.hp.mem.load(address + 0x3c8, 1) == 60,
+            "WarWraith chase fade falls toward 60");
+      a.state = 6;
+      a.hp.mem.store(address + 0x3c8, 1, 100);
+    }
+    input.has_target = true; input.hit_event = true; input.animation_over = true;
+    calls.clear(); transitions.clear();
+    actors.tick(address);
+    check(calls.back() == "setState" &&
+          transitions == std::vector<std::uint32_t>{i == 3 ? 3u : 5u},
+          "completed targeted attack requests documented next state");
+    input.has_target = false; input.hit_event = false;
+    if (i == 3) a.hp.mem.store(address + 0x3c8, 1, 100);
+    calls.clear(); transitions.clear();
+    actors.tick(address);
+    check(calls.back() == "setState" &&
+          transitions == std::vector<std::uint32_t>{i == 3 ? 3u : 5u},
+          "completed no-target attack also requests next state");
     a.state = 7;
+    input.has_target = true; input.animation_over = false;
     refuses([&] { actors.tick(address); }, "state7 targeted branch remains Unknown");
     input.has_target = false; input.hit_event = false;
+    a.state = 0;
+    input.idle_deadline.reset();
+    refuses([&] { actors.tick(address); }, "missing idle deadline refuses");
+    input.idle_deadline = 10;
+    world.frame = 10;
+    calls.clear(); transitions.clear();
+    actors.tick(address);
+    check(transitions.empty(), "idle stays before or at deadline");
+    world.frame = 11;
+    calls.clear(); transitions.clear();
+    actors.tick(address);
+    check(transitions == std::vector<std::uint32_t>{1} &&
+          calls.back() == "setState", "idle requests wander after deadline");
+    input.idle_deadline = 1000;
+    world.frame = 0;
     a.hp.mem.store(address + 0x228, 4, R::from_int(100));
     const auto prior_frame = a.hp.mem.load(R::creature_hp::G_SIM_FRAME, 4);
     refuses([&] { actors.take_damage(address, 0x1000, 8, R::from_int(25)); },
@@ -207,15 +322,33 @@ void run_seed(std::uint32_t seed) {
           a.hp.mem.load(address + 0xc8, 4) == R::from_int(25) &&
           a.hp.mem.load(address + 0x2dc, 4) == 8,
           "reference base damage probe");
+    const std::array<std::uint32_t, 4> timer_offsets{{0x31c,0x318,0x314,0x31a}};
+    for (std::size_t n = 0; n < timer_offsets.size(); ++n)
+      a.hp.mem.store(address + timer_offsets[n], 2, n + 1);
+    const auto before_death_state = a.state;
+    const auto before_drops = drops.size();
+    filter_refuse = true;
+    calls.clear();
+    actors.set_state(address, 20);
+    check(calls == std::vector<std::string>{"filter"} &&
+          a.state == before_death_state && !a.death_reported &&
+          drops.size() == before_drops,
+          "filter refusal prevents death state and drops");
+    for (std::size_t n = 0; n < timer_offsets.size(); ++n)
+      check(a.hp.mem.load(address + timer_offsets[n], 2) == n + 1,
+            "filter refusal preserves timers");
+    filter_refuse = false;
     calls.clear();
     actors.set_state(address, 20);
     check(a.state == 20 && a.hp.mem.load(address + 0x232, 2) == 20 &&
           a.death_reported && drops.size() == i + 1,
           "reference death dispatch");
     check(calls == (i == 3 ?
-          std::vector<std::string>{"holderDrop","generateDrops","deathRemainder"} :
-          std::vector<std::string>{"dropLoot","deathRemainder"}),
+          std::vector<std::string>{"filter","holderDrop","generateDrops","deathRemainder"} :
+          std::vector<std::string>{"filter","dropLoot","deathRemainder"}),
           "reference death call order");
+    check(drop_timers.back() == std::array<std::uint64_t, 4>{{0,0,0,0}},
+          "all four death timers clear before drop dispatch");
     const auto &d = drops.back();
     check(d.z == 0x42100000 && d.throw_speed == 0x40000000 &&
           d.gold_scale == (i == 3 ? 0x40333333u : 0x3fccccccu) &&
@@ -241,6 +374,51 @@ void run_seed(std::uint32_t seed) {
   check(fresh_wraith.weapon_part == reference_part &&
         parts == std::vector<std::uint32_t>{reference_part},
         "fresh-object reference weapon part for seed");
+  O::World recycled_world(O::CallbackPolicy::ReferenceBase);
+  B::Runtime recycled(recycled_world, resources, s);
+  auto &first = recycled.construct(B::Kind::Kobold, {0,0,0}, 0,
+                                   {}, R::from_int(100));
+  auto *old_object = first.object;
+  const auto reused_address = old_object->addr;
+  const auto old_serial = old_object->serial;
+  recycled_world.destroy(*old_object);
+  auto &replacement = recycled.construct(B::Kind::KoboldTough, {0,0,0}, 0,
+                                         {}, R::from_int(100));
+  check(replacement.object->addr == reused_address &&
+        replacement.object != old_object &&
+        replacement.object_serial != old_serial &&
+        &recycled.at(reused_address) == &replacement,
+        "destroy/reconstruct retires stale entry at recycled address");
+  input.active = false;
+  calls.clear();
+  recycled.tick(reused_address);
+  check(calls == std::vector<std::string>{"damage","run"},
+        "replacement actor ticks safely");
+  recycled_world.destroy(*replacement.object);
+  refuses([&] { recycled.at(reused_address); },
+          "dead replacement identity is not returned");
+  auto &callback_actor = recycled.construct(B::Kind::Kobold, {0,0,0}, 0,
+                                             {}, R::from_int(100));
+  check(callback_actor.object->addr == reused_address &&
+        bool(recycled_world.on_destroy),
+        "World death dispatch covers recycled actor");
+  recycled_world.on_destroy(*callback_actor.object, 3);
+  refuses([&] { recycled.at(reused_address); },
+          "World death dispatch retires actor identity");
+  input.active = true;
+  O::World missing_filter_world(O::CallbackPolicy::ReferenceBase);
+  auto no_filter = s;
+  no_filter.filter_state = {};
+  B::Runtime missing_filter(missing_filter_world, resources, no_filter);
+  auto &unfiltered = missing_filter.construct(B::Kind::Kobold,
+                                               {0,0,0}, 0, {}, R::from_int(100));
+  const auto unfiltered_addr = unfiltered.object->addr;
+  unfiltered.hp.mem.store(unfiltered_addr + 0x31c, 2, 7);
+  refuses([&] { missing_filter.set_state(unfiltered_addr, 20); },
+          "missing filter answer refuses death");
+  check(unfiltered.state == 0 &&
+        unfiltered.hp.mem.load(unfiltered_addr + 0x31c, 2) == 7,
+        "missing filter leaves state and timers untouched");
   const auto count = world.objects.size();
   resources.unload("kobold.lmp");
   refuses([&] {
