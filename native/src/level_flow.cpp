@@ -841,12 +841,14 @@ bool GateTravel::confirm(const std::string &s, const std::string &current,
 bool GateTravel::tick(Pending &p) {
   if (!ticks || request_written)
     return false;
-  ++ticks;
-  if (ticks == 181) {
+  // State 5 tests the counter on entry. Entry 180 advances to 181 without
+  // copying; the next invocation writes the request (0x27e1a8-0x27e218).
+  if (ticks >= 181) {
     p.request(destination);
     request_written = true;
     return true;
   }
+  ++ticks;
   return false;
 }
 void GateTravel::arrived() { *this = {}; }

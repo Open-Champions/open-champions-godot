@@ -661,6 +661,11 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
         gate_arrival_pending_ = true;
       }
     }
+    // Player_run/Player_draw may ask for a prompt without a pressed use. The
+    // bridge cannot resolve either stage until the live grid is supplied.
+    if (std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+                    [](const auto &r) { return r.cls == "JumpGate" || r.cls == "Portal" || r.cls == "PortalHurt"; }))
+      gate_prompt_refusal_ = "Gate proximity discovery refused: the live object-grid query and campaign hub/GateList lifecycle are unavailable.";
     const bool exit_used = exit_use_pending_ && run_level_use();
     exit_use_pending_ = false;
     if (scripts_->dialog_attached()) {
@@ -702,106 +707,12 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
   }
 }
 bool ChampionsSessionController::run_level_use() {
-  if (!scripts_ || script_level_objects_.empty()) return false;
-  // The original box query considers object extents and grid order. This
-  // bridge has records, so only centres inside the documented box can be
-  // offered; missing grid extents/order remain an explicit acceptance limit.
-  const auto &p = current_.position;
-  std::vector<rta::level_flow::UseCandidate> candidates;
-  for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
-    const auto &r = script_level_objects_[i];
-    if (r.cls != "PushTrigger" && r.cls != "Portal" && r.cls != "PortalHurt" &&
-        r.cls != "JumpGate") continue;
-    if (i < used_once_exits_.size() && used_once_exits_[i]) continue;
-    if (!rta::level_flow::use_query_contains_centre(p, r.position)) continue;
-    candidates.push_back({i, r.position, 0x100000u});
-  }
-  const auto nearest = rta::level_flow::nearest_use_candidate(p, candidates);
-  if (!nearest) return false;
-  const auto &record = script_level_objects_[*nearest];
-  const auto nonzero = [&](const char *name) {
-    return std::strtol(record.prop(name).value_or("0").c_str(), nullptr, 10) != 0;
-  };
-  exit_use_refusal_.clear();
-  if (record.cls != "PushTrigger") {
-    if (record.cls == "PortalHurt" || nonzero("hurt")) {
-      gate_prompt_refusal_ = "Hurt gate has no interaction prompt.";
-      return true;
-    }
-    if (gate_travel_.menu_open || gate_travel_.ticks) {
-      gate_prompt_refusal_ = "Gate task already running.";
-      return true;
-    }
-    if (const auto script = record.prop("script")) {
-      const auto stop = scripts_->run_object_entry(*nearest, *script, 0);
-      if (stop != rta::script_commands::Stop::Complete || !scripts_->last_value()) {
-        gate_prompt_refusal_ = "Gate script predicate refused interaction.";
-        return true;
-      }
-    }
-    std::string hub;
-    if (start_level_name_.find("hub") != std::string::npos)
-      hub = start_level_name_;
-    else
-      for (const auto &name : gate_destinations_.names)
-        if (name.find("hub") != std::string::npos) { hub = name; break; }
-    gate_destinations_.add_current(start_level_name_, hub);
-    const auto prompt = rta::level_flow::gate_prompt(true, false, true,
-                                                    gate_destinations_.names.size(), {});
-    gate_prompt_refusal_ = prompt.text.value_or("");
-    if (!prompt.usable) return true;
-    gate_travel_.open(false);
-    if (const auto fixed = record.prop("destination")) {
-      if (!gate_travel_.confirm(*fixed, start_level_name_, gate_destinations_, true))
-        gate_prompt_refusal_ = "Gate fixed destination was refused.";
-    }
-    return true;
-  }
-  // Slot-13 needs a nonempty prompt. A failed key selects lockMessage and
-  // never reaches slot-14. Offline slot 0 uses the pressed E/use event.
-  for (const auto &property : record.props) {
-    if (property.rfind("key=", 0) != 0) continue;
-    const auto stop = scripts_->run_object_entry(*nearest, property.substr(4), 0);
-    if (stop != rta::script_commands::Stop::Complete) {
-      exit_use_refusal_ = "PushTrigger key predicate was not completed.";
-      return true;
-    }
-    if (!scripts_->last_value()) {
-      exit_use_refusal_ = record.prop("lockMessage").value_or("PushTrigger locked");
-      return true;
-    }
-  }
-  if (record.prop("message").value_or("").empty()) {
-    exit_use_refusal_ = "PushTrigger has no usable prompt.";
-    return true;
-  }
-  if (nonzero("shop")) {
-    exit_use_refusal_ = "PushTrigger shop alive-player flag is unported.";
-    return true;
-  }
-  const bool off_only = nonzero("offOnly");
-  bool ran = false;
-  for (const auto &property : record.props) {
-    if (property.rfind("action=", 0) != 0 || property.size() == 7) continue;
-    const auto name = property.substr(7);
-    const auto stop = scripts_->run_object_entry(*nearest,
-        off_only ? "off" + name : name, 0);
-    if (stop == rta::script_commands::Stop::Missing ||
-        stop == rta::script_commands::Stop::Fault ||
-        stop == rta::script_commands::Stop::Refused) {
-      exit_use_refusal_ = "PushTrigger action script was refused.";
-      return true;
-    }
-    ran = true;
-  }
-  if (!ran) {
-    exit_use_refusal_ = "PushTrigger has no action property.";
-    return true;
-  }
-  if (nonzero("once")) used_once_exits_[*nearest] = true;
-  ++exit_use_count_;
-  exit_use_record_ = *nearest;
-  return true;
+  // objects.ob alone is not the ordered, limited live object-grid query.
+  // It omits competing interactables, extents, flags and vehicle state. Do
+  // not execute a selected record or its prompt from an invented query.
+  exit_use_refusal_ = "Physical use refused: player vehicle state and the ordered live object-grid query (extents, flags, competitors, limit) are unavailable.";
+  gate_prompt_refusal_ = "Gate proximity discovery refused: the live object-grid query and campaign hub/GateList lifecycle are unavailable.";
+  return !script_level_objects_.empty();
 }
 void ChampionsSessionController::run_level_triggers() {
   if (live_triggers_.empty()) return;
@@ -1183,7 +1094,9 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       gate_clear_next_tick_ = false;
     }
     script_level_objects_ = std::move(next_objects);
-    used_once_exits_.assign(script_level_objects_.size(), false);
+    // Live PushTrigger deletion is unavailable along with live dispatch. Do
+    // not construct a per-attachment once mask that revives on re-entry.
+    used_once_exits_.clear();
     exit_use_pending_ = false;
     exit_use_count_ = 0;
     exit_use_refusal_.clear();
@@ -1331,11 +1244,15 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
 } // namespace
 Dictionary ChampionsSessionController::dialog_use() {
   Dictionary out;
-  out["ok"] = bool(scripts_ && !scripts_->hud().help_open);
-  if (out["ok"]) {
-    exit_use_pending_ = true;
-    dialog_use_pending_ = true;
-  }
+  const bool player_valid = player_ && observed_player().current_known && observed_player().hp > 0;
+  out["ok"] = false;
+  if (!player_valid)
+    out["error"] = "Player_interact refused: a controlled player object with positive record health is required.";
+  else if (scripts_ && scripts_->hud().help_open)
+    out["error"] = "Player_interact refused: the help box owns use input.";
+  else
+    out["error"] = "Player_interact refused: ridden-vehicle state and the ordered live object-grid query are unavailable.";
+  exit_use_refusal_ = String(out["error"]).utf8().get_data();
   return out;
 }
 Array ChampionsSessionController::dialog_events() {
@@ -1754,10 +1671,9 @@ Array ChampionsSessionController::script_exit_targets() const {
       }
     }
     if (kind == "PushTrigger") {
-      item["physical_use"] = record.prop("action").has_value() &&
-          !record.prop("message").value_or("").empty();
+      item["physical_use"] = false;
       item["physical_use_refusal"] =
-          "Object grid ordering, network prompts, and the shop flag are bounded separately.";
+          "Physical use requires the ordered live object grid and player vehicle state.";
     }
     // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
     // Neither is a direct script action. The host exposes them without claiming
@@ -1816,6 +1732,7 @@ Dictionary ChampionsSessionController::script_gate_status() const {
   out["travel_ticks"] = int64_t(gate_travel_.ticks);
   out["request_written"] = gate_travel_.request_written;
   out["prompt"] = String::utf8(gate_prompt_refusal_.c_str());
+  out["refusal"] = "Gate travel requires the campaign hub, saved/reset GateList, menu pause/task state, and constructed destination object grid and seed.";
   Array destinations;
   for (const auto &name : gate_destinations_.choosable(start_level_name_))
     destinations.push_back(String::utf8(name.c_str()));
@@ -1824,9 +1741,9 @@ Dictionary ChampionsSessionController::script_gate_status() const {
 }
 Dictionary ChampionsSessionController::script_gate_confirm(const String &destination) {
   Dictionary out;
-  const std::string name = destination.utf8().get_data();
-  out["ok"] = gate_travel_.confirm(name, start_level_name_, gate_destinations_);
-  if (!bool(out["ok"])) out["error"] = "Gate destination is current, unknown, or its menu is closed.";
+  (void)destination;
+  out["ok"] = false;
+  out["error"] = "Gate travel refused: campaign hub/GateList lifecycle, paused menu task, and destination constructor seed/blocking grid are unavailable.";
   return out;
 }
 Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
@@ -2304,52 +2221,9 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
       const auto records = rta::level_flow::parse_objects(
           {start_objects_.data(), start_objects_.size()});
       rta::level_flow::StoryGround story;
-      if (gate_arrival_pending_ && !gate_travel_.fixed) {
-        // JumpGate_ctor searches each destination Portal in record order.
-        // The owner-selected WORLD supplies both terrain tests. The native
-        // bridge has no complete live object grid or constructor draws, so
-        // this is an explicitly bounded terrain free spot, not a retail
-        // coordinate parity claim.
-        rta::objects::World finder;
-        finder.shared.state = script_seed_ && !script_seed_unpaired_
-            ? script_seed_->state
-            : control_ ? control_->shared_seed() : active_setup().config.shared_seed;
-        rta::level_flow::StartEntry entry;
-        entry.prev = start_previous_level_;
-        entry.entrance = start_entrance_;
-        entry.gate = true;
-        rta::level_flow::Placement placement;
-        placement.players = 1;
-        auto spot = [&](const rta::level_flow::Vec3 &at, rta::Raw spread,
-                        rta::Raw radius, bool any) {
-          return finder.find_free_spot(at, int(display_float(spread)),
-                                       int(display_float(radius)), any,
-              [&](rta::Raw r, const rta::level_flow::Vec3 &p) {
-                return rta::world_queries::terrain_test_flag1(query, r, p);
-              },
-              [&](rta::Raw r, const rta::level_flow::Vec3 &p) {
-                return rta::world_queries::terrain_height(query, r, p);
-              }).first;
-        };
-        const auto resolved = rta::level_flow::resolve_start(
-            {}, records, entry, placement,
-            [&](rta::Raw r, const rta::level_flow::Vec3 &p) {
-              return rta::world_queries::terrain_height(query, r, p);
-            }, spot, [&]() { return std::uint16_t(finder.shared.draw() >> 16); });
-        const bool took_portal = std::any_of(resolved.took.begin(), resolved.took.end(),
-            [&](std::size_t i) { return records[i].cls == "Portal" || records[i].cls == "PortalHurt"; });
-        if (!took_portal) throw std::runtime_error("Gate destination has no Portal arrival record.");
-        story.position = resolved.spawn.pos[0];
-        story.object_z = resolved.object_z[0];
-        story.rank = resolved.spawn.rank;
-        story.marker_taken = true;
-        story.ground = resolved.ground[0];
-        story.facing = resolved.spawn.facing[0];
-        gate_arrival_seed_ = finder.shared.state;
-        start_info["portal_free_spot"] = true;
-        start_info["portal_object_grid_verified"] = false;
-        start_info["portal_seed_after_constructors_verified"] = false;
-      } else if (start_previous_level_.empty() && start_entrance_.empty()) {
+      if (gate_arrival_pending_)
+        throw std::runtime_error("Portal arrival refused: destination constructors, post-constructor seed, blocking-object grid and live actor facing are unavailable.");
+      if (start_previous_level_.empty() && start_entrance_.empty()) {
         story = rta::level_flow::story_start_ground({}, records, query);
       } else {
         rta::level_flow::StartEntry entry;
@@ -2411,8 +2285,6 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
                            ? current_config
                            : scene_config();
     next_config.start = start;
-    if (gate_arrival_pending_ && !gate_travel_.fixed && bool(start_info.get("portal_free_spot", false)))
-      next_config.shared_seed = gate_arrival_seed_;
     prepared->control =
         std::make_unique<rta::native_save::Scene>(next_config, data);
     prepared->name = path.get_file();

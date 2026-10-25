@@ -498,22 +498,28 @@ func run() -> void:
 	var opened_dialog := false
 	var physical_attempts := 0
 	if dialog.get("ok", false) and talkers > 0 and scene.play_mode:
-		# No target coordinates are published by the client. Sweep the four
-		# movement directions and use the ordinary E key at each stop.
-		for direction in [1, 2, 4, 8]:
-			for part in range(4):
-				advance(direction, 24)
-				game_key(KEY_E)
-				advance(0, 2)
-				help_close()
-				physical_attempts += 1
-				if scene.controller.dialog_status().get("open", false):
-					opened_dialog = true
-					break
-			if opened_dialog: break
+		# One ordinary E press establishes the explicit Player_interact
+		# refusal; further navigation cannot supply its missing runtime state.
+		game_key(KEY_E)
+		advance(0, 2)
+		help_close()
+		physical_attempts = 1
+		opened_dialog = scene.controller.dialog_status().get("open", false)
+	var physical_dialog_opened := opened_dialog
+	var direct_dialog_opened := false
+	if not opened_dialog and talkers == 1 and dialog.get("ok", false):
+		# Keep the separate route diagnostic running after the Player_interact
+		# refusal. This explicit talker index is never counted as physical use.
+		var direct_talk: Dictionary = scene.controller.dialog_talk_to(0)
+		if direct_talk.get("ok", false):
+			advance(0, 2)
+			direct_dialog_opened = scene.controller.dialog_status().get("open", false)
+			opened_dialog = direct_dialog_opened
 	var walk_end: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
-	mark("walk_and_talk", "dialog_open" if opened_dialog else "refused",
+	mark("walk_and_talk", "dialog_open" if physical_dialog_opened else \
+		("physical_refused_direct_diagnostic" if direct_dialog_opened else "refused"),
 		{"talkers": talkers, "physical_use_attempts": physical_attempts,
+		"physical_dialog_opened": physical_dialog_opened, "direct_diagnostic_opened": direct_dialog_opened,
 		"walk_displacement": walk_start.distance_to(walk_end),
 		"nearest_target_known": false, "paused": scene.paused,
 		"menu_visible": scene.menu.visible})
@@ -640,8 +646,8 @@ func run() -> void:
 		save_json()
 		quit(0 if walk_exit_ok else 1)
 		return
-	# Normal E/use on an owner-supplied level record; the selected action is
-	# never invoked by the diagnostic menu.
+	# Exercise the real-level use button boundary. A records-only object table
+	# cannot establish the live query, so action effects must stay absent.
 	var push_sources: Array[int] = []
 	var portal_sources: Array[int] = []
 	for index in range(scene.real.levels.size()):
@@ -652,106 +658,54 @@ func run() -> void:
 		if not inventory.get("ok", false): continue
 		if int(inventory.get("pushes", 0)) > 0: push_sources.append(index)
 		if int(inventory.get("portals", 0)) > 0: portal_sources.append(index)
-	var physical_push := false
-	var push_attempts := 0
-	for index in push_sources:
-		if push_attempts >= 6 or physical_push: break
-		if index != scene.real.current:
-			if not scene.load_real_level(index, true): continue
-			scene.start_play()
-			help_close()
-			if scene.paused and scene.session_started: scene.resume_session()
-		var targets: Array = scene.controller.script_exit_targets().filter(func(t): return t.get("physical_use", false))
-		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
-		targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
-		for target in targets:
-			push_attempts += 1
-			var count_before := int(scene.controller.script_use_status().get("uses", 0))
-			var approach: Dictionary = approach_use(target, 2500)
-			var use: Dictionary = scene.controller.script_use_status()
-			physical_push = bool(approach.get("pressed", false)) and int(use.get("uses", 0)) > count_before and \
-				int(use.get("record", -1)) == int(target.get("index", -2))
-			if physical_push or push_attempts >= 6: break
-	mark("push_trigger_use", "used" if physical_push else "refused",
-		{"candidate_levels": push_sources.size(), "attempts": push_attempts, "physical_use": physical_push,
-		"use_refusal": scene.controller.script_use_status().get("refusal", "")})
-	await capture("11-push-use")
-	# Discover two real gate levels, then request travel from the second to a
-	# discovered destination. The host menu exposes explicit destination choice;
-	# the research did not dynamically compare its full pad input machine.
-	var gate_discoveries := 0
-	var gate_pressed := 0
-	var gate_sources_tried := 0
-	var gate_target_attempts := 0
-	var gate_navigation_stalls := 0
-	var gate_menu := false
-	var portal_arrived := false
-	var portal_rank := -1
-	var portal_at_spot := false
-	var gate_request_at_181 := false
-	var gate_advance_calls := 0
-	var gate_ready_before := -1
-	var gate_ready_after := -1
-	for index in portal_sources:
-		if gate_discoveries >= 2: break
-		if not scene.load_real_level(index, true): continue
-		gate_sources_tried += 1
+	var physical_refused := false
+	if not push_sources.is_empty() and scene.load_real_level(push_sources[0], true):
 		scene.start_play()
 		help_close()
 		if scene.paused and scene.session_started: scene.resume_session()
-		var targets: Array = scene.controller.script_exit_targets().filter(func(t): return t.get("kind", "") in ["Portal", "PortalHurt"])
-		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
-		targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
-		for target in targets:
-			gate_target_attempts += 1
-			var approach: Dictionary = approach_use(target, 2500)
-			if approach.get("navigation_stalled", false): gate_navigation_stalls += 1
-			if not approach.get("pressed", false): continue
-			gate_pressed += 1
-			var gate: Dictionary = scene.controller.script_gate_status()
-			if str(gate.get("prompt", "")) == "JumpGateVirgin" or gate.get("menu_open", false) or int(gate.get("travel_ticks", 0)) > 0:
-				gate_discoveries += 1
-				gate_menu = bool(gate.get("menu_open", false))
-				break
-		print("GATE_SEARCH " + JSON.stringify({"sources": gate_sources_tried,
-			"targets": gate_target_attempts, "stalls": gate_navigation_stalls,
-			"discoveries": gate_discoveries, "pressed": gate_pressed}))
-	if gate_menu:
-		var gate: Dictionary = scene.controller.script_gate_status()
-		var choices: Array = gate.get("destinations", [])
-		if not choices.is_empty() and scene.controller.script_gate_confirm(str(choices[0])).get("ok", false):
-			gate_ready_before = int(scene.controller.get_observation().get("ready_ticks", -1))
-			while gate_advance_calls < 360 and not scene.controller.script_gate_status().get("request_written", false):
-				advance()
-				gate_advance_calls += 1
-			gate_ready_after = int(scene.controller.get_observation().get("ready_ticks", -1))
-			var pending_gate: Dictionary = scene.controller.script_level_request()
-			var travel: Dictionary = scene.controller.script_gate_status()
-			gate_request_at_181 = pending_gate.get("queued", false) and \
-				int(travel.get("travel_ticks", -1)) == 181 and travel.get("request_written", false) and \
-				int(pending_gate.get("orientation", -1)) == 255
-			if gate_request_at_181 and scene._apply_level_change():
-				if not scene.session_started: scene.start_play()
-				if scene.session_started and not scene.stopped: scene.set_paused(false)
-				var arrival: Dictionary = scene.controller.get_terrain().get("start", {})
-				portal_rank = int(arrival.get("rank", -1))
-				portal_at_spot = scene.controller.get_observation().get("position", Vector3.ZERO).distance_to(
-					arrival.get("position", Vector3.ZERO)) < 0.01
-				portal_arrived = bool(arrival.get("portal_free_spot", false)) and portal_rank == 3 and portal_at_spot
-	mark("portal_arrival", "arrived" if portal_arrived else "refused",
-		{"candidate_levels": portal_sources.size(), "gate_discoveries": gate_discoveries,
-		"gate_sources_tried": gate_sources_tried, "gate_target_attempts": gate_target_attempts,
-		"gate_navigation_stalls": gate_navigation_stalls,
-		"physical_gate_presses": gate_pressed, "menu_opened": gate_menu,
-		"request_at_181": gate_request_at_181, "gate_advance_calls": gate_advance_calls,
-		"gate_ready_ticks": gate_ready_after - gate_ready_before,
-		"portal_free_spot": portal_arrived, "rank": portal_rank,
-		"position_matches_start": portal_at_spot,
-		"object_grid_verified": false, "constructor_seed_verified": false})
+		var before_use: int = int(scene.controller.script_use_status().get("uses", 0))
+		var before_action: Dictionary = scene.controller.script_command_counts().get("executed", {})
+		var use_request: Dictionary = scene.controller.dialog_use()
+		advance()
+		var after_use: Dictionary = scene.controller.script_use_status()
+		var after_action: Dictionary = scene.controller.script_command_counts().get("executed", {})
+		physical_refused = int(after_use.get("uses", 0)) == before_use and \
+			(not str(after_use.get("refusal", "")).is_empty() or not use_request.get("ok", false))
+		mark("push_trigger_use", "refused_expected" if physical_refused else "unsafe_dispatch",
+			{"candidate_levels": push_sources.size(), "uses_unchanged": int(after_use.get("uses", 0)) == before_use,
+			"action_counts_before": before_action, "action_counts_after": after_action,
+			"refusal": after_use.get("refusal", use_request.get("error", ""))})
+	else:
+		mark("push_trigger_use", "blocked_no_real_source", {"candidate_levels": push_sources.size()})
+	await capture("11-push-use")
+	# Gate confirmation is visible under its own action ID. With no saved
+	# GateList or constructed destination grid, the UI and API must refuse.
+	var portal_refused := false
+	if not portal_sources.is_empty() and scene.load_real_level(portal_sources[0], true):
+		scene.start_play()
+		help_close()
+		if scene.paused and scene.session_started: scene.resume_session()
+		scene._update_menu()
+		var button: Button = scene.actions.real_gate_confirm
+		var before_position: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		var request_before: Dictionary = scene.controller.script_level_request()
+		var refusal: Dictionary = scene.controller.script_gate_confirm("unsupported")
+		var request_after: Dictionary = scene.controller.script_level_request()
+		portal_refused = button.visible and button.disabled and not refusal.get("ok", true) and \
+			str(refusal.get("error", "")).contains("constructor") and \
+			request_after.get("queued", false) == request_before.get("queued", false) and \
+			scene.controller.get_observation().get("position", Vector3.ZERO) == before_position
+		mark("portal_arrival", "refused_expected" if portal_refused else "unsafe_arrival",
+			{"candidate_levels": portal_sources.size(), "real_button_visible": button.visible,
+			"real_button_disabled": button.disabled, "request_unchanged": request_after.get("queued", false) == request_before.get("queued", false),
+			"position_unchanged": scene.controller.get_observation().get("position", Vector3.ZERO) == before_position,
+			"refusal": refusal.get("error", "")})
+	else:
+		mark("portal_arrival", "blocked_no_real_source", {"candidate_levels": portal_sources.size()})
 	await capture("12-portal-arrival")
 	if args.has("exits-only"):
 		save_json()
-		quit(0 if walk_exit_ok and physical_push and portal_arrived else 1)
+		quit(0 if walk_exit_ok and physical_refused and portal_refused else 1)
 		return
 	# Valor is a separate fight diagnostic; the story route above enters blood1.
 	var valor_index := -1

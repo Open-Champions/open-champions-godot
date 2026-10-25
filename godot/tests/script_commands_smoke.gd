@@ -51,7 +51,7 @@ func run() -> void:
 	run_tick_counter(fresh)
 	check_trigger_property(fresh)
 	check_push_use(fresh)
-	check_hurt_gate(fresh)
+	check_gate_refusal(fresh)
 	var silent: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0)
 	check(silent.get("ok", false) and int(silent.get("music_volume", -1)) == 0, "options-file zero reaches the script host")
 	var loud: Dictionary = fresh.enable_level_script(TICK_COUNTER.hex_decode(), PackedByteArray(), false, {}, 0x3fc00000)
@@ -98,25 +98,39 @@ func check_push_use(controller) -> void:
 	var objects := trigger_objects(position, ["message=Use", "action=tick", "once=1"], "PushTrigger")
 	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), objects).get("ok", false),
 		"synthetic PushTrigger loads")
-	check(controller.dialog_use().get("ok", false), "E/use is accepted without dialog data")
-	for i in range(3): controller.advance(0)
+	var before: int = int(controller.script_command_counts().get("executed", {}).get("addv", 0))
+	var ready_before: int = int(controller.get_observation().get("ready_ticks", 0))
+	check(not controller.dialog_use().get("ok", true), "use requires a live player with positive record health")
+	controller.advance(0)
 	var use: Dictionary = controller.script_use_status()
-	check(int(use.get("uses", 0)) == 1 and int(use.get("record", -1)) == 0,
-		"proximity use runs selected PushTrigger action")
-	controller.dialog_use()
-	for i in range(3): controller.advance(0)
-	check(int(controller.script_use_status().get("uses", 0)) == 1, "once removes PushTrigger from use")
+	var ready_after: int = int(controller.get_observation().get("ready_ticks", 0))
+	check(int(use.get("uses", 0)) == 0 and int(controller.script_command_counts().get("executed", {}).get("addv", 0)) == before + ready_after - ready_before,
+		"refused physical use does not execute an action beyond the scheduled Script tick")
+	check(not controller.script_run_exit(0).get("ok", true), "once PushTrigger refuses direct action without persisted deletion")
+	var direct := trigger_objects(position, ["message=Use", "action=tick"], "PushTrigger")
+	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), direct).get("ok", false), "diagnostic action fixture loads")
+	before = int(controller.script_command_counts().get("executed", {}).get("addv", 0))
+	check(controller.script_run_exit(0).get("ok", false), "explicit diagnostic action runs")
+	check(int(controller.script_command_counts().get("executed", {}).get("addv", 0)) == before + 1,
+		"diagnostic action has an observable addv effect before another ready tick")
 
-func check_hurt_gate(controller) -> void:
+func check_gate_refusal(controller) -> void:
 	var position: Vector3 = controller.get_observation().get("position", Vector3.ZERO)
-	var objects := trigger_objects(position, [], "PortalHurt")
+	var objects := trigger_objects(position, [], "JumpGate")
 	check(controller.enable_level_script(TICK_COUNTER.hex_decode(), objects).get("ok", false),
-		"synthetic hurt gate loads")
-	controller.dialog_use()
+		"synthetic ordinary gate loads")
 	for i in range(3): controller.advance(0)
 	var gate: Dictionary = controller.script_gate_status()
-	check(not gate.get("menu_open", false) and gate.get("prompt", "") == "Hurt gate has no interaction prompt.",
-		"hurt gate does not open interaction menu")
+	check(not gate.get("menu_open", false) and str(gate.get("prompt", "")).contains("proximity discovery refused"),
+		"normal ready ticks report refused gate discovery without a use press")
+	controller.dialog_use()
+	var pending_before: Dictionary = controller.script_level_request()
+	var position_before: Vector3 = controller.get_observation().get("position", Vector3.ZERO)
+	var confirm: Dictionary = controller.script_gate_confirm("unsupported")
+	check(not confirm.get("ok", true) and str(confirm.get("error", "")).contains("constructor"),
+		"gate confirmation refuses absent destination construction and seed")
+	check(controller.script_level_request() == pending_before and controller.get_observation().get("position", Vector3.ZERO) == position_before,
+		"refused gate confirmation publishes no request or arrival position")
 
 func run_tick_counter(controller) -> void:
 	var ticks_before := int(controller.get_observation().get("ready_ticks", -1))

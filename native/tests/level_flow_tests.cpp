@@ -949,7 +949,9 @@ void integration() {
   CHECK(state.travel.confirm("aab", "aa", state.gates));
   for (int i = 0; i < 179; ++i)
     CHECK(!adapter.advance_ready());
-  CHECK(state.pending.name.empty());
+  CHECK(state.travel.ticks == 180 && state.pending.name.empty());
+  CHECK(!adapter.advance_ready());
+  CHECK(state.travel.ticks == 181 && state.pending.name.empty());
   CHECK(adapter.advance_ready());
   CHECK(state.pending.name == "aab" && state.travel.ticks == 181);
   CHECK(!adapter.advance_ready());

@@ -1,4 +1,4 @@
-STATUS: PARTIAL. The bounded exit path passes integrated headless and rendered walk-in Trigger, physical PushTrigger use, and gate-to-Portal arrival. The broad native CTest run timed out under concurrent load; serial `player-exact` passed with a timeout-only local override. Full retail terrain/object-grid parity and the complete gate pad menu remain unverified.
+STATUS: SUPERSEDED by `work/loop-play-exits-r3-fix-report.md`. The r3 audit rejected the physical PushTrigger and gate-to-Portal arrival claims below; they describe the prior run and are not current acceptance evidence.
 
 ## Scope and evidence
 

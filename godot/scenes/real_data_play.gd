@@ -109,11 +109,11 @@ func _ready() -> void:
 	real_exit_choice = OptionButton.new()
 	real_exit_choice.add_item("No level exit loaded", -1)
 	menu.add_child(real_exit_choice)
-	_add_action("real_exit", "Use selected level action", activate_selected_exit)
+	_add_action("real_exit", "Run selected script diagnostic", activate_selected_exit)
 	gate_destination_choice = OptionButton.new()
 	gate_destination_choice.add_item("Gate destinations", -1)
 	menu.add_child(gate_destination_choice)
-	_add_action("gate_travel", "Confirm gate destination", confirm_gate_destination)
+	_add_action("real_gate_confirm", "Confirm gate destination", confirm_gate_destination)
 	mission_menu_panel = PanelContainer.new()
 	mission_menu_panel.set_anchors_preset(Control.PRESET_CENTER)
 	mission_menu_panel.custom_minimum_size = Vector2(380, 160)
@@ -145,8 +145,14 @@ func _ready() -> void:
 
 func _update_menu() -> void:
 	super._update_menu()
+	if actions.has("real_gate_confirm") and controller != null:
+		var gate: Dictionary = controller.script_gate_status()
+		actions.real_gate_confirm.visible = real != null and real.current >= 0
+		actions.real_gate_confirm.disabled = not gate.get("menu_open", false) or \
+			gate.get("destinations", []).is_empty() or not str(gate.get("refusal", "")).is_empty()
+		actions.real_gate_confirm.tooltip_text = str(gate.get("refusal", ""))
 	if mode_label != null and play_mode and real != null and real.current >= 0:
-		mode_label.text = "Play mode · walk-in triggers and E/use can open exits; gate destinations use the menu."
+		mode_label.text = "Play mode · walk-in Triggers; physical use and gate travel require live object and campaign state."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -480,6 +486,8 @@ func confirm_gate_destination() -> Dictionary:
 	return result
 
 func activate_selected_exit() -> Dictionary:
+	# Indexed script execution is a diagnostic; it is never the physical
+	# Player_interact path and does not establish proximity or use eligibility.
 	var out := {"ok": false, "error": "Select a documented level script action."}
 	if controller == null or real_exit_choice == null: return out
 	var index: int = real_exit_choice.get_selected_id()
