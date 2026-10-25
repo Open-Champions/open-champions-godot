@@ -1003,7 +1003,7 @@ std::vector<std::uint8_t> Ledger::save() const {
   std::vector<std::uint8_t> out;
   const char magic[] = "OCMENU1";
   out.insert(out.end(), magic, magic + 8);
-  put_u32(out, 2);
+  put_u32(out, 3);
   const auto r = record();
   put_s32(out, gold());
   put_s32(out, skill_points());
@@ -1043,6 +1043,15 @@ std::vector<std::uint8_t> Ledger::save() const {
   put_u32(out, effective_delta_valid_ ? 1u : 0u);
   put_u32(out, live_record_ ? 1u : 0u);
   put_u32(out, machine_->u32(r + 0x43d8));
+  for (const auto offset : {0x50u, 0xc0u, 0xc4u, 0xdcu, 0x124u})
+    put_u32(out, machine_->u32(r + offset));
+  const auto obj = machine_->u32(r + 0x43d8);
+  const bool owned_object = obj == OBJECT && !live_record_;
+  put_u32(out, owned_object ? 1u : 0u);
+  put_u32(out, owned_object ? machine_->u16(obj + 0xe4) : 0u);
+  put_u32(out, owned_object ? machine_->u32(obj + 0x474) : 0u);
+  for (std::uint32_t index = 0; index < 5; ++index)
+    put_u32(out, owned_object ? machine_->u32(obj + 0x5c + 4u * index) : 0u);
   return out;
 }
 
@@ -1052,8 +1061,9 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
     throw Refusal("menu save magic is not OCMENU1");
   at = 8;
   const auto version = take_u32(bytes, at);
-  if (version != 1 && version != 2)
-    throw Refusal("menu save version is not 1 or 2");
+  if (version != 1 && version != 2 && version != 3)
+    throw Refusal("menu save version is not 1, 2 or 3");
+  effective_delta_valid_ = false;
   const auto r = record();
   const auto gold_value = take_s32(bytes, at);
   const auto skills = take_s32(bytes, at);
@@ -1105,7 +1115,7 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   std::array<std::int32_t, 4> saved_delta{};
   bool saved_valid = false, saved_live = false;
   std::uint32_t saved_object = machine_->u32(r + 0x43d8);
-  if (version == 2) {
+  if (version >= 2) {
     for (auto &value : saved_effective) value = take_s32(bytes, at);
     for (auto &value : saved_delta) value = take_s32(bytes, at);
     saved_valid = take_u32(bytes, at) != 0;
@@ -1125,12 +1135,11 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
   for (int i = 0; i < 4; ++i)
     machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(bases[i]));
-  if (version == 2) {
+  if (version >= 2) {
     for (int i = 0; i < 4; ++i)
       machine_->w32(r + 0x90 + static_cast<std::uint32_t>(i) * 4,
                     static_cast<std::uint32_t>(saved_effective[i]));
     effective_delta_ = saved_delta;
-    effective_delta_valid_ = saved_valid;
     live_record_ = saved_live;
     machine_->w32(r + 0x43d8, saved_object);
   } else {
@@ -1141,6 +1150,29 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   }
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
+  if (version == 3) {
+    for (const auto offset : {0x50u, 0xc0u, 0xc4u, 0xdcu, 0x124u})
+      machine_->w32(r + offset, take_u32(bytes, at));
+    const bool owned_object = take_u32(bytes, at) != 0;
+    const auto armor = take_u32(bytes, at);
+    const auto bonuses = take_u32(bytes, at);
+    std::array<std::uint32_t, 5> resistances{};
+    for (auto &value : resistances) value = take_u32(bytes, at);
+    if (owned_object && saved_object == OBJECT && !saved_live) {
+      machine_->w16(saved_object + 0xe4, armor);
+      machine_->w32(saved_object + 0x474, bonuses);
+      for (std::uint32_t index = 0; index < resistances.size(); ++index)
+        machine_->w32(saved_object + 0x5c + 4u * index, resistances[index]);
+    } else if (saved_object != 0) {
+      saved_valid = false;
+    }
+    effective_delta_valid_ = saved_valid;
+    try {
+      ensure_recalc_supported();
+    } catch (const Refusal &) {
+      effective_delta_valid_ = false;
+    }
+  }
 }
 
 } // namespace champions::menus

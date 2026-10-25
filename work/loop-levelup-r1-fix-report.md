@@ -1,4 +1,13 @@
-STATUS: PASS WITH LOAD-TIMEOUT RETRIES — NLU-1 through NLU-5 are fixed; all 226 native test bodies passed across the full run and isolated retries, and Godot, sweep, trace and capture gates passed.
+STATUS: MORE — NLU-6 implementation and targeted Release checks pass; full gates pending. Earlier NLU-1 through NLU-5 results below are historical.
+
+## NLU-6 follow-up (2026-10-25)
+
+- Companion version 3 snapshots current/max mana, class, stagger and load capacity, plus the owned authored object's armour, five resistances and four bonus bytes. Load restores these fields directly without recalculation, refill or resource clamping. HP retains the existing exact snapshot restore.
+- Version 1/2 remain readable but cannot authorize XP/stat recalculation because their missing dependent state cannot be reconstructed exactly. Missing/unsupported linked-object snapshots and existing equipment/effective-stat invalidation likewise remain mutation refusals; no object state is invented.
+- Native assertions cover level 6 (maximum mana 17), level 7 (18), then load back to 17; save/change/load and fresh-ledger restores inspect actual record/object fields, depleted current resources, capacity, stagger, armour, resistances and bonus bytes. Both legacy formats and a missing-object snapshot refuse later XP/stat reconstruction.
+- Evidence: `research-levelup@576b41c:tools/ref_combat.py:1715` and `research-levelup@576b41c:tools/ref_combat.py:1843` (recalculation/refill boundaries and dependent writes), and `research-ui@3e39392:docs/hud-layout.md:165` (record mana source), as cited by NLU-6 in `native-levelup-r1-fix.md`. This is an authored companion format, not a retail-save format change.
+- Changed files: `native/src/menus.cpp`, `native/tests/menus_tests.cpp`, this report. No other audit finding is changed. Local commits only; never pushed.
+- Executed: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`; `cmake --build build/native -j 4`; `build/native/champions-menus-tests` — all pass, **221 menu checks**. Broader gates follow below when complete.
 
 ## Audit fixes
 

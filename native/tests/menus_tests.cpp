@@ -12,6 +12,15 @@ using namespace champions::menus;
 
 namespace champions::menus {
 struct LedgerProbe {
+  static std::uint32_t word(const Ledger &ledger, std::uint32_t offset) {
+    return ledger.machine_->u32(ledger.machine_->u32(ledger.record() + 0x43d8) + offset);
+  }
+  static void record_word(Ledger &ledger, std::uint32_t offset, std::uint32_t value) {
+    ledger.machine_->w32(ledger.record() + offset, value);
+  }
+  static void object_word(Ledger &ledger, std::uint32_t offset, std::uint32_t value) {
+    ledger.machine_->w32(ledger.machine_->u32(ledger.record() + 0x43d8) + offset, value);
+  }
   static std::uint32_t byte(const Ledger &ledger, std::uint32_t offset) {
     return ledger.machine_->u8(ledger.machine_->u32(ledger.record() + 0x43d8) + offset);
   }
@@ -385,6 +394,13 @@ void levelup_vectors() {
          "class formula HP recalculation and alive refill");
   expect(book.max_mana() == 0x41880000u && book.mana() == book.max_mana(),
          "class formula mana recalculation and alive refill");
+  const auto level_six = book.save();
+  expect(book.give_xp(100) == 1 && book.max_mana() == 0x41900000u,
+         "level seven increases maximum mana to eighteen");
+  book.load(level_six);
+  expect(book.level() == 6 && book.mana() == 0x41880000u &&
+         book.max_mana() == 0x41880000u,
+         "loading level six restores both mana fields to seventeen");
   expect(book.give_xp(250) == 2 && book.level() == 8 && book.stat_points() == 12 &&
          book.skill_points() == 9, "multi-level award repeats old-level grants");
   book.open_level_up();
@@ -489,7 +505,7 @@ void levelup_vectors() {
   reject([&] { changed_equipment.give_xp(500); },
          "level-up refuses stale effective bonuses after equipment change");
   auto equipped_bytes = changed_equipment.save();
-  const auto suffix = equipped_bytes.size() - 44u;
+  const auto suffix = equipped_bytes.size() - 96u;
   auto put_word = [&](std::size_t at, std::uint32_t value) {
     for (int i = 0; i < 4; ++i)
       equipped_bytes[at + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(value >> (8 * i));
@@ -506,6 +522,70 @@ void levelup_vectors() {
          "equipment invalidation survives save and load");
   expect(restored_equipment.record_bytes() == before_loaded_xp,
          "loaded invalid equipment refuses without changing the record");
+
+  Ledger snapshot;
+  snapshot.set_xp_rules(table, formulas);
+  snapshot.give_xp(500);
+  LedgerProbe::record_word(snapshot, 0xac, 0x40a00000u);
+  LedgerProbe::record_word(snapshot, 0xc0, 0x40400000u);
+  const auto saved = snapshot.save();
+  auto check_restored = [&](const Ledger &restored) {
+    expect(restored.level() == 6 && restored.base_stat(0) == 10 &&
+           restored.record_word(0x90) == 10u, "restored level and Strength");
+    expect(restored.hit_points() == 0x40a00000u && restored.max_hit_points() == 0x424c0000u,
+           "restore preserves depleted current HP without refill");
+    expect(restored.mana() == 0x40400000u && restored.max_mana() == 0x41880000u,
+           "restore preserves depleted current mana and saved maximum");
+    expect(restored.record_word(0x124) == 0x43070000u, "restore writes saved capacity");
+    expect(restored.record_word(0xdc) == 0u, "restore writes saved stagger resistance");
+    expect(LedgerProbe::half(restored, 0xe4) == 6u, "restore writes saved armour");
+    expect(LedgerProbe::word(restored, 0x474) == 0x08000600u,
+           "restore writes all four saved object bonus bytes");
+    for (std::uint32_t index = 0; index < 5; ++index)
+      expect(LedgerProbe::word(restored, 0x5c + 4u * index) == 0u,
+             "restore writes each saved object resistance");
+  };
+  snapshot.give_xp(100);
+  snapshot.spend_stat(0);
+  snapshot.spend_stat(2);
+  snapshot.spend_stat(2);
+  snapshot.spend_stat(3);
+  expect(snapshot.record_word(0x124) == 0x43080000u &&
+         LedgerProbe::half(snapshot, 0xe4) == 7u &&
+         LedgerProbe::word(snapshot, 0x474) == 0x09000600u,
+         "later stat spends change capacity, armour and bonuses");
+  LedgerProbe::record_word(snapshot, 0xdc, 0x3f000000u);
+  for (std::uint32_t index = 0; index < 5; ++index)
+    LedgerProbe::object_word(snapshot, 0x5c + 4u * index, 0x3f000000u);
+  snapshot.load(saved);
+  check_restored(snapshot);
+  expect(snapshot.give_xp(100) == 1, "complete snapshot permits later supported XP");
+  Ledger fresh;
+  fresh.load(saved);
+  check_restored(fresh);
+  fresh.set_xp_rules(table, formulas);
+  fresh.spend_stat(0);
+  expect(fresh.mana() == 0x40400000u && fresh.hit_points() == 0x40a00000u &&
+         fresh.record_word(0x124) == 0x43080000u,
+         "fresh restore supports stat spending without refilling resources");
+  for (const auto version : {1u, 2u}) {
+    auto legacy = saved;
+    legacy.resize(legacy.size() - (version == 1 ? 96u : 52u));
+    legacy[8] = static_cast<std::uint8_t>(version);
+    Ledger old;
+    old.load(legacy);
+    old.set_xp_rules(table, formulas);
+    const auto before = old.record_bytes();
+    reject([&] { old.give_xp(100); }, "incomplete legacy snapshot refuses XP reconstruction");
+    reject([&] { old.spend_stat(0); }, "incomplete legacy snapshot refuses stat reconstruction");
+    expect(old.record_bytes() == before, "legacy reconstruction refusal preserves record");
+  }
+  auto missing_object = saved;
+  missing_object[missing_object.size() - 32u] = 0;
+  Ledger unsupported;
+  unsupported.load(missing_object);
+  unsupported.set_xp_rules(table, formulas);
+  reject([&] { unsupported.give_xp(100); }, "missing object snapshot cannot authorize XP");
 }
 } // namespace
 
