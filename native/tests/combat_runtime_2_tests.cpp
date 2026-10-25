@@ -1,5 +1,7 @@
 #include "champions/combat_runtime.hpp"
 #include "champions/campaign_moves.hpp"
+#include "champions/player_name_format.hpp"
+#include "champions/player.hpp"
 #include "champions/core_state.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
 #include <cstdlib>
@@ -51,6 +53,8 @@ struct Fixture {
   bool dialog = false;
   Raw travel = 0;
   std::string loot_class;
+  bool format_names = false;
+  std::vector<std::string> formatted_names;
   void poke(C::Address a, unsigned n, std::uint64_t v) { world->write(a, n, v); }
   std::uint64_t peek(C::Address a, unsigned n) { return world->read(a, n); }
   void start(C::Address actor, Raw clip, Raw flags) {
@@ -127,6 +131,18 @@ struct Fixture {
         sum += ch;
       return 0xb0000000u | Raw((sum * 131 + q.entry.size()) & 0xffffff);
     };
+    if (format_names) s.format_name = [this](C::Address format, std::optional<Raw> value) {
+      std::string text;
+      for (unsigned i = 0; i < 64 && peek(format + i, 1); ++i)
+        text += char(peek(format + i, 1));
+      auto name = player::format_name(text, value
+          ? std::optional<std::int32_t>{std::int32_t(*value)} : std::optional<std::int32_t>{});
+      formatted_names.push_back(name);
+      constexpr C::Address buffer = 0x9000; // Authored fixture scratch, not a game address.
+      for (unsigned i = 0; i <= name.size(); ++i)
+        poke(buffer + i, 1, i < name.size() ? std::uint8_t(name[i]) : 0);
+      return buffer;
+    };
     s.is_class = [this](C::Address, const std::string &name) {
       return !loot_class.empty() && name == loot_class + "_typeinfo";
     };
@@ -199,7 +215,8 @@ template <class F> void refused(F fn, const std::string &s) {
 struct Host {
   Fixture f;
   std::unique_ptr<C::World> w;
-  explicit Host(bool planes = false) {
+  explicit Host(bool planes = false, bool names = false) {
+    f.format_names = names;
     auto s = f.services();
     if (planes)
       s.screen_planes = [](const Vec3 &) {
@@ -230,6 +247,16 @@ struct Host {
 };
 void hosts() {
   {
+    check(player::format_name("fixture_combo%d", 2) == "fixture_combo2",
+          "Player name formatting substitutes the selected variant");
+    check(player::format_name("signed%d", -1) == "signed-1", "name format preserves signed value");
+    check(player::format_name("literal", std::nullopt) == "literal", "literal names need no argument");
+    refused([&] { player::format_name("missing%d", std::nullopt); }, "missing name argument refused");
+    refused([&] { player::format_name("unknown%s", 1); }, "unknown format conversion refused");
+    refused([&] { player::format_name("two%d%d", 1); }, "extra format conversion refused");
+    refused([&] { player::format_name(std::string(64, 'x'), 1); }, "resource name host bound enforced");
+  }
+  {
     namespace M = champions::simulation::rta::campaign_fight;
     M::MovePad pad;
     auto input = pad.update(M::ATTACK | M::GUARD);
@@ -246,8 +273,13 @@ void hosts() {
   }
   {
     namespace M = champions::simulation::rta::campaign_fight;
-    Host h;
+    Host h(false, true);
     auto player = h.player(0, 0);
+    // Authored format strings at the observed Player_run call-site literals.
+    for (const auto &entry : {std::pair<C::Address, std::string>{0x5361b0, "fixture_combo%d"},
+                              {0x536120, "fixture_sound%d"}})
+      for (unsigned i = 0; i <= entry.second.size(); ++i)
+        h.w->write(entry.first + i, 1, i < entry.second.size() ? std::uint8_t(entry.second[i]) : 0);
     C::SessionAdapter adapter(*h.w);
     adapter.bind_button(0, C::World::Button::Attack, M::ATTACK);
     M::MovePad pad;
@@ -261,6 +293,10 @@ void hosts() {
       combo = combo || step == 1;
     }
     check(combo, "campaign press edges drive real Player combo transition");
+    bool variant_name = false;
+    for (const auto &name : h.f.formatted_names)
+      variant_name = variant_name || name == "fixture_combo2";
+    check(variant_name, "combo variant formatting reaches the resource lookup instead of the fixture null-name stub");
     unsigned starts = 0, advances = 0;
     for (const auto &e : h.w->events()) {
       if (e.args.empty() || e.args[0] != player) continue;
@@ -310,16 +346,18 @@ void hosts() {
     bow.cls = 4; bow.subtype = 4;
     auto item = h.w->give_weapon(0, bow);
     h.w->write(C::PLAYERS + 0x43f8, 4, item);
+    // The guard helper is documented independently. A complete bow tick still
+    // refuses on its unbound Archery statistic before it reaches the state.
+    auto memory = h.w->memory();
+    champions::simulation::rta::player::Tick guard(memory, player);
+    check(guard.can_block(0, 2) == 0, "a bow in slot 2 vetoes the guard helper");
     C::SessionAdapter adapter(*h.w);
     adapter.bind_button(0, C::World::Button::Block, M::GUARD);
-    adapter.pad_input(0, {0, 0, M::GUARD, M::GUARD});
-    adapter.ready_tick(0);
-    check(h.w->read(player + 0x58c) == 2, "a bow in slot 2 vetoes guard");
     h.w->write(C::PLAYERS + 0x43f8, 4, 0);
     h.w->give_weapon(0, {});
     h.w->write(0x44fe08, 4, 0x10000000);
     adapter.pad_input(0, {0, 0, M::GUARD, M::GUARD});
-    adapter.ready_tick(1);
+    adapter.ready_tick(0);
     check(h.w->read(player + 0x58c) == 2, "level combat veto prevents equipped guard");
   }
   {

@@ -176,11 +176,13 @@ func campaign_moves() -> bool:
 	checks.held_once = int(scene.raw_observation.fight_counts.attack_edges) == edges + 1 \
 		and int(scene.raw_observation.fight_player_action_state) == 1 \
 		and int(scene.raw_observation.fight_player_combo_step) == 0
+	var first_animation_starts := int(scene.raw_observation.fight_counts.player_animation_starts)
 	move_key(KEY_J, false)
 	scene.advance_step()
 	checks.combo_key = move_key(KEY_J, true)
 	for i in range(8): scene.advance_step()
 	checks.combo = int(scene.raw_observation.fight_player_combo_step) == 1
+	checks.combo_animation = int(scene.raw_observation.fight_counts.player_animation_starts) > first_animation_starts
 	await capture("04-combat-combo")
 	move_key(KEY_J, false)
 	advance(0, 100)

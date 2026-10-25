@@ -2,6 +2,7 @@
 #include "champions/campaign_actors.hpp"
 #include "champions/campaign_rewards.hpp"
 #include "champions/player_state.hpp"
+#include "champions/player_name_format.hpp"
 #include "champions/script_items.hpp"
 #include "champions/creature_anim/runtime.hpp"
 #include "champions/model.hpp"
@@ -64,6 +65,7 @@ struct Fight::Impl {
   std::map<Raw, creature_anim::ClipId> token_clip;
   std::map<creature_anim::ClipId, Raw> clip_token;
   std::string player_lump;
+  Address format_scratch = 0;
   // actors
   std::map<Address, creature_anim::StateId> states;
   std::map<Address, bool> stopped;
@@ -269,6 +271,20 @@ struct Fight::Impl {
       if (q.lump_is_text || q.lump != PLAYER_LUMP_TOKEN) return 0;
       if (q.entry.empty() || !player_entry(q.entry)) return 0;
       return player_token(q.entry);
+    };
+    base.format_name = [this](Address format, std::optional<Raw> value) -> Raw {
+      if (!format_scratch) throw C::Unsupported("player name format: scratch storage not bound");
+      std::string text;
+      for (unsigned i = 0; i < 64; ++i) {
+        const auto c = read(format + i, 1);
+        if (!c) break;
+        text += char(c);
+      }
+      const auto name = player::format_name(text, value
+          ? std::optional<std::int32_t>{std::int32_t(*value)} : std::optional<std::int32_t>{});
+      for (std::size_t i = 0; i <= name.size(); ++i)
+        world->write(format_scratch + Address(i), 1, i < name.size() ? std::uint8_t(name[i]) : 0);
+      return format_scratch;
     };
     base.is_class = [](Address, const std::string &) { return false; };
     base.loot_generate = [this](const C::LootDrop &d) { roll_loot(d); };
@@ -506,6 +522,9 @@ struct Fight::Impl {
       world->write(def + 8 * slot + 4, 4, player_entry(name) ? player_token(name) : 0);
       scratch += Address((name.size() + 16) & ~std::size_t(15));
     }
+    // Reuse the end of this host-owned string area, after all definition names.
+    // Each Player sprintf result is consumed immediately by res_find/sound.
+    format_scratch = scratch;
     // The strings the player tick names by executable address.
     for (const auto &range : NAME_RANGES)
       for (std::uint32_t a = range.first; a < range.second; ++a) {

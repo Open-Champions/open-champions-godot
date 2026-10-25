@@ -1017,8 +1017,14 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return iv(resource_at(ar(0), ar(1)));
   }
   if (n == "libc_sprintf") {
-    if (full())
+    if (full()) {
+      if (services.format_name) {
+        const auto argument = std::holds_alternative<std::monostate>(a.at(1))
+            ? std::optional<Raw>{} : std::optional<Raw>{ar(1)};
+        return iv(services.format_name(ar(0), argument));
+      }
       return iv(0);
+    }
     return A::CallbackResult::tuple(
         {A::CallbackResult::text("buf"), A::CallbackResult::bytes("")});
   }
