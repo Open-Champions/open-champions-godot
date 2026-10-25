@@ -64,8 +64,14 @@ All evidence below is local; ignored details are in `work/minotaur-final/`.
   all four commands exit 0; 111 script attachments, 76 script starts. These
   counts do not establish that all script commands or combat classes are ported.
 - `python3 tools/run_loop_playthrough.py --godot "$GODOT_BIN" --game-folder
-  "$RTA_DISC" --out work/minotaur-final/exclusive-playthrough`: final result
-  pending below. A prior overlapping rendered probe caused the rendered journey
+  "$RTA_DISC" --out work/minotaur-final/exclusive-playthrough`: both variants
+  exit 1 with **24 steps each**, **13 rendered screenshots**, and identical
+  fight results: six Minotaurs / zero unbuilt Minotaurs; the boar target dies
+  after 10,945 ticks / 347 swing cycles; 2,100 XP, one level gained, one equipment
+  roll and 947 shared loot draws. Only the known Gold source/gain and item
+  ground-object/pickup checks remain missing. Neither variant pauses or reports
+  a failed combat World. This remains `blocked_unported_combat`, not PASS.
+  A prior overlapping rendered probe caused the rendered journey
   to pause on focus loss (415 ticks, no swings); it is not counted as a combat
   success. The journey was rerun with no other rendered validation window opened.
 - Native private probe: `--near-minotaur --ticks 900` constructs six Minotaurs,
