@@ -8,4 +8,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_facing_vectors.py"
     --exe "$<TARGET_FILE:champions-session-facing-trace>"
     --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_facing.tsv.gz")
+  # The Python harness gives its native worker 600 seconds. Reserve another
+  # minute for fixture verification and trace comparison, and override any
+  # shorter job-wide CTest default without changing that worker deadline.
+  set_tests_properties(session-facing-exact PROPERTIES TIMEOUT 660)
 endif()
