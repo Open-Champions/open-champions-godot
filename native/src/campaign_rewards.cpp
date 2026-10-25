@@ -67,27 +67,32 @@ namespace {
 struct RecordingWorld : items::World {
   Loot *owner = nullptr;
   LootOutcome *outcome = nullptr;
-  void spawn_gold(std::int32_t, items::Rng &) override {
+  void spawn_gold(std::int32_t amount, items::Rng &rng) override {
+    outcome->gold_objects += 1;
+    if (owner->spawn_gold) { owner->spawn_gold(amount, rng); return; }
     // loot_spawnGold: three draws per scatter try, a terrain test, pool_new
     // and Gold_ctor2 (a further shared draw). Not bound here; the boar's
     // zero gold chance never reaches it, and any other caller is refused.
-    outcome->gold_objects += 1;
     throw Unsupported("loot_spawnGold: Gold scatter, pool allocation and Gold_ctor2 are not bound");
   }
   bool spawn_item(const std::string &kind, items::Item &item, items::Rng &rng) override {
+    bool made = true;
     // "make the item prop": pool_new(0x248) then PhProp_ctor, whose GameObject_ctor
-    // takes one shared value (items.md section 8). The prop itself is not
-    // built: the loot constructor's arguments are not in the research.
-    (void)rng.next();
+    // takes one shared value (items.md section 8). The real World callback
+    // owns that draw; the unbound differential fixture records it here.
+    if (owner->spawn_item) made = owner->spawn_item(kind, item, rng);
+    else (void)rng.next();
     GroundItem g;
     g.kind = kind;
     g.category = item.definition ? item.definition->category : -1;
     g.count = item.count;
     g.record = item.pack();
     outcome->items.push_back(g);
-    return true; // pool_new succeeded: the equipment throw angle is drawn next
+    return made; // allocation failure skips equipment's angle draw
   }
-  void throw_item(const items::Item &, std::int32_t) override {}
+  void throw_item(const items::Item &item, std::int32_t angle) override {
+    if (owner->throw_item) owner->throw_item(item, angle);
+  }
 };
 } // namespace
 

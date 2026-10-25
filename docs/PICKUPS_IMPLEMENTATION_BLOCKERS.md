@@ -1,5 +1,9 @@
 # Real-level chest and pickup implementation handoff
 
+Historical handoff at `bcfebff6`. The 2026-10-25 implementation continuation and
+current verification/refusals are in [PICKUPS_IMPLEMENTATION.md](PICKUPS_IMPLEMENTATION.md).
+The four missing research contracts below were supplied at `77c2f70`.
+
 STATUS: BLOCKED
 
 Scope: RTA US v2.00, `codex/play-pickups` from `252f34a`. The worktree was

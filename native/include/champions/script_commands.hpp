@@ -328,6 +328,9 @@ public:
   };
   using CreatureBuilder = std::function<void(const CreatureRequest &)>;
   void set_creature_builder(CreatureBuilder builder) { creature_builder_ = std::move(builder); }
+  using ChestBuilder = std::function<void(std::uint32_t, const level_flow::Record &, unsigned, SharedRandom &)>;
+  void set_chest_builder(ChestBuilder builder) { chest_builder_ = std::move(builder); }
+  const std::string &loaded_level_name() const { return level_name_; }
   champions::resources::Manager &resources() { return resources_; }
   // Keeps a class port's runtime alive exactly as long as this host (and
   // destroys it before the host's objects).
@@ -554,6 +557,7 @@ private:
   Build build_creature_family(const level_flow::Record &, const level_factory::Outcome &,
                               std::uint32_t address, const std::vector<std::string> &props);
   CreatureBuilder creature_builder_;
+  ChestBuilder chest_builder_;
   Build build_generator(const level_factory::Outcome &, const level_flow::Record &,
                         std::uint32_t address, const std::vector<std::string> &props);
   std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,

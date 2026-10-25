@@ -73,6 +73,10 @@ struct ResourceQuery {
   bool lump_is_text = false;
   std::string lump_text, entry;
 };
+struct InteractionPrompt {
+  Raw status = 0;
+  bool nonempty = false;
+};
 struct Services {
   std::function<bool()> dialog_is_open;
   std::function<Raw()> jumpgate_travel_state;
@@ -149,6 +153,14 @@ struct Services {
   // from the run list before any table lookup; return true when the class
   // body ran. A false return falls through to the executed dispatch.
   std::function<bool(Address actor)> external_run;
+  // Loaded integer model bounds and original terrain sweep, for item props.
+  std::function<std::array<Raw, 6>(Raw, std::uint64_t)> model_bounds;
+  std::function<std::array<Raw, 3>(const Vec3 &, const Vec3 &, Raw, Raw)> terrain_sweep;
+  // Virtual slots 13/14. Prompt is evaluated without an input edge. The
+  // existing Player_run K1 gate remains the only simulation caller.
+  std::function<InteractionPrompt(Address, Raw)> interact_prompt;
+  std::function<void(Address, Raw)> interact_use;
+  std::function<void(Address from, Address replacement)> item_settled;
 };
 struct Arc {
   Raw facing = 0, angle = 6000, minimum = 4, maximum = 8, attack = 100,
@@ -234,6 +246,7 @@ public:
   // grid queries) accept it as a victim or target. The vtable at +0x48 must be
   // defined (define_creature_table) first. Never allocates, draws or links.
   void adopt_creature(Address factory_object);
+  void adopt_prop(Address factory_object);
   // Writes a creature vtable image: the executed Creature base slots, then the
   // class's own overrides (slot -> function address).
   void define_creature_table(Address table,
@@ -322,6 +335,20 @@ public:
   void hit_sparks(Address player, Address target);
   void block_sparks(Address player, Raw silent = 0);
   void interact(Address player, Address pad, Raw display_only = 0);
+  // Loot-drop 77c2f70: concrete PhProp/ItemProp objects in this World. Names
+  // are addresses in the caller's runtime image, never embedded item names.
+  Address spawn_item(const Vec3 &, Address lump, Address model, Address texture,
+                     const std::array<std::uint8_t, 0x48> &record);
+  void throw_item(Address, Raw angle, Raw speed);
+  Address spawn_resting_item(const Vec3 &, Address lump, Address model, Address texture,
+                             const std::array<std::uint8_t, 0x48> &, const Mat34 &);
+  Address spawn_gold(const Vec3 &, Raw amount);
+  // Only the traced nonexplosive broken/no-placed-item AutoContainer branch.
+  // Source construction and its earlier debris draws remain the caller's.
+  Address broken_container_gold(Address container, Raw level_times_0_4);
+  void add_gold_floater(Raw slot, const Vec3 &, Raw amount);
+  // Runtime data only; uses the shared host byte owner, outside combat logs.
+  void load_runtime_bytes(Address, const std::vector<std::uint8_t> &);
   int can_see_point(Address, const Vec3 &, Raw facing, Raw arc, Raw near,
                     Raw far);
   int can_see_edge(Address, Address, Raw facing, Raw arc, Raw ray_mode,

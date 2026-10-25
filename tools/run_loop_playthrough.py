@@ -60,6 +60,9 @@ def main() -> int:
             results[name]["screenshots"] = data.get("screenshots", 0)
             results[name]["steps"] = len(data.get("steps", []))
             results[name]["refusal_kinds"] = len(data.get("refusals", {}))
+            for row in data.get("steps", []):
+                if row.get("step") == "loot_pickup":
+                    results[name]["loot_pickup"] = row
         print(f"{name}: {results[name]}")
     after = file_count(disc)
     summary = {"disc_files_before": before, "disc_files_after": after,

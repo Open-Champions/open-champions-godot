@@ -346,6 +346,11 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
 // set-states (combat_ctors), registered with the first such creature so other
 // worlds keep their callback table.
 void World::State::install_ctor_services() {
+  model.callbacks["World_item_settled"] = [this](A::Model &, const std::vector<Value> &a) -> Value {
+    note("item_settled", {number(a.at(0)), number(a.at(1))});
+    if (services.item_settled) services.item_settled(number(a.at(0)), number(a.at(1)));
+    return iv(0);
+  };
   for (const char *name :
        {"anim_clear", "anim_push", "anim_pushWithWeights", "anim_pushChained",
         "anim_findTrack", "model_buildHideMask", "Creature_init",
@@ -401,6 +406,7 @@ void World::State::install_services() {
                          "world_slideMove",
                          "terrain_heightBelow",
                          "terrain_height",
+                         "terrain_sweepCircle",
                          "water_test",
                          "obj_getPropStr",
                          "obj_getPropInt",
@@ -428,6 +434,7 @@ void World::State::install_services() {
                          "player_giveExp",
                          "world_notifyObjectsNear",
                          "model_getBounds",
+                         "item_getResourceIndex",
                          "model_getAttachPoint",
                          "model_getAttachWorldMatrix",
                          "isNearView",
@@ -919,8 +926,24 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     notify_objects_near(ar(0), v(1), ar(2), ar(3));
     return iv(0);
   }
-  if (n == "model_getBounds")
-    return A::Bounds{};
+  if (n == "model_getBounds") {
+    if (services.model_bounds)
+      return A::Bounds{services.model_bounds(ar(0), std::uint64_t(std::get<std::int64_t>(a.at(1))))};
+    return A::Bounds{}; // retained synthetic combat corpus boundary
+  }
+  if (n == "item_getResourceIndex") {
+    const auto item = ar(0);
+    auto index = s16m(u(item) + 0x34);
+    if (q(item + 8) & (UINT64_C(1) << 36)) index += (q(item + 8) >> 11) & 31;
+    return iv(Raw(index));
+  }
+  if (n == "terrain_sweepCircle") {
+    if (!services.terrain_sweep) throw Unsupported("PhProp terrain sweep is not bound");
+    const auto result = services.terrain_sweep(v(1), v(2), ar(3), ar(4));
+    std::vector<A::CallbackResult> values;
+    for (auto x : result) values.push_back(A::CallbackResult::unsigned_integer(x));
+    return A::CallbackResult::tuple(std::move(values));
+  }
   if (n == "MissileWeapon_ctor") {
     // Skeleton_run state 8's plain-arrow argument vector, executed in
     // research-combat-ctors-4 6baf4cd, arrow-run.md section 4.1.

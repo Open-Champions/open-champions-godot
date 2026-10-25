@@ -24,6 +24,10 @@ void World::define_creature_table(Address table,
                                   const std::map<unsigned, Raw> &overrides) {
   s_->write_table(table, &overrides);
 }
+void World::adopt_prop(Address a) {
+  adopt_creature(a);
+  s_->objects.at(a)->kind = State::Kind::Effect;
+}
 void World::set_class_body(
     Raw function,
     std::function<void(Address, const std::vector<std::uint64_t> &)> body) {

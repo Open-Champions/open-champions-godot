@@ -254,14 +254,13 @@ func _observe(result: Dictionary) -> void:
 	if result.get("facing_enabled", false) and not result.get("fight_player_ready", false):
 		health_label.text += "\nFacing test · angle %d · velocity %d · mode %d" % [result.facing_raw, result.angular_velocity_raw, result.turn_mode]
 	if result.get("fight_player_ready", false):
-		health_label.text += "\nStarting equipment: %s · weapon class %d (%s, not campaign evidence)" % [
-			str(result.get("fight_starting_equipment", "unknown")), int(result.get("fight_player_weapon_class", -1)),
-			str(result.get("fight_player_weapon_class_source", "unknown"))]
+		health_label.text += "\nStarting equipment equipped · weapon class %d" % [
+			int(result.get("fight_player_weapon_class", -1))]
 		var fight_counts: Dictionary = result.get("fight_counts", {})
-		health_label.text += "\nLevel %d · Experience %d · kills %d · loot rolls %d (items %d, no ground object) · Gold %d" % [
+		health_label.text += "\nLevel %d · Experience %d · kills %d · loot rolls %d (items %d, picked up %d) · Gold %d" % [
 			int(result.get("fight_player_level", -1)), int(result.get("fight_player_experience", -1)),
 			int(fight_counts.get("deaths", 0)), int(fight_counts.get("loot_calls", 0)),
-			int(fight_counts.get("loot_items", 0)), int(result.get("gold", -1))]
+			int(fight_counts.get("loot_items", 0)), int(fight_counts.get("pickups", 0)), int(result.get("gold", -1))]
 		if diagnostic_placement_at_weakest:
 			health_label.text += "\nDIAGNOSTIC placement at the lowest-HP boar"
 	animation_cache_label.visible = result.get("animation_cache_enabled", false)

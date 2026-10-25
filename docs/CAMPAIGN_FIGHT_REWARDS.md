@@ -1,5 +1,9 @@
 # What a kill gives the session player (valor fight, round 2)
 
+Historical round-2 report. The ground-object and starting-equipment blockers
+below are superseded by [PICKUPS_IMPLEMENTATION.md](PICKUPS_IMPLEMENTATION.md),
+which records the current implementation, gates and remaining refusals.
+
 Native code: `native/src/campaign_rewards.cpp` (`campaign_rewards::give_exp`,
 `campaign_rewards::Loot`), wired into `campaign_fight.cpp`. Evidence is the
 research repositories only: `t3/research-levelup` 576b41c

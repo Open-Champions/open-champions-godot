@@ -422,6 +422,27 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
   last_draws_complete_ = false;
+  if (outcome.constructor() == 0x292030 && chest_builder_) {
+    if (!external_seed_) {
+      counts_.build_refusals["Chest needs the shared session seed"] += 1;
+      return Build::NotBuilt;
+    }
+    try {
+      auto placed = record;
+      placed.props = props;
+      // Prefix match precedes the exact names; those four rows all select 0.
+      chest_builder_(c, placed, outcome.test == 0x533130 ? 4u : 0u, *external_seed_);
+      mark_built(c);
+      return Build::Built;
+    } catch (const std::exception &e) {
+      counts_.build_refusals[std::string("Chest: ") + e.what()] += 1;
+      if (variables_->object_properties.count(c)) {
+        last_draws_complete_ = true;
+        return Build::Stubbed;
+      }
+      return Build::NotBuilt;
+    }
+  }
   // Only the four rider rows the research documents (mounted 1) and the Nightmare row. The
   // other rows that call the same constructor (0x532dc8..0x532df8) are not documented there.
   bool rider_row = false;

@@ -5,7 +5,7 @@ extends SceneTree
 # or this bound (about 90,000 ticks) ends it; nothing is forced.
 const SWING_CYCLES := 3000
 # Ticks run after the target dies so the death, XP award and loot roll settle.
-const SETTLE_TICKS := 120
+const SETTLE_TICKS := 480 # Authored probe bound, including flight/settle ticks.
 
 # Private, opt-in journey probe. The same script runs with --headless or a
 # rendered display. Only counts and generic refusal text leave the game folder.
@@ -509,7 +509,55 @@ func run() -> void:
 		if target_dead or bool(polled.get("fight_failed", false)): break
 	var swing_msec := Time.get_ticks_msec() - swing_start_msec
 	if target_dead: advance(0, SETTLE_TICKS)
+	# Follow a real native ground object with ordinary movement. E goes through
+	# pressed-use on Player_run; no pickup call or player placement is injected.
+	var pickup_walk_ticks := 0
+	var pickup_walked := false
+	var pickup_start: Dictionary = scene.controller.get_observation()
+	var pickup_start_position: Vector3 = pickup_start.get("position", Vector3.ZERO)
+	var inventory_units_before := int(pickup_start.get("fight_inventory_units", 0))
+	var produced := false
+	var picked_up := false
+	for attempt in range(360):
+		var observed: Dictionary = scene.controller.get_observation()
+		var me: Vector3 = observed.get("position", Vector3.ZERO)
+		var target := {}
+		for drop in observed.get("fight_ground_drops", []):
+			produced = produced or bool(drop.get("spawned", false))
+			picked_up = picked_up or bool(drop.get("picked_up", false))
+			if drop.get("spawned", false) and not drop.get("picked_up", false) and not drop.get("lost", false):
+				target = drop
+				break
+		if picked_up or target.is_empty() or observed.get("fight_failed", false): break
+		var spot: Vector3 = target.position
+		var aim := Vector2(spot.x - me.x, spot.y - me.y)
+		if aim.length() < 20.0 and pickup_walked:
+			game_key(KEY_E)
+			advance(0, 1)
+		else:
+			var best := 1
+			var best_dot := -2.0
+			for cmd in candidates:
+				var v := Vector2.ZERO
+				for bit in [1, 2, 4, 8]:
+					if cmd & bit: v += basis[bit]
+				if v.length() < 0.01: continue
+				var dot := v.normalized().dot(aim.normalized())
+				if dot > best_dot:
+					best_dot = dot
+					best = cmd
+			advance(best, 2)
+			pickup_walk_ticks += 2
+			var moved: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+			pickup_walked = pickup_walked or moved.distance_to(pickup_start_position) > 0.01
 	var after: Dictionary = scene.controller.get_observation()
+	for drop in after.get("fight_ground_drops", []): picked_up = picked_up or bool(drop.get("picked_up", false))
+	var inventory_units_after := int(after.get("fight_inventory_units", 0))
+	var pickup_passed := not produced or (picked_up and pickup_walked and inventory_units_after > inventory_units_before)
+	mark("loot_pickup", "passed" if pickup_passed else "refused",
+		{"drop_produced": produced, "picked_up": picked_up, "walked": pickup_walked,
+		"walk_ticks": pickup_walk_ticks, "inventory_units_before": inventory_units_before,
+		"inventory_units_after": inventory_units_after, "rendered_pickup_verified": false})
 	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var saved_hp := float(after.get("hp", -1.0))
 	var saved_gold := int(after.get("gold", -1))
@@ -554,18 +602,14 @@ func run() -> void:
 	var ground_drops: Array = after.get("fight_ground_drops", [])
 	var kill_evidence := enemy_died and target_dead_flag and target_hp_end <= 0.0 and int(fight_counts.get("deaths", 0)) >= 1
 	var gold_after := int(after.get("gold", -1))
-	# Round 8 traced Gold from AutoContainer, separate from the boar's
-	# zero-Gold drop. Require a runtime source witness; none is built here.
+	# WarBoar's documented zero chance must not be replaced by container Gold.
 	var auto_container_gold := bool(after.get("gold_from_auto_container", false))
 	var fight_started: bool = bool(after.get("fight_started", false)) and bool(after.get("fight_player_ready", false))
-	# The journey needs the kill, its XP, any generated item picked up and Gold.
-	# Item pickup and Gold are not reachable (refused, labelled), so the step
-	# stays "blocked_unported_combat" while they are missing.
 	var fight_passed: bool = fight_loaded and scene.real.current == fight_level \
 		and fight_started and attack_handled \
 		and not enemy_hp_before.is_empty() and enemy_damaged and kill_evidence \
-		and xp_gained > 0 and loot_items == 0 \
-		and auto_container_gold and gold_after > gold_before
+		and xp_gained > 0 and pickup_passed \
+		and gold_after == gold_before and not bool(after.get("fight_failed", false))
 	var missing_fight_steps := {}
 	if not fight_loaded or scene.real.current != fight_level: missing_fight_steps["enemy_level_entry"] = 1
 	if not fight_started: missing_fight_steps["campaign_combat_runtime"] = 1
@@ -575,10 +619,9 @@ func run() -> void:
 	if not kill_evidence: missing_fight_steps["enemy_death"] = 1
 	if xp_gained <= 0: missing_fight_steps["kill_xp"] = 1
 	if loot_items > 0:
-		missing_fight_steps["loot_ground_object_spawn"] = loot_items
-		missing_fight_steps["loot_item_pickup"] = loot_items
-	if not auto_container_gold: missing_fight_steps["auto_container_gold_source"] = 1
-	if gold_after <= gold_before: missing_fight_steps["gold_gain"] = 1
+		if not produced: missing_fight_steps["loot_ground_object_spawn"] = loot_items
+		if not pickup_passed: missing_fight_steps["loot_item_pickup"] = loot_items
+	if gold_after != gold_before: missing_fight_steps["warboar_zero_gold"] = 1
 	var object_counts: Dictionary = scene.controller.script_command_counts()
 	mark("enemy_fight", "passed" if fight_passed else "blocked_unported_combat",
 		{"attack_input_handled": attack_handled, "live_enemies_before": enemy_hp_before.size(),

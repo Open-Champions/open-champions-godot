@@ -118,6 +118,7 @@ void ChampionsSessionController::_bind_methods() {
   // DIAGNOSTIC ONLY (unchecked placement; scripted test runs and the .fight load).
   ClassDB::bind_method(D_METHOD("fight_place_player", "position", "facing"),
                        &ChampionsSessionController::fight_place_player);
+  ClassDB::bind_method(D_METHOD("world_use"), &ChampionsSessionController::world_use);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -761,6 +762,7 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
     }
     player_ = std::move(next);
+    starting_items_pending_ = !imported;
     ++player_record_revision_;
     if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true;
@@ -855,6 +857,8 @@ Array ChampionsSessionController::combat_resource_lump_names() const {
     const auto lump = rta::campaign_fight::Fight::player_animation_lump(*executable_, unsigned(player_->model));
     if (!lump.empty()) names.push_back(String::utf8(lump.c_str()));
   }
+  for (const auto &name : rta::campaign_fight::Fight::pickup_resource_lumps(*executable_))
+    if (!name.empty()) names.push_back(String::utf8(name.c_str()));
   return names;
 }
 
@@ -925,6 +929,18 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     }
     if (live_player)
       bind_player_to_scripts(*next, *live_player);
+    if (scripts_ && player_ && !starting_items_pending_ &&
+        inventory_record_revision_ == player_record_revision_) {
+      // Inventory uses the same stable player-record addresses as the menu
+      // branch. Carry its raw bags and in-record equipment pointers across
+      // level hosts; campaign's name/flag projection cannot reconstruct them.
+      const auto &old_memory = scripts_->variables().memory;
+      auto &new_memory = next->variables().memory;
+      const auto record = rta::combat_runtime::PLAYERS;
+      for (const auto span : {std::pair<unsigned, unsigned>{0x130, 3 * 0x1208},
+                             {0x43f0, 0x50}, {0x4a84, 4}})
+        new_memory.write(record + span.first, old_memory.read(record + span.first, span.second));
+    }
     // A fresh stream from the play session's configured shared seed; the
     // fixtures keep their own journaled seeds, so it is bound only while the
     // control session is the one that will play.
@@ -1071,6 +1087,7 @@ void ChampionsSessionController::start_fight(const rta::session_control::Observa
   start.position = state.position;
   start.facing = state.facing & 0xffffu;
   start.level_name = fight_level_;
+  start.grant_starting_items = starting_items_pending_;
   if (player_) {
     const auto p = observed_player();
     start.model_index = unsigned(p.model);
@@ -1078,7 +1095,13 @@ void ChampionsSessionController::start_fight(const rta::session_control::Observa
   } else {
     start.hp = state.hp;
   }
-  fight_->start(start);
+  if (fight_->start(start).empty()) {
+    starting_items_pending_ = false;
+    inventory_record_revision_ = player_record_revision_;
+  }
+}
+bool ChampionsSessionController::world_use() {
+  return fight_ && !dialog_status().get("open", false) && fight_->request_use();
 }
 Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &position, int64_t facing, int64_t hp_raw) {
   // A load replaced the scene before play started: the fight begins from the
@@ -2367,6 +2390,10 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
   const String temporary = path + String(".ocnsave.tmp");
   bool owns_temporary = false;
   try {
+    if (fight_)
+      for (const auto &drop : fight_->ground_drops())
+        if (drop.spawned && !drop.picked_up && !drop.lost)
+          throw std::runtime_error("Saving a level with dropped items is refused: dropped-item reload is not implemented.");
     rta::native_save::Bytes bytes;
     if (level_) {
       bytes = level_->save();
@@ -2734,6 +2761,12 @@ Dictionary ChampionsSessionController::fight_observation() const {
   counts["xp_awards"] = int64_t(n.xp_awards);
   counts["xp_gained"] = int64_t(n.xp_gained);
   counts["levels_gained"] = int64_t(n.levels_gained);
+  counts["pickups"] = int64_t(n.pickups);
+  counts["pickup_recipients"] = int64_t(n.pickup_recipients);
+  counts["prompts"] = int64_t(n.prompts);
+  counts["chests_built"] = int64_t(n.chests_built);
+  counts["chests_opened"] = int64_t(n.chests_opened);
+  counts["starting_grants"] = int64_t(n.starting_grants);
   counts["factory_runs_skipped"] = int64_t(n.factory_runs_skipped);
   out["fight_counts"] = counts;
   Dictionary refusals;
@@ -2763,10 +2796,12 @@ Dictionary ChampionsSessionController::fight_observation() const {
   if (player.present) {
     out["fight_player_action_state"] = int64_t(player.action_state);
     out["fight_player_weapon_class"] = int64_t(player.weapon_class);
-    // Host stand-in: the research does not document the route's starting
-    // equipment, so the class-5 (unarmed) record is a labelled fallback.
-    out["fight_starting_equipment"] = "refused_unknown";
-    out["fight_player_weapon_class_source"] = "unarmed_fallback_standin";
+    out["fight_player_record_class"] = int64_t(fight_->world().read(rta::combat_runtime::PLAYERS + 0x50));
+    out["fight_player_record_hp"] = display_float(rta::Raw(fight_->world().read(rta::combat_runtime::PLAYERS + 0xac)));
+    out["fight_starting_equipment"] = "runtime_record";
+    out["fight_player_weapon_class_source"] = "inventory_equipItem";
+    out["fight_pickups"] = int64_t(fight_->counts().pickups);
+    out["fight_starting_grants"] = int64_t(fight_->counts().starting_grants);
     out["gold"] = int64_t(player.gold);
     // The experience record in the shared bytes (kill XP and level-up).
     out["fight_player_level"] = int64_t(player.level);
@@ -2789,7 +2824,7 @@ Dictionary ChampionsSessionController::fight_observation() const {
     awards.push_back(value);
   }
   out["fight_awards"] = awards;
-  // Item records the loot roll generated; no ground object exists for them.
+  // Runtime object identities and pickup outcomes, without private item names.
   Array drops;
   for (const auto &g : fight_->ground_drops()) {
     Dictionary value;
@@ -2797,9 +2832,27 @@ Dictionary ChampionsSessionController::fight_observation() const {
     value["category"] = int64_t(g.category);
     value["count"] = int64_t(g.count);
     value["spawned"] = g.spawned;
+    value["address"] = int64_t(g.address);
+    value["picked_up"] = g.picked_up;
+    value["lost"] = g.lost;
+    value["position"] = Vector3(display_float(g.position[0]), display_float(g.position[1]), display_float(g.position[2]));
     drops.push_back(value);
   }
   out["fight_ground_drops"] = drops;
+  out["dropped_item_save"] = "refused_unimplemented";
+  out["pickup_rendering"] = "refused_unverified";
+  std::int64_t units = 0, entries = 0;
+  if (scripts_) {
+    const auto &memory = scripts_->variables().memory;
+    for (unsigned bag = 0; bag < 3; ++bag) {
+      const auto count = memory.s32(rta::script_items::bag_count_at(0, bag));
+      if (count < 0 || count > 64) continue;
+      entries += count;
+      for (int k = 0; k < count; ++k) units += memory.s16(rta::script_items::bag_entry(0, bag, k) + 4);
+    }
+  }
+  out["fight_inventory_records"] = entries;
+  out["fight_inventory_units"] = units;
   return out;
 }
 rta::session_control::Observation ChampionsSessionController::active_observation() const {

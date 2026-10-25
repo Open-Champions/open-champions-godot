@@ -167,6 +167,19 @@ struct B {
     auto res=call("res_find",{iv(0x532478),name});
     call("sound_playOnObject",{res,iv(obj),iv(ONE)});
   }
+  void item_record(Address obj, Address item) {
+    w32(obj+0x48,0x511c38);
+    for (unsigned k=0;k<0x48;k+=4) w32(obj+0x148+k,u32(item+k));
+    auto flags=(u32(obj+0xc)|0x102000)&~0x1800u;
+    if (u64(item+8)&(UINT64_C(1)<<39)) flags&=~0x3000u;
+    w32(obj+0xc,flags);
+    call("obj_updateGridCell",{iv(obj)});
+  }
+  std::array<Address,2> item_resources(Address item) {
+    auto model=Raw(number(call("item_getResourceIndex",{iv(item)})));
+    auto texture=Raw(number(call("item_getResourceIndex",{iv(item)})));
+    return {u32(0x3e9ce0+16*model),u32(0x3e9ce4+16*texture)};
+  }
 };
 } // namespace
 
@@ -175,6 +188,27 @@ void phprop_ctor(A::Model &m,Address obj,const Vec3 &pos,Address lump,Address mo
   B b{m};b.named(obj,pos,lump,model,texture,parts,launch);
   b.record(obj,item,scale);b.w8(obj+0x23a,0);b.w32(obj+0x234,0);
   b.physics(obj,launch);b.sound(obj,launch);
+}
+void phprop_init_physics(A::Model &m,Address obj,Raw flags) { B{m}.physics(obj,flags); }
+void itemprop_ctor2(A::Model &m,Address obj,const Vec3 &pos,Address item,Raw flags) {
+  B b{m}; const auto names=b.item_resources(item);
+  b.named(obj,pos,0x5326b0,names[0],names[1],UINT64_MAX,flags);
+  b.item_record(obj,item);
+  const auto matrix=mat34_set_pos_rot_z_scale(ONE,pos,s16(b.u16(obj+0x38)+0x4000));
+  for (unsigned k=0;k<12;++k) b.w32(obj+0x110+4*k,matrix[k]);
+}
+void itemprop_ctor3(A::Model &m,Address obj,const Vec3 &pos,Address item,const Mat34 &matrix) {
+  B b{m}; const auto names=b.item_resources(item);
+  b.gameobject(obj,pos);
+  b.w32(obj+0x48,0x511d58); b.w32(obj+0xc,0x1809);
+  b.call("obj_updateGridCell",{iv(obj)});
+  b.w16(obj+0x140,1); b.w32(obj+0x1c,0x40800000);
+  b.copy_name(obj+0x54,0x5326b0); b.copy_name(obj+0x64,names[0]); b.copy_name(obj+0xa4,names[1]);
+  b.w32(obj+0x4c,Raw(number(b.call("res_find",{iv(obj+0x54),iv(obj+0x64)}))));
+  b.w32(obj+0x50,Raw(number(b.call("res_find",{iv(obj+0x54),iv(obj+0xa4)}))));
+  b.w64(obj+0xe8,UINT64_MAX);
+  for (unsigned k=0;k<12;++k) b.w32(obj+0x110+4*k,matrix[k]);
+  b.item_record(obj,item);
 }
 void phprop_ctor2(A::Model &m,Address obj,const Vec3 &pos,Raw facing,Address model,
                   Address anim,Address lump,Address name,Address texture,

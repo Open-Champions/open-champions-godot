@@ -15,7 +15,8 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
    TARGET champions-player-services AND TARGET champions-combat-runtime AND
    TARGET champions-player-state AND TARGET champions-items AND CHAMPIONS_FIGHT_ARCHIVE)
     add_library(champions-campaign-fight "${CMAKE_CURRENT_LIST_DIR}/src/campaign_fight.cpp"
-        "${CMAKE_CURRENT_LIST_DIR}/src/campaign_rewards.cpp")
+        "${CMAKE_CURRENT_LIST_DIR}/src/campaign_rewards.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/src/pickups.cpp")
     target_include_directories(champions-campaign-fight PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
     target_link_libraries(champions-campaign-fight PUBLIC
         champions-script-commands champions-campaign-actors champions-player-services
@@ -40,6 +41,9 @@ if(BUILD_TESTING AND TARGET champions-campaign-actors AND TARGET champions-comba
     add_test(NAME campaign-fight-adopt COMMAND champions-campaign-fight-adopt-tests)
 endif()
 if(BUILD_TESTING AND TARGET champions-campaign-fight)
+    add_executable(champions-pickups-tests "${CMAKE_CURRENT_LIST_DIR}/tests/pickups_tests.cpp")
+    target_link_libraries(champions-pickups-tests PRIVATE champions-campaign-fight)
+    add_test(NAME pickups COMMAND champions-pickups-tests)
     add_executable(champions-campaign-rewards-tests "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_rewards_tests.cpp")
     target_link_libraries(champions-campaign-rewards-tests PRIVATE champions-campaign-fight)
     add_test(NAME campaign-rewards COMMAND champions-campaign-rewards-tests)

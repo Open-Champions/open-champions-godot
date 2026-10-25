@@ -207,8 +207,8 @@ Raw World::State::has_anim(Address p, const std::string &name) {
       return 1;
   return 0;
 }
-void World::State::interact(Address p, Address, Raw display_only) {
-  if (display_only)
+void World::State::interact(Address p, Address pad, Raw display_only) {
+  if (display_only && !services.interact_prompt)
     throw Unsupported("Player_interact with displayOnly (the HUD caller)");
   if (u(p + 0x540))
     return;
@@ -238,9 +238,23 @@ void World::State::interact(Address p, Address, Raw display_only) {
       best = int(i);
     }
   }
-  if (best != -1)
-    throw Unsupported(
-        "Player_interact with an interactable object (flag 0x100000) in reach");
+  if (best != -1) {
+    if (!services.interact_prompt)
+      throw Unsupported("Player_interact with an interactable object (flag 0x100000) in reach");
+    const auto object = found[unsigned(best)];
+    const auto slot = u(p + 0x3c8);
+    w(0x4d8ae4, slot); // g_scriptActivePlayer, before prompt slot 13
+    const auto prompt = services.interact_prompt(object, slot);
+    note("interact_prompt", {object, slot, prompt.status, prompt.nonempty});
+    if (prompt.nonempty && !display_only &&
+        ((prompt.status == 1 && (u(pad + 0xc) & u(0x41b9c0 + 4 * slot))) ||
+         (prompt.status == 2 && (u(pad + 0xc) & 0x10)))) {
+      if (!services.interact_use) throw Unsupported("interaction slot 14 is not bound");
+      services.interact_use(object, slot);
+      note("interact_use", {object, slot});
+    }
+    return;
+  }
   auto slot = Raw(s32m(p + 0x3c8));
   auto timer = Raw(G_PROMPT_TIMER + 4 * slot);
   auto t = s32(u(timer) - 7);

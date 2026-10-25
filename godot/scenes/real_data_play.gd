@@ -120,7 +120,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. The player is unarmed (starting equipment refused_unknown). Enemy AI (sight and everything past idle), hit reactions, loot objects, Gold and the Minotaurs remain refused."
+			mode_label.text = "Play mode · WASD moves, J attacks, E uses nearby loot or chests. Starting equipment and item pickup use the native inventory. Enemy AI, hit reactions and Minotaurs remain incomplete."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -462,6 +462,9 @@ func attach_level_script(carry_campaign := false) -> bool:
 	for name in controller.combat_resource_lump_names():
 		if real.files.has(name):
 			resource_lumps[name] = FileAccess.get_file_as_bytes(real.files[name])
+		else:
+			var image: PackedByteArray = real.read_entry(level.gob, "", name)
+			if not image.is_empty(): resource_lumps[name] = image
 	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world, resource_lumps)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
@@ -538,6 +541,7 @@ func handle_input_event(event: InputEvent) -> bool:
 		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if key == KEY_E and controller.world_use(): return true
 		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
 			var open: bool = controller.dialog_status().get("open", false)
 			if TALK_KEYS[key] is String:

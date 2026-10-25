@@ -409,11 +409,10 @@ Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
       w(r + 0xac, v.hp);
       w(r + 0xb0, v.hp);
     }
-    // Weapon class 5 = unarmed (research docs/player.md). For the Full fixture
-    // this is the authored setup. For a session record (ordinary play) it is a
-    // HOST STAND-IN: the research does not establish the route's equipped item,
-    // so the player is left unarmed and the caller counts a refusal.
-    w(r + 0x4a86, 1, 5);
+    // The fixture starts unarmed. A session may already carry real equipment
+    // pointers and its weapon class from inventory_equipItem; preserve them.
+    if (!v.session_record || !u(r + 0x4434 + 4 * b(r + 0x4a85)))
+      w(r + 0x4a86, 1, 5);
     w(r + 0x4c24, 1, Raw(v.team));
     w(NUM_PLAYERS, std::max(u(NUM_PLAYERS), slot + 1));
     if (full()) {
