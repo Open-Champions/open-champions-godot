@@ -69,10 +69,6 @@
     // Passive table and skill-list terminators are read by weight and equip.
     reader(0x4ef538, 7 * 0xa88);
     auto &service = host->items();
-    service.delegates["script_runByName"] = [this](const std::vector<std::uint64_t> &a) {
-      host->run(runtime_string(Address(a.at(0))));
-      return std::uint64_t(0);
-    };
     service.delegates["pickup_notify"] = [this](const std::vector<std::uint64_t> &) {
       // No level in the traced disc defines this optional hook. Record the
       // sound/HUD boundary; it does not replace inventory insertion.

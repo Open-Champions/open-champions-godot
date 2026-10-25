@@ -234,6 +234,14 @@ Host::Host(std::shared_ptr<WorldAuthority> authority)
   install();
   bind_campaign();
   items_ = std::make_unique<script_items::Service>(*variables_);
+  items_->delegates["script_runByName"] = [this](const std::vector<std::uint64_t> &args) {
+    const auto entry = variables_->memory.cstr(std::uint32_t(args.at(0)));
+    const auto stop = run(entry);
+    if (stop != Stop::Complete && stop != Stop::Missing)
+      throw script_items::Refused("item notification '" + entry + "' did not complete (stop " +
+                                  std::to_string(static_cast<unsigned>(stop)) + ")");
+    return std::uint64_t(0);
+  };
   variables_->stub_creature = [this](const objects::GameObject &obj) {
     const auto info = stub_info_.find(obj.addr);
     return stubs_.count(obj.addr) != 0 && info != stub_info_.end() &&

@@ -495,6 +495,37 @@ std::size_t index_of(const char *name) {
 }
 
 void synthetic_tests() {
+  for (bool fault : {false, true}) {
+    sc::Host host;
+    auto built = build_calls({{"notify", fault
+        ? std::vector<Call>{{".HALT", {a::ERR_BOUNDS}}}
+        : std::vector<Call>{{"getRand", {}}, {".ADD.C", {1}}, {"clearAllSkills", {}}}}},
+        {{2000, "authored item"}, {2100, "after notification"}}, true);
+    plant(host, built);
+    auto &memory = host.variables().memory;
+    memory.string(0x538048, "notify");
+    memory.string(0x538028, "notify");
+    memory.byte(si::rec(0) + 0x58, 1);
+    for (unsigned stat = 0; stat < 4; ++stat) memory.word(si::rec(0) + 0x90 + 4 * stat, 20);
+    auto tables = std::make_shared<champions::simulation::rta::items::Tables>();
+    auto definition = std::make_shared<champions::simulation::rta::items::Definition>();
+    definition->name = "authored weapon";
+    definition->addr = champions::simulation::rta::items::A_DEFS;
+    definition->count = 1; definition->slot = 0; definition->level = 1;
+    tables->defs.push_back(definition);
+    champions::simulation::rta::items::Item item;
+    item.definition = definition; item.count = 1;
+    host.items().bind_tables(tables);
+    host.items().set_record(item.pack());
+    host.items().call("inventory_giveItem", {0u, 0u});
+    const auto entry = si::bag_entry(0, 0, 0);
+    bool refused = false;
+    try { host.items().call("inventory_equipItem", {0u, entry, 1u}); }
+    catch (const si::Refused &) { refused = true; }
+    check(refused, "Host-backed failed notification refuses equip");
+    check(memory.word(si::rec(0) + 0x43f0) == 0, "failed notification does not commit equipment overlay");
+    check(host.counts().executed[index_of("clearAllSkills")] == 0, "refusing notification stops subsequent script command");
+  }
   // The executable image's g_difficultyIdx (1) and cm1 word (-1).
   {
     sc::Host host;
