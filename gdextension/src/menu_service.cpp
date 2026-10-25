@@ -181,6 +181,16 @@ public:
         frames.push_back(row);
       }
       out["frames"] = frames;
+      Array draw_order;
+      for (const auto &packet : drawn.draw_order) {
+        Dictionary row;
+        row["layer"] = packet.layer;
+        row["submission"] = packet.submission;
+        row["kind"] = packet.text ? "text" : "sprite";
+        row["index"] = packet.index;
+        draw_order.push_back(row);
+      }
+      out["draw_order"] = draw_order;
       out["gaps"] = gaps;
       return out;
     } catch (const std::exception &error) {

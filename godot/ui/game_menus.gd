@@ -24,6 +24,7 @@ var opener: Button
 var inventory_art: RefCounted
 var live_imported := false
 var vendor_open := false
+var vendor_resume := false
 var icon_index := PackedByteArray()
 var icon_cache := {}
 var shop_art_cache := {}
@@ -228,6 +229,22 @@ func open_screen(which: String) -> void:
 	queue_redraw()
 
 func open_vendor_shop() -> Dictionary:
+	if scene == null or not scene.has_method("set_paused") or scene.get("controller") == null or not scene.get("session_started") or scene.get("stopped") or scene.get("paused"):
+		return {"ok": false, "error": "Shop refused: offline pause lifecycle is unavailable."}
+	if vendor_open:
+		return {"ok": true, "stock_refusal": "Fixed stock count and generation budget are unknown."}
+	scene.set_paused(true)
+	var observed: Dictionary = scene.get("raw_observation")
+	if not bool(scene.get("paused")) or not observed.get("paused", false):
+		return {"ok": false, "error": "Shop refused: offline session did not pause."}
+	# The session owns the pause; its generic pause controls would consume the
+	# viewport needed by the shop. Keep that separate host panel hidden here.
+	var flow_menu: Control = scene.get("menu")
+	if flow_menu != null:
+		flow_menu.hide()
+		if scene.has_method("_frame_layout"):
+			scene._frame_layout()
+	vendor_resume = true
 	var adopted := adopt_imported()
 	vendor_open = true
 	open_screen("shop")
@@ -239,17 +256,22 @@ func open_vendor_shop() -> Dictionary:
 	return {"ok": true, "stock_refusal": "Fixed stock count and generation budget are unknown."}
 
 func close_menu() -> void:
-	if vendor_open:
-		# shop_close unloads the shared inventory resources.
+	var was_vendor := vendor_open
+	var resume := was_vendor and vendor_resume
+	open = false
+	vendor_open = false
+	vendor_resume = false
+	mouse_filter = MOUSE_FILTER_IGNORE
+	opener.visible = true
+	host.visible = false
+	if resume and scene != null and scene.has_method("set_paused"):
+		scene.set_paused(false)
+	if was_vendor:
+		# shop_close unloads the shared inventory resources after resume refresh.
 		inventory_art = null
 		inventory_art_path = ""
 		icon_cache.clear()
 		shop_art_cache.clear()
-	open = false
-	vendor_open = false
-	mouse_filter = MOUSE_FILTER_IGNORE
-	opener.visible = true
-	host.visible = false
 	queue_redraw()
 
 func _open_inventory_page(page: int) -> void:
@@ -395,6 +417,14 @@ func _logical(pos: Vector2) -> Vector2:
 		return Vector2.ZERO
 	return Vector2(pos.x / factor, pos.y / (factor * 480.0 / 448.0))
 
+func _shop_queue(frame: Dictionary) -> Array:
+	var packets: Array = frame.get("draw_order", []).duplicate(true)
+	packets.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if int(a.layer) != int(b.layer):
+			return int(a.layer) < int(b.layer)
+		return int(a.submission) > int(b.submission))
+	return packets
+
 func _draw() -> void:
 	if not open or service == null:
 		return
@@ -461,16 +491,20 @@ func _draw() -> void:
 		for selected in drawn.get("selected_texts", []):
 			_glyphs(int(selected.x), int(selected.y), str(selected.text), int(selected.colour), true, true)
 	if screen == "shop":
-		for sprite in drawn.get("sprites", []):
-			var art: Dictionary = _shop_art(str(sprite.resource))
-			if not art.is_empty():
-				draw_texture(art.texture, Vector2(int(sprite.x), int(sprite.y)), _word(int(sprite.tint)))
-		var shop_texts: Array = drawn.get("texts", [])
-		for index in shop_texts.size():
-			if vendor_open and index >= 2:
-				continue # Authored fixture stock is never shown as hub stock.
-			var row_text: Dictionary = shop_texts[index]
-			_glyphs(int(row_text.x), int(row_text.y), str(row_text.text), int(row_text.colour), bool(row_text.centred), false)
+		for packet in _shop_queue(drawn):
+			var index := int(packet.index)
+			if str(packet.kind) == "sprite":
+				var sprites: Array = drawn.get("sprites", [])
+				if index < 0 or index >= sprites.size(): continue
+				var sprite: Dictionary = sprites[index]
+				var art: Dictionary = _shop_art(str(sprite.resource))
+				if not art.is_empty():
+					draw_texture(art.texture, Vector2(int(sprite.x), int(sprite.y)), _word(int(sprite.tint)))
+			elif str(packet.kind) == "text":
+				var shop_texts: Array = drawn.get("texts", [])
+				if index < 0 or index >= shop_texts.size() or (vendor_open and index >= 2): continue
+				var row_text: Dictionary = shop_texts[index]
+				_glyphs(int(row_text.x), int(row_text.y), str(row_text.text), int(row_text.colour), bool(row_text.centred), false)
 	if screen in ["stats", "level-up", "skills"] or (screen == "inventory" and int(service.state().get("page", 0)) >= 3):
 		for text in drawn.texts:
 			_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred), true)

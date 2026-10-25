@@ -76,8 +76,25 @@ func run() -> void:
 		quit(1)
 		return
 	var shop_frame: Dictionary = scene.game_menus.service.frame("shop")
-	if shop_frame.get("sprites", []).size() != 3:
-		printerr("checked shop sprite submissions missing")
+	if shop_frame.get("sprites", []).size() != 1:
+		printerr("shop submitted a texture without a pinned tint")
+		quit(1)
+		return
+	var queue: Array = scene.game_menus._shop_queue(shop_frame)
+	# Research: buttontop is submitted before the layer-0 text batch. The
+	# two text draws are Buy then Sell; 2D queue traversal reverses them.
+	if queue.size() != 3 or str(queue[0].kind) != "text" or int(queue[0].index) != 1 or str(queue[1].kind) != "text" or int(queue[1].index) != 0 or str(queue[2].kind) != "sprite" or int(queue[2].index) != 0:
+		printerr("shop packet queue differs from the research order")
+		quit(1)
+		return
+	var layered: Array = scene.game_menus._shop_queue({"draw_order": [
+		{"kind": "sprite", "index": 0, "layer": 1, "submission": 3},
+		{"kind": "sprite", "index": 1, "layer": 0, "submission": 0},
+		{"kind": "text", "index": 0, "layer": 0, "submission": 1},
+		{"kind": "text", "index": 1, "layer": 0, "submission": 2},
+	]})
+	if layered.map(func(packet: Dictionary) -> String: return "%s:%d" % [packet.kind, int(packet.index)]) != ["text:1", "text:0", "sprite:1", "sprite:0"]:
+		printerr("2D queue did not use ascending layer and reverse submission")
 		quit(1)
 		return
 	var shop_art_count := 0
@@ -85,7 +102,7 @@ func run() -> void:
 		var art: Dictionary = scene.game_menus._shop_art(str(sprite.resource))
 		if not art.is_empty():
 			shop_art_count += 1
-	if shop_art_count != 3:
+	if shop_art_count != 1:
 		printerr("checked shop art could not be read from selected disc")
 		quit(1)
 		return
@@ -118,8 +135,16 @@ func run() -> void:
 		printerr("rendered shop did not differ from inventory")
 		quit(1)
 		return
+	scene.game_menus.close_menu()
+	scene.game_menus.configure(null)
+	var missing_pause: Dictionary = scene.game_menus.open_vendor_shop()
+	if missing_pause.get("ok", false) or scene.game_menus.vendor_open:
+		printerr("shop opened without an authoritative pause lifecycle")
+		quit(1)
+		return
+	scene.game_menus.configure(scene)
 	scene.npc_dialog.emit_signal("shop_requested", 0)
-	if not scene.game_menus.vendor_open or not scene.game_menus.open or scene.game_menus.live_imported:
+	if not scene.game_menus.vendor_open or not scene.game_menus.open or scene.game_menus.live_imported or not scene.paused:
 		printerr("hub shop without a player record did not open in refusal state")
 		quit(1)
 		return
@@ -188,13 +213,25 @@ func run() -> void:
 		printerr("unequip did not change the imported player record")
 		quit(1)
 		return
+	scene.automatic_steps = true
+	scene.held_commands = 1
+	scene.pending_damage = true
 	scene.npc_dialog.emit_signal("shop_requested", 0)
-	if not scene.game_menus.vendor_open or not scene.game_menus.service.state().get("live_record", false):
+	if not scene.game_menus.vendor_open or not scene.game_menus.service.state().get("live_record", false) or not scene.paused or scene.held_commands != 0 or scene.pending_damage:
 		printerr("hub shop event did not open the imported player's shop")
 		quit(1)
 		return
+	var paused_ticks: int = int(scene.raw_observation.ready_ticks)
+	var paused_submissions: int = int(scene.raw_observation.submissions)
+	var paused_state: Dictionary = scene.raw_observation.duplicate(true)
+	for _frame in range(8):
+		await process_frame
+	if scene.raw_observation != paused_state or int(scene.raw_observation.ready_ticks) != paused_ticks or int(scene.raw_observation.submissions) != paused_submissions:
+		printerr("automatic session advanced while shop held offline pause")
+		quit(1)
+		return
 	var live_shop: Dictionary = scene.game_menus.service.frame("shop")
-	if live_shop.get("sprites", []).size() != 3 or int(scene.game_menus.service.state().gold) != 777:
+	if live_shop.get("sprites", []).size() != 1 or int(scene.game_menus.service.state().gold) != 777:
 		printerr("live shop did not retain the imported player")
 		quit(1)
 		return
@@ -202,7 +239,7 @@ func run() -> void:
 		await process_frame
 		await RenderingServer.frame_post_draw
 	var live_shop_image: Image = scene.viewport.get_texture().get_image()
-	if live_shop_image == null or live_shop_image.get_data() == shop_capture.get_data() or live_shop_image.save_png(capture_dir.path_join("shop-live.png")) != OK:
+	if live_shop_image == null or live_shop_image.get_height() < shop_capture.get_height() or live_shop_image.get_data() == shop_capture.get_data() or live_shop_image.save_png(capture_dir.path_join("shop-live.png")) != OK:
 		printerr("live shop capture did not show imported state")
 		quit(1)
 		return
@@ -225,10 +262,21 @@ func run() -> void:
 		quit(1)
 		return
 	scene.game_menus.close_menu()
-	if scene.game_menus.vendor_open or scene.game_menus.open or scene.game_menus.inventory_art != null:
-		printerr("shop close did not hide and unload resources")
+	if scene.game_menus.vendor_open or scene.game_menus.open or scene.game_menus.inventory_art != null or scene.paused:
+		printerr("shop close did not hide and unload resources: vendor=", scene.game_menus.vendor_open,
+			" open=", scene.game_menus.open, " art=", scene.game_menus.inventory_art != null,
+			" paused=", scene.paused, " native=", scene.raw_observation.get("paused", null))
 		quit(1)
 		return
+	for _frame in range(30):
+		if int(scene.raw_observation.submissions) > paused_submissions:
+			break
+		await process_frame
+	if int(scene.raw_observation.submissions) <= paused_submissions:
+		printerr("automatic session did not resume after shop close")
+		quit(1)
+		return
+	scene.automatic_steps = false
 	scene.ps2_import.replace_record(original_record)
 	print("captures ", saved + 3)
 	quit(0 if saved == 8 else 1)

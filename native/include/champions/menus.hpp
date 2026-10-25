@@ -188,6 +188,11 @@ struct DrawFrame {
   int x = 0, y = 0, width = 0, height = 0, style = 0;
   std::uint32_t tint = 0;
 };
+struct DrawOrder {
+  int layer = 0, submission = 0;
+  bool text = false;
+  int index = 0;
+};
 struct Frame {
   std::string screen;
   std::vector<DrawText> texts;
@@ -196,6 +201,9 @@ struct Frame {
   std::vector<DrawSprite> sprites;
   std::vector<DrawIcon> icons;
   std::vector<DrawFrame> frames;
+  // Shop packets in original submission order; the 2D draw queue displays
+  // ascending layers and reverse submission order within each layer.
+  std::vector<DrawOrder> draw_order;
   std::vector<Gap> gaps;
 };
 
