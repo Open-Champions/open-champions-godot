@@ -429,6 +429,7 @@ func _level_script_toggled(on: bool) -> void:
 	if real == null or real.current < 0: return
 	if on: attach_level_script()
 	else: controller.disable_level_script()
+	_present_npc_dialog()
 
 # The level's script.scr and objects.ob. Refuses an empty image and does not
 # change the play observation. Entry names are the documented loader names.
@@ -583,8 +584,14 @@ func _observe(result: Dictionary) -> void:
 func _present_npc_dialog() -> void:
 	if controller == null: return
 	var talk: Dictionary = controller.dialog_status()
-	if not talk.get("ok", false): return
+	# hud_draw's g_hudSuppressed gate (docs/dialog.md 6.1) covers the
+	# player-status and auxiliary HUD layers as well as the text widgets.
+	# Apply the current word even after script detach so the view recovers.
+	var suppressed: bool = controller.text_hud().get("suppressed", false)
+	if play_hud != null: play_hud.visible = not suppressed
+	if hud_round3 != null: hud_round3.visible = not suppressed
 	if frontend != null: frontend.set_dialog_open(bool(talk.get("open", false)))
+	if not talk.get("ok", false): return
 	if talk.get("stalled", false):
 		status_label.text = "Dialog stopped: %s. \"Leave stalled dialog\" ends it (not in the original)." % str(talk.get("stall_reason", ""))
 	elif talk.get("open", false):
