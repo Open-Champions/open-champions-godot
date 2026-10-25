@@ -114,6 +114,18 @@ func game_key(code: int) -> bool:
 	scene.handle_input_event(event)
 	return handled
 
+func same_player_record(before: Dictionary, after: Dictionary) -> bool:
+	if not before.get("player_ready", false) or not after.get("player_ready", false): return false
+	for key in ["name", "player_class", "gold", "experience", "level", "acknowledged_level",
+		"record_max_hp_raw", "record_max_mana_raw"]:
+		if not before.has(key) or not after.has(key) or before[key] != after[key]: return false
+	var currents_known: bool = before.get("player_record_currents_known", false)
+	if currents_known != after.get("player_record_currents_known", false): return false
+	if currents_known:
+		for key in ["record_hp_raw", "record_mana_raw"]:
+			if not before.has(key) or not after.has(key) or before[key] != after[key]: return false
+	return true
+
 func save_json() -> void:
 	var summary := {"steps": rows, "refusals": refusal_counts,
 		"screenshots": screenshots, "renderer": DisplayServer.get_name()}
@@ -287,7 +299,8 @@ func run() -> void:
 	var record_after: Dictionary = scene.controller.get_observation()
 	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var mission1_still_available: bool = bool(scene.controller.script_mission_menu_state().get("first_story_available", false))
-	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
+	var record_carried: bool = transition_ok and scene.last_level_script_attached \
+		and scene.last_campaign_carried and scene.last_campaign_image_restored \
 		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
 		and int(record_after.get("player_class", -1)) == int(record_before.get("player_class", -2)) \
 		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
@@ -296,9 +309,12 @@ func run() -> void:
 		and int(record_after.get("record_max_hp_raw", -1)) == int(record_before.get("record_max_hp_raw", -2)) \
 		and int(record_after.get("record_max_mana_raw", -1)) == int(record_before.get("record_max_mana_raw", -2))
 	var at_blood1: bool = scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "blood1"
+	var route_carried: bool = at_hub and dialog_choice_completed and trigger_opened_menu and selected \
+		and record_carried and at_blood1 and mission1_still_available
 	mark("blood1_arrival", "arrived" if record_carried and at_blood1 and mission1_still_available else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
-		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
+		"pending_script_level": pending.get("queued", false),
+		"script_attached": scene.last_level_script_attached, "campaign_carried": scene.last_campaign_carried,
 		"campaign_image_restored": scene.last_campaign_image_restored,
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
 		"quest_vars_after": int(quests_after.get("vars", 0)),
@@ -308,12 +324,15 @@ func run() -> void:
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()
-		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
+		quit(0 if route_carried else 1)
 		return
 	# Continue from the real hub route through the host's blood1 entries. The
 	# selected-object Trigger call is a diagnostic; physical occupancy and the
 	# 15-list schedule are separate from this probe.
 	var story: Dictionary = scene.controller.script_story_status()
+	var initial_choice_clean: bool = int(story.get("decision", -1)) == 0 and int(story.get("evil", -1)) == 0
+	mark("blood1_initial_choice_state", "clean" if initial_choice_clean else "refused",
+		{"decision": int(story.get("decision", -1)), "evil": int(story.get("evil", -1))})
 	var blood1_census: bool = at_blood1 and int(story.get("records", 0)) == 363 \
 		and int(story.get("script_entries", 0)) == 21 \
 		and int(story.get("arrival_markers", 0)) == 3 \
@@ -400,11 +419,16 @@ func run() -> void:
 				choice_closed = true
 				break
 	story = scene.controller.script_story_status()
-	var decision_made: bool = choice_closed and int(story.get("decision", 0)) != 0
+	# The fresh difficulty-1 campaign uses bit 1 in the decision/evil bytes.
+	# Research maps the first terminal to good and the second to evil.
+	var evil_choice_requested: bool = args.has("blood1-choice-evil")
+	var expected_evil_bit := 2 if evil_choice_requested else 0
+	var decision_made: bool = initial_choice_clean and choice_closed \
+		and int(story.get("decision", -1)) == 2 and int(story.get("evil", -1)) == expected_evil_bit
 	mark("blood1_dialog_decision", "recorded" if decision_made else "refused",
 		{"closed": choice_closed, "decision": int(story.get("decision", 0)),
 		"evil": int(story.get("evil", 0)), "quest_lines": int(story.get("quest_lines", 0)),
-		"requested_evil_choice": args.has("blood1-choice-evil")})
+		"requested_evil_choice": evil_choice_requested, "expected_evil_bit": expected_evil_bit})
 	mark("blood1_door_sequence", "refused_unported_binding" if decision_made and int(story.get("cutscene_refusals", 0)) > 1 else "not_verified",
 		{"cutscene_refusals": int(story.get("cutscene_refusals", 0)),
 		"door_refusals": int(story.get("door_refusals", 0)),
@@ -425,22 +449,52 @@ func run() -> void:
 			exit_action = true
 			requested = str(request.get("name", ""))
 			break
-	var keyed_destination: bool = requested in ["strife", "drundar"]
+	var expected_destination := "drundar" if evil_choice_requested else "strife"
+	var keyed_destination: bool = requested == expected_destination
 	mark("blood1_keyed_exit_host_action", "queued" if exit_action and keyed_destination else "refused",
 		{"keyed_targets": keyed.size(), "selected_object_action_ok": exit_action,
-		"destination_documented": keyed_destination, "physical_use_verified": false})
+		"destination_matches_selected_branch": keyed_destination, "physical_use_verified": false})
+	var destination_request_before: Dictionary = scene.controller.script_level_request()
+	var destination_player_before: Dictionary = scene.controller.get_observation()
+	var destination_choice_before: Dictionary = scene.controller.script_story_status()
+	var exit_post_action_pending: bool = destination_request_before.get("post_action_pending", false)
 	var destination_loaded: bool = exit_action and keyed_destination and scene._apply_level_change()
 	var at_destination: bool = destination_loaded and scene.real.current >= 0 \
-		and str(scene.real.levels[scene.real.current].stem) == requested
+		and str(scene.real.levels[scene.real.current].stem) == expected_destination
 	var destination_state: Dictionary = scene.controller.script_story_status()
-	mark("blood1_destination", "loaded" if at_destination else "refused",
-		{"campaign_carried": scene.last_campaign_carried,
-		"exit_post_action_pending": story.get("post_action_pending", false),
+	var destination_player_after: Dictionary = scene.controller.get_observation()
+	var destination_request_after: Dictionary = scene.controller.script_level_request()
+	var destination_script_attached: bool = at_destination and scene.last_level_script_attached \
+		and destination_state.get("ok", false) \
+		and scene.controller.get_play_capabilities().get("level_script_enabled", false) \
+		and int(destination_state.get("script_entries", 0)) > 0
+	var destination_campaign_restored: bool = at_destination and scene.last_campaign_carried \
+		and scene.last_campaign_image_restored
+	var destination_player_carried: bool = at_destination and same_player_record(destination_player_before, destination_player_after)
+	var destination_choice_carried: bool = at_destination \
+		and int(destination_state.get("decision", -1)) == int(destination_choice_before.get("decision", -2)) \
+		and int(destination_state.get("evil", -1)) == int(destination_choice_before.get("evil", -2))
+	var destination_verified: bool = at_destination and destination_script_attached \
+		and destination_campaign_restored and destination_player_carried and destination_choice_carried
+	var evil_transition_refused: bool = evil_choice_requested and exit_action and keyed_destination \
+		and exit_post_action_pending and not destination_loaded and scene.real.current >= 0 \
+		and str(scene.real.levels[scene.real.current].stem) == "blood1" \
+		and destination_request_after.get("queued", false) \
+		and str(destination_request_after.get("name", "")) == expected_destination \
+		and scene.status_label.text == "Level change refused: a pending post action cannot be carried."
+	mark("blood1_destination", "loaded" if destination_verified else "refused_pending_post_action" if evil_transition_refused else "refused",
+		{"campaign_carried": destination_campaign_restored,
+		"campaign_image_restored": at_destination and scene.last_campaign_image_restored,
+		"destination_script_attached": destination_script_attached,
+		"destination_player_carried": destination_player_carried,
+		"destination_choice_carried": destination_choice_carried,
+		"exit_post_action_pending": exit_post_action_pending,
+		"evil_transition_refused": evil_transition_refused,
 		"mission_1_complete": destination_state.get("mission_1_complete", false),
 		"completion_branch_verified": false, "hub_return_verified": false})
 	await capture("11-blood1-destination")
 	var hub_branch: Dictionary = scene.controller.script_level_request()
-	var completed_in_destination: bool = at_destination and destination_state.get("mission_1_complete", false)
+	var completed_in_destination: bool = destination_verified and destination_state.get("mission_1_complete", false)
 	var hub_queued: bool = completed_in_destination and str(hub_branch.get("name", "")) == "hub"
 	var hub_loaded: bool = hub_queued and scene._apply_level_change()
 	mark("mission_1_completion_hub_return", "returned" if hub_loaded and scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "hub" else "branch_unverified",
@@ -449,8 +503,11 @@ func run() -> void:
 		"destination_counter_inputs_verified": false})
 	if args.has("blood1-only"):
 		save_json()
-		quit(0 if blood1_census and objective_ready and script_spawn_calls == 0 and trigger_action.get("ok", false) \
-			and blood_dialog_open and decision_made and exit_action and keyed_destination and at_destination else 1)
+		var blood1_steps_verified: bool = route_carried and initial_choice_clean and blood1_census \
+			and objective_ready and script_spawn_calls == 0 and trigger_action.get("ok", false) \
+			and blood_dialog_open and decision_made and exit_action and keyed_destination
+		var branch_verified: bool = evil_transition_refused if evil_choice_requested else destination_verified
+		quit(0 if blood1_steps_verified and branch_verified else 1)
 		return
 	# Combat remains a separate diagnostic until blood1 hostile constructors
 	# yield live enemies. Direct selection of valor is not a campaign route.
