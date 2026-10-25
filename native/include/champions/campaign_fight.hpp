@@ -20,6 +20,7 @@ using Address = combat_runtime::Address;
 
 struct EnemyView {
   Address address = 0;
+  std::string kind;
   bool small = false, dead = false, ai_frozen = false;
   Raw hp = 0, max_hp = 0, facing = 0;
   std::uint32_t state = 0;

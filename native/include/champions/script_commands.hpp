@@ -313,8 +313,8 @@ public:
     bool gate_travel = false, loaded_from_save = false;
   };
   void set_player1_entry(Player1Entry entry) { player1_entry_ = std::move(entry); }
-  // A class port finishing a factory creature (campaign_actors WarBoar and
-  // WarBoarSmall). When set, a boar-family record runs the executed base
+  // A class port finishing a factory creature (WarBoar family or the four
+  // mission-2 hostile classes). When set, a supported record runs the base
   // Creature_ctor (arena model) over the shared memory first, with the
   // selected level's balance row and monster level, and then the builder runs
   // the class constructor. The builder throws (its what() is the refusal
@@ -323,7 +323,7 @@ public:
   struct CreatureRequest {
     std::string class_name;
     bool small = false;
-    std::uint32_t address = 0, angle = 0;
+    std::uint32_t address = 0, angle = 0, constructor = 0;
     objects::GameObject *object = nullptr;
   };
   using CreatureBuilder = std::function<void(const CreatureRequest &)>;

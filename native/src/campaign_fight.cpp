@@ -1,6 +1,7 @@
 #include "champions/campaign_fight.hpp"
 #include "champions/campaign_actors.hpp"
 #include "champions/campaign_rewards.hpp"
+#include "champions/mission2_actors.hpp"
 #include "champions/player_state.hpp"
 #include "champions/script_items.hpp"
 #include "champions/creature_anim/runtime.hpp"
@@ -54,6 +55,7 @@ struct Fight::Impl {
   std::unique_ptr<C::SessionAdapter> adapter;
   script_commands::Host *host = nullptr;
   std::unique_ptr<campaign_actors::Runtime> actors;
+  std::unique_ptr<mission2_actors::Runtime> mission2;
   Counts counts;
   std::map<std::string, std::size_t> refusals;
   bool started = false, failed = false;
@@ -412,6 +414,74 @@ struct Fight::Impl {
   }
   std::map<Address, std::int64_t> registered_frame;
 
+  mission2_actors::Services mission2_services() {
+    mission2_actors::Services s;
+    // ffff9a7 leaves loaded holder/animation effects Unknown, and asserts
+    // event IDs without complete masks/times for all three definitions. Keep
+    // the native numeric constructor; active animation explicitly refuses.
+    s.initialize = [](Address, mission2_actors::Kind, const std::vector<unsigned> &) {
+      throw mission2_actors::Unsupported("mission2 loaded constructor services: holder, model, animation and complete event parameters Unknown");
+    };
+    s.call = [this](const mission2_actors::Call &c) -> Raw {
+      const auto a = c.self;
+      try {
+        switch (c.function) {
+        case 0x3c2738: return read(read(a + 0x24) + 12);
+        case 0x110d30: world->process_damage(a); return 0;
+        case 0x112948: return world->creature_run(a);
+        case 0x10c0f0: return world->creature_update_active(a);
+        case 0x1162b0:
+          throw mission2_actors::Unsupported("mission2 Creature_stepAnim: loaded constructor/event results Unknown");
+        case 0x115eb8: world->apply_knockback(a, c.floats.at(0)); return 0;
+        case 0x10ded0: world->pick_target(a); return 0;
+        case 0x119938: case 0x119b58: {
+          C::Arc arc;
+          arc.near = ZERO;
+          arc.far = c.function == 0x119938 ? from_int(36) : from_int(84);
+          arc.facing = read(a + 0x38, 2);
+          arc.angle = c.function == 0x119938 ? 8000 : 10000;
+          arc.minimum = Raw(std::int16_t(read(a + 0xd0, 2)));
+          arc.maximum = Raw(std::int16_t(read(a + 0xd2, 2)));
+          arc.attack = Raw(std::int16_t(read(a + 0xd4, 2)));
+          arc.flags = c.args.at(0);
+          return c.function == 0x119938 ? world->hit_target_in_arc(a, arc) : world->hit_all_in_arc(a, arc);
+        }
+        case 0x161270: {
+          const Vec3 pos{read(a + 0x10), read(a + 0x14), read(a + 0x18)};
+          world->damage_in_radius(a, pos, c.args.at(0), c.args.at(1), c.args.at(2), c.args.at(3),
+                                  c.floats.at(0), c.floats.at(1));
+          return 0;
+        }
+        case 0x10a9c0: return world->creature_filter_state(a, c.args.at(0));
+        case 0x10f2c8: {
+          // The shared loot adapter only establishes the rank-0, untinted
+          // route. In particular do not silently roll ordinary boss loot.
+          if (auto *actor = mission2->find(a))
+            if (actor->kind == mission2_actors::Kind::IronGuardian || read(a + 0xa0, 1) ||
+                (world->read(a + 0xa8, 8) & 1))
+              throw mission2_actors::Unsupported("mission2 ranked/tinted Creature_dropLoot: original result Unknown");
+          const Vec3 pos{read(a + 0x10), read(a + 0x14), read(a + 0x18)};
+          const auto &f = c.floats;
+          world->drop_loot(a, pos, read(a + 0x38, 2), 0, f.at(0), f.at(1), f.at(2), f.at(3), f.at(4), f.at(5));
+          return 0;
+        }
+        case 0x24fd8c:
+          refuse("Clockwork_shedParts: prop construction and loaded mesh-group results Unknown"); return 0;
+        case 0x16cfe0:
+          refuse("mission2 death animation: loaded clip start refused (numeric slot only)"); return 0;
+        case 0x10beb8: world->creature_on_death(a, 0); ++counts.deaths; return 0;
+        case 0x24f90c: case 0x27c0a0: case 0x27b550:
+          mission2->set_state(a, c.args.at(0)); return 0;
+        default:
+          throw mission2_actors::Unsupported("mission2 animation/AI/effect/physics call: unexecuted loaded service");
+        }
+      } catch (const C::Unsupported &e) {
+        throw mission2_actors::Unsupported(e.what());
+      }
+    };
+    return s;
+  }
+
   void build_boar(const script_commands::Host::CreatureRequest &request) {
     if (!actors) throw campaign_actors::Unsupported("boar runtime is not installed");
     const auto kind = request.small ? campaign_actors::Kind::WarBoarSmall
@@ -555,6 +625,11 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
   p.bundle.set_local_slot(0);
   p.dispatch->run = [impl = p_.get()](Address a) -> bool {
     auto &q = *impl;
+    if (q.mission2 && q.mission2->find(a)) {
+      try { q.mission2->tick(a); }
+      catch (const std::exception &e) { q.refuse(std::string("mission2 tick: ") + e.what()); }
+      return true;
+    }
     if (q.actors)
       if (auto *actor = q.actors->find(a)) {
         (void)actor;
@@ -582,7 +657,16 @@ void Fight::install(script_commands::Host &host) {
   p.actors = std::make_unique<campaign_actors::Runtime>(*p.authority->objects, host.resources(),
                                                        p.boar_services(), &p.authority->memory);
   p.actors->set_contain_refusals(true);
+  p.mission2 = std::make_unique<mission2_actors::Runtime>(*p.authority, host.resources(), *p.exe, p.mission2_services());
+  p.mission2->contain_refusals(true);
   host.set_creature_builder([impl = p_.get()](const script_commands::Host::CreatureRequest &r) {
+    if (const auto kind = mission2_actors::classify(r.constructor, r.class_name)) {
+      impl->mission2->adopt(*kind, *r.object, r.angle);
+      ++impl->counts.actors_built;
+      return;
+    }
+    if (r.constructor != 0x2ba03c)
+      throw mission2_actors::Unsupported("campaign creature: constructor class not supported");
     impl->build_boar(r);
   });
 }
@@ -598,6 +682,20 @@ std::string Fight::start(const PlayerStart &start) {
   auto &p = *p_;
   if (p.started) return "fight already started";
   try {
+    for (const auto kind : {mission2_actors::Kind::Cutter, mission2_actors::Kind::Droid, mission2_actors::Kind::IronGuardian}) {
+      const auto &spec = mission2_actors::profile(kind);
+      std::map<unsigned, Raw> overrides{{4, spec.run}, {27, spec.set_state}};
+      // Preserve unique, unported slots as refusals instead of silently
+      // dispatching the Creature base answer (monsters-2.md sections 3/5).
+      if (kind == mission2_actors::Kind::Cutter) overrides[36] = 0x3ca394;
+      if (kind == mission2_actors::Kind::Droid) overrides[1] = 0x3cb364;
+      if (kind == mission2_actors::Kind::IronGuardian) { overrides[1] = 0x3cb414; overrides[36] = 0x3cb50c; }
+      p.world->define_creature_table(spec.vtable, overrides);
+      p.world->set_class_body(spec.set_state, [impl = p_.get()](Address self, const std::vector<std::uint64_t> &args) {
+        try { impl->mission2->set_state(self, args.empty() ? 0u : Raw(args[0])); }
+        catch (const std::exception &e) { impl->refuse(std::string("mission2 setState: ") + e.what()); }
+      });
+    }
     // Documented WarBoar vtable (handoff round 2, monsters-2.md): the Creature
     // base slots with run (slot 4) and setState (slot 27) overridden; slot 2
     // is the inherited Creature_takeDamage 0x116638.
@@ -616,6 +714,8 @@ std::string Fight::start(const PlayerStart &start) {
         p.world->adopt_creature(entry.first);
         if (p.states.count(entry.first)) p.bundle.bind_actor(entry.first, p.states[entry.first]);
       }
+    if (p.mission2)
+      for (const auto &entry : p.mission2->actors()) p.world->adopt_creature(entry.first);
   } catch (const std::exception &e) {
     p.error = e.what();
     p.failed = true;
@@ -745,6 +845,7 @@ std::vector<EnemyView> Fight::enemies() const {
     EnemyView v;
     v.address = entry.first;
     v.small = actor.kind == campaign_actors::Kind::WarBoarSmall;
+    v.kind = v.small ? "WarBoarSmall" : "WarBoar";
     v.hp = p.read(entry.first + 0x228);
     v.max_hp = p.read(entry.first + 0x22c);
     v.dead = actor.dead();
@@ -754,6 +855,27 @@ std::vector<EnemyView> Fight::enemies() const {
     v.facing = p.read(entry.first + 0x38, 2);
     out.push_back(v);
   }
+  if (p.mission2)
+    for (const auto &entry : p.mission2->actors()) {
+      const auto &a = *entry.second;
+      if (!a.object->alive) continue;
+      EnemyView v;
+      v.address = entry.first;
+      switch (a.kind) {
+      case mission2_actors::Kind::Cutter: v.kind = "clockworkcutter"; break;
+      case mission2_actors::Kind::Hammer: v.kind = "clockworkhammer"; break;
+      case mission2_actors::Kind::Droid: v.kind = "Droid"; break;
+      case mission2_actors::Kind::IronGuardian: v.kind = "IronGuardian"; break;
+      }
+      v.hp = p.read(entry.first + 0x228);
+      v.max_hp = p.read(entry.first + 0x22c);
+      v.dead = !lt(ZERO, v.hp);
+      v.ai_frozen = a.ai_refusal.has_value();
+      v.state = p.read(entry.first + 0x232, 2);
+      v.position = {p.read(entry.first + 0x10), p.read(entry.first + 0x14), p.read(entry.first + 0x18)};
+      v.facing = p.read(entry.first + 0x38, 2);
+      out.push_back(v);
+    }
   return out;
 }
 const Counts &Fight::counts() const { return p_->counts; }
@@ -766,6 +888,8 @@ const std::map<std::string, std::size_t> &Fight::refusals() const {
     merged["unconstructed host stub left out of a collision/target box (class not ported)"] += p_->world->stub_box_skips();
   if (p_->actors)
     for (const auto &entry : p_->actors->refusal_counts()) merged["WarBoar AI: " + entry.first] += entry.second;
+  if (p_->mission2)
+    for (const auto &entry : p_->mission2->refusals()) merged["mission2: " + entry.first] += entry.second;
   return merged;
 }
 combat_runtime::World &Fight::world() { return *p_->world; }

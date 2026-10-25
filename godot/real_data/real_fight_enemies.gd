@@ -92,6 +92,9 @@ func update(observation: Dictionary) -> int:
 	var seen := {}
 	var drawn := 0
 	for row in rows:
+		# This presenter owns only the boar model. Mission 2 native actors are
+		# observed by class; their loaded model/animation path remains refused.
+		if str(row.kind) not in ["WarBoar", "WarBoarSmall"]: continue
 		var address := int(row.handle)
 		seen[address] = true
 		var instance: MeshInstance3D = instances.get(address)

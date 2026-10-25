@@ -843,7 +843,7 @@ Dictionary ChampionsSessionController::load_campaign_bytes(const PackedByteArray
 Array ChampionsSessionController::combat_resource_lump_names() const {
   Array names;
   if (!executable_) return names;
-  for (const auto definition : {0x502f80u, 0x501200u}) {
+  for (const auto definition : {0x502f80u, 0x501200u, 0x4ff260u, 0x500a88u, 0x500960u}) {
     std::uint32_t address = 0;
     for (unsigned i = 0; i < 4; ++i)
       address |= std::uint32_t(executable_->byte(definition + i)) << (i * 8);
@@ -2745,7 +2745,7 @@ Dictionary ChampionsSessionController::fight_observation() const {
     Dictionary value;
     value["slot"] = int64_t(1 + handle);
     value["handle"] = int64_t(e.address);
-    value["kind"] = e.small ? "WarBoarSmall" : "WarBoar";
+    value["kind"] = String::utf8(e.kind.c_str());
     value["present"] = true;
     value["dead"] = e.dead;
     value["ai_frozen"] = e.ai_frozen;
