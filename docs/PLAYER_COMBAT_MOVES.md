@@ -72,3 +72,32 @@ unarmed guard/move refusals, heavy/ability refusals without mana use or attack
 substitution, resume edges, and a newly resolved animation start on the second
 combo step. It supplies
 no equipment, learned ability, damage or health writes.
+
+## Validation (2026-10-25, Apple Silicon)
+
+Release native and GDExtension builds passed. The native `ctest -j 3` batch
+passed 240/241 in 2,269.35 s; `player-exact` hit its 240 s limit and passed
+alone in 195.11 s, validating all 241 cases. The targeted move/format tests
+passed 144 checks. Godot's development matrix passed 55/55 commands (including
+33 keyboard checks); the level sweep loaded and played 111/111 levels with
+230 checks and zero failures.
+
+`FULL_TRACE` stayed at 36,402 bytes, SHA-256
+`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+`FULL_SAVE_LOAD` matched 300/300 presentations. Both playthrough variants
+completed 25 stages, including 22/22 move checks; the rendered run captured
+15 images. The native combo probe resolves a new clip on its second step.
+Both complete fights recorded 323 resolved animation starts, 320 player hit
+calls, 103 positive damage events, one natural kill, 2,100 XP and level 2.
+This seed rolled zero items with eight shared draws. The journey exits 1 for
+the existing Gold source/gain gap; ground-item pickup was not exercised.
+The disc file count remained 994 before and after. Rendered diagnostics were
+inspected; the rest-pose mesh remains the stated presentation boundary.
+
+Clang's generated level-flow assertion driver uses `-O0` in Release; gameplay
+libraries and trace executables retain their Release optimization. Optimizing
+that large driver was still incomplete after 11:25 wall / 3:06.74 CPU; the
+final incremental native build completed in 26.07 s. The unchanged harness and
+generated vectors passed all 10,362 checks in 0.16 s. No fixture or assertion
+was removed. Other OS/architecture and exported-client execution remain
+unverified.
