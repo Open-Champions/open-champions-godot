@@ -1,4 +1,5 @@
 #pragma once
+#include "champions/hub_services.hpp"
 #include "champions/frame_clock.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/campaign_fight.hpp"
@@ -83,6 +84,7 @@ public:
 private:
   // Parsed records belong to this level's script image and are replaced with it.
   std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
+  std::map<std::size_t, champions::simulation::rta::hub_services::Savepoint> hub_savepoints_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   bool ui_frame_driven_ = false;
@@ -129,6 +131,7 @@ private:
   std::optional<std::uint8_t> help_chime_;
   bool help_paused_ = false;
   static void bind_text_methods();
+  static void bind_hub_methods();
   void apply_text(champions::simulation::rta::script_commands::Host &);
   void note_help_box();
   void release_help_pause();
@@ -222,6 +225,8 @@ public:
   godot::Array combat_resource_lump_names() const;
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
+  godot::Array hub_service_targets() const;
+  godot::Dictionary hub_service_use(int64_t index, bool card_busy);
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,
   // 0x40 confirm), taken at the next ready tick.
   godot::Dictionary dialog_press(int64_t pad_bits);

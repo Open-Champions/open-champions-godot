@@ -276,6 +276,8 @@ func run() -> void:
 	help_close()
 	if scene.paused and scene.session_started: scene.resume_session()
 	var dialog: Dictionary = scene.controller.dialog_status()
+	var hub_campaign_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var hub_player_before: Dictionary = scene.controller.get_observation()
 	var talkers := int(dialog.get("talkers", 0))
 	var walk_start: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var opened_dialog := false
@@ -337,7 +339,12 @@ func run() -> void:
 		mark("dialog_prompt", "drawn" if prompt_drawn else "unavailable",
 			{"cursor_glyph_quads": int(scene.npc_dialog.frame.get("cursor_glyph_quads", 0))})
 		if prompt_drawn: await capture("04-dialog-prompt")
+	var point_menu_refused := false
 	if opened_dialog:
+		for target in scene.controller.hub_service_targets():
+			if str(target.kind) == "Savepoint":
+				var blocked: Dictionary = scene.controller.hub_service_use(int(target.index), false)
+				point_menu_refused = not blocked.get("ok", true) and not blocked.get("request_save", true)
 		game_key(KEY_DOWN)
 		var closed := false
 		for i in range(1200):
@@ -360,6 +367,100 @@ func run() -> void:
 	help_close()
 	if fe.screen() == "pause": tap(START)
 	if scene.paused and scene.session_started and not scene.stopped: scene.resume_session()
+	var hub_campaign_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var hub_player_after: Dictionary = scene.controller.get_observation()
+	var hub_quest_changed := int(hub_campaign_after.get("quest_lines", -1)) == int(hub_campaign_before.get("quest_lines", -1)) + 1 \
+		and int(hub_campaign_after.get("mission_available_bits", -1)) == int(hub_campaign_before.get("mission_available_bits", -1)) + 1
+	var hub_no_debit: bool = hub_player_after.get("gold", -1) == hub_player_before.get("gold", -2) \
+		and hub_player_after.get("experience", -1) == hub_player_before.get("experience", -2)
+	mark("hub_quest_service", "applied" if hub_quest_changed and hub_no_debit else "refused",
+		{"quest_lines_added": int(hub_campaign_after.get("quest_lines", -1)) - int(hub_campaign_before.get("quest_lines", -1)),
+		"mission_bits_added": int(hub_campaign_after.get("mission_available_bits", -1)) - int(hub_campaign_before.get("mission_available_bits", -1)),
+		"gold_xp_unchanged": hub_no_debit})
+	var point_index := -1
+	var point_choice := -1
+	var service_refusals := true
+	scene.hub_services.refresh()
+	for index in range(scene.hub_services.targets.size()):
+		var target: Dictionary = scene.hub_services.targets[index]
+		if str(target.kind) == "Savepoint":
+			point_index = int(target.index)
+			point_choice = index
+		else:
+			var refused: Dictionary = scene.controller.hub_service_use(int(target.index), false)
+			service_refusals = service_refusals and not refused.get("ok", true) and not refused.get("request_save", true) \
+				and not str(refused.get("error", "")).is_empty()
+	var point_before: Dictionary = scene.controller.get_observation()
+	var point_busy: Dictionary = scene.controller.hub_service_use(point_index, true)
+	var point_bad: Dictionary = scene.controller.hub_service_use(-1, false)
+	var point_result := {"ok": false}
+	var point_saved := false
+	var point_path := out_dir.path_join("hub-savepoint.ocplay")
+	if point_choice >= 0:
+		scene.hub_services.choice.select(point_choice)
+		if args.has("hub-only"):
+			scene.set_paused(true)
+			await process_frame
+			scene.scene_scroll.ensure_control_visible(scene.hub_services.row)
+			await capture("04-hub-services")
+			scene.set_paused(false)
+		fe.queue_path("save_session", point_path)
+		point_result = scene.hub_services.use_selected()
+		await capture("04-savepoint-save-screen")
+		if fe.screen() == "save-game": tap(CROSS)
+		point_saved = fe.screen() == "saved" and FileAccess.file_exists(point_path)
+		if fe.screen() == "saved": tap(CROSS)
+	var point_after: Dictionary = scene.controller.get_observation()
+	var point_unchanged := true
+	for key in ["gold", "experience", "level", "record_max_hp_raw", "record_max_mana_raw", "player_record_revision"]:
+		point_unchanged = point_unchanged and point_before.has(key) and point_before.get(key) == point_after.get(key)
+	for key in ["record_hp_raw", "record_mana_raw"]:
+		point_unchanged = point_unchanged and point_before.has(key) == point_after.has(key) and point_before.get(key) == point_after.get(key)
+	var point_loaded: bool = point_saved and scene.load_session_file(point_path)
+	var point_readback: Dictionary = scene.controller.get_observation()
+	var point_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var point_carried := point_loaded
+	for key in ["gold", "experience", "level", "record_max_hp_raw", "record_max_mana_raw", "player_class", "player_model_index"]:
+		point_carried = point_carried and point_before.has(key) and point_before.get(key) == point_readback.get(key)
+	for key in ["record_hp_raw", "record_mana_raw"]:
+		point_carried = point_carried and point_before.has(key) == point_readback.has(key) and point_before.get(key) == point_readback.get(key)
+	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
+		point_carried = point_carried and hub_campaign_after.has(key) and hub_campaign_after.get(key) == point_campaign.get(key)
+	mark("hub_savepoint", "saved" if point_saved and point_unchanged and point_carried and service_refusals else "refused",
+		{"accepted": point_result.get("ok", false), "busy_refused": not point_busy.get("ok", true),
+		"bad_index_refused": not point_bad.get("ok", true), "mutex_refused": point_menu_refused, "player_unchanged": point_unchanged,
+		"native_save_written": point_saved, "original_card_persistence": false,
+		"save_readback_matches": point_carried, "other_services_refused": service_refusals})
+	if not point_saved or not point_unchanged: refusal("hub_savepoint", point_result.get("error", "savepoint flow incomplete"))
+	if not point_carried: refusal("hub_savepoint", "native continuation readback differs")
+	if not service_refusals: refusal("hub_services", "an unsupported direct service did not refuse with a diagnostic")
+	if args.has("hub-only"):
+		var alternate_index := -1
+		for index in range(scene.real.levels.size()):
+			if str(scene.real.levels[index].stem) == "hub2": alternate_index = index
+		var alternate_loaded: bool = alternate_index >= 0 and scene.load_real_level(alternate_index, true)
+		var alternate_refused := false
+		var alternate_point := false
+		if alternate_loaded:
+			scene.start_play()
+			help_close()
+			var alternate_use: Dictionary = scene.controller.dialog_use()
+			var alternate_talk: Dictionary = scene.controller.dialog_talk_to(0)
+			alternate_refused = not alternate_use.get("ok", true) and not alternate_talk.get("ok", true)
+			for target in scene.controller.hub_service_targets():
+				if str(target.kind) == "PushTrigger":
+					var alternate_action: Dictionary = scene.controller.script_run_exit(int(target.index))
+					alternate_refused = alternate_refused and not alternate_action.get("ok", true)
+				elif str(target.kind) == "Savepoint":
+					var alternate_save: Dictionary = scene.controller.hub_service_use(int(target.index), false)
+					alternate_point = alternate_save.get("ok", false) and alternate_save.get("request_save", false)
+		mark("alternate_hub_services", "bounded" if alternate_loaded and alternate_refused and alternate_point else "refused",
+			{"loaded": alternate_loaded, "unknown_routes_refused": alternate_refused, "direct_savepoint_accepted": alternate_point})
+		save_json()
+		scene.queue_free()
+		await process_frame
+		quit(0 if hub_quest_changed and hub_no_debit and service_refusals and point_carried and point_saved and point_unchanged and point_menu_refused and not point_busy.get("ok", true) and not point_bad.get("ok", true) and alternate_loaded and alternate_refused and alternate_point else 1)
+		return
 	# campaign-combat-handoff.md ranks the hub-to-valor route first: hub has
 	# no hostile objects, while this level has WarBoar placements. Select the
 	# level from the opened game folder rather than relying on its sorted index.
