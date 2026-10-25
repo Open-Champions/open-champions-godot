@@ -447,6 +447,19 @@ func _full_key(event: InputEvent) -> bool:
 		"disease_bolt": _combat_call("combat_press_disease_bolt" if event.pressed else "combat_release_disease_bolt", [true] if event.pressed else [])
 	return true
 
+# Ordinary real-level play with the shared-World fight: J is the attack button
+# of the executed player tick (native command bit 16 = pad attack).
+func _fight_key(event: InputEvent) -> bool:
+	if not event is InputEventKey or event.echo or not raw_observation.get("fight_player_ready", false): return false
+	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+	if key != KEY_J: return false
+	if not event.pressed:
+		held_commands &= ~16
+		return true
+	if paused or stopped or _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible: return false
+	held_commands |= 16
+	return true
+
 func handle_input_event(event: InputEvent) -> bool:
 	if frontend != null and frontend.handle_key(event):
 		held_commands = 0
@@ -460,6 +473,7 @@ func handle_input_event(event: InputEvent) -> bool:
 	if game_menus != null and game_menus.handle_host_key(event):
 		return true
 	if _full_key(event): return true
+	if _fight_key(event): return true
 	if event is InputEventKey and event.pressed and not event.echo and (event.physical_keycode == KEY_ESCAPE or event.keycode == KEY_ESCAPE):
 		if _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible:
 			return false

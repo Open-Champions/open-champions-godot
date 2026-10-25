@@ -7,6 +7,8 @@
 // readable by hideMonster; hit points need the selected level's balance data.
 #include "champions/objects.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/combat_runtime.hpp"
+#include "champions/session_combat_runtime_adapter.hpp"
 #include <array>
 #include <cstring>
 #include <tuple>
@@ -164,6 +166,7 @@ int main(int argc, char **argv) {
     check(!cases.empty() && seed0, "vectors read");
     rta::SharedRandom seed(seed0);
     unsigned built = 0, stubs = 0;
+    bool shared_authority_checked = false;
     for (const auto &c : cases) {
       const auto pos_words = split(c[2], ',');
       const std::array<std::uint32_t, 3> pos{hex(pos_words[0]), hex(pos_words[1]), hex(pos_words[2])};
@@ -182,6 +185,107 @@ int main(int argc, char **argv) {
       const std::string where = "record " + c[1] + " " + c[4];
       check(counts.objects_registered == 1, where + " registered");
       if (c[5] == "built") {
+        if (!shared_authority_checked) {
+          namespace combat = rta::combat_runtime;
+          auto authority = std::make_shared<rta::WorldAuthority>();
+          combat::World combat_world(authority, combat::Services{});
+          combat::SessionAdapter adapter(combat_world);
+          combat::Address handle = 0, address = 0;
+          {
+            sc::Host factory(authority);
+            rta::SharedRandom factory_seed(seed0);
+            factory.bind_seed(&factory_seed);
+            factory.set_executable(image.view());
+            check(factory.adopt_objects(bytes.data(), bytes.size()), "shared factory adoption");
+            check(factory.counts().objects_built == 1, "ported factory constructor");
+            check(authority->objects->objects.size() == 1, "one shared object graph entry");
+            address = authority->objects->objects.begin()->first;
+            const auto free_nodes = authority->objects->handles.count_free();
+            handle = combat_world.retain(address);
+            check(authority->objects->handles.count_free() < free_nodes,
+                  "combat retain uses the host's handle pool");
+            check(combat_world.target(handle) == address &&
+                      adapter.factory_object(handle) == authority->objects->objects.at(address),
+                  "factory object reachable by the combat adapter handle");
+            check(combat_world.read(address + 0x44) == factory.variables().memory.word(address + 0x44),
+                  "factory bytes visible in combat memory");
+            combat_world.write(address + 0x34, 4, 0x1234);
+            check(factory.variables().memory.word(address + 0x34) == 0x1234,
+                  "combat write visible in script memory");
+          }
+          check(!combat_world.target(handle) && !adapter.factory_object(handle) &&
+                    !authority->find(address), "host removal invalidates shared handle");
+          authority->objects->pool.free(address); // Force the same pool slot's next generation.
+          {
+            sc::Host replacement(authority);
+            rta::SharedRandom replacement_seed(seed0);
+            replacement.bind_seed(&replacement_seed);
+            replacement.set_executable(image.view());
+            check(replacement.adopt_objects(bytes.data(), bytes.size()), "replacement adoption");
+            check(authority->objects->objects.count(address) == 1,
+                  "factory allocation reuses the shared pool address");
+            check(!combat_world.target(handle) && !adapter.factory_object(handle),
+                  "retired handle does not alias replacement generation");
+            // The factory identity guard: a retained handle whose node is still
+            // linked, but whose address is now registered to a different Object.
+            const auto live_handle = combat_world.retain(address);
+            check(adapter.factory_object(live_handle) == authority->objects->objects.at(address),
+                  "fresh handle resolves the replacement factory object");
+            auto *original = authority->find(address);
+            authority->unregister_object(*original);
+            rta::Object stand_in;
+            stand_in.id = address;
+            authority->register_object(stand_in);
+            authority->register_factory(address);
+            check(combat_world.target(live_handle) == address &&
+                      !adapter.factory_object(live_handle),
+                  "factory_object rejects a registry object that is not the graph object");
+            authority->unregister_object(stand_in);
+            authority->register_object(*original);
+            authority->register_factory(address);
+            check(adapter.factory_object(live_handle) == authority->objects->objects.at(address),
+                  "factory identity restored");
+            // Script writes to bytes the combat overlay covers are not refused
+            // (script memory keeps its original store semantics).
+            bool refused = false;
+            try {
+              replacement.variables().memory.write(address, {0x5a});
+              replacement.variables().memory.write(address + 0x34, {0x12, 0x34});
+            } catch (const std::exception &) {
+              refused = true;
+            }
+            check(!refused && replacement.variables().memory.u8(address + 0x34) == 0x12,
+                  "script write to a combat-overlay byte is not refused");
+          }
+          {
+            // A combat actor is freed, then a factory object reuses its pool
+            // block: a retained handle must link to the object's own head.
+            auto reuse_authority = std::make_shared<rta::WorldAuthority>();
+            combat::World reuse_world(reuse_authority, combat::Services{});
+            const auto actor = reuse_world.spawn_skelight();
+            reuse_world.destroy(actor);
+            auto reuse = std::make_unique<sc::Host>(reuse_authority);
+            rta::SharedRandom reuse_seed(seed0);
+            reuse->bind_seed(&reuse_seed);
+            reuse->set_executable(image.view());
+            check(reuse->adopt_objects(bytes.data(), bytes.size()), "reuse adoption");
+            check(reuse_authority->objects->objects.size() == 1, "one reused object graph entry");
+            const auto reused = reuse_authority->objects->objects.begin()->first;
+            check(reused == actor, "factory object reuses the freed combat actor's block");
+            const auto reuse_handle = reuse_world.retain(reused);
+            check(reuse_world.target(reuse_handle) == reused &&
+                      reuse_world.factory_object(reuse_handle) ==
+                          reuse_authority->objects->objects.at(reused),
+                  "handle on a reused block links the factory object's own head");
+            // Host teardown must unlink the node from the factory object's own
+            // head; a node left in the stale combat head would still resolve
+            // (audit WA-F2).
+            reuse.reset();
+            check(reuse_world.target(reuse_handle) == 0 && !reuse_world.factory_object(reuse_handle),
+                  "host teardown invalidates the retained handle");
+          }
+          shared_authority_checked = true;
+        }
         // Size, then the non-zero bytes as offset:value.
         const auto semi = c[6].find(';');
         const auto n = hex(c[6].substr(0, semi));
@@ -216,7 +320,7 @@ int main(int argc, char **argv) {
           check(!host.variables().find(name, 0x200).empty(), where + " found by name");
         }
     }
-    check(built > 200 && stubs > 0, "case coverage");
+    check(built > 200 && stubs > 0 && shared_authority_checked, "case coverage");
     rta::SharedRandom gate_seed(20973), expected_gate_seed(20973);
     sc::Host gate_host;
     gate_host.bind_seed(&gate_seed);

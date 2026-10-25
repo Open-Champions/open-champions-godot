@@ -21,6 +21,7 @@
 #include "champions/script_effects.hpp"
 
 #include "champions/script_items.hpp"
+#include "champions/resource_manager.hpp"
 
 #include "champions/strings.hpp"
 #include <array>
@@ -242,6 +243,7 @@ struct DialogCounts {
 class Host {
 public:
   Host();
+  explicit Host(std::shared_ptr<WorldAuthority>);
   Host(const Host &) = delete;
   Host &operator=(const Host &) = delete;
   Host(Host &&) = delete;
@@ -294,6 +296,11 @@ public:
   // The selected level's WORLD payload supplies the terrain queries used by
   // Player1_ctor's four exact free-spot searches.
   void set_level_world(const std::uint8_t *world, std::size_t size);
+  // Read-only bytes from the caller's selected disc, installed before object
+  // adoption. Resource names are read from the executable definition table.
+  void load_resource_lmp(const std::string &name, champions::Bytes image) {
+    resources_.load_lmp(name, image);
+  }
   // The level-entry inputs of Player1_ctor's marker ranking (research
   // ref_objects.py player1_marker: prev_level, entrance, gate_travel, and the
   // start rank 3 after a load from a save, docs/issues/arena-entry.md). Nothing
@@ -306,6 +313,25 @@ public:
     bool gate_travel = false, loaded_from_save = false;
   };
   void set_player1_entry(Player1Entry entry) { player1_entry_ = std::move(entry); }
+  // A class port finishing a factory creature (campaign_actors WarBoar and
+  // WarBoarSmall). When set, a boar-family record runs the executed base
+  // Creature_ctor (arena model) over the shared memory first, with the
+  // selected level's balance row and monster level, and then the builder runs
+  // the class constructor. The builder throws (its what() is the refusal
+  // label) to leave the record a labelled stub. Without a builder these
+  // records stay unbuilt, as before.
+  struct CreatureRequest {
+    std::string class_name;
+    bool small = false;
+    std::uint32_t address = 0, angle = 0;
+    objects::GameObject *object = nullptr;
+  };
+  using CreatureBuilder = std::function<void(const CreatureRequest &)>;
+  void set_creature_builder(CreatureBuilder builder) { creature_builder_ = std::move(builder); }
+  champions::resources::Manager &resources() { return resources_; }
+  // Keeps a class port's runtime alive exactly as long as this host (and
+  // destroys it before the host's objects).
+  void retain(std::shared_ptr<void> owner) { keepalive_.push_back(std::move(owner)); }
   // Execute the observed intro/hud.lmp gate. A missing residency result
   // refuses seed advancement and counts the potentially omitted 223 draws.
   void advance_first_level_items(const std::string &level_name,
@@ -384,6 +410,17 @@ public:
   // The f12 music_playLevel passes to channel 2. Zero until a call passes the gate.
   std::uint32_t music_channel() const { return music_channel_; }
   builtins::Variables &variables() { return *variables_; }
+  // The two globals game_loadLevel leaves for the loaded level: g_levelMonsterLevel
+  // 0x4f714c (level-table byte + 2 on difficulty 1, research-pickups 9911a6b
+  // docs/data-tables.md section 5; level_flow::monster_level) and g_difficultyIdx
+  // 0x4f719c. Present only once set_level_stats loaded the level's table and
+  // while the difficulty word is the 1 the value was computed for (single
+  // player, no PvP: the only mode this host models); otherwise empty.
+  struct LevelLoadGlobals {
+    std::uint32_t monster_level = 0;
+    std::int32_t difficulty = 0;
+  };
+  std::optional<LevelLoadGlobals> level_load_globals() const;
   amx::Machine *machine() { return machine_.get(); }
   amx::Cell last_value() const { return last_value_; }
   const std::string &last_fault() const { return last_fault_; }
@@ -514,6 +551,9 @@ private:
   // record's property list (research items-gaps ecf9742 docs/spec/hide-monster.md
   // 4.1 and 5). world_createObject for ScriptGenerator_spawn: the factory row,
   // then a ported constructor chain; any other constructor refuses.
+  Build build_creature_family(const level_flow::Record &, const level_factory::Outcome &,
+                              std::uint32_t address, const std::vector<std::string> &props);
+  CreatureBuilder creature_builder_;
   Build build_generator(const level_factory::Outcome &, const level_flow::Record &,
                         std::uint32_t address, const std::vector<std::string> &props);
   std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
@@ -530,10 +570,12 @@ private:
   void refresh_hud_inputs();
   void mirror_hud();
   Cell *target_cell(std::uint32_t creature, bool create);
+  void mark_built(std::uint32_t);
 
   // Linked target cells must outlive Variables teardown, which unregisters
   // external objects and unlinks their paired handle nodes.
   std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
+  std::shared_ptr<WorldAuthority> authority_;
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
   std::unique_ptr<script_items::Service> items_;
@@ -569,6 +611,7 @@ private:
   bool seed_gate_observed_ = false;
   std::optional<Player1Entry> player1_entry_;
   std::unique_ptr<world_queries::Level> terrain_level_;
+  champions::resources::Manager resources_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
@@ -615,6 +658,8 @@ private:
   // A dialog built-in is running: the binder's camera, message, shop and menu
   // seams it calls are answered by the dialog wiring.
   bool in_dialog_command_ = false;
+  // After variables_: a class port's runtime dies before the host's objects.
+  std::vector<std::shared_ptr<void>> keepalive_;
   // Declared last so the machine, whose natives capture this, dies first.
   std::shared_ptr<amx::Machine> machine_;
 };

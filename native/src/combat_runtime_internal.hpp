@@ -79,16 +79,18 @@ struct World::State {
     std::optional<Vec3> point;
     std::optional<Raw> facing;
   };
-  Pool pool;
-  HandlePool handles;
+  std::shared_ptr<WorldAuthority> authority;
+  Pool &pool;
+  HandlePool &handles;
   SharedRandom shared; // borrowed by damage_apply; synchronised with memory
-  std::map<Address, std::unique_ptr<Cell>> heads;
+  std::map<Address, Cell *> heads;
+  std::map<Address, std::unique_ptr<Cell>> owned_heads;
   std::map<const Link *, Address> links;
   std::map<Address, std::unique_ptr<Actor>> objects;
   std::map<Address, std::unique_ptr<Actor>> spells; // spell records (no object)
   std::vector<std::unique_ptr<Actor>> retired;
   std::shared_ptr<Overlay> overlay;
-  creature_hp::Memory mem;
+  creature_hp::Memory &mem;
   A::Model model;
   creature_movement::Model movement;
   Services services;
@@ -104,8 +106,18 @@ struct World::State {
   Address fixture_next = FIXTURE_BASE, external_next = 0x90000000;
   int camera_mode = 1;
   bool running = false, failed = false;
+  // Iterators are retained after end() because stale node references can read
+  // their prev links. The retention is a host choice, not a game rule: an
+  // ended iterator that no list, node or live iterator refers to is released
+  // (prune_iterators), and only a runaway count of referenced ones is refused.
   std::vector<std::unique_ptr<Iterator>>
       iterators; // preserve retired prev links
+  std::set<const Link *> ended_iterators;
+  std::size_t prune_at = 4096;
+  IteratorRetention retention = IteratorRetention::Lazy;
+  void reserve_iterator();
+  void end_iterator(Iterator &);
+  void prune_iterators();
   std::vector<Iterator *> spell_iterators; // iter_begin/next/end stack
   std::map<Address, std::pair<Raw, Raw>> animations;
   std::array<std::uint8_t, 32> music{};
@@ -116,6 +128,11 @@ struct World::State {
   std::map<Address, Address> prop_model_pointers;
   std::map<Address, unsigned> fixture_extents;
   std::vector<std::pair<Raw, Raw>> exp_awards;
+  std::size_t stub_box_skips = 0;
+  // Class virtual bodies ported outside the arena model, by function address
+  // (World::set_class_body). Consulted before any inherited body.
+  std::map<Raw, std::function<void(Address, const std::vector<std::uint64_t> &)>> class_hooks;
+  bool run_class_hook(Raw fn, Address self, const std::vector<Value> &args);
   Address typeid_target = 0, pending_dtor = 0;
   bool has_typeid_target = false;
   Kind kind_hint = Kind::Missile;
@@ -123,6 +140,7 @@ struct World::State {
   std::vector<std::unique_ptr<Cell>> retired_cells;
   std::vector<std::pair<Address, unsigned>> arena_stack;
   std::shared_ptr<player::Tick::NamedCallbacks> tick_callbacks;
+  explicit State(std::shared_ptr<WorldAuthority>, Services, int, Composition);
   explicit State(Services, int, Composition);
   ~State();
   bool full() const { return composition == Composition::Full; }

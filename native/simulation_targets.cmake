@@ -3,7 +3,7 @@ include_guard(GLOBAL)
 set(CHAMPIONS_SIMULATION_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 # Standalone RTA quest/profile script built-ins; remaining engine commands refuse.
 add_library(champions-script-builtins "${CHAMPIONS_SIMULATION_ROOT}/src/script_builtins.cpp")
-target_link_libraries(champions-script-builtins PUBLIC champions-amx champions-core champions-objects)
+target_link_libraries(champions-script-builtins PUBLIC champions-amx champions-core champions-objects champions-creature-hp)
 if(MSVC)
     target_compile_options(champions-script-builtins PRIVATE /W4 /utf-8)
 else()
@@ -235,6 +235,22 @@ else()
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
+# Isolated campaign WarBoar/Minotaur actor boundary; no play-scene binding.
+add_library(champions-campaign-actors "${CHAMPIONS_SIMULATION_ROOT}/src/campaign_actors.cpp")
+target_include_directories(champions-campaign-actors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+# The GDExtension compiles the same archive/resource-manager sources as
+# champions-archive-binding-core and sets CHAMPIONS_ACTORS_ARCHIVE to it.
+if(NOT CHAMPIONS_ACTORS_ARCHIVE)
+  set(CHAMPIONS_ACTORS_ARCHIVE champions-archive)
+endif()
+target_link_libraries(champions-campaign-actors PUBLIC champions-objects champions-creature-hp ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
+if(MSVC)
+    target_compile_options(champions-campaign-actors PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-campaign-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-campaign-actors)
+
 # AntQueen, Skeleton and Soul constructors, set-states and run prologues
 # (research-combat-ctors e9777eb) on the arena model.
 add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors.cpp"
@@ -316,7 +332,19 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-play)
 
 include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")
 
-target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines champions-creature-anim)
+target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines champions-creature-anim champions-objects)
+
+# Borrowed production Player callbacks; the Full fixture retains its own
+# explicit synthetic services. No World ownership is changed here.
+add_library(champions-player-services "${CHAMPIONS_SIMULATION_ROOT}/src/player_services.cpp")
+target_include_directories(champions-player-services PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-player-services PUBLIC champions-combat-runtime champions-world-queries champions-creature-anim champions-creature-water)
+if(MSVC)
+  target_compile_options(champions-player-services PRIVATE /W4 /utf-8 /fp:strict)
+else()
+  target_compile_options(champions-player-services PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-player-services)
 
 target_sources(champions-combat-play PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/play_animation.cpp")
 target_link_libraries(champions-combat-play PUBLIC champions-creature-anim)

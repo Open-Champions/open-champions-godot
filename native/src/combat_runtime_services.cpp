@@ -154,6 +154,16 @@ Raw World::State::advance_anim(Address a, Raw speed) {
   note("anim_advance", {a, speed, ev});
   return ev;
 }
+bool World::State::run_class_hook(Raw fn, Address self, const std::vector<Value> &args) {
+  auto hook = class_hooks.find(fn);
+  if (hook == class_hooks.end()) return false;
+  std::vector<std::uint64_t> numbers;
+  for (const auto &value : args)
+    if (auto n = std::get_if<std::int64_t>(&value)) numbers.push_back(std::uint64_t(*n));
+  auto body = hook->second;
+  body(self, numbers);
+  return true;
+}
 Value World::State::vcall(Address c, unsigned slot, std::vector<Value> args) {
   if (full())
     return full_vcall(c, slot, std::move(args));
@@ -263,6 +273,8 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     combat_ctors::gold_on_touch(model,self,ar(0));
     return iv(0);
   }
+  if (run_class_hook(fn, self, args))
+    return iv(0);
   switch (fn) {
   case 0x2da610:
     multifire_on_hit(self, ar(0));
@@ -338,6 +350,8 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
   if (fn == 0x27142c || fn == 0x271484 || fn == 0x27155c ||
       fn == 0x272f4c)
     return full_vcall(self, slot, std::move(args));
+  if (run_class_hook(fn, self, args))
+    return iv(0);
   if (knows(fn)) {
     for (auto &d : arena_stack)
       if (d.first == self && d.second == slot)
@@ -400,6 +414,7 @@ void World::State::install_ctor_services() {
     // constructed props, chunks and gold.
     p->id=obj;p->kind=Kind::Effect;
     objects[obj]=std::move(p);
+    authority->register_object(*objects.at(obj));
     for (unsigned off:{0u,4u,8u}) head(obj+off);
     return iv(0);
   };
@@ -787,8 +802,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
         throw Unsupported("nonempty spell iterator");
       return iv(0);
     }
-    if (iterators.size() >= 65536)
-      throw Error("combat iterator retention budget exceeded");
+    reserve_iterator();
     iterators.push_back(std::make_unique<Iterator>(list_head(ar(0)), ar(1)));
     auto *it = iterators.back().get();
     spell_iterators.push_back(it);
@@ -808,7 +822,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       return iv(0);
     if (spell_iterators.empty())
       throw Error("iter_end without iter_begin");
-    spell_iterators.back()->end();
+    end_iterator(*spell_iterators.back());
     spell_iterators.pop_back();
     return iv(0);
   }
@@ -938,6 +952,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "player_giveExp") {
     note(n, {ar(0), ar(1)});
     exp_awards.push_back({ar(0), ar(1)});
+    if (services.give_exp) services.give_exp(ar(0), ar(1));
     return iv(0);
   }
   if (n == "world_notifyObjectsNear") {
@@ -1344,6 +1359,13 @@ void World::State::run(Address a) {
   }
   // FullRuntime._slot4.
   auto fn = u(u(a + 0x48) + 36);
+  if (services.external_run) {
+    auto external = services.external_run;
+    if (external(a)) {
+      note("run", {a});
+      return;
+    }
+  }
   // StaticFire_run 0x2c595c still deals damage from a view test this round
   // did not take. DiseaseCloud_run 0x2ce6e0 is the round-3 body.
   if (fn == 0x2c595c || (fn == DISEASE_CLOUD_RUN && !round3))

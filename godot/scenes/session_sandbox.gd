@@ -15,6 +15,10 @@ var terrain_root: Node3D
 var camera: Camera3D
 var viewport: SubViewport
 var raw_observation: Dictionary = {}
+# Set by a scripted run that put the player beside the lowest-HP boar with
+# controller.fight_place_player (DIAGNOSTIC; not an original routine). Shown on
+# the health label so a screenshot cannot be read as an organic approach.
+var diagnostic_placement_at_weakest := false
 var held_commands := 0
 var pending_damage := false
 var paused := false
@@ -110,6 +114,34 @@ func _apply_presentation() -> void:
 	# Camera motion is display-only and follows the interpolated actor.
 	camera.position = actor.position + Vector3(56, 70, 80)
 	camera.look_at(actor.position + Vector3(0, 3, 0), Vector3.UP)
+	_capture_player_camera()
+
+func _native_camera_vector(v: Vector3) -> Vector3:
+	return Vector3(v.x, -v.z, v.y)
+
+func _capture_player_camera() -> void:
+	# The camera and viewport are host presentation state. The native bundle
+	# flattens these four actual side planes at each queried player's height.
+	if controller == null or camera == null:
+		return
+	var forward := -camera.global_transform.basis.z.normalized()
+	var inside := camera.global_position + forward * 10.0
+	var sides := PackedVector3Array()
+	for plane in camera.get_frustum():
+		var normal: Vector3 = plane.normal
+		if absf(normal.dot(forward)) > 0.99:
+			continue
+		if plane.distance_to(inside) < 0.0:
+			normal = -normal
+		sides.push_back(_native_camera_vector(normal))
+	if sides.size() != 4:
+		return
+	var native_forward := _native_camera_vector(forward)
+	var yaw := roundi(atan2(native_forward.y, native_forward.x) * 65536.0 / TAU) & 0xffff
+	# HOST-SOURCED: the yaw above is this sandbox camera's, not Camera_getYaw
+	# (+0x68), so Player_move steers relative to the host camera. Camera3D also
+	# has no source for the original live follow mode (flag stays null).
+	controller.set_player_camera(0, yaw, null, _native_camera_vector(camera.global_position), sides)
 
 func _input(event: InputEvent) -> void:
 	if handle_input_event(event):
@@ -219,8 +251,19 @@ func _observe(result: Dictionary) -> void:
 	health_label.text = "Health %s / %s" % [str(snappedf(float(result.hp), 0.01)), str(snappedf(float(result.max_hp), 0.01))]
 	if result.get("recovery_enabled", false):
 		health_label.text += " · Mana %.2f / %.2f\nPending HP %.2f · Mana %.2f" % [result.mana, result.max_mana, result.pending_health, result.pending_mana]
-	if result.get("facing_enabled", false):
+	if result.get("facing_enabled", false) and not result.get("fight_player_ready", false):
 		health_label.text += "\nFacing test · angle %d · velocity %d · mode %d" % [result.facing_raw, result.angular_velocity_raw, result.turn_mode]
+	if result.get("fight_player_ready", false):
+		health_label.text += "\nStarting equipment: %s · weapon class %d (%s, not campaign evidence)" % [
+			str(result.get("fight_starting_equipment", "unknown")), int(result.get("fight_player_weapon_class", -1)),
+			str(result.get("fight_player_weapon_class_source", "unknown"))]
+		var fight_counts: Dictionary = result.get("fight_counts", {})
+		health_label.text += "\nLevel %d · Experience %d · kills %d · loot rolls %d (items %d, no ground object) · Gold %d" % [
+			int(result.get("fight_player_level", -1)), int(result.get("fight_player_experience", -1)),
+			int(fight_counts.get("deaths", 0)), int(fight_counts.get("loot_calls", 0)),
+			int(fight_counts.get("loot_items", 0)), int(result.get("gold", -1))]
+		if diagnostic_placement_at_weakest:
+			health_label.text += "\nDIAGNOSTIC placement at the lowest-HP boar"
 	animation_cache_label.visible = result.get("animation_cache_enabled", false)
 	if animation_cache_label.visible:
 		animation_cache_label.text = "Animation-cache diagnostic · synthetic data, no model pose\nTrack %s · sample track %s · time raw %s · event %s\nRaw joint values %s" % [result.animation_track, result.animation_sample_track, result.animation_time_raw, result.animation_event, str(result.animation_joints_raw)]

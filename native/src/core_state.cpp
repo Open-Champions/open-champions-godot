@@ -227,6 +227,27 @@ void HandlePool::clear(Cell &head) {
     node = following;
   }
 }
+void HandlePool::clear_nodes(Cell &head) {
+  auto *node = head.next;
+  while (node) {
+    auto *following = node->next;
+    if (node->kind == LinkKind::Iterator) {
+      node = following;
+      continue;
+    }
+    // Runs from a World destructor, so it must not throw: when the partner is
+    // the very next node both leave together and the walk resumes after it.
+    auto *partner = node->partner;
+    if (following && following == partner) following = partner->next;
+    unlink(node);
+    if (partner) {
+      unlink(partner);
+      release(partner);
+    }
+    release(node);
+    node = following;
+  }
+}
 std::size_t HandlePool::count_free() const {
   std::size_t count = 0;
   for (auto *n = free; n; n = n->next)

@@ -100,10 +100,22 @@ World::State::Actor &World::State::spell_record(Address addr) {
 }
 Address World::State::handle_link(Address head_addr, Address back, Address obj) {
   auto *target = link_target(obj);
-  auto i = heads.find(back);
-  if (i == heads.end())
+  Cell *back_cell = nullptr;
+  // A script-host factory creature keeps its own back-reference heads (the
+  // same rule State::link applies, for its three list heads at +0, +4, +8); a
+  // combat actor's heads are in `heads`.
+  if (authority->is_factory(obj) && back >= obj && back - obj <= 8 && !((back - obj) & 3)) {
+    auto external = authority->objects->objects.find(obj);
+    if (external != authority->objects->objects.end())
+      back_cell = &external->second->heads[(back - obj) / 4];
+  }
+  if (!back_cell) {
+    auto i = heads.find(back);
+    if (i != heads.end()) back_cell = i->second;
+  }
+  if (!back_cell)
     throw Error("handle_link back list is not a head");
-  auto *n = handles.link(list_head(head_addr), *i->second, target);
+  auto *n = handles.link(list_head(head_addr), *back_cell, target);
   return ptr(n);
 }
 Address World::State::handle_insert(Address head_addr, Address after,
@@ -350,6 +362,7 @@ void World::State::pool_free(Address a) {
   auto i = objects.find(a);
   if (i != objects.end()) {
     i->second->alive = false;
+    authority->unregister_object(*i->second);
     retired.push_back(std::move(i->second));
     objects.erase(i);
   }

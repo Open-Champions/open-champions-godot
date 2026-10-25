@@ -1,7 +1,9 @@
 #pragma once
 #include "champions/frame_clock.hpp"
 #include "champions/arena_executable.hpp"
+#include "champions/campaign_fight.hpp"
 #include "champions/combat_play.hpp"
+#include "champions/session_combat_runtime_adapter.hpp"
 #include "champions/core_state.hpp"
 #include "champions/combat_play_effects.hpp"
 #include "champions/level_play.hpp"
@@ -10,11 +12,15 @@
 #include "champions/player_state.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/world_geometry.hpp"
+#include "champions/player_services.hpp"
+#include "champions/real_world.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <array>
 #include <godot_cpp/variant/array.hpp>
 #include <cstdint>
@@ -32,6 +38,12 @@ class Host;
 class ChampionsSessionController : public godot::RefCounted {
   GDCLASS(ChampionsSessionController, godot::RefCounted)
   std::unique_ptr<champions::simulation::rta::native_save::Scene> control_;
+  // The ordinary play session owns the one native address authority. Its
+  // combat adapter is prepared for registered level-factory objects, but
+  // gameplay ticks still require the separately ported production services.
+  std::shared_ptr<champions::simulation::rta::WorldAuthority> world_authority_;
+  std::unique_ptr<champions::simulation::rta::combat_runtime::World> world_runtime_;
+  std::unique_ptr<champions::simulation::rta::combat_runtime::SessionAdapter> world_adapter_;
   // Combat and level fixtures behind the journaled fixture-continuation facades
   // (play_fixture_save.hpp); the Full fixture's EffectSimulation lives in the
   // combat scene and runs in every ready tick.
@@ -48,9 +60,28 @@ class ChampionsSessionController : public godot::RefCounted {
     return combat_ ? combat_->effects() : nullptr;
   }
   std::unique_ptr<champions::simulation::rta::fixture_save::LevelScene> level_;
+  std::unique_ptr<champions::simulation::rta::world_queries::Level> player_service_level_;
+  std::unique_ptr<champions::real_world::WaterImage> player_water_image_;
+  std::unique_ptr<champions::simulation::rta::player_services::Bundle> player_services_;
+  // The first real enemy fight (native/include/champions/campaign_fight.hpp):
+  // the session Player and the level factory's WarBoar-family actors in the one
+  // shared World. Declared before the host so the host's objects are released
+  // first (a host reset must precede reset_fight()).
+  std::unique_ptr<champions::simulation::rta::campaign_fight::Fight> fight_;
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  std::string fight_level_;
+  void reset_fight();
+  void start_fight(const champions::simulation::rta::session_control::Observation &);
+  void apply_fight(champions::simulation::rta::session_control::Observation &) const;
+  godot::Dictionary fight_observation() const;
+public:
+  // DIAGNOSTIC, not an original routine (scripted runs only).
+  godot::Dictionary fight_place_player(const godot::Vector3 &position, int64_t facing);
+  // Save/load: put the saved player position and health back (not an original routine).
+  godot::Dictionary fight_restore_player(const godot::Vector3 &position, int64_t facing, int64_t hp_raw);
+private:
   // Parsed records belong to this level's script image and are replaced with it.
   std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
   struct LiveTrigger {
@@ -211,7 +242,9 @@ public:
                                         std::int64_t music_volume_bits = -1,
                                         const godot::String &level_name = godot::String(),
                                         const godot::PackedByteArray &balance = godot::PackedByteArray(),
-                                        const godot::PackedByteArray &world = godot::PackedByteArray());
+                                        const godot::PackedByteArray &world = godot::PackedByteArray(),
+                                        const godot::Dictionary &resource_lumps = godot::Dictionary());
+  godot::Array combat_resource_lump_names() const;
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,
@@ -284,6 +317,12 @@ public:
   godot::Dictionary save_snapshot_file(const godot::String &path);
   godot::Dictionary prepare_save_file(const godot::String &path, bool reuse_loaded_level = false);
   godot::Dictionary load_terrain_file(const godot::String &path);
+  void set_player_camera(int64_t slot, int64_t yaw, const godot::Variant &flag,
+                         const godot::Vector3 &position,
+                         const godot::PackedVector3Array &side_normals);
+  champions::simulation::rta::player_services::Bundle *player_services() noexcept {
+    return player_services_.get();
+  }
   godot::Dictionary prepare_terrain_file(const godot::String &path, bool build_display = true);
   // Level-spawn story start for the next terrain prepared from exactly `path`:
   // that level's objects.ob bytes (level_flow::story_start_ground). Empty

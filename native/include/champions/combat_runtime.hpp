@@ -3,7 +3,9 @@
 #include "champions/creature_hp.hpp"
 #include "champions/archive.hpp"
 #include "champions/world_queries.hpp"
+#include "champions/world_authority.hpp"
 #include <array>
+#include <map>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -44,6 +46,12 @@ struct Spawn {
   std::uint64_t creature_flags = 0x100000;
   // Full composition players only (authored set-up, not Player_ctor).
   Raw idle_voice_limit = 0x7fff, speed_mul = 0x3f800000;
+  // A session player: the record at PLAYERS already holds the real character
+  // (class, level, statistics, hit points). Only the object back-pointer, the
+  // documented unarmed weapon class and the team are written; the class
+  // definition block is left blank (0x400 bytes) and no authored base cells
+  // are planted, so the caller builds both from the real resources.
+  bool session_record = false;
 };
 struct Slide {
   Vec3 position{};
@@ -90,6 +98,10 @@ struct Services {
       animation_advance; // actor, speed -> mask (hit=1)
   std::function<void(Address, Raw, Raw, Raw, Raw)> animation_start;
   std::function<Raw(const std::string &, Raw, Raw)> skill_stat;
+  // player_giveExp 0x1d3150 (slot, amount), called where Creature_processDamage
+  // awards a kill. The award is always recorded (World::exp_awards); a host that
+  // owns a real player record applies it here. Optional.
+  std::function<void(Raw slot, Raw amount)> give_exp;
   // Full composition. Each is called where the executed bodies call it.
   std::function<Raw(Raw slot)> camera_yaw;  // net_getCamYaw
   std::function<Raw(Raw slot)> camera_flag; // net_getCamFlag
@@ -137,6 +149,10 @@ struct Services {
   // particleGroup_create (SpellHornOmenEffect_ctor). A missing function
   // refuses. The flat fixture returns 0, which is not an original group id.
   std::function<Raw()> particle_group;
+  // Slot 4 of an adopted campaign creature (World::adopt_creature). Called
+  // from the run list before any table lookup; return true when the class
+  // body ran. A false return falls through to the executed dispatch.
+  std::function<bool(Address actor)> external_run;
 };
 // Install the original terrain query answers from one selected, post-fixup
 // WORLD. The caller owns Level for as long as the resulting World runs.
@@ -177,6 +193,11 @@ struct SkillSetup {
 // Owns one pool, one handle graph and one memory. Address results are
 // transient; keep a handle for anything retained across calls/ticks or
 // allocation reuse.
+// When finished iterators are released (a host policy, not a game rule): Lazy
+// (default) at 4,096 and then at twice what survives; Always before every walk;
+// Never keeps all until the 65,536 retention refusal. The simulated state does
+// not depend on it; the differential test compares the three.
+enum class IteratorRetention { Lazy, Always, Never };
 class World {
 public:
   struct State;
@@ -187,6 +208,8 @@ private:
 public:
   explicit World(Services services, int camera_mode = 1,
                  Composition composition = Composition::Round1);
+  World(std::shared_ptr<WorldAuthority> authority, Services services,
+        int camera_mode = 1, Composition composition = Composition::Round1);
   ~World();
   World(const World &) = delete;
   World &operator=(const World &) = delete;
@@ -215,6 +238,39 @@ public:
   void relink(Address head, Address target);
   void clear_handle(Address head);
   Address target(Address head) const;
+  // A level-factory object remains owned by the script host. Its handle can
+  // be resolved here without claiming an unported combat constructor or run.
+  const objects::GameObject *factory_object(Address head) const;
+  // A script-host factory creature that a campaign class port has finished
+  // building: its bytes already live in the shared memory and its object is
+  // registered with the authority. Gives it a combat record so executed
+  // damage, targeting and knockback bodies (damage_apply, Creature_takeDamage,
+  // grid queries) accept it as a victim or target. The vtable at +0x48 must be
+  // defined (define_creature_table) first. Never allocates, draws or links.
+  void adopt_creature(Address factory_object);
+  // Writes a creature vtable image: the executed Creature base slots, then the
+  // class's own overrides (slot -> function address).
+  void define_creature_table(Address table,
+                             const std::map<unsigned, Raw> &overrides);
+  // A class virtual body ported outside the arena model, selected by function
+  // address (for example a WarBoar_setState at slot 27). Runs before any
+  // inherited body; arguments are the call's integer arguments.
+  void set_class_body(Raw function,
+                      std::function<void(Address self,
+                                         const std::vector<std::uint64_t> &args)> body);
+  // Base Creature steps a class run makes over the shared memory
+  // (Creature_run, Creature_updateActive, Creature_stepAnim).
+  bool creature_run(Address);
+  bool creature_update_active(Address);
+  Raw creature_step_anim(Address, Raw speed);
+  bool creature_away_from_home(Address);
+  // Creature_filterState 0x10a9c0: true when the requested state is allowed.
+  bool creature_filter_state(Address, std::uint32_t requested);
+  // Creature_onDeath 0x10beb8 (virtual slot 28).
+  void creature_on_death(Address, Raw quiet = 0);
+  // Grid nodes left out of box queries because they are unconstructed host
+  // stubs (their class constructor is not ported).
+  std::size_t stub_box_skips() const;
   void destroy(Address);       // slot 1 with 3 through the executed chain
   void delete_object(Address); // unlink run list now; grid/handles persist
   void update_grid(Address);
@@ -255,6 +311,7 @@ public:
   void animation_events(Address, Raw mask);
   const std::vector<Event> &events() const;
   void clear_history();
+  void set_iterator_retention(IteratorRetention);
   Raw slot_function(Address, unsigned slot) const;
   [[noreturn]] void refuse(const std::string &feature) const;
 

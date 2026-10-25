@@ -85,7 +85,8 @@ void Memory::poke(Address address, std::size_t size, std::uint64_t value) {
   std::size_t additions = 0;
   for (std::size_t i = 0; i < size; ++i)
     additions += !bytes_.count(std::uint32_t(address + i));
-  if (additions > limits_.memory_bytes - bytes_.size())
+  if (additions && (combat_bytes() > limits_.memory_bytes ||
+                    additions > limits_.memory_bytes - combat_bytes()))
     throw ResourceLimit("sparse memory byte budget exceeded");
   for (std::size_t i = 0; i < size; ++i)
     bytes_[std::uint32_t(address + i)] = std::uint8_t(value >> (8 * i));
@@ -110,10 +111,32 @@ void Memory::write_bytes(Address address, const std::vector<std::uint8_t> &data)
       throw Error("raw write intersects read-only overlay");
     additions += !bytes_.count(a);
   }
-  if (additions > limits_.memory_bytes - bytes_.size())
+  if (additions && (combat_bytes() > limits_.memory_bytes ||
+                    additions > limits_.memory_bytes - combat_bytes()))
     throw ResourceLimit("sparse memory byte budget exceeded");
   for (std::size_t i = 0; i < data.size(); ++i)
     bytes_[std::uint32_t(address + i)] = data[i];
+}
+void Memory::write_host_bytes(Address address,
+                              const std::vector<std::uint8_t> &data) {
+  if (data.empty()) return;
+  if (address > UINT32_MAX || data.size() > UINT64_C(0x100000000) - address)
+    throw ResourceLimit("host byte write outside supported memory span");
+  for (std::size_t i = 0; i < data.size(); ++i) {
+    const auto a = std::uint32_t(address + i);
+    const auto found = bytes_.find(a);
+    if (data[i] || under_) {
+      if (found == bytes_.end()) {
+        bytes_.emplace(a, data[i]);
+        ++host_extra_;
+      } else {
+        found->second = data[i];
+      }
+    } else if (found != bytes_.end()) {
+      bytes_.erase(found);
+      if (host_extra_) --host_extra_;
+    }
+  }
 }
 const std::map<std::uint32_t, std::uint8_t> &Memory::bytes() const noexcept {
   return bytes_;
@@ -152,7 +175,14 @@ void Memory::clear_log() noexcept {
   log_prefix_ = 0;
 }
 Model::Model(CallbackPolicy selected, Limits limits)
-    : limits_(limits), mem(limits), policy(selected) {
+    : limits_(limits), owned_memory_(std::make_unique<Memory>(limits)),
+      mem(*owned_memory_), policy(selected) {
+  if (selected != CallbackPolicy::RequireHandlers &&
+      selected != CallbackPolicy::ReferenceZero)
+    throw Error("unknown creature callback policy");
+}
+Model::Model(Memory &shared, CallbackPolicy selected, Limits limits)
+    : limits_(limits), mem(shared), policy(selected) {
   if (selected != CallbackPolicy::RequireHandlers &&
       selected != CallbackPolicy::ReferenceZero)
     throw Error("unknown creature callback policy");
@@ -240,6 +270,13 @@ void Memory::checkpoint(detail::Checkpoint &a) {
   a.history(log_);
   if (a.reading)
     log_prefix_ = a.deferred() ? a.records(log_) : 0;
+  // The snapshot format (version 1) does not carry which entries the script
+  // store created, so after a restore every restored byte is treated as
+  // host-owned: the combat budget then counts only entries added afterwards,
+  // and a script store never makes a later combat addition throw (WA-F4). The
+  // restore is already capped at memory_bytes entries (below), so total
+  // growth stays bounded.
+  if (a.reading) host_extra_ = bytes_.size();
   detail::Checkpoint::require(bytes_.size() <= limits_.memory_bytes &&
                                   log_prefix_ + log_.size() <=
                                       limits_.history_entries,

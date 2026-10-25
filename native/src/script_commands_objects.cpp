@@ -198,7 +198,7 @@ Host::Build Host::build_generator(const level_factory::Outcome &outcome, const l
   memory.byte(c + 0x38, static_cast<std::uint8_t>(record.angle & 0xff));
   memory.byte(c + 0x39, static_cast<std::uint8_t>(record.angle >> 8));
   static_cast<objects::GameObject &>(*obj).flags = memory.word(c + 0x0c);
-  built_.insert(c);
+  mark_built(c);
   counts_.objects_registered += 1;
   return Build::Built;
 }
@@ -434,6 +434,42 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     return build_mounted(record, outcome, c, props);
   if (outcome.constructor() == SCRIPT_GENERATOR_CTOR)
     return build_generator(outcome, record, c, props);
+  // Campaign-combat r7 observed both class constructors entering Creature_ctor,
+  // then GameObject_ctor, which called res_find. Its 46 resource returns are
+  // addresses in one scripted-entry emulator session, not addresses allocated
+  // by this host. Registration on the 60-frame list and direct runObjects to
+  // WarBoar_run dispatch were observed in round 8; Minotaur dispatch was not
+  // captured. Definition names come from the selected executable, never the
+  // capture's returned pointers. This verifies the native resource service
+  // separately from the still-unported actor execution.
+  if (outcome.constructor() == 0x2ba03c && creature_builder_)
+    return build_creature_family(record, outcome, c, props);
+  if (outcome.constructor() == 0x2ba03c || outcome.constructor() == 0x288fdc) {
+    const bool boar = outcome.constructor() == 0x2ba03c;
+    const std::uint32_t definition = boar ? 0x502f80 : 0x501200;
+    const unsigned slots = boar ? 20 : 26;
+    auto word = [this](std::uint32_t at) {
+      std::uint32_t value = 0;
+      for (unsigned i = 0; i < 4; ++i)
+        value |= std::uint32_t(exe_->byte(at + i)) << (i * 8);
+      return value;
+    };
+    const auto lump = exe_->string(word(definition));
+    bool complete = !lump.empty();
+    for (unsigned slot = 0; slot < slots && complete; ++slot) {
+      const auto name = exe_->string(word(definition + 8 + 8 * slot));
+      const auto handle = resources_.find(lump, name);
+      complete = !name.empty() && handle && resources_.bytes(*handle).has_value();
+    }
+    if (!complete || word(definition + 8 + 8 * slots) != 0) {
+      counts_.build_refusals[boar ? "WarBoar named resources unavailable" :
+                                    "Minotaur named resources unavailable"] += 1;
+      return Build::NotBuilt;
+    }
+    counts_.build_refusals[boar ? "WarBoar class tick and shared actor runtime unavailable" :
+                                  "Minotaur: base Creature_ctor flags, hide variant and hand writes Unknown; Minotaur_run not in the research"] += 1;
+    return Build::NotBuilt;
+  }
   if (outcome.constructor() == 0x158928) {
     if (!seed_gate_observed_ || counts_.item_load_gate_refusals ||
         counts_.load_draws_unmodelled) {
@@ -504,7 +540,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       }
       external_seed_->state = world.shared.state;
     }
-    built_.insert(c);
+    mark_built(c);
     counts_.objects_registered += 1;
     return Build::Built;
     } catch (const std::exception &error) {
@@ -834,14 +870,201 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // for every earlier object. Creature_init does not write it.
   static_cast<objects::GameObject &>(*obj).flags = variables_->memory.word(c + 0x0c);
   static_cast<objects::GameObject &>(*obj).radius = variables_->memory.word(c + 0x1c);
-  built_.insert(c);
+  mark_built(c);
   if (stats_ready_ && seed_gate_observed_ && !counts_.item_load_gate_refusals &&
       !counts_.load_draws_unmodelled) stats_built_.insert(c);
   counts_.objects_registered += 1;
   return Build::Built;
 }
 
-// Horsemen and Nightmare factory rows, from horsemen-mount.md sections 1-2.
+// WarBoar / WarBoarSmall (constructor 0x2ba03c; research t3/research-campaign-combat
+// 328b072, handoff rounds 2-8). Order as in the original: GameObject_ctor (one
+// shared draw), the executed base Creature_ctor with max-HP argument 10.0 and
+// class definition 0x502f80, then the class part (creature_builder_). Every
+// service the class part needs that the research does not establish makes the
+// builder throw, which leaves the object a labelled stub with its draw made.
+Host::Build Host::build_creature_family(const level_flow::Record &record,
+                                        const level_factory::Outcome &outcome, std::uint32_t c,
+                                        const std::vector<std::string> &props) {
+  namespace AM = arena_monsters;
+  constexpr std::uint32_t BOAR_DEFINITION = 0x502f80;
+  constexpr Raw BOAR_MAX_HP_ARGUMENT = 0x41200000; // 10.0 (monsters-2.md WarBoar)
+  if (!external_seed_) {
+    counts_.build_refusals["no session seed"] += 1;
+    return Build::NotBuilt;
+  }
+  if (!stats_ready_) {
+    counts_.build_refusals["WarBoar needs monsters.bal and the level monster level"] += 1;
+    return Build::NotBuilt;
+  }
+  if (variables_->memory.u32(0x4d8ae0) != 1 ||
+      variables_->memory.u32(script_items::G_DIFFICULTY) != 1) {
+    counts_.build_refusals["stats require one player at difficulty 1"] += 1;
+    return Build::NotBuilt;
+  }
+  auto &exe = *exe_;
+  M1::Memory mem({}, [&exe](creature_hp::Address a, std::size_t n) -> std::uint64_t {
+    std::uint64_t v = 0;
+    for (std::size_t i = n; i-- > 0;) {
+      std::uint8_t b = 0;
+      try {
+        b = exe.byte(static_cast<std::uint32_t>(a + i));
+      } catch (const std::exception &) {
+        b = 0;
+      }
+      v = (v << 8) | b;
+    }
+    return v;
+  });
+  mem.poke(CREATURE_SERIAL, 1, variables_->memory.u8(CREATURE_SERIAL));
+  mem.poke(0x4f714c, 4, monster_level_);
+  for (std::size_t i = 0; i < level_name_.size(); ++i)
+    mem.poke(0x44fe18 + static_cast<std::uint32_t>(i), 1, static_cast<unsigned char>(level_name_[i]));
+  mem.poke(0x44fe18 + static_cast<std::uint32_t>(level_name_.size()), 1, 0);
+  std::uint32_t scratch = SCRATCH;
+  auto place = [&](const std::string &text) -> std::uint32_t {
+    const auto at = scratch;
+    if (at + text.size() + 1 >= SCRATCH_END)
+      throw Refused("scratch strings exhausted");
+    for (std::size_t i = 0; i < text.size(); ++i)
+      mem.poke(at + static_cast<std::uint32_t>(i), 1, static_cast<unsigned char>(text[i]));
+    mem.poke(at + static_cast<std::uint32_t>(text.size()), 1, 0);
+    scratch = (at + static_cast<std::uint32_t>(text.size()) + 16) & ~15u;
+    return at;
+  };
+  const auto type_ptr = place(record.cls);
+  AM::Model model(mem);
+  std::shared_ptr<builtins::Obj> obj;
+  auto num = [](const AM::Value &v) { return std::uint32_t(std::get<std::int64_t>(v)); };
+  auto prop_text = [&](std::uint32_t key) -> std::optional<std::string> {
+    return level_factory::prop_find(&props, exe.string(key), exe);
+  };
+  model.callbacks["GameObject_ctor"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto self = num(a.at(0));
+    const auto pos = std::get<AM::Vec3>(a.at(1));
+    const auto def = num(a.at(2));
+    if (self != c)
+      throw Refused("GameObject_ctor on another block");
+    auto list = std::make_shared<std::vector<std::string>>(props);
+    obj = variables_->new_object({}, 0, pos, 0, "7WarBoar", list, c, outcome.size);
+    const std::pair<std::uint32_t, std::uint64_t> words[] = {
+        {0x00, 0}, {0x04, 0}, {0x08, 0}, {0x48, VT_GAMEOBJECT}, {0x1c, RADIUS_24},
+        {0x20, HEIGHT_72}, {0x0c, 0}, {0x10, pos[0]}, {0x14, pos[1]}, {0x18, pos[2]},
+        {0x34, 0}, {0x24, def}};
+    for (const auto &w : words)
+      m.mem.store(self + w.first, 4, w.second);
+    m.mem.store(self + 0x28, 1, 25);
+    m.mem.store(self + 0x29, 1, 73);
+    m.mem.store(self + 0x44, 4, external_seed_->draw());
+    return std::int64_t(0);
+  };
+  model.callbacks["obj_getPropInt"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto text = prop_text(num(a.at(1)));
+    return std::int64_t(text ? level_factory::atoi(*text, exe) : 0u);
+  };
+  model.callbacks["obj_getPropStr"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto text = prop_text(num(a.at(1)));
+    return std::int64_t(text ? place(*text) : 0u);
+  };
+  model.callbacks["obj_moveOffGrid"] = [&](AM::Model &, const std::vector<AM::Value> &) -> AM::Value {
+    if (!obj)
+      throw Refused("grid call before GameObject_ctor");
+    variables_->world->move_off_grid(*obj);
+    return std::int64_t(0);
+  };
+  model.callbacks["balance_lookup"] = [&](AM::Model &, const std::vector<AM::Value> &) -> AM::Value {
+    for (const auto &row : balance_rows_)
+      if (row.hash == balance_hash(record.cls)) {
+        AM::Balance b;
+        b.found = 1;
+        for (unsigned i = 0; i < 5; ++i)
+          b.factors[i] = row.factors[i];
+        return b;
+      }
+    return AM::Balance{};
+  };
+  // Creature_setStats 0x10a620: combat::monster_stats on the selected level's
+  // table, with its own-generator HP draw first (as build()).
+  model.callbacks["Creature_setStats"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
+    const auto self = num(a.at(0));
+    const bool roll = num(a.at(1)) != 0;
+    std::uint32_t draw = 0;
+    if (roll) {
+      const auto seed = static_cast<std::uint32_t>(m.mem.load(self + 0x44, 4)) * 0x19660du + 0x3c6ef35fu;
+      m.mem.store(self + 0x44, 4, seed);
+      draw = seed >> 16;
+    }
+    combat::Tables tables;
+    tables.fixed_levels = {U"stomedal", U"innpit"};
+    combat::World world;
+    world.monster_level = static_cast<Raw>(m.mem.load(0x4f714c, 4));
+    world.num_players = variables_->memory.u32(0x4d8ae0);
+    world.difficulty = variables_->memory.u32(script_items::G_DIFFICULTY);
+    world.medal_mission = variables_->memory.u32(0x4f713c);
+    for (unsigned char ch : level_name_) world.level_name.push_back(ch);
+    std::array<Raw, 5> factors{};
+    for (unsigned i = 0; i < 5; ++i)
+      factors[i] = num(a.at(i + 2));
+    const auto result = combat::monster_stats(tables, world, factors, 0, std::u32string{}, roll, draw);
+    if (result.hp) m.mem.store(self + 0x228, 4, *result.hp);
+    if (result.max_hp) m.mem.store(self + 0x22c, 4, *result.max_hp);
+    m.mem.store(self + 0xe4, 2, static_cast<std::uint16_t>(result.armor));
+    m.mem.store(self + 0xd0, 2, static_cast<std::uint16_t>(result.dmg_low));
+    m.mem.store(self + 0xd2, 2, static_cast<std::uint16_t>(result.dmg_high));
+    m.mem.store(self + 0xd4, 2, static_cast<std::uint16_t>(result.attack));
+    m.mem.store(self + 0xd8, 4, result.exp_value);
+    return std::int64_t(0);
+  };
+  const auto facing = static_cast<Raw>(static_cast<std::int32_t>(static_cast<std::int16_t>(record.angle)));
+  try {
+    model.creature_ctor(c, type_ptr, record.position, facing, BOAR_DEFINITION, 0, BOAR_MAX_HP_ARGUMENT);
+  } catch (const std::exception &error) {
+    counts_.build_refusals[error.what()] += 1;
+    if (!obj)
+      return Build::NotBuilt;
+    stubs_.insert(obj->addr);
+    counts_.objects_registered += 1;
+    return Build::Stubbed;
+  }
+  if (!obj)
+    throw std::logic_error("constructor did not call GameObject_ctor");
+  // Copy the base-constructed bytes into the shared memory. The fields the
+  // base does not model (pointers into host scratch, the property list word)
+  // are skipped exactly as for the other ported classes.
+  for (std::uint32_t off = 0; off < outcome.size; ++off)
+    if (!in_spans(off, kNotCopied, std::size(kNotCopied)))
+      variables_->memory.byte(c + off, static_cast<std::uint8_t>(mem.load(c + off, 1)));
+  variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
+  static_cast<objects::GameObject &>(*obj).flags = variables_->memory.word(c + 0x0c);
+  static_cast<objects::GameObject &>(*obj).radius = variables_->memory.word(c + 0x1c);
+  static_cast<objects::GameObject &>(*obj).seed = variables_->memory.word(c + 0x44);
+  // Class part: the builder runs over the shared bytes. A refusal leaves the
+  // object a labelled stub (GameObject_ctor ran; its draws are made).
+  try {
+    CreatureRequest request;
+    request.class_name = record.cls;
+    request.small = record.cls.compare(0, 12, "WarBoarSmall") == 0;
+    request.address = c;
+    request.angle = record.angle;
+    request.object = obj.get();
+    creature_builder_(request);
+  } catch (const std::exception &error) {
+    counts_.build_refusals[error.what()] += 1;
+    stubs_.insert(obj->addr);
+    counts_.objects_registered += 1;
+    return Build::Stubbed;
+  }
+  mark_built(c);
+  if (seed_gate_observed_ && !counts_.item_load_gate_refusals && !counts_.load_draws_unmodelled)
+    stats_built_.insert(c);
+  counts_.objects_registered += 1;
+  return Build::Built;
+}
+
+// The mounted Horsemen and Nightmare rows, from research t3/research-horsemen-mount
+// 338d459, docs/spec/horsemen-mount.md sections 1-2. The four addressed lists
+// each contain miniboss=1 and a distinct name. One rider record consumes two
+// pool blocks and two shared draws; a placed Nightmare consumes one of each.
 // Mounted riders receive a fixed MiniBoss mount list; on-foot rows consume
 // their own record properties and construct no mount.
 Host::Build Host::build_mounted(const level_flow::Record &record, const level_factory::Outcome &outcome,
@@ -1075,7 +1298,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
       if (!skipped(off))
         variables_->memory.byte(self + off, static_cast<std::uint8_t>(mem.load(self + off, 1)));
     static_cast<objects::GameObject &>(*entry.second).flags = variables_->memory.word(self + 0x0c);
-    built_.insert(self);
+    mark_built(self);
   }
   variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
   counts_.objects_registered += objects.size();

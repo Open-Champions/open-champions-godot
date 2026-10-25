@@ -7,8 +7,10 @@ const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const RealPlayer = preload("res://real_data/real_player.gd")
 const TextHud = preload("res://ui/text_hud.gd")
+const FightEnemies = preload("res://real_data/real_fight_enemies.gd")
 var real: Node
 var real_player: RefCounted
+var fight_enemies: RefCounted
 var imported_appearance: Array = []
 var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
@@ -46,6 +48,7 @@ func _ready() -> void:
 	add_child(real)
 	real.configure(self, "user://real-data-cache")
 	real_player = RealPlayer.new()
+	fight_enemies = FightEnemies.new()
 	if viewport != null:
 		text_hud = TextHud.new()
 		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -140,7 +143,9 @@ func _ready() -> void:
 func _update_menu() -> void:
 	super._update_menu()
 	if mode_label != null and play_mode and real != null and real.current >= 0:
-		mode_label.text = "Play mode · walk-in triggers can change real levels; combat and other campaign paths remain incomplete."
+		mode_label.text = "Play mode · walk-in triggers and level script actions can change real levels; combat and other campaign paths remain incomplete."
+		if raw_observation.get("fight_player_ready", false):
+			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. The player is unarmed (starting equipment refused_unknown). Enemy AI (sight and everything past idle), hit reactions, loot objects, Gold and the Minotaurs remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -207,6 +212,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	if level_script != null and level_script.button_pressed: scripted = attach_level_script(carry_campaign)
 	else: controller.disable_level_script()
 	_refresh_exit_targets()
+	_install_fight_enemies()
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
@@ -221,6 +227,17 @@ func restore_default_actor() -> void:
 func _apply_presentation() -> void:
 	super._apply_presentation()
 	_frame_player_camera()
+	if fight_enemies != null and raw_observation.get("campaign_fight", false):
+		fight_enemies.update(raw_observation)
+
+# The shared-World fight's enemies: the class archive's rest-pose model.
+func _install_fight_enemies() -> void:
+	if fight_enemies == null: return
+	fight_enemies.clear()
+	if controller == null or not controller.get_observation().get("campaign_fight", false): return
+	var names: Array = controller.combat_resource_lump_names()
+	if names.is_empty() or _world == null: return
+	fight_enemies.install(real, inspector, _world, str(names[0]), "")
 
 func _frame_player_camera() -> void:
 	if real_player == null or not real_player.body_drawn or actor_visual.mesh == null or camera == null: return
@@ -231,6 +248,7 @@ func _frame_player_camera() -> void:
 	var distance := maxf(120.0, height * 0.7 / tan(half_fov)) # Host-viewer distance.
 	camera.position = focus + Vector3(56, 70, 80).normalized() * distance # Host-viewer direction.
 	camera.look_at(focus, Vector3.UP)
+	_capture_player_camera()
 
 func _clear_imported_appearance() -> void:
 	imported_appearance = []
@@ -311,7 +329,21 @@ func save_session_file(path: String) -> bool:
 		return false
 	if not scripted and FileAccess.file_exists(path + ".campaign"):
 		DirAccess.remove_absolute(path + ".campaign")
+	# The shared-World player is not in the native image: its position, facing and
+	# health go in a companion (enemies and other active objects are not saved).
+	var fight_obs: Dictionary = controller.get_observation()
+	var has_fight: bool = fight_obs.get("fight_player_ready", false)
+	if has_fight:
+		var where: Vector3 = fight_obs.get("position", Vector3.ZERO)
+		var fight_state := {"position": [where.x, where.y, where.z], "facing": int(fight_obs.get("facing_raw", 0)),
+			"hp_raw": int(fight_obs.get("hp_raw", 0))}
+		if not _write_companion(path + ".fight", JSON.stringify(fight_state).to_utf8_buffer()):
+			status_label.text = "Save refused: shared-World player companion could not be written."
+			return false
+	elif FileAccess.file_exists(path + ".fight"):
+		DirAccess.remove_absolute(path + ".fight")
 	var manifest := {"version": 1, "save_sha256": FileAccess.get_sha256(path),
+		"fight_sha256": FileAccess.get_sha256(path + ".fight") if has_fight else "",
 		"player_sha256": player_hash,
 		"level_index": real.current, "level_stem": str(level.stem),
 		"world_sha256": world_hash, "tex_sha256": tex_hash,
@@ -392,7 +424,28 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; load refused: campaign state is unsupported: " + str(restored.get("error", "unknown"))
 			return false
 		_observe(restored)
-	status_label.text = "Loaded level, player, quests and position. World-object continuation refused; scripts restart from level data."
+	var fight_hash := str(manifest.get("fight_sha256", ""))
+	if not fight_hash.is_empty():
+		var fight_path := path + ".fight"
+		var fight_file := FileAccess.open(fight_path, FileAccess.READ)
+		if fight_file == null or fight_file.get_length() > 4096 or FileAccess.get_sha256(fight_path) != fight_hash:
+			status_label.text = "Session replaced; load refused: shared-World player companion is absent or differs."
+			return false
+		var saved = JSON.parse_string(fight_file.get_as_text())
+		var numbers_ok: bool = saved is Dictionary and saved.get("position") is Array and saved.position.size() == 3
+		if numbers_ok:
+			for field in [saved.position[0], saved.position[1], saved.position[2], saved.get("facing"), saved.get("hp_raw")]:
+				numbers_ok = numbers_ok and (typeof(field) == TYPE_INT or typeof(field) == TYPE_FLOAT)
+		if not numbers_ok:
+			status_label.text = "Session replaced; load refused: shared-World player companion is malformed."
+			return false
+		var put: Dictionary = controller.fight_restore_player(Vector3(float(saved.position[0]), float(saved.position[1]), float(saved.position[2])),
+			int(saved.get("facing", 0)), int(saved.get("hp_raw", 0)))
+		if not put.get("ok", false):
+			status_label.text = "Session replaced; shared-World player could not be restored: " + str(put.get("error", "unknown"))
+			return false
+		_observe(controller.get_observation())
+	status_label.text = "Loaded level, player, quests and position. Active world objects are not saved; scripts restart from level data."
 	return true
 
 func _prepare_native_save(path: String) -> Dictionary:
@@ -437,7 +490,11 @@ func attach_level_script(carry_campaign := false) -> bool:
 	var balance := PackedByteArray()
 	if real.files.has("balance.lmp"):
 		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
-	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world)
+	var resource_lumps := {}
+	for name in controller.combat_resource_lump_names():
+		if real.files.has(name):
+			resource_lumps[name] = FileAccess.get_file_as_bytes(real.files[name])
+	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world, resource_lumps)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
 	if result.get("ok", false): _refused_level_request = ""

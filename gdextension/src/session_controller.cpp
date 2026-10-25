@@ -82,6 +82,9 @@ void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
 } // namespace
 struct ChampionsSessionController::PendingTerrain {
   std::unique_ptr<rta::native_save::Scene> control;
+  std::unique_ptr<rta::world_queries::Level> player_service_level;
+  std::unique_ptr<champions::real_world::WaterImage> player_water_image;
+  std::unique_ptr<rta::player_services::Bundle> player_services;
   // A fixture continuation (play_fixture_save.hpp) instead of a dry scene.
   std::unique_ptr<rta::fixture_save::CombatScene> combat;
   std::unique_ptr<rta::fixture_save::LevelScene> level;
@@ -119,9 +122,11 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world"),
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world", "resource_lumps"),
                        &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)),
-                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()));
+                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()), DEFVAL(Dictionary()));
+  ClassDB::bind_method(D_METHOD("combat_resource_lump_names"),
+                       &ChampionsSessionController::combat_resource_lump_names);
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -133,6 +138,11 @@ void ChampionsSessionController::_bind_methods() {
                        DEFVAL(Dictionary()));
   ClassDB::bind_method(D_METHOD("dialog_events"), &ChampionsSessionController::dialog_events);
   ClassDB::bind_method(D_METHOD("dialog_voice_state", "voice"), &ChampionsSessionController::dialog_voice_state);
+  ClassDB::bind_method(D_METHOD("fight_restore_player", "position", "facing", "hp_raw"),
+                       &ChampionsSessionController::fight_restore_player);
+  // DIAGNOSTIC ONLY (unchecked placement; scripted test runs and the .fight load).
+  ClassDB::bind_method(D_METHOD("fight_place_player", "position", "facing"),
+                       &ChampionsSessionController::fight_place_player);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -194,6 +204,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
                        &ChampionsSessionController::load_terrain_file);
+  ClassDB::bind_method(D_METHOD("set_player_camera", "slot", "yaw", "flag", "position", "side_normals"),
+                       &ChampionsSessionController::set_player_camera);
   ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path", "build_display"),
                        &ChampionsSessionController::prepare_terrain_file, DEFVAL(true));
   ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects", "level_name", "previous", "entrance"),
@@ -219,6 +231,11 @@ Dictionary ChampionsSessionController::observation() const {
   if (level_) return level_observation();
   auto result = present_observation(current_);
   result["save_history_pending"] = control_->history_pending();
+  if (fight_) {
+    const auto fight = fight_observation();
+    for (const auto &key : fight.keys()) result[key] = fight[key];
+    if (fight_->player_ready()) result["movement_policy"] = "shared-world player (Player_run / Player_move)";
+  }
   return result;
 }
 Dictionary ChampionsSessionController::present_observation(
@@ -334,6 +351,8 @@ Dictionary ChampionsSessionController::present_observation(
     result["player_record_currents_known"] = p.current_known;
     result["name"] = String::utf8(p.name.c_str());
     result["player_class"] = p.player_class;
+    result["player_model"] = p.model;
+    result["player_imported"] = p.imported;
     result["player_model_index"] = p.model;
     result["level"] = p.level;
     result["acknowledged_level"] = p.acknowledged;
@@ -915,6 +934,24 @@ Dictionary ChampionsSessionController::load_campaign_bytes(const PackedByteArray
     Dictionary result = observation(); result["ok"] = true; return result;
   } catch (const std::exception &e) { return failure(e); }
 }
+Array ChampionsSessionController::combat_resource_lump_names() const {
+  Array names;
+  if (!executable_) return names;
+  for (const auto definition : {0x502f80u, 0x501200u}) {
+    std::uint32_t address = 0;
+    for (unsigned i = 0; i < 4; ++i)
+      address |= std::uint32_t(executable_->byte(definition + i)) << (i * 8);
+    const auto name = executable_->string(address);
+    if (!name.empty()) names.push_back(String::utf8(name.c_str()));
+  }
+  if (player_) {
+    // The session player's class animation LMP (Player_ctor's model definition).
+    const auto lump = rta::campaign_fight::Fight::player_animation_lump(*executable_, unsigned(player_->model));
+    if (!lump.empty()) names.push_back(String::utf8(lump.c_str()));
+  }
+  return names;
+}
+
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
@@ -922,7 +959,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                                           int64_t music_volume_bits,
                                                           const String &level_name,
                                                           const PackedByteArray &balance,
-                                                          const PackedByteArray &world) {
+                                                          const PackedByteArray &world,
+                                                          const Dictionary &resource_lumps) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -933,7 +971,28 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
-    auto next = std::make_unique<rta::script_commands::Host>();
+    auto next_authority = (!combat_ && !level_)
+        ? std::make_shared<rta::WorldAuthority>() : nullptr;
+    // A real level with the owner's executable, the level's terrain and the
+    // audited player bundle gets the shared-World fight; anything else keeps
+    // the prepared (unticked) World of the earlier sessions.
+    const bool want_fight = next_authority && executable_ && player_services_ && !world.is_empty();
+    std::unique_ptr<rta::campaign_fight::Fight> next_fight;
+    if (want_fight)
+      next_fight = std::make_unique<rta::campaign_fight::Fight>(
+          next_authority, executable_, *player_services_, [this]() {
+            return scripts_ && dialog_status().get("open", false);
+          });
+    auto next_runtime = (next_authority && !want_fight)
+        ? std::make_unique<rta::combat_runtime::World>(next_authority,
+                                                       rta::combat_runtime::Services{})
+        : nullptr;
+    auto next_adapter = next_runtime
+        ? std::make_unique<rta::combat_runtime::SessionAdapter>(*next_runtime)
+        : nullptr;
+    auto next = next_authority
+        ? std::make_unique<rta::script_commands::Host>(next_authority)
+        : std::make_unique<rta::script_commands::Host>();
     apply_text(*next);
     rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
     std::memcpy(image.data(), script.ptr(), image.size());
@@ -970,6 +1029,20 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->set_executable(rta::script_commands::executable_view(executable_));
     if (executable_)
       next->campaign().set_rows(mission_rows(*executable_));
+    for (const auto &name_value : resource_lumps.keys()) {
+      const String name = name_value;
+      const PackedByteArray image = resource_lumps[name];
+      if (image.is_empty() || image.size() > 64 * 1024 * 1024) {
+        next->count_refusal("Selected resource archive unreadable");
+        continue;
+      }
+      try {
+        next->load_resource_lmp(name.utf8().get_data(), {image.ptr(), std::size_t(image.size())});
+      } catch (const std::exception &) {
+        next->count_refusal("Selected resource archive malformed");
+      }
+    }
+    if (next_fight) next_fight->install(*next);
     // Malformed statistics or WORLD are refused and counted; the script still
     // attaches without them.
     if (executable_ && !level_name.is_empty() && !balance.is_empty()) {
@@ -1059,7 +1132,13 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_use_pending_ = false;
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
+    // The previous host is released first, then its fight.
     scripts_ = std::move(next);
+    fight_ = std::move(next_fight);
+    fight_level_ = level_name.utf8().get_data();
+    world_adapter_ = std::move(next_adapter);
+    world_runtime_ = std::move(next_runtime);
+    world_authority_ = std::move(next_authority);
     script_level_objects_ = std::move(next_objects);
     if (carried && !trigger_level_name_.empty()) {
       auto &saved = trigger_states_[trigger_level_name_];
@@ -1128,10 +1207,89 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     return failure(e);
   }
 }
+void ChampionsSessionController::reset_fight() { fight_.reset(); }
+void ChampionsSessionController::start_fight(const rta::session_control::Observation &state) {
+  if (!fight_ || fight_->started()) return;
+  // The session's player is the ported Player in the shared World. The dry
+  // scene stays only as the ready-tick clock and save spine.
+  rta::campaign_fight::Fight::PlayerStart start;
+  start.position = state.position;
+  start.facing = state.facing & 0xffffu;
+  start.level_name = fight_level_;
+  if (player_) {
+    const auto p = observed_player();
+    start.model_index = unsigned(p.model);
+    start.hp = p.current_known ? p.hp : p.max_hp;
+  } else {
+    start.hp = state.hp;
+  }
+  fight_->start(start);
+}
+Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &position, int64_t facing, int64_t hp_raw) {
+  // A load replaced the scene before play started: the fight begins from the
+  // loaded scene, then the saved player is put back.
+  if (fight_ && !fight_->started() && control_) start_fight(control_->observation());
+  // Refuse a malformed companion before writing anything (docs/NATIVE_SAVE.md,
+  // ".fight companion"): finite position, 16-bit facing, 0 < hp <= max hp.
+  // The position is not checked against the level's bounds (no documented
+  // bounds contract is bound here).
+  auto refuse = [](const char *why) {
+    Dictionary bad;
+    bad["ok"] = false;
+    bad["error"] = why;
+    return bad;
+  };
+  if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+    return refuse("saved position is not finite");
+  if (facing < 0 || facing > 0xffff) return refuse("saved facing is outside 16 bits");
+  if (!fight_ || !fight_->player_ready()) return refuse("no shared-World player");
+  if (hp_raw < 0 || hp_raw > 0xffffffffll) return refuse("saved hit points are outside 32 bits");
+  {
+    const auto raw = static_cast<rta::Raw>(hp_raw);
+    float hp = 0, max_hp = 0;
+    const auto max_raw = fight_->player().max_hp;
+    std::memcpy(&hp, &raw, sizeof(hp));
+    std::memcpy(&max_hp, &max_raw, sizeof(max_hp));
+    if (!std::isfinite(hp) || !(hp > 0.0f) || !(hp <= max_hp))
+      return refuse("saved hit points are outside (0, max]");
+  }
+  Dictionary out = fight_place_player(position, facing);
+  if (!bool(out.get("ok", false))) return out;
+  const auto error = fight_->restore_health(rta::Raw(hp_raw & 0xffffffffll));
+  out["ok"] = error.empty();
+  if (!error.empty()) out["error"] = String::utf8(error.c_str());
+  auto o = control_ ? control_->observation() : current_;
+  apply_fight(o);
+  cache_state(o, true);
+  return out;
+}
+// DIAGNOSTIC ONLY, not an original routine: writes an unchecked position and
+// facing (no terrain or bounds test). Used by scripted test runs and, through
+// fight_restore_player, the .fight save load. Ordinary play never calls it.
+Dictionary ChampionsSessionController::fight_place_player(const Vector3 &position, int64_t facing) {
+  Dictionary out;
+  out["ok"] = false;
+  if (!fight_ || !fight_->player_ready()) {
+    out["error"] = "no shared-World player";
+    return out;
+  }
+  auto bits = [](double value) {
+    const float narrowed = static_cast<float>(value);
+    rta::Raw raw;
+    std::memcpy(&raw, &narrowed, sizeof(raw));
+    return raw;
+  };
+  const auto error = fight_->place_player({bits(position.x), bits(position.y), bits(position.z)},
+                                          rta::Raw(facing & 0xffff));
+  out["ok"] = error.empty();
+  if (!error.empty()) out["error"] = String::utf8(error.c_str());
+  return out;
+}
 Dictionary ChampionsSessionController::disable_level_script() {
   remember_script_fade();
   release_help_pause();
   scripts_.reset();
+  reset_fight();
   script_level_objects_.clear();
   live_triggers_.clear();
   for (auto &list : trigger_lists_) list.clear();
@@ -1471,6 +1629,16 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["item_load_gate_refusals"] = static_cast<int64_t>(counts.item_load_gate_refusals);
   result["item_load_draws_inferred"] = static_cast<int64_t>(counts.item_load_draws_inferred);
   result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
+  // Both WarBoar names share the factory constructor. An unbuilt record is a
+  // stub, not a live combat actor.
+  const auto boars = counts.unbuilt_constructors.find(0x2ba03c);
+  result["warboar_unbuilt"] = static_cast<int64_t>(
+      boars == counts.unbuilt_constructors.end() ? 0 : boars->second);
+  // Report the Minotaur constructor separately. This gives no evidence of a
+  // Gold drop or credit.
+  const auto minotaurs = counts.unbuilt_constructors.find(0x288fdc);
+  result["minotaur_unbuilt"] = static_cast<int64_t>(
+      minotaurs == counts.unbuilt_constructors.end() ? 0 : minotaurs->second);
   Dictionary build_refusals;
   for (const auto &kv : counts.build_refusals)
     build_refusals[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
@@ -1731,7 +1899,10 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       // The fixture's seed is its own journaled one: a level script's
       // draws no longer share the session's stream.
       unpair_script_seed();
+      reset_fight();
+      world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
       level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
+      player_services_.reset(); player_water_image_.reset(); player_service_level_.reset();
       terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
       cache_state(state, true); clock_.reset();
       return observation();
@@ -1744,11 +1915,14 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
                                : std::make_unique<rta::fixture_save::CombatScene>(setup.initial_terrain, which);
       auto state = next->observation();
       unpair_script_seed();
+      reset_fight();
+      world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
       combat_setup_ = setup;
       combat_ = std::move(next);
       attach_effects();
       level_.reset();
       control_.reset(); // The combat World is the sole actor owner.
+      player_services_.reset(); player_water_image_.reset(); player_service_level_.reset();
       pending_.reset();
       cache_state(state, true);
       return observation();
@@ -1778,10 +1952,23 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
                            display_float(state.position[2]));
     const double facing =
         double(state.facing & 0xffffu) * (6.283185307179586 / 65536.0);
+    auto new_authority = world_authority_ ? nullptr : std::make_shared<rta::WorldAuthority>();
+    auto new_runtime = new_authority
+        ? std::make_unique<rta::combat_runtime::World>(new_authority,
+                                                       rta::combat_runtime::Services{})
+        : nullptr;
+    auto new_adapter = new_runtime
+        ? std::make_unique<rta::combat_runtime::SessionAdapter>(*new_runtime)
+        : nullptr;
     // All allocations/validation precede publication. Terrain and visual owners
     // remain untouched. The remaining native moves and scalar stores cannot
     // fail.
     control_.swap(next);
+    if (new_authority) {
+      world_authority_ = std::move(new_authority);
+      world_runtime_ = std::move(new_runtime);
+      world_adapter_ = std::move(new_adapter);
+    }
     combat_.reset();
     level_.reset();
     pending_.reset();
@@ -1789,6 +1976,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       script_seed_->state = control_->shared_seed();
       script_world_ = script_seed_->state;
     }
+    start_fight(state);
     current_ = std::move(state);
     previous_position_ = current_position_ = position;
     previous_facing_ = current_facing_ = facing;
@@ -1802,6 +1990,8 @@ Dictionary ChampionsSessionController::reset_session() {
   try {
     remember_script_fade();
     scripts_.reset();
+    reset_fight();
+    world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
     help_paused_ = false;
     loaded_presentation_.reset();
     pending_.reset();
@@ -1816,6 +2006,12 @@ Dictionary ChampionsSessionController::reset_session() {
     } else if (level_) {
       auto next = std::make_unique<rta::fixture_save::LevelScene>(); level_.swap(next);
     } else control_->reset();
+    if (!combat_ && !level_) {
+      world_authority_ = std::make_shared<rta::WorldAuthority>();
+      world_runtime_ = std::make_unique<rta::combat_runtime::World>(
+          world_authority_, rta::combat_runtime::Services{});
+      world_adapter_ = std::make_unique<rta::combat_runtime::SessionAdapter>(*world_runtime_);
+    }
     snap();
     return observation();
   } catch (const std::exception &e) {
@@ -1844,6 +2040,8 @@ Dictionary ChampionsSessionController::stop_session() {
   try {
     remember_script_fade();
     scripts_.reset();
+    reset_fight();
+    world_adapter_.reset(); world_runtime_.reset(); world_authority_.reset();
     help_paused_ = false;
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap();
@@ -2202,6 +2400,13 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
     next_config.start = start;
     prepared->control =
         std::make_unique<rta::native_save::Scene>(next_config, data);
+    prepared->player_service_level = std::make_unique<rta::world_queries::Level>(data);
+    prepared->player_services = std::make_unique<rta::player_services::Bundle>(*prepared->player_service_level);
+    if (!illustration) {
+      prepared->player_water_image = std::make_unique<champions::real_world::WaterImage>(input, geometry);
+      prepared->player_services->bind_water(prepared->player_water_image->service(),
+                                           prepared->player_water_image->world());
+    }
     prepared->name = path.get_file();
     const Dictionary initial_observation =
         present_observation(prepared->control->observation());
@@ -2284,9 +2489,13 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     if (pending_->combat || pending_->level) {
       // Validated at preparation (journal replay, witness, presentation block).
       unpair_script_seed();
+      reset_fight();
       combat_ = std::move(pending_->combat);
       level_ = std::move(pending_->level);
       control_.reset();
+      player_services_.reset();
+      player_water_image_.reset();
+      player_service_level_.reset();
       combat_setup_ = pending_->setup;
       terrain_ = pending_->terrain;
       std::swap(terrain_name_, pending_->name);
@@ -2310,7 +2519,17 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     const double facing =
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     unpair_script_seed_if_paired();
+    // The fight borrows the player bundle. Reloading the terrain the fight was
+    // built on (a save of the same level) keeps it and its bundle; any other
+    // terrain replaces the bundle and so ends the fight.
+    const bool keep_fight = fight_ && pending_->name == terrain_name_;
+    if (!keep_fight) reset_fight();
     control_.swap(pending_->control);
+    if (!keep_fight) {
+      player_services_ = std::move(pending_->player_services);
+      player_water_image_ = std::move(pending_->player_water_image);
+      player_service_level_ = std::move(pending_->player_service_level);
+    }
     combat_.reset();
     level_.reset();
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
@@ -2342,6 +2561,35 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
   if (!bool(prepared.get("ok", false)))
     return prepared;
   return commit_terrain_file(int64_t(prepared["token"]));
+}
+void ChampionsSessionController::set_player_camera(
+    int64_t slot, int64_t yaw, const Variant &flag, const Vector3 &position,
+    const PackedVector3Array &side_normals) {
+  if (!player_services_) return; // no real level is resident yet
+  if (slot < 0 || slot > 3 || side_normals.size() != 4)
+    throw std::runtime_error("Player camera needs one slot and four side normals.");
+  auto bits = [](double value) -> rta::Raw {
+    if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+      throw std::runtime_error("Player camera has a nonfinite component.");
+    const float narrowed = static_cast<float>(value);
+    rta::Raw raw;
+    std::memcpy(&raw, &narrowed, sizeof(raw));
+    return raw;
+  };
+  auto vector = [&](const Vector3 &v) -> rta::Vec3 {
+    return {bits(v.x), bits(v.y), bits(v.z)};
+  };
+  rta::player_services::Camera snapshot;
+  snapshot.yaw = rta::Raw(yaw & 0xffff);
+  if (flag.get_type() == Variant::BOOL)
+    snapshot.flag = bool(flag) ? 1 : 0;
+  else if (flag.get_type() != Variant::NIL)
+    throw std::runtime_error("Player camera mode needs a boolean or null.");
+  snapshot.position = vector(position);
+  for (int i = 0; i < 4; ++i)
+    snapshot.side_normals[unsigned(i)] = vector(side_normals[i]);
+  player_services_->set_local_slot(rta::Raw(slot));
+  player_services_->set_camera(rta::Raw(slot), std::move(snapshot));
 }
 
 Dictionary ChampionsSessionController::save_file(const String &path) {
@@ -2748,15 +2996,128 @@ Dictionary ChampionsSessionController::draw_effect_slots() {
   } catch (const std::exception &e) { return failure(e); }
 }
 
+void ChampionsSessionController::apply_fight(rta::session_control::Observation &o) const {
+  const auto p = fight_->player();
+  if (!p.present) return;
+  o.position = p.position;
+  o.facing = p.facing & 0xffffu;
+  o.facing_enabled = true;
+  o.hp = p.hp;
+  if (p.max_hp) o.max_health = p.max_hp;
+}
+Dictionary ChampionsSessionController::fight_observation() const {
+  Dictionary out;
+  if (!fight_) return out;
+  out["campaign_fight"] = true;
+  out["fight_started"] = fight_->started();
+  out["fight_player_ready"] = fight_->player_ready();
+  out["fight_failed"] = fight_->failed();
+  out["fight_error"] = String::utf8(fight_->error().c_str());
+  const auto &n = fight_->counts();
+  Dictionary counts;
+  counts["ticks"] = int64_t(n.ticks);
+  counts["actors_built"] = int64_t(n.actors_built);
+  counts["attack_edges"] = int64_t(n.attack_edges);
+  counts["player_swings"] = int64_t(n.player_swings);
+  counts["player_hits"] = int64_t(n.player_hits);
+  counts["damage_events"] = int64_t(n.damage_events);
+  counts["deaths"] = int64_t(n.deaths);
+  counts["loot_calls"] = int64_t(n.loot_calls);
+  counts["loot_items"] = int64_t(n.loot_items);
+  counts["loot_shared_draws"] = int64_t(n.loot_shared_draws);
+  counts["xp_awards"] = int64_t(n.xp_awards);
+  counts["xp_gained"] = int64_t(n.xp_gained);
+  counts["levels_gained"] = int64_t(n.levels_gained);
+  counts["factory_runs_skipped"] = int64_t(n.factory_runs_skipped);
+  out["fight_counts"] = counts;
+  Dictionary refusals;
+  for (const auto &entry : fight_->refusals()) refusals[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+  out["fight_refusals"] = refusals;
+  Array enemies;
+  int64_t handle = 0;
+  for (const auto &e : fight_->enemies()) {
+    Dictionary value;
+    value["slot"] = int64_t(1 + handle);
+    value["handle"] = int64_t(e.address);
+    value["kind"] = e.small ? "WarBoarSmall" : "WarBoar";
+    value["present"] = true;
+    value["dead"] = e.dead;
+    value["ai_frozen"] = e.ai_frozen;
+    value["hp_raw"] = int64_t(e.hp);
+    value["hp"] = display_float(e.hp);
+    value["max_hp"] = display_float(e.max_hp);
+    value["state"] = int64_t(e.state);
+    value["facing"] = int64_t(e.facing);
+    value["position"] = Vector3(display_float(e.position[0]), display_float(e.position[1]), display_float(e.position[2]));
+    enemies.push_back(value);
+    ++handle;
+  }
+  out["fight_enemies"] = enemies;
+  const auto player = fight_->player();
+  if (player.present) {
+    out["fight_player_action_state"] = int64_t(player.action_state);
+    out["fight_player_weapon_class"] = int64_t(player.weapon_class);
+    // Host stand-in: the research does not document the route's starting
+    // equipment, so the class-5 (unarmed) record is a labelled fallback.
+    out["fight_starting_equipment"] = "refused_unknown";
+    out["fight_player_weapon_class_source"] = "unarmed_fallback_standin";
+    out["gold"] = int64_t(player.gold);
+    // The experience record in the shared bytes (kill XP and level-up).
+    out["fight_player_level"] = int64_t(player.level);
+    out["fight_player_experience"] = int64_t(player.experience);
+    out["fight_player_skill_points"] = int64_t(player.skill_points);
+    out["fight_player_stat_points"] = int64_t(player.stat_points);
+    out["fight_player_mana"] = display_float(player.mana);
+    out["fight_player_max_mana"] = display_float(player.max_mana);
+  }
+  Array awards;
+  for (const auto &a : fight_->awards()) {
+    Dictionary value;
+    value["slot"] = int64_t(a.slot);
+    value["amount"] = int64_t(a.amount);
+    value["levels_gained"] = int64_t(a.levels_gained);
+    value["level_before"] = int64_t(a.level_before);
+    value["level_after"] = int64_t(a.level_after);
+    value["experience_before"] = int64_t(a.experience_before);
+    value["experience_after"] = int64_t(a.experience_after);
+    awards.push_back(value);
+  }
+  out["fight_awards"] = awards;
+  // Item records the loot roll generated; no ground object exists for them.
+  Array drops;
+  for (const auto &g : fight_->ground_drops()) {
+    Dictionary value;
+    value["kind"] = String::utf8(g.kind.c_str());
+    value["category"] = int64_t(g.category);
+    value["count"] = int64_t(g.count);
+    value["spawned"] = g.spawned;
+    drops.push_back(value);
+  }
+  out["fight_ground_drops"] = drops;
+  return out;
+}
 rta::session_control::Observation ChampionsSessionController::active_observation() const {
   if (combat_) return combat_->observation();
   if (level_) return level_->observation();
-  return control_->observation();
+  auto o = control_->observation();
+  // The shared-World player is what the scene presents (a stopped fight keeps
+  // its last player state); the dry scene supplies only the clock fields.
+  if (fight_ && fight_->player_ready()) apply_fight(o);
+  return o;
 }
 rta::session_control::Observation ChampionsSessionController::active_advance(uint32_t mask) {
   const auto before=active_observation().ready_ticks;
   loaded_presentation_.reset();
-  auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(mask));
+  // The shared-World fight, when established, owns the player: the dry scene
+  // only keeps the ready-tick clock, so it receives no movement or damage.
+  const bool fighting = !combat_ && !level_ && fight_ && fight_->started() && fight_->player_ready() && !fight_->failed();
+  // With a fight established the dry scene never receives the J/H diagnostic
+  // damage bit (it is the player's attack button); a failed fight leaves the
+  // stand-in with movement only.
+  const uint32_t dry_mask = fight_ && fight_->player_ready() ? (fighting ? 0u : (mask & ~uint32_t(rta::session_control::DAMAGE))) : mask;
+  auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(dry_mask));
+  if (fighting && !next.failed && next.ready_ticks>before) fight_->tick(mask);
+  if (!combat_ && !level_ && fight_ && fight_->player_ready()) apply_fight(next);
   if(!next.failed && next.ready_ticks>before) {
     if(combat_) {
       Dictionary visual; Array events;

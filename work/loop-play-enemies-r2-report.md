@@ -1,0 +1,23 @@
+STATUS: BLOCKED — step 4 now loads an audited enemy-bearing campaign level, but the native/Godot play session still has no production combat actors. The real fight, damage, death, drop and gold requirements remain red.
+
+# Play enemies r2 — 2026-10-22
+
+Branch `codex/play-enemies`, based on `f8d1293`. Local only; no push or PR. The evidence handoff is research commit `64a0117`, `docs/issues/campaign-combat-handoff.md` in `research-campaign-combat`. Private RTA US v2.00 input was read only. This report records counts and the class and level names already present in the audited research; no disc bytes or newly decoded names are committed.
+
+## Implemented
+
+- `godot/tests/loop_playthrough.gd` now starts in the hub as before, completes the dialog probe, finds the research's bounded `valor` fight route by stem in the opened game folder, loads it, starts play, and requires that level entry as an additional step 4 condition. It keeps the fight's resulting session for the following save probe. The existing step 4 gate still requires a live enemy, handled J attack, damage, death, a drop and increased gold.
+- The audited research identifies `WarBoar` and `WarBoarSmall` placements there. The original loader constructs each hostile creature as a GameObject with grid and run-list identity, not by copying it into a second World. The present client has separate script-host and combat-fixture actor worlds. Its level factory does not build either WarBoar constructor; its combat World has no WarBoar class dispatch. Connecting a sprite, a fixture actor, or a guessed stat/loot service would not meet the original contract. Ranked items 2–5 stay refused. This round adds no synthetic combat actor or value.
+
+## Verification
+
+- `python3 -m py_compile tools/run_loop_playthrough.py`; `git diff --check`: PASS.
+- Release arm64 configure and focused build: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`; `cmake --build build/native --target champions-level-objects-tests champions-script-commands-tests champions-combat-runtime-2-tests champions-fixture-save-tests champions-play-session-tests -j 2`: PASS. `ctest --test-dir build/native --output-on-failure -j 2 -R '^(level-objects|script-commands|combat-runtime-2-host|fixture-save|play-session-runtime)$'`: **5/5 PASS**.
+- Godot dev matrix: `python3 /Users/syndicatemike/Projects/open-champions/worktrees/playable-integration/work/playable-wave24/run-godot.py`: **54/54 PASS**. Its Full fixture `FULL_TRACE` is 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged from r1. This fixture is not real campaign combat.
+- Scripted real-data sweep: `bash work/play-enemies/run-sweep.sh`: **111/111 tried, loaded and played; 230 checks passed; zero failures and zero refusal kinds**. Four sequential slices, 60 ready ticks per level.
+- Final `python3 tools/run_loop_playthrough.py --godot /Users/syndicatemike/Projects/open-champions/worktrees/integration/work/runtime/Godot.app/Contents/MacOS/Godot --game-folder /Users/syndicatemike/Projects/open-champions/private-validation/rta-disc`: headless and rendered each wrote 20 steps and exited 1 as required for incomplete playthroughs. Both entered the target level (sorted index 99), reported **0 built / 191 unbuilt** objects and no factory build refusals, **0 live enemies**, J unhandled, no damage or death, drops 0→0 and gold 500→500. Rendered output wrote 10 screenshots; the fight screenshot was inspected and shows terrain and the player marker but no enemy actor. Read-only disc file count was 994 before and after. The later save/load probe also refuses on the current terrain display limit; this is separate from the step 4 result.
+- Full Release build: `cmake --build build/native -j 4` — PASS, arm64 test executables. Final `ctest --test-dir build/native --output-on-failure -j 3` — **231/231 PASS** in 1000.53 s. The first full CTest attempt was stopped because this worktree had only the focused test targets built; missing executables were a build preparation error, not a test failure. The clean final rerun is the claimed result.
+
+## Remaining contract gaps
+
+The research explicitly leaves the client's production transfer/unification contract and exact WarBoar animation/resource service answers unestablished. A real session also needs its class constructor/tick/death chain, balance table and level-scale stats, player equipment and melee state, terrain and loot services, Gold object touch and delayed credit. The current separate worlds and stubbed level constructor path cannot provide these by wiring the existing Full fixture. The direct level load proves level entry only; the story/portal transition is unverified.

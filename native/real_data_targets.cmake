@@ -20,6 +20,12 @@ target_include_directories(champions-real-world PUBLIC include)
 target_link_libraries(champions-real-world PUBLIC
     champions-world-geometry champions-terrain-file champions-level-flow
     champions-creature-water)
+if(BUILD_TESTING)
+    add_executable(champions-player-services-tests tests/player_services_tests.cpp)
+    target_link_libraries(champions-player-services-tests PRIVATE
+        champions-player-services champions-real-world champions-archive)
+    add_test(NAME player-services COMMAND champions-player-services-tests)
+endif()
 if(MSVC)
     target_compile_options(champions-real-world PRIVATE /W4 /utf-8 /fp:strict)
 else()

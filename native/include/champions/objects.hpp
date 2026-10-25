@@ -227,6 +227,12 @@ class World {
   void leave_run_list(GameObject &);
 
 public:
+  // Adds to `referred` each candidate that any list head, pool node or object
+  // head of this World (iterators this World retains excluded) still points
+  // at. A host that retains finished iterators uses it to release those
+  // nothing refers to any more.
+  void collect_link_references(const std::set<const Link *> &candidates,
+                               std::set<const Link *> &referred) const;
   Pool pool;
   HandlePool handles;
   SharedRandom shared;

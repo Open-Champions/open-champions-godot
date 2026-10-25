@@ -23,6 +23,9 @@ target_link_libraries(champions-script-commands PUBLIC
     champions-level-factory champions-monsters-1 champions-arena-monsters champions-script-items champions-dialog
     champions-dialog-gaps champions-strings champions-ui-text-gaps
     champions-combat champions-terrain-file)
+if(TARGET champions-archive)
+    target_link_libraries(champions-script-commands PUBLIC champions-archive)
+endif()
 # The native build provides champions-native-audio. The Godot extension compiles
 # the same file as champions-native-audio-binding-core and links it after this
 # static library, so the Playback references resolve there.
@@ -66,7 +69,7 @@ if(BUILD_TESTING AND TARGET champions-archive)
     add_test(NAME level-factory COMMAND champions-level-factory-tests
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/level_factory.tsv")
     add_executable(champions-level-objects-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/level_objects_tests.cpp")
-    target_link_libraries(champions-level-objects-tests PRIVATE champions-script-commands)
+    target_link_libraries(champions-level-objects-tests PRIVATE champions-script-commands champions-combat-runtime)
     if(MSVC)
         target_compile_options(champions-level-objects-tests PRIVATE /W4 /utf-8 /fp:strict)
     else()
