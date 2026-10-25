@@ -10,7 +10,6 @@ func configure(owner_scene: Node, menu: Node) -> void:
 	row = HBoxContainer.new()
 	menu.add_child(row)
 	choice = OptionButton.new()
-	choice.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	choice.tooltip_text = "Diagnostic direct use. Original proximity dispatch is not implemented."
 	row.add_child(choice)
 	var button: Button = host._button("Use hub service (direct)", use_selected)

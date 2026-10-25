@@ -395,6 +395,7 @@ func run() -> void:
 	var point_bad: Dictionary = scene.controller.hub_service_use(-1, false)
 	var point_result := {"ok": false}
 	var point_saved := false
+	var hub_controls_visible := true
 	var point_path := out_dir.path_join("hub-savepoint.ocplay")
 	if point_choice >= 0:
 		scene.hub_services.choice.select(point_choice)
@@ -402,6 +403,12 @@ func run() -> void:
 			scene.set_paused(true)
 			await process_frame
 			scene.scene_scroll.ensure_control_visible(scene.hub_services.row)
+			await process_frame
+			var visible_bounds := Rect2(Vector2.ZERO, Vector2(root.size))
+			hub_controls_visible = visible_bounds.encloses(scene.hub_services.choice.get_global_rect()) \
+				and visible_bounds.encloses(scene.actions.hub_service.get_global_rect())
+			mark("hub_service_controls", "drawn" if hub_controls_visible else "refused",
+				{"selector_and_action_inside_viewport": hub_controls_visible})
 			await capture("04-hub-services")
 			scene.set_paused(false)
 		fe.queue_path("save_session", point_path)
@@ -459,7 +466,7 @@ func run() -> void:
 		save_json()
 		scene.queue_free()
 		await process_frame
-		quit(0 if hub_quest_changed and hub_no_debit and service_refusals and point_carried and point_saved and point_unchanged and point_menu_refused and not point_busy.get("ok", true) and not point_bad.get("ok", true) and alternate_loaded and alternate_refused and alternate_point else 1)
+		quit(0 if hub_controls_visible and hub_quest_changed and hub_no_debit and service_refusals and point_carried and point_saved and point_unchanged and point_menu_refused and not point_busy.get("ok", true) and not point_bad.get("ok", true) and alternate_loaded and alternate_refused and alternate_point else 1)
 		return
 	# campaign-combat-handoff.md ranks the hub-to-valor route first: hub has
 	# no hostile objects, while this level has WarBoar placements. Select the
