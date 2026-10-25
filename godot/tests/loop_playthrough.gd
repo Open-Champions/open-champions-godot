@@ -478,6 +478,11 @@ func run() -> void:
 		mark("level_script", "enabled" if scene.controller.get_play_capabilities().get("level_script_enabled", false) else "unavailable")
 	help_close()
 	if scene.paused and scene.session_started: scene.resume_session()
+	var portal_before_offer: Dictionary = scene.controller.script_run_exit(12) if scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "hub" else {"ok": false}
+	var portal_guarded: bool = portal_before_offer.get("ok", false) and int(portal_before_offer.get("portal_requests", -1)) == 0 \
+		and not scene.controller.script_mission_menu_state().get("first_story_available", true)
+	mark("hub_portal_locked", "guarded" if portal_guarded else "refused",
+		{"requests_before_offer": int(portal_before_offer.get("portal_requests", -1))})
 	var dialog: Dictionary = scene.controller.dialog_status()
 	var talkers := int(dialog.get("talkers", 0))
 	var walk_start: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
@@ -569,6 +574,20 @@ func run() -> void:
 	var menu_before: Dictionary = scene.controller.script_mission_menu_state()
 	mark("mission_1_unlock", "available" if at_hub and menu_before.get("first_story_available", false) else "refused",
 		{"at_hub": at_hub, "available": menu_before.get("first_story_available", false)})
+	# The separate rectangle Trigger requests trigger(portal, 0) once after
+	# mission 1 is offered. The target method and rendering are unverified.
+	var portal_trigger_found := false
+	for target in scene.controller.script_exit_targets():
+		if int(target.index) == 12 and str(target.kind) == "Trigger" and target.get("script_action", false):
+			portal_trigger_found = true
+			break
+	var portal_result: Dictionary = scene.controller.script_run_exit(12) if at_hub and dialog_choice_completed and menu_before.get("first_story_available", false) and portal_trigger_found else {"ok": false}
+	var portal_repeat: Dictionary = scene.controller.script_run_exit(12) if portal_result.get("ok", false) else {"ok": false}
+	var portal_request_ok: bool = portal_trigger_found and portal_result.get("ok", false) and int(portal_result.get("portal_requests", -1)) == 1 \
+		and portal_repeat.get("ok", false) and int(portal_repeat.get("portal_requests", -1)) == 0
+	mark("hub_portal_request", "requested" if portal_request_ok else "refused",
+		{"trigger_found": portal_trigger_found, "first_requests": int(portal_result.get("portal_requests", -1)),
+		"repeat_requests": int(portal_repeat.get("portal_requests", -1)), "rendering_verified": false})
 	var hub_trigger_found := false
 	for target in scene.controller.script_exit_targets():
 		if int(target.index) == 11 and str(target.kind) == "PushTrigger" and target.get("script_action", false):
@@ -724,6 +743,15 @@ func run() -> void:
 		and int(record_after.get("record_max_hp_raw", -1)) == int(record_before.get("record_max_hp_raw", -2)) \
 		and int(record_after.get("record_max_mana_raw", -1)) == int(record_before.get("record_max_mana_raw", -2))
 	var at_blood1: bool = scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "blood1"
+	var markers: Array = scene.controller.script_player_markers() if at_blood1 else []
+	var markers_exact: bool = markers.size() == 3
+	if markers_exact:
+		markers_exact = int(markers[0].index) == 227 and markers[0].properties == PackedStringArray(["default=1"]) \
+			and int(markers[1].index) == 287 and markers[1].properties == PackedStringArray(["from=strife"]) \
+			and int(markers[2].index) == 298 and markers[2].properties == PackedStringArray(["from=drundar"])
+	mark("blood1_marker_records", "exact" if markers_exact else "refused",
+		{"marker_count": markers.size(), "record_indices": [227, 287, 298] if markers_exact else [],
+		"arrival_selection_verified": false})
 	mark("blood1_arrival", "arrived" if record_carried and at_blood1 and mission1_still_available else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
 		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
@@ -738,7 +766,7 @@ func run() -> void:
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()
-		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available and audit_menu_checks else 1)
+		quit(0 if at_hub and portal_guarded and dialog_choice_completed and portal_request_ok and trigger_opened_menu and selected and record_carried and at_blood1 and markers_exact and mission1_still_available and audit_menu_checks else 1)
 		return
 	# Exercise physical Trigger entry after the hub story route has reached blood1.
 	await walk_exit_probe()

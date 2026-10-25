@@ -277,6 +277,7 @@ public:
   godot::Array script_exit_targets() const;
   godot::Dictionary inspect_exit_records(const godot::PackedByteArray &) const;
   godot::Dictionary script_trigger_status() const;
+  godot::Array script_player_markers() const;
   godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
