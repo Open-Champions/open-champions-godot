@@ -117,6 +117,7 @@ private:
   bool dialog_use_pending_ = false;
   int64_t dialog_talk_pending_ = -1;
   uint32_t dialog_pad_ = 0;
+  int dialog_text_option_ = 1; // 0x4fdcc8: same option for draw and run tasks
   // queue_count, status, position of voice stream 1 (dialog_voice_state).
   std::optional<std::array<int64_t, 3>> dialog_voice_;
   godot::String dialog_last_use_;

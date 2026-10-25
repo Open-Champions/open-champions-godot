@@ -77,9 +77,9 @@ func voice_counts() -> void:
 	if int(s.get("queued", 0)) > 0: add("voice.frames_queued")
 	if int(s.get("status", 0)) & 1: add("voice.frames_playing")
 
-# Explicit test stimulus, with no ready tick between the two draw calls.
-# Verifies that the bridge passes stream status to the text-off draw gate;
-# the live mixer observation is restored before the conversation advances.
+# Explicit test stimulus: one confirm tick with playing status and text off.
+# Both the draw and input gates must hold. Restore the live mixer observation
+# and the scene's text-on option before the measured conversation continues.
 func probe_voice_gate() -> void:
 	if not args.has("voice-gate-probe") or counts.get("probe.voice_gate", 0) != 0: return
 	var status: Dictionary = scene.controller.dialog_status()
@@ -90,9 +90,14 @@ func probe_voice_gate() -> void:
 	var live: Dictionary = streams[1]
 	scene.controller.dialog_voice_state({"queue_count": 0, "status": 1, "position": 0})
 	var playing: Dictionary = scene.controller.dialog_frame(0)
+	var choices := int(status.get("counts", {}).get("choices_taken", 0))
+	scene.controller.dialog_press(0x40)
+	scene.advance_step()
+	check(int(scene.controller.dialog_status().get("counts", {}).get("choices_taken", 0)) == choices, "text-off confirm waits while voice status is playing")
 	scene.controller.dialog_voice_state({"queue_count": 0, "status": 0, "position": 0})
 	var silent: Dictionary = scene.controller.dialog_frame(0)
 	scene.controller.dialog_voice_state({"queue_count": int(live.get("queued", 0)), "status": int(live.get("status", 0)), "position": int(live.get("entry_position", 0))})
+	scene.controller.dialog_frame(1)
 	check(playing.get("ok", false) and int(playing.get("cursor_glyph_quads", 0)) == 0, "text-off prompt is hidden while voice status is playing")
 	check(silent.get("ok", false) and int(silent.get("cursor_glyph_quads", 0)) > 0, "text-off prompt appears after voice status clears")
 	add("probe.voice_gate")
