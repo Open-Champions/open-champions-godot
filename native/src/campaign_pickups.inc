@@ -10,6 +10,7 @@
   Address prompt_object = 0;
   bool pending_use = false;
   struct ChestState {
+    std::shared_ptr<builtins::Obj> owner;
     std::vector<std::string> props;
     creature_anim::StateId animation = 0;
     creature_anim::ClipId clip = 0;
@@ -136,6 +137,8 @@
     return seed >> 16;
   }
   void build_chest(Address a, const level_flow::Record &record, unsigned variant, SharedRandom &seed) {
+    if (chests.count(a) || authority->find(a))
+      throw C::Unsupported("Chest address already has a live owner or state");
     if (variant > 4) throw C::Unsupported("Chest variant outside 0..4");
     const auto globals = host->level_load_globals();
     if (!globals) throw C::Unsupported("Chest level inputs unavailable");
@@ -159,7 +162,7 @@
     world->load_runtime_bytes(0x5118d8, table);
     auto &memory = host->variables().memory;
     memory.write(a, std::vector<std::uint8_t>(0x88, 0));
-    host->variables().new_object({}, 0, record.position, record.angle, "5Chest",
+    chest.owner = host->variables().new_object({}, 0, record.position, record.angle, "5Chest",
       std::make_shared<std::vector<std::string>>(record.props), a, 0x88);
     memory.word(a + 0x44, seed.draw());
     memory.word(a + 0x24, descriptor);
@@ -184,18 +187,25 @@
     const int selection = bits == 8 ? 3 : bits == 4 ? 2 : bits == 2 ? 1 : bits == 1 ? 0 : -1;
     memory.word(a + 0x54, Raw(modelVisibilityMask(model, selection)));
     for (unsigned k = 0; k < 3; ++k) memory.word(descriptor + 12 + 8 * k, resources[k]);
-    chests.emplace(a, std::move(chest));
+    if (!chests.emplace(a, std::move(chest)).second)
+      throw C::Unsupported("Chest state address insertion failed");
     ++counts.chests_built;
   }
   static Raw float_bits(float f) { Raw r; std::memcpy(&r, &f, 4); return r; }
+  bool live_chest(Address a) const {
+    const auto it = chests.find(a);
+    return it != chests.end() && it->second.owner && it->second.owner->alive &&
+           it->second.owner->type_name == "5Chest" && authority->is_factory(a) &&
+           authority->find(a) == it->second.owner.get() && read(a + 0x48) == 0x5118d8;
+  }
   C::InteractionPrompt chest_prompt(Address a, Raw) {
-    if (!chests.count(a)) throw C::Unsupported("interactable class has no ported prompt slot 13");
+    if (!live_chest(a)) throw C::Unsupported("interactable class has no live Chest prompt slot 13");
     // The zero-gold opened branch returns status 1 without writing text.
     return {1, read(a + 0x84) == 0 || std::int16_t(read(a + 0x4c, 2)) > 0};
   }
   void chest_use(Address a, Raw slot) {
     auto it = chests.find(a);
-    if (it == chests.end()) throw C::Unsupported("interactable class has no ported slot 14");
+    if (!live_chest(a)) throw C::Unsupported("interactable class has no live Chest slot 14");
     if (read(a + 0x84)) {
       world->write(a + 0x54, 4, 1);
       world->add_gold_floater(slot, {read(a + 0x10), read(a + 0x14), read(a + 0x18)},
@@ -215,7 +225,7 @@
   }
   bool chest_run(Address a) {
     auto it = chests.find(a);
-    if (it == chests.end()) return false;
+    if (!live_chest(a)) return false;
     auto &chest = it->second;
     if (read(a + 0x58, 1)) {
       refuse("trapped Chest run: explosion/action path not executed by loot-drop probes");

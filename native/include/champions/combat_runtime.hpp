@@ -246,7 +246,7 @@ public:
   // grid queries) accept it as a victim or target. The vtable at +0x48 must be
   // defined (define_creature_table) first. Never allocates, draws or links.
   void adopt_creature(Address factory_object);
-  void adopt_prop(Address factory_object);
+  void adopt_prop(Address factory_object, std::function<void()> retire);
   // Writes a creature vtable image: the executed Creature base slots, then the
   // class's own overrides (slot -> function address).
   void define_creature_table(Address table,

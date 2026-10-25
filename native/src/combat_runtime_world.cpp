@@ -465,6 +465,26 @@ void World::State::destroy(Address a) {
     return destroy_round1(a);
   // Slot 1 with 3 (research FullRuntime._slot1).
   actor(a);
+  auto adopted = adopted_props.find(a);
+  if (adopted != adopted_props.end()) {
+    auto *owner = adopted->second.first;
+    if (!owner->alive || authority->find(a) != owner ||
+        authority->objects->objects.at(a) != owner)
+      throw Error("adopted prop owner identity changed before destruction");
+    const auto extent = Pool::CLASSES[pool.class_of(a)][0];
+    auto retire = adopted->second.second;
+    note("destroy", {a});
+    authority->objects->destroy(*owner, 3);
+    authority->unregister_object(*owner);
+    animations.erase(a);
+    objects.at(a)->alive = false;
+    retired.push_back(std::move(objects.at(a)));
+    objects.erase(a);
+    adopted_props.erase(adopted);
+    forget_heads(a, a + extent);
+    retire();
+    return;
+  }
   auto fn = u(u(a + 0x48) + 12);
   if (fn == 0x151454 || fn == 0x3c6468)
     return projectile_destroy(a, 3);

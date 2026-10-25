@@ -50,6 +50,7 @@ struct Fight::Impl {
   std::shared_ptr<creature_anim::Runtime> anim = std::make_shared<creature_anim::Runtime>();
   struct Dispatch {
     std::function<bool(Address)> run;
+    std::function<bool(objects::GameObject &, std::int64_t)> destroy;
   };
   std::shared_ptr<Dispatch> dispatch = std::make_shared<Dispatch>();
   std::unique_ptr<C::World> world;
@@ -611,10 +612,27 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
 }
 Fight::~Fight() {
   p_->dispatch->run = {};
+  p_->dispatch->destroy = {};
 }
 void Fight::install(script_commands::Host &host) {
   auto &p = *p_;
   p.host = &host;
+  p.dispatch->destroy = [impl = p_.get()](objects::GameObject &owner, std::int64_t flags) {
+    if (!impl->live_chest(owner.addr) || impl->authority->find(owner.addr) != &owner) return false;
+    if (flags != 3) throw C::Unsupported("Chest destruction requires the researched freeing destructor flags 3");
+    impl->world->destroy(owner.addr);
+    return true;
+  };
+  const auto bind_destroy = [dispatch = p.dispatch](auto previous) {
+    return [dispatch, previous](objects::GameObject &owner, std::int64_t flags) {
+      if (dispatch->destroy && dispatch->destroy(owner, flags)) return;
+      if (previous) previous(owner, flags);
+      else throw C::Unsupported("factory object destructor has no bound owner");
+    };
+  };
+  host.variables().world->on_destroy = bind_destroy(host.variables().world->on_destroy);
+  auto &host_destroy = host.variables().host->game->on_destroy;
+  host_destroy = bind_destroy(host_destroy);
   p.actors = std::make_unique<campaign_actors::Runtime>(*p.authority->objects, host.resources(),
                                                        p.boar_services(), &p.authority->memory);
   p.actors->set_contain_refusals(true);
@@ -663,7 +681,13 @@ std::string Fight::start(const PlayerStart &start) {
         if (p.states.count(entry.first)) p.bundle.bind_actor(entry.first, p.states[entry.first]);
       }
     for (auto &chest : p.chests) {
-      p.world->adopt_prop(chest.first);
+      const auto address = chest.first;
+      p.world->adopt_prop(address, [impl = p_.get(), address] {
+        auto &state = impl->chests.at(address);
+        impl->anim->anim_clear(state.animation);
+        impl->anim->anim_state_dtor(state.animation);
+        impl->chests.erase(address);
+      });
     }
   } catch (const std::exception &e) {
     p.error = e.what();

@@ -2,6 +2,7 @@
 // boundaries, including registry deletion and shared/own draw ownership.
 #include "champions/pickups.hpp"
 #include "champions/combat_ctors.hpp"
+#include "champions/script_commands.hpp"
 #include <cstring>
 #include <iostream>
 namespace R = champions::simulation::rta;
@@ -149,6 +150,57 @@ void flight_and_settle() {
   check(g.world.read(replacement+4)==0 && g.bounds_calls==3, "ctor3 requests neither run list nor fresh bounds (third call is the throw reinit)");
   g.world.destroy(replacement);
   check(!g.world.contains(replacement) && !g.authority->find(replacement), "accepted pickup destructor removes real registry entry");
+}
+void adopted_chest_lifetime() {
+  auto authority = std::make_shared<R::WorldAuthority>();
+  R::script_commands::Host host(authority);
+  std::map<C::Address, std::shared_ptr<R::builtins::Obj>> chests;
+  unsigned chest_ticks = 0, replacement_ticks = 0, retirements = 0;
+  auto services = C::flat_fixture_services();
+  services.external_run = [&](C::Address address) {
+    const auto found = chests.find(address);
+    if (found != chests.end() && authority->find(address) == found->second.get() &&
+        found->second->alive && found->second->type_name == "5Chest") ++chest_ticks;
+    else ++replacement_ticks;
+    return true;
+  };
+  C::World world(authority, services, 0, C::Composition::Full);
+  auto construct = [&](C::Address address, const std::string &type) {
+    auto owner = host.variables().new_object({}, 0x100018, {0,0,0}, 0, type, {}, address, 0x88);
+    authority->register_factory(address);
+    world.write(address + 0x48, 4, 0x5118d8);
+    if (type == "5Chest") {
+      check(chests.emplace(address, owner).second, "Chest address index insertion is unique");
+      world.adopt_prop(address, [&, address] { chests.erase(address); ++retirements; });
+      world.write(address + 0x84, 4, 1);
+    }
+    host.variables().world->run_every_frame(*owner);
+    return owner;
+  };
+  const auto address = authority->objects->pool.allocate(0x88);
+  auto first = construct(address, "5Chest");
+  const auto retained = world.retain(address);
+  world.run_actor(address);
+  world.destroy(address);
+  check(!first->alive && !authority->find(address) && !world.contains(address) && chests.empty(),
+        "Chest destruction retires exact host owner, combat view and address state");
+  check(!world.target(retained) && !first->heads[0].next && !first->heads[1].next && !first->heads[2].next,
+        "Chest destructor clears actual host handle, run and grid heads");
+  check(authority->objects->pool.allocate(0x88) == address, "Chest allocation immediately reuses freed block");
+  auto second = construct(address, "5Chest");
+  check(second.get() != first.get() && authority->find(address) == second.get(), "replacement Chest has distinct registered identity");
+  auto hits = world.collect_box({raw(-10),raw(-10),raw(-10)}, {raw(10),raw(10),raw(10)}, 256);
+  check(hits == std::vector<C::Address>{address}, "query returns replacement Chest exactly once");
+  world.run_actor(address);
+  world.destroy(address);
+  check(authority->objects->pool.allocate(0x88) == address, "different small-pool object reuses Chest block");
+  auto other = construct(address, "10GameObject");
+  hits = world.collect_box({raw(-10),raw(-10),raw(-10)}, {raw(10),raw(10),raw(10)}, 256);
+  check(hits == std::vector<C::Address>{address} && chests.empty(), "replacement non-Chest is queried without stale Chest index");
+  world.run_actor(address);
+  check(chest_ticks == 2 && replacement_ticks == 1 && retirements == 2, "replacement dispatch uses live identity and class");
+  authority->objects->destroy(*other, 3);
+  authority->unregister_object(*other);
 }
 void allocation_loss() {
   Ground g; const auto a = g.flying();
@@ -351,7 +403,7 @@ void item_constructors() {
 } // namespace
 int main() {
   try {
-    inventory_limits(); equip_callback(); bounds(); flight_and_settle(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
+    inventory_limits(); equip_callback(); bounds(); flight_and_settle(); adopted_chest_lifetime(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
     gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors();
     std::cout << "pickup checks " << checks << " passed\n"; return 0;
   } catch(const std::exception &e) { std::cerr << "pickup check " << checks << ": " << e.what() << '\n'; return 1; }
