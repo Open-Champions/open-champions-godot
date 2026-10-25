@@ -215,7 +215,6 @@ func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
 	if inside_trigger(began, target): return {"entered": false, "ticks": 0}
 	var lo: Vector3 = target.get("min", Vector3.ZERO)
 	var hi: Vector3 = target.get("max", Vector3.ZERO)
-	var aim := Vector3((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5, 0)
 	var moved := false
 	var entered := false
 	var ticks := 0
@@ -224,15 +223,18 @@ func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
 	var best_distance := trigger_distance(began, target)
 	while ticks < max_ticks and not scene.controller.script_level_request().get("queued", false):
 		var before: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		# Aim for the nearest point in the documented inclusive rectangle.
+		# The authored record's origin can be at a far corner of a wide Trigger.
+		var dx := clampf(before.x, lo.x, hi.x) - before.x
+		var dy := clampf(before.y, lo.y, hi.y) - before.y
 		var command := 0
-		if before.x < lo.x or before.x > hi.x:
-			command = 1 if before.x < aim.x else 2
-		elif before.y < lo.y or before.y > hi.y:
-			command = 4 if before.y < aim.y else 8
+		if absf(dx) >= absf(dy) and not is_zero_approx(dx): command = 1 if dx > 0 else 2
+		elif not is_zero_approx(dy): command = 4 if dy > 0 else 8
+		elif not is_zero_approx(dx): command = 1 if dx > 0 else 2
 		advance(command)
 		ticks += 1
 		var after: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
-		if after.distance_to(before) > 0.001: moved = true; still = 0
+		if Vector2(after.x - before.x, after.y - before.y).length() > 0.001: moved = true; still = 0
 		else: still += 1
 		if moved and not inside_trigger(before, target) and inside_trigger(after, target): entered = true
 		var distance := trigger_distance(after, target)
@@ -240,15 +242,16 @@ func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
 			best_distance = distance
 			without_progress = 0
 		else: without_progress += 1
-		if still >= 20 or without_progress >= 600 or scene.stopped: break
+		if still >= 20 or without_progress >= 120 or scene.stopped: break
 		if command == 0 and ticks % 15 == 0 and not scene.controller.script_level_request().get("queued", false): break
-	return {"entered": entered, "ticks": ticks, "navigation_stalled": without_progress >= 600}
+	return {"entered": entered, "ticks": ticks, "navigation_stalled": still >= 20 or without_progress >= 120}
 
 func approach_use(target: Dictionary, max_ticks: int) -> Dictionary:
 	var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
 	var goal: Vector3 = target.get("position", Vector3.ZERO)
 	var best := origin.distance_to(goal)
 	var stale := 0
+	var still := 0
 	var ticks := 0
 	while ticks < max_ticks and not scene.stopped:
 		var at: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
@@ -262,11 +265,14 @@ func approach_use(target: Dictionary, max_ticks: int) -> Dictionary:
 		if command == 0: break
 		advance(command)
 		ticks += 1
-		var distance: float = scene.controller.get_observation().get("position", Vector3.ZERO).distance_to(goal)
+		var after: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if Vector2(after.x - at.x, after.y - at.y).length() <= 0.001: still += 1
+		else: still = 0
+		var distance: float = after.distance_to(goal)
 		if distance < best - 0.25: best = distance; stale = 0
 		else: stale += 1
-		if stale >= 600: break
-	return {"pressed": false, "ticks": ticks, "navigation_stalled": stale >= 600}
+		if stale >= 600 or still >= 20: break
+	return {"pressed": false, "ticks": ticks, "navigation_stalled": stale >= 600 or still >= 20}
 
 func help_close() -> void:
 	for i in range(200):
@@ -291,7 +297,7 @@ func save_json() -> void:
 	if file != null: file.store_string(JSON.stringify(summary, "  ", true) + "\n")
 	print("PLAYTHROUGH_RESULT " + JSON.stringify(summary))
 
-func walk_exit_probe() -> void:
+func walk_exit_probe() -> bool:
 	# Step 6: walk the native player into a real Trigger's inclusive x/y box.
 	var transition_before: int = scene.real.current
 	var exit_targets: Array = scene.controller.script_exit_targets()
@@ -302,48 +308,62 @@ func walk_exit_probe() -> void:
 	var entered_without_change := 0
 	var navigation_stalls := 0
 	var sources_examined := 1
-	var candidate_indices: Array[int] = []
+	var initial_source := transition_before
+	var multi_trigger_indices: Array[int] = []
+	var other_trigger_indices: Array[int] = []
 	for index in range(scene.real.levels.size()):
+		if index == initial_source: continue
 		var level: Dictionary = scene.real.levels[index]
 		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
 		if objects.is_empty(): continue
 		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
-		if inventory.get("ok", false) and int(inventory.get("triggers", 0)) >= 4:
-			candidate_indices.append(index)
-	var sources: Array[int] = [-1]
-	sources.append_array(candidate_indices)
-	for index in sources:
-		if index >= 0:
-			if index == transition_before: continue
-			if not scene.load_real_level(index, true): continue
-			scene.start_play()
-			help_close()
-			if scene.paused and scene.session_started: scene.resume_session()
-			sources_examined += 1
-			exit_targets = scene.controller.script_exit_targets()
-		pending = scene.controller.script_level_request()
-		if pending.get("queued", false): continue
-		var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
-		if walk_targets.is_empty(): continue
-		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
-		walk_targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
-		for target in walk_targets:
-			walk_attempts += 1
-			var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
-			var walk: Dictionary = walk_into_trigger(target, 45000)
-			if walk.get("navigation_stalled", false): navigation_stalls += 1
-			walked_into = bool(walk.get("entered", false))
+		if not inventory.get("ok", false): continue
+		var trigger_count := int(inventory.get("triggers", 0))
+		if trigger_count >= 4: multi_trigger_indices.append(index)
+		elif trigger_count > 0: other_trigger_indices.append(index)
+	var sources: Array[int] = [initial_source]
+	sources.append_array(multi_trigger_indices)
+	sources.append_array(other_trigger_indices)
+	# Probe nearby rectangles in every source before trying its farther ones.
+	# Both passes retain every eligible live Trigger without relying on a
+	# private level index or a guessed walk-in coordinate.
+	for pass_index in range(2):
+		for index in sources:
+			if index == initial_source and pass_index == 0:
+				pass
+			else:
+				if not scene.load_real_level(index, true): continue
+				scene.start_play()
+				help_close()
+				if scene.paused and scene.session_started: scene.resume_session()
+				sources_examined += 1
+				exit_targets = scene.controller.script_exit_targets()
 			pending = scene.controller.script_level_request()
-			var dispatch: Dictionary = scene.controller.script_trigger_status()
-			queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
-				int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
-				int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
-				str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
-			if walked_into and not pending.get("queued", false): entered_without_change += 1
-			if pending.get("queued", false): break
-		if queued_by_walk:
-			transition_before = scene.real.current
-			break
+			if pending.get("queued", false): continue
+			var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
+			if walk_targets.is_empty(): continue
+			var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+			walk_targets.sort_custom(func(a, b): return trigger_distance(origin, a) < trigger_distance(origin, b))
+			var first: int = 0 if pass_index == 0 else mini(2, walk_targets.size())
+			var last: int = mini(2, walk_targets.size()) if pass_index == 0 else walk_targets.size()
+			for target in walk_targets.slice(first, last):
+				walk_attempts += 1
+				var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
+				var walk: Dictionary = walk_into_trigger(target, 5000)
+				if walk.get("navigation_stalled", false): navigation_stalls += 1
+				walked_into = bool(walk.get("entered", false))
+				pending = scene.controller.script_level_request()
+				var dispatch: Dictionary = scene.controller.script_trigger_status()
+				queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
+					int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
+					int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
+					str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
+				if walked_into and not pending.get("queued", false): entered_without_change += 1
+				if pending.get("queued", false) or scene.stopped: break
+			if queued_by_walk:
+				transition_before = scene.real.current
+				break
+		if queued_by_walk: break
 	var record_before: Dictionary = scene.controller.get_observation()
 	var trigger_status: Dictionary = scene.controller.script_trigger_status()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
@@ -379,6 +399,7 @@ func walk_exit_probe() -> void:
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
 		"quest_vars_after": int(quests_after.get("vars", 0))})
 	await capture("11-walk-exit-level-change")
+	return record_carried and arrival_at_marker and scene.real.current != transition_before
 
 func run() -> void:
 	if not args.has("game-folder") or not args.has("out"):
@@ -614,7 +635,11 @@ func run() -> void:
 		quit(0 if at_hub and dialog_choice_completed and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available else 1)
 		return
 	# Exercise physical Trigger entry after the hub story route has reached blood1.
-	await walk_exit_probe()
+	var walk_exit_ok: bool = await walk_exit_probe()
+	if args.has("walk-only"):
+		save_json()
+		quit(0 if walk_exit_ok else 1)
+		return
 	# Normal E/use on an owner-supplied level record; the selected action is
 	# never invoked by the diagnostic menu.
 	var push_sources: Array[int] = []
@@ -656,6 +681,9 @@ func run() -> void:
 	# the research did not dynamically compare its full pad input machine.
 	var gate_discoveries := 0
 	var gate_pressed := 0
+	var gate_sources_tried := 0
+	var gate_target_attempts := 0
+	var gate_navigation_stalls := 0
 	var gate_menu := false
 	var portal_arrived := false
 	var portal_rank := -1
@@ -667,6 +695,7 @@ func run() -> void:
 	for index in portal_sources:
 		if gate_discoveries >= 2: break
 		if not scene.load_real_level(index, true): continue
+		gate_sources_tried += 1
 		scene.start_play()
 		help_close()
 		if scene.paused and scene.session_started: scene.resume_session()
@@ -674,7 +703,9 @@ func run() -> void:
 		var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
 		targets.sort_custom(func(a, b): return a.position.distance_squared_to(origin) < b.position.distance_squared_to(origin))
 		for target in targets:
+			gate_target_attempts += 1
 			var approach: Dictionary = approach_use(target, 2500)
+			if approach.get("navigation_stalled", false): gate_navigation_stalls += 1
 			if not approach.get("pressed", false): continue
 			gate_pressed += 1
 			var gate: Dictionary = scene.controller.script_gate_status()
@@ -682,6 +713,9 @@ func run() -> void:
 				gate_discoveries += 1
 				gate_menu = bool(gate.get("menu_open", false))
 				break
+		print("GATE_SEARCH " + JSON.stringify({"sources": gate_sources_tried,
+			"targets": gate_target_attempts, "stalls": gate_navigation_stalls,
+			"discoveries": gate_discoveries, "pressed": gate_pressed}))
 	if gate_menu:
 		var gate: Dictionary = scene.controller.script_gate_status()
 		var choices: Array = gate.get("destinations", [])
@@ -706,6 +740,8 @@ func run() -> void:
 				portal_arrived = bool(arrival.get("portal_free_spot", false)) and portal_rank == 3 and portal_at_spot
 	mark("portal_arrival", "arrived" if portal_arrived else "refused",
 		{"candidate_levels": portal_sources.size(), "gate_discoveries": gate_discoveries,
+		"gate_sources_tried": gate_sources_tried, "gate_target_attempts": gate_target_attempts,
+		"gate_navigation_stalls": gate_navigation_stalls,
 		"physical_gate_presses": gate_pressed, "menu_opened": gate_menu,
 		"request_at_181": gate_request_at_181, "gate_advance_calls": gate_advance_calls,
 		"gate_ready_ticks": gate_ready_after - gate_ready_before,
@@ -713,6 +749,10 @@ func run() -> void:
 		"position_matches_start": portal_at_spot,
 		"object_grid_verified": false, "constructor_seed_verified": false})
 	await capture("12-portal-arrival")
+	if args.has("exits-only"):
+		save_json()
+		quit(0 if walk_exit_ok and physical_push and portal_arrived else 1)
+		return
 	# Valor is a separate fight diagnostic; the story route above enters blood1.
 	var valor_index := -1
 	for index in range(scene.real.levels.size()):
