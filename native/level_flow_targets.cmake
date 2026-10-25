@@ -23,7 +23,19 @@ foreach(target champions-level-flow champions-session-level-flow)
   endif()
 endforeach()
 if(BUILD_TESTING)
-  add_executable(champions-level-flow-tests "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_tests.cpp")
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set(level_flow_batched_vectors "${CMAKE_CURRENT_BINARY_DIR}/generated/level_flow_vectors_batched.inc")
+  add_custom_command(OUTPUT "${level_flow_batched_vectors}"
+    COMMAND "${Python3_EXECUTABLE}" "${CHAMPIONS_LEVEL_FLOW_ROOT}/../tools/batch_level_flow_vectors.py"
+      --input "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_vectors.inc"
+      --output "${level_flow_batched_vectors}"
+    DEPENDS "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_vectors.inc"
+      "${CHAMPIONS_LEVEL_FLOW_ROOT}/../tools/batch_level_flow_vectors.py"
+    VERBATIM)
+  set_source_files_properties("${level_flow_batched_vectors}" PROPERTIES GENERATED TRUE HEADER_FILE_ONLY TRUE)
+  add_executable(champions-level-flow-tests "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_tests.cpp"
+    "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_check.cpp" "${level_flow_batched_vectors}")
+  target_include_directories(champions-level-flow-tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
   target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow champions-objects champions-terrain-file)
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()
