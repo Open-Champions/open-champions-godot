@@ -438,10 +438,11 @@ void World::State::destroy(Address a) {
   gameobject_dtor_call(a, 3);
 }
 void World::State::gameobject_dtor_call(Address a, Raw flags) {
-  // GameObject_dtor 0x14cf90 on the shared world (no name properties here):
-  // the GameObject table, then +8, +4, +0 cleared; bit 0 frees the block.
+  // GameObject_dtor 0x14cf90 on the shared world: the GameObject table,
+  // name removal, then +8, +4, +0 cleared; bit 0 frees the block.
   auto &o = actor(a);
   w(a + 0x48, VT_GAMEOBJECT);
+  remove_names(a);
   for (unsigned off : {8, 4, 0})
     clear(a + off);
   animations.erase(a);

@@ -92,6 +92,11 @@ struct Session::State {
     out.animation_start = [this](Raw a, Raw clip, Raw flags, Raw, Raw) { full_start(a, clip, flags); };
     out.animation_advance = [this](Raw a, Raw) { return full_advance(a); };
     out.in_knockdown_anim = [](C::Address) { return false; }; // no knockdown clip in this fixture
+    // Explicitly empty display-name output for this authored fixture only.
+    // The original Creature_getName body is not in the research model.
+    out.display_name = [this](C::Address, C::Address output) {
+      world->write(output, 1, 0);
+    };
     out.is_class = [](C::Address, const std::string &) { return false; };
     out.loot_generate = [](const C::LootDrop &) {};
     out.spawn_named_item = [](const Vec3 &, Raw) {};

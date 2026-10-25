@@ -191,6 +191,7 @@ champions::simulation::rta::level_factory::Executable authored_executable() {
   for (const auto &row : LF::tests())
     (*strings)[row.name] = "Cls" + std::to_string(k++);
   (*strings)[0x532b88] = "Gnaw";
+  (*strings)[0x52fa60] = "MiniBoss"; // Creature_ctor's documented property key.
   (*strings)[0x52fac8] = "dead";
   (*strings)[0x52fad0] = "change%d";
   LF::Executable exe;
@@ -486,7 +487,7 @@ void test_mounted_records() {
                                   {rider_classes[2], "rider2"}, {rider_classes[3], "rider3"},
                                   {foot_classes[0], "foot0"}, {foot_classes[1], "foot1"},
                                   {foot_classes[2], "foot2"}, {foot_classes[3], "foot3"},
-                                  {nightmare_class, "horse"}});
+                                  {nightmare_class, "horse"}}, "miniboss=0");
   check(host.adopt_objects(blob.data(), blob.size()), "mounted records adopt");
   const auto &counts = host.counts();
   // Each mounted row draws twice; each on-foot row and the placed mount once.
@@ -509,6 +510,11 @@ void test_mounted_records() {
                 mem.u8(rider->addr + 0x470) == i &&
                 mem.u16(rider->addr + 0x232) == 0x1b && mem.u16(mount->addr + 0x232) == 0,
             "variant, MiniBoss flag and linked initial states");
+      check(mount->props && *mount->props == std::vector<std::string>{
+                "miniboss=1", "name=" + mount_names[i]} &&
+                !(mem.word(rider->addr + 0xa8) & 1) &&
+                mem.word(mount->addr + 0x368) == 0,
+            "fixed mount list has no extra fields and is independent of rider properties");
       check(rider_node && mount_node && mem.word(rider_node + 12) == mount->addr &&
                 mem.word(mount_node + 12) == rider->addr,
             "reciprocal rider-mount handles");

@@ -2,6 +2,7 @@
 // classes whose constructor chain is ported (research t3/research-script-session
 // 6841b8a, docs/script-session.md sections 3-5).
 #include "champions/arena_monsters.hpp"
+#include "champions/horsemen_properties.hpp"
 #include <cctype>
 #include "champions/monsters_1.hpp"
 #include "champions/script_commands.hpp"
@@ -405,7 +406,8 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
       return Build::NotBuilt;
     }
   }
-  constexpr const char *MOUNT_NAMES[] = {"horsedisease", "horsewar", "horsepestilence", "horsedeath"};
+  const std::vector<std::string> mount_props{
+      "miniboss=1", std::string("name=") + horsemen_properties::mounts[variant].name};
   M1::Memory mem({}, [&exe](creature_hp::Address a, std::size_t n) -> std::uint64_t {
     std::uint64_t v = 0;
     for (std::size_t i = n; i-- > 0;) {
@@ -438,8 +440,9 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   std::uint32_t mount_block = 0;
   std::uint64_t draws = 0;
   auto is_rider_mount = [&](std::uint32_t self) { return rider && self == mount_block && mount_block; };
-  auto prop_text = [&](std::uint32_t key) -> std::optional<std::string> {
-    return level_factory::prop_find(&props, exe.string(key), exe);
+  auto prop_text = [&](std::uint32_t self, std::uint32_t key) -> std::optional<std::string> {
+    return level_factory::prop_find(is_rider_mount(self) ? &mount_props : &props,
+                                    exe.string(key), exe);
   };
   auto num = [](const AM::Value &v) { return std::uint32_t(std::get<std::int64_t>(v)); };
   model.callbacks["pool_new"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
@@ -461,7 +464,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
       throw Refused("GameObject_ctor on another block");
     // Observed 12-byte lists at 0x500848 + 12*variant, each ending in null.
     const auto list_props = is_rider_mount(self)
-        ? std::vector<std::string>{"miniboss=1", std::string("name=") + MOUNT_NAMES[variant]}
+        ? mount_props
         : props;
     auto list = std::make_shared<std::vector<std::string>>(list_props);
     const bool is_rider_object = rider && self == c;
@@ -482,15 +485,11 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     return std::int64_t(0);
   };
   model.callbacks["obj_getPropInt"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
-    if (is_rider_mount(num(a.at(0))))
-      return std::int64_t(num(a.at(1)) == 0x52fa60 ? 1 : 0); // MiniBoss key in Creature_ctor.
-    const auto text = prop_text(num(a.at(1)));
+    const auto text = prop_text(num(a.at(0)), num(a.at(1)));
     return std::int64_t(text ? level_factory::atoi(*text, exe) : 0u);
   };
   model.callbacks["obj_getPropStr"] = [&](AM::Model &, const std::vector<AM::Value> &a) -> AM::Value {
-    if (is_rider_mount(num(a.at(0))))
-      return std::int64_t(exe.string(num(a.at(1))) == "name" ? place(MOUNT_NAMES[variant]) : 0u);
-    const auto text = prop_text(num(a.at(1)));
+    const auto text = prop_text(num(a.at(0)), num(a.at(1)));
     return std::int64_t(text ? place(*text) : 0u);
   };
   // As build(): the balance row only feeds Creature_setStats, whose results are not copied.
@@ -507,8 +506,8 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   };
   model.callbacks["Creature_init"] = [&](AM::Model &m, const std::vector<AM::Value> &a) -> AM::Value {
     const auto self = num(a.at(0));
-    if (!is_rider_mount(self) && prop_text(KEY_DEAD)) throw Refused("Creature_init dead");
-    if (!is_rider_mount(self) && prop_text(KEY_INIT_SCRIPT)) throw Refused("Creature_init initScript");
+    if (prop_text(self, KEY_DEAD)) throw Refused("Creature_init dead");
+    if (prop_text(self, KEY_INIT_SCRIPT)) throw Refused("Creature_init initScript");
     // Creature_init first calls virtual slot 18 for a MiniBoss. Nightmare
     // inherits the documented empty Creature slot 18 (docs/creatures.md).
     std::uint32_t mask = 0;

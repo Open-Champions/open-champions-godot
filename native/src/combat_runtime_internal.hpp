@@ -7,6 +7,7 @@
 #include "champions/core_state.hpp"
 #include "champions/creature_movement.hpp"
 #include "champions/player.hpp"
+#include "champions/objects.hpp"
 #include <algorithm>
 #include <map>
 #include <set>
@@ -86,6 +87,10 @@ struct World::State {
   std::map<Address, std::unique_ptr<Actor>> objects;
   std::map<Address, std::unique_ptr<Actor>> spells; // spell records (no object)
   std::vector<std::unique_ptr<Actor>> retired;
+  // Reuse the object runtime's documented name hash/probing and duplicate
+  // behavior. These records only adapt names; Actor remains the pool owner.
+  objects::NameTable names;
+  std::map<Address, std::unique_ptr<objects::GameObject>> name_records;
   std::shared_ptr<Overlay> overlay;
   creature_hp::Memory mem;
   A::Model model;
@@ -153,6 +158,8 @@ struct World::State {
   Address spawn_class(const std::string &, const Spawn &);
   std::array<Address, 2> spawn_mounted_horseman(unsigned, const Spawn &,
                                                 const Spawn &);
+  Address property_value(Address, const std::string &) const;
+  void remove_names(Address);
   void write_table(Address table, const std::map<unsigned, Raw> *extra = nullptr);
   Address construct(Address addr, const Vec3 &pos, Kind kind);
   void link(Address, Address, Address);

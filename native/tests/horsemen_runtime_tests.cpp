@@ -8,8 +8,106 @@ using namespace champions::simulation::rta;
 static void check(bool yes, const char *message) {
   if (!yes) throw std::runtime_error(message);
 }
+static void test_mount_properties() {
+  // Expectations come from audited research 338d459, not the native table.
+  const char *names[] = {"horsedisease", "horsewar", "horsepestilence", "horsedeath"};
+  const Address lists[] = {0x500848, 0x500854, 0x500860, 0x50086c};
+  const Address name_texts[] = {0x547330, 0x547348, 0x547358, 0x547370};
+  for (Raw seed : {20973u, 7u}) {
+    auto services = flat_fixture_services();
+    services.animation_start = [](Address, Raw, Raw, Raw, Raw) {};
+    services.is_class = [](Address, const std::string &) { return false; };
+    services.loot_generate = [](const LootDrop &) {};
+    World world(std::move(services), 1, Composition::Full);
+    world.write(SHARED_SEED, 4, seed);
+    SharedRandom expected(seed);
+    for (unsigned v = 0; v < 4; ++v) {
+      const auto pair = world.spawn_mounted_horseman(v, Spawn{}, Spawn{});
+      const auto r = pair[0], m = pair[1];
+      expected.draw(); expected.draw();
+      check(world.read(SHARED_SEED) == expected.state,
+            "mount properties introduce no extra shared random draw");
+      check(world.read(m + 0x2c) == lists[v] &&
+                world.read(lists[v]) == 0x547320 &&
+                world.read(lists[v] + 4) == name_texts[v] &&
+                world.read(lists[v] + 8) == 0,
+            "mount retains the exact two-entry, null-terminated property list");
+      check(world.property_int(m, "MiniBoss") == 1 &&
+                (world.read(m + 0xa8, 8) & 1),
+            "each mount consumes miniboss=1");
+      check(world.property_string(m, "name") == names[v] &&
+                world.find_by_name(names[v]) == m,
+            "each mount name resolves to its own actor");
+      check(!world.property_string(m, "ShowName") &&
+                !world.property_string(m, "hide") &&
+                world.property_int(m, "hide", 7) == 7 &&
+                world.read(m + 0x368) == 0 &&
+                !(world.read(m + 12) & 0x100000),
+            "absent ShowName and hide do not gain synthetic values");
+      check(world.read(r + 0x2c) == 0 &&
+                !(world.read(r + 0xa8, 8) & 1) &&
+                !world.property_string(r, "name") &&
+                world.property_int(r, "miniboss") == 0,
+            "the fixed mount properties do not leak onto the rider");
+      check(world.read(m + 0x3c0) == from_int(2400) &&
+                world.read(m + 0x3ae, 2) == 2400 &&
+                world.read(m + 0xdc) == 0x3f999999,
+            "Nightmare constructor overrides remain intact");
+      world.write(lists[v] + 8, 4, 1); // authored malformed-terminator probe
+      bool modified_refused = false;
+      try { (void)world.property_string(m, "name"); }
+      catch (const Unsupported &e) {
+        modified_refused = std::string(e.what()).find("differs from audited") != std::string::npos;
+      }
+      world.write(lists[v] + 8, 4, 0);
+      check(modified_refused, "modified fixed mount lists refuse with a diagnostic");
+      // Exercise duplicate names, the original table's case-insensitive
+      // lookup, and deletion without losing the second live registration.
+      const auto duplicate = world.spawn_mounted_horseman(v, Spawn{}, Spawn{});
+      expected.draw(); expected.draw();
+      auto upper = std::string(names[v]);
+      for (auto &c : upper) if (c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+      check(world.find_by_name(upper) == m, "name lookup preserves first duplicate");
+      world.set_mounted_state(m, 0x14);
+      world.destroy(m);
+      check(!world.contains(m) && world.find_by_name(names[v]) == duplicate[1],
+            "destroyed mount name is removed without hiding the live duplicate");
+      world.set_mounted_state(duplicate[1], 0x14);
+      world.destroy(duplicate[1]);
+      check(world.find_by_name(names[v]) == 0, "last mount deletion clears name lookup");
+      const auto saved = world.read(duplicate[0] + 0x2c);
+      world.write(duplicate[0] + 0x2c, 4, 1); // authored unknown-list probe
+      bool refused = false;
+      try { (void)world.property_int(duplicate[0], "miniboss"); }
+      catch (const Unsupported &e) {
+        refused = std::string(e.what()).find("not documented") != std::string::npos;
+      }
+      world.write(duplicate[0] + 0x2c, 4, saved);
+      check(refused, "unknown property lists refuse with a diagnostic");
+    }
+  }
+  // The MiniBoss meter's original display-name body remains a refusal when
+  // the host has not explicitly supplied a presentation service.
+  auto services = flat_fixture_services();
+  services.animation_start = [](Address, Raw, Raw, Raw, Raw) {};
+  services.animation_advance = [](Address, Raw) { return Raw(0); };
+  World unbound(std::move(services), 1, Composition::Full);
+  unbound.spawn_player(0, Spawn{});
+  const auto pair = unbound.spawn_mounted_horseman(0, Spawn{}, Spawn{});
+  unbound.write(0x4f8424, 4, 1); // documented local alive count/list
+  unbound.write(0x4f8430, 4, 0);
+  unbound.write(pair[1] + 0xa8, 8,
+      unbound.read(pair[1] + 0xa8, 8) | UINT64_C(0x8000000080000000));
+  bool name_refused = false;
+  try { unbound.run_actor(pair[1]); }
+  catch (const Unsupported &e) {
+    name_refused = std::string(e.what()).find("display-name service missing") != std::string::npos;
+  }
+  check(name_refused, "unmodelled original MiniBoss name body stays refused");
+}
 int main() {
   try {
+    test_mount_properties();
     auto services = flat_fixture_services();
     auto attacking_rider = std::make_shared<Address>(0);
     auto charging_mount = std::make_shared<Address>(0);
@@ -118,6 +216,8 @@ int main() {
           "dead mount fades for 100 runs and queues deletion");
     world.tick();
     check(!world.contains(m), "run-list flush deletes faded mount");
+    check(world.find_by_name("horsedisease") == 0,
+          "fade deletion removes the mount's name registration");
     world.take_damage(r, p, 0, from_int(2));
     world.process_damage(r);
     check(world.read(r + 0x232, 2) == 0x14,
@@ -167,17 +267,24 @@ int main() {
     check(fw.read(fixture_pair[0] + 0x232, 2) == 0x1f,
           "mount state 0x18 pushes the fourth rider swing");
     bool fourth_swing_event = false;
+    bool fixture_name_service = false;
     for (int i = 0; i < 10; ++i) {
       frame = fixture.advance(0);
-      check(!frame.failed, "fourth mounted swing completes a ready tick");
-      for (const auto &event : fixture.tick_events())
+      if (frame.failed)
+        throw std::runtime_error("fourth mounted swing refused: " + frame.error);
+      for (const auto &event : fixture.tick_events()) {
         if (event.name == "damage_apply" && event.args.size() >= 2 &&
             event.args[1] == fixture_pair[0] &&
             fw.read(fixture_pair[0] + 0x232, 2) == 0x1f)
           fourth_swing_event = true;
+        fixture_name_service |= event.name == "presentation:Creature.v19" &&
+            event.args.size() == 2 && event.args[0] == fixture_pair[1];
+      }
     }
     check(fourth_swing_event,
           "state 0x1f rider hit event fires through the Full fixture");
+    check(fixture_name_service && fw.read(0x41ba40, 1) == 0,
+          "MiniBoss meter uses the Full fixture's explicit empty-name service");
     std::cout << "mounted fight smoke passed\n";
     return 0;
   } catch (const std::exception &e) {
