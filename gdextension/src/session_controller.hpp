@@ -78,6 +78,7 @@ class ChampionsSessionController : public godot::RefCounted {
 public:
   // DIAGNOSTIC, not an original routine (scripted runs only).
   godot::Dictionary fight_place_player(const godot::Vector3 &position, int64_t facing);
+  godot::Dictionary fight_diagnostic_lethal_hit();
   // Save/load: put the saved player position and health back (not an original routine).
   godot::Dictionary fight_restore_player(const godot::Vector3 &position, int64_t facing, int64_t hp_raw);
 private:

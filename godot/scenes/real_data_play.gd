@@ -11,6 +11,8 @@ const FightEnemies = preload("res://real_data/real_fight_enemies.gd")
 var real: Node
 var real_player: RefCounted
 var fight_enemies: RefCounted
+var death_fade: Control
+var _death_close_requests := 0
 var imported_appearance: Array = []
 var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
@@ -49,6 +51,8 @@ func _ready() -> void:
 		text_hud = TextHud.new()
 		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 		viewport.add_child(text_hud)
+		death_fade = load("res://ui/death_fade.gd").new()
+		viewport.add_child(death_fade)
 	real_folder = FileDialog.new()
 	real_folder.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	real_folder.access = FileDialog.ACCESS_FILESYSTEM
@@ -560,6 +564,15 @@ func start_play() -> void:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
+	var close_requests := int(result.get("fight_close_menus_requests", 0))
+	if close_requests > _death_close_requests and game_menus != null and game_menus.open:
+		game_menus.close_menu()
+	_death_close_requests = close_requests
+	if death_fade != null:
+		death_fade.observe(result)
+		# HUD/menu Controls are added later as a level is configured. Preserve
+		# the fade's final overlay order when those children change.
+		viewport.move_child(death_fade, viewport.get_child_count() - 1)
 	if not _level_change_loading and controller != null:
 		var pending: Dictionary = controller.script_level_request()
 		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:

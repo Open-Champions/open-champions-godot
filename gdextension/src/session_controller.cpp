@@ -118,6 +118,8 @@ void ChampionsSessionController::_bind_methods() {
   // DIAGNOSTIC ONLY (unchecked placement; scripted test runs and the .fight load).
   ClassDB::bind_method(D_METHOD("fight_place_player", "position", "facing"),
                        &ChampionsSessionController::fight_place_player);
+  ClassDB::bind_method(D_METHOD("fight_diagnostic_lethal_hit"),
+                       &ChampionsSessionController::fight_diagnostic_lethal_hit);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -1080,6 +1082,17 @@ void ChampionsSessionController::start_fight(const rta::session_control::Observa
   }
   fight_->start(start);
 }
+Dictionary ChampionsSessionController::fight_diagnostic_lethal_hit() {
+  try {
+    if (!fight_) throw std::runtime_error("no shared-World fight");
+    const auto error = fight_->diagnostic_lethal_hit();
+    if (!error.empty()) throw std::runtime_error(error);
+    Dictionary out;
+    out["ok"] = true;
+    out["diagnostic"] = true;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
 Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &position, int64_t facing, int64_t hp_raw) {
   // A load replaced the scene before play started: the fight begins from the
   // loaded scene, then the saved player is put back.
@@ -1098,6 +1111,8 @@ Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &posit
     return refuse("saved position is not finite");
   if (facing < 0 || facing > 0xffff) return refuse("saved facing is outside 16 bits");
   if (!fight_ || !fight_->player_ready()) return refuse("no shared-World player");
+  if (fight_->player().action_state == 4)
+    return refuse("dead player requires object replacement; cannot restore health or position in place");
   if (hp_raw < 0 || hp_raw > 0xffffffffll) return refuse("saved hit points are outside 32 bits");
   {
     const auto raw = static_cast<rta::Raw>(hp_raw);
@@ -2719,6 +2734,20 @@ Dictionary ChampionsSessionController::fight_observation() const {
   out["fight_player_ready"] = fight_->player_ready();
   out["fight_failed"] = fight_->failed();
   out["fight_error"] = String::utf8(fight_->error().c_str());
+  const auto death = fight_->death_view();
+  out["fight_death_task"] = death.running;
+  out["fight_death_phase"] = int64_t(death.phase);
+  out["fight_death_error"] = String::utf8(death.refusal.c_str());
+  out["fight_death_countdown"] = int64_t(death.wipe_countdown);
+  out["fight_dead_countdown"] = int64_t(death.dead_countdown);
+  out["fight_death_fade"] = int64_t(death.fade);
+  out["fight_death_animation_started"] = death.animation_started;
+  out["fight_death_animation_steps"] = int64_t(death.animation_steps);
+  out["fight_death_animation_time_raw"] = int64_t(death.animation_time);
+  out["fight_death_animation_flags"] = int64_t(death.animation_flags);
+  // The simulation selects/advances the death clip; the class-body renderer
+  // still shows its rest pose. Never label the rendered body as animated.
+  out["fight_death_pose_rendered"] = false;
   const auto &n = fight_->counts();
   Dictionary counts;
   counts["ticks"] = int64_t(n.ticks);
@@ -2728,6 +2757,8 @@ Dictionary ChampionsSessionController::fight_observation() const {
   counts["player_hits"] = int64_t(n.player_hits);
   counts["damage_events"] = int64_t(n.damage_events);
   counts["deaths"] = int64_t(n.deaths);
+  counts["player_deaths"] = int64_t(n.player_deaths);
+  out["fight_close_menus_requests"] = int64_t(n.close_menu_requests);
   counts["loot_calls"] = int64_t(n.loot_calls);
   counts["loot_items"] = int64_t(n.loot_items);
   counts["loot_shared_draws"] = int64_t(n.loot_shared_draws);
