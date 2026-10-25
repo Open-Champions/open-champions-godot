@@ -524,12 +524,17 @@ bool Ledger::press_stat(const StatInput &input) {
 void Ledger::spend_stat(int stat) {
   if (stat < 0 || stat > 3)
     throw Refusal("the stats page sends only rows 0..3");
-  if (live_record_ && !xp_ready_)
+  if (!xp_ready_)
     throw Refusal("selected executable level-up rules were not supplied");
-  if (xp_ready_ && !effective_delta_valid_)
-    throw Refusal("equipment changed; level-up needs recalculated effective stats from the player service");
-  machine_->on_stat_point(0, stat);
-  if (xp_ready_) recalc_level_stats();
+  ensure_recalc_supported();
+  auto before = memory_;
+  try {
+    machine_->on_stat_point(0, stat);
+    recalc_level_stats();
+  } catch (...) {
+    memory_ = std::move(before);
+    throw;
+  }
 }
 
 void Ledger::spend_skill(int is_skill, std::uint32_t value) {
@@ -549,20 +554,57 @@ void Ledger::set_xp_rules(XpTable table, std::array<ClassFormula, 8> formulas) {
   xp_ready_ = true;
 }
 
+void Ledger::ensure_recalc_supported() const {
+  if (!effective_delta_valid_)
+    throw Refusal("effective stats are stale; recalculate them from the player service before XP or stat changes");
+  const auto r = record();
+  const auto obj = machine_->u32(r + 0x43d8);
+  if (obj != 0 && (live_record_ || obj != OBJECT))
+    throw Refusal("linked player object state is unavailable for player_recalcStats");
+  for (int i = 0; i < 17; ++i)
+    if (machine_->u32(r + 0x43f0 + 4u * static_cast<std::uint32_t>(i)) != 0)
+      throw Refusal("equipped item modifiers need the linked player object service");
+  if (machine_->s32(r + BAG_COUNT + 2u * BAG_STRIDE) != 0)
+    throw Refusal("figurine bonuses need the linked player object service");
+  if (obj != 0) {
+    if (machine_->s32(obj + 0x3c8) != 0 || machine_->skill_rank(0, 0x3f) != 0)
+      throw Refusal("authored player recalculation lacks this object's slot or resistance rank");
+    for (const auto delta : effective_delta_)
+      if (delta != 0)
+        throw Refusal("effective bonuses need the linked player object service");
+  }
+}
+
 void Ledger::recalc_level_stats() {
   const auto r = record();
+  const auto obj = machine_->u32(r + 0x43d8);
   const int cls = machine_->s32(r + 0x50);
   const auto &f = formulas_[cls >= 0 && cls < 7 ? cls : 7];
   std::array<std::uint32_t, 4> effective{};
   for (int i = 0; i < 4; ++i) {
     const auto base = machine_->s32(r + 0x78 + 4u * static_cast<std::uint32_t>(i));
-    const auto value = static_cast<std::int64_t>(base) + effective_delta_[i];
+    const auto value = static_cast<std::int64_t>(base) + (obj ? effective_delta_[i] : 0);
     if (value < 0 || value > INT32_MAX)
       throw Refusal("effective stat is outside the supported level-up arithmetic");
     effective[i] = static_cast<std::uint32_t>(value);
     machine_->w32(r + 0x90 + 4u * static_cast<std::uint32_t>(i), effective[i]);
   }
+  // player_recalcStats returns here when the record has no linked object.
+  if (obj == 0) return;
+  machine_->w32(r + 0xdc, 0);
+  for (int i = 0; i < 4; ++i) {
+    const auto shifted = (effective[i] - static_cast<std::uint32_t>(i == 0 || i == 2 ? 30 : 5)) & 0xffu;
+    machine_->w8(obj + 0x474 + static_cast<std::uint32_t>(i), shifted >= 128u ? 0u : shifted);
+  }
+  for (int i = 0; i < 5; ++i)
+    machine_->w32(obj + 0x5c + 4u * static_cast<std::uint32_t>(i), 0);
+  machine_->w16(obj + 0xe4, effective[2] / 2u);
   const auto level = items::fint(static_cast<std::uint32_t>(this->level()));
+  auto load = items::fint(effective[0] + 125u);
+  load = items::fadd(load, items::fmul(items::fint(static_cast<std::uint32_t>(machine_->passive_level(0, 0x40))), 0x41700000u));
+  if (machine_->s32(0x4d8ae8) != 0) load = items::fadd(load, 0x459c4000u);
+  if (items::flt(0x461c3c00u, load)) load = 0x461c3c00u;
+  machine_->w32(r + 0x124, load);
   const auto max_mana = items::fadd(
       items::fmul(items::fsub(items::fint(effective[1]), f[0]), f[1]),
       items::fmul(level, f[2]));
@@ -576,27 +618,32 @@ void Ledger::recalc_level_stats() {
 
 int Ledger::give_xp(std::int32_t amount) {
   if (!xp_ready_) throw Refusal("selected executable experience table and class formulas are required");
-  if (!effective_delta_valid_)
-    throw Refusal("equipment changed; level-up needs recalculated effective stats from the player service");
-  const auto r = record();
-  const auto added = items::s32(static_cast<std::uint32_t>(experience()) + static_cast<std::uint32_t>(amount));
-  const auto exp = std::min(added, static_cast<std::int32_t>(xp_table_[80] - 1));
-  machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
-  int gained = 0;
-  while (level() >= 1 && level() < 80 && exp >= xp_table_[static_cast<std::size_t>(level())]) {
-    const auto prior = level();
-    machine_->w32(r + 0xe8, static_cast<std::uint32_t>(skill_points()) +
-                              static_cast<std::uint32_t>(skill_points_for_level(prior)));
-    machine_->w8(r + 0xec, machine_->u8(r + 0xec) + 3u);
-    machine_->w8(r + 0x59, static_cast<std::uint32_t>(prior + 1));
-    recalc_level_stats();
-    if (items::flt(0, machine_->u32(r + 0xac))) {
-      machine_->w32(r + 0xac, machine_->u32(r + 0xb0));
-      machine_->w32(r + 0xc0, machine_->u32(r + 0xc4));
+  ensure_recalc_supported();
+  auto before = memory_;
+  try {
+    const auto r = record();
+    const auto added = items::s32(static_cast<std::uint32_t>(experience()) + static_cast<std::uint32_t>(amount));
+    const auto exp = std::min(added, static_cast<std::int32_t>(xp_table_[80] - 1));
+    machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
+    int gained = 0;
+    while (level() >= 1 && level() < 80 && exp >= xp_table_[static_cast<std::size_t>(level())]) {
+      const auto prior = level();
+      machine_->w32(r + 0xe8, static_cast<std::uint32_t>(skill_points()) +
+                                static_cast<std::uint32_t>(skill_points_for_level(prior)));
+      machine_->w8(r + 0xec, machine_->u8(r + 0xec) + 3u);
+      machine_->w8(r + 0x59, static_cast<std::uint32_t>(prior + 1));
+      recalc_level_stats();
+      if (items::flt(0, machine_->u32(r + 0xac))) {
+        machine_->w32(r + 0xac, machine_->u32(r + 0xb0));
+        machine_->w32(r + 0xc0, machine_->u32(r + 0xc4));
+      }
+      ++gained;
     }
-    ++gained;
+    return gained;
+  } catch (...) {
+    memory_ = std::move(before);
+    throw;
   }
-  return gained;
 }
 
 std::int32_t Ledger::give_kill_xp(std::uint32_t creature_experience,
@@ -620,15 +667,21 @@ std::int32_t Ledger::give_kill_xp(std::uint32_t creature_experience,
                                     xp_table_[static_cast<std::size_t>(earned)]
                                : xp_table_[80];
   const auto award = std::min(scaled, cap);
-  give_xp(award);
-  if (machine_->s32(record() + 0x50) == 0) {
-    const auto restored = items::fadd(machine_->u32(record() + 0xc0),
-                                      items::fmul(creature_max_hp, 0x3d088888u));
-    machine_->w32(record() + 0xc0,
-                  items::flt(machine_->u32(record() + 0xc4), restored)
-                      ? machine_->u32(record() + 0xc4) : restored);
+  auto before = memory_;
+  try {
+    give_xp(award);
+    if (machine_->s32(record() + 0x50) == 0) {
+      const auto restored = items::fadd(machine_->u32(record() + 0xc0),
+                                        items::fmul(creature_max_hp, 0x3d088888u));
+      machine_->w32(record() + 0xc0,
+                    items::flt(machine_->u32(record() + 0xc4), restored)
+                        ? machine_->u32(record() + 0xc4) : restored);
+    }
+    return award;
+  } catch (...) {
+    memory_ = std::move(before);
+    throw;
   }
-  return award;
 }
 
 std::int32_t Ledger::experience() const { return machine_->s32(record() + 0x5c); }
@@ -642,6 +695,18 @@ std::int32_t Ledger::base_threshold() const {
   if (!xp_ready_) throw Refusal("selected executable experience table is required");
   const auto index = level();
   if (index < 1 || index > 80) throw Refusal("earned level is outside experience table");
+  return xp_table_[static_cast<std::size_t>(index - 1)];
+}
+std::int32_t Ledger::hud_next_threshold() const {
+  if (!xp_ready_) throw Refusal("selected executable experience table is required");
+  const auto index = acknowledged();
+  if (index < 1 || index > 80) throw Refusal("acknowledged level is outside HUD experience table");
+  return xp_table_[static_cast<std::size_t>(index)];
+}
+std::int32_t Ledger::hud_base_threshold() const {
+  if (!xp_ready_) throw Refusal("selected executable experience table is required");
+  const auto index = acknowledged();
+  if (index < 1 || index > 80) throw Refusal("acknowledged level is outside HUD experience table");
   return xp_table_[static_cast<std::size_t>(index - 1)];
 }
 std::uint32_t Ledger::mana() const { return machine_->u32(record() + 0xc0); }
@@ -857,6 +922,8 @@ void Ledger::adopt(const Adopted &c) {
   dragging_ = 0;
   drag_cell_ = 0;
   live_record_ = false;
+  // A front-end record has no linked world object.
+  machine_->w32(r + 0x43d8, 0);
   machine_->w32(r + 0xe4, static_cast<std::uint32_t>(c.gold));
   machine_->w32(r + 0xe8, static_cast<std::uint32_t>(c.skill_points));
   machine_->w8(r + 0xec, static_cast<std::uint32_t>(c.stat_points));
@@ -914,7 +981,11 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
       throw Refusal("imported effective-stat offset is outside signed 32-bit range");
     effective_delta_[i] = static_cast<std::int32_t>(delta);
   }
-  effective_delta_valid_ = true;
+  // The imported slot carries a pointer, not the linked object/equipment
+  // state. Only a detached record with effective == base is complete here.
+  effective_delta_valid_ = word(0x43d8) == 0;
+  for (const auto delta : effective_delta_)
+    if (delta != 0) effective_delta_valid_ = false;
   dragging_ = 0;
   drag_cell_ = 0;
   live_record_ = true;
@@ -932,7 +1003,7 @@ std::vector<std::uint8_t> Ledger::save() const {
   std::vector<std::uint8_t> out;
   const char magic[] = "OCMENU1";
   out.insert(out.end(), magic, magic + 8);
-  put_u32(out, 1);
+  put_u32(out, 2);
   const auto r = record();
   put_s32(out, gold());
   put_s32(out, skill_points());
@@ -966,6 +1037,12 @@ std::vector<std::uint8_t> Ledger::save() const {
   put_s32(out, cursor_y_);
   put_s32(out, dragging_);
   put_s32(out, dragging_ ? item_ptr_to_index(drag_cell_, r, counted) : -1);
+  for (int i = 0; i < 4; ++i)
+    put_s32(out, machine_->s32(r + 0x90 + 4u * static_cast<std::uint32_t>(i)));
+  for (const auto delta : effective_delta_) put_s32(out, delta);
+  put_u32(out, effective_delta_valid_ ? 1u : 0u);
+  put_u32(out, live_record_ ? 1u : 0u);
+  put_u32(out, machine_->u32(r + 0x43d8));
   return out;
 }
 
@@ -974,8 +1051,9 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   if (bytes.size() < 12 || std::memcmp(bytes.data(), "OCMENU1", 7) != 0)
     throw Refusal("menu save magic is not OCMENU1");
   at = 8;
-  if (take_u32(bytes, at) != 1)
-    throw Refusal("menu save version is not 1");
+  const auto version = take_u32(bytes, at);
+  if (version != 1 && version != 2)
+    throw Refusal("menu save version is not 1 or 2");
   const auto r = record();
   const auto gold_value = take_s32(bytes, at);
   const auto skills = take_s32(bytes, at);
@@ -1023,6 +1101,22 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   cursor_y_ = take_s32(bytes, at);
   dragging_ = take_s32(bytes, at);
   drag_cell_ = item_index_to_ptr(take_s32(bytes, at), r, counted);
+  std::array<std::int32_t, 4> saved_effective{};
+  std::array<std::int32_t, 4> saved_delta{};
+  bool saved_valid = false, saved_live = false;
+  std::uint32_t saved_object = machine_->u32(r + 0x43d8);
+  if (version == 2) {
+    for (auto &value : saved_effective) value = take_s32(bytes, at);
+    for (auto &value : saved_delta) value = take_s32(bytes, at);
+    saved_valid = take_u32(bytes, at) != 0;
+    saved_live = take_u32(bytes, at) != 0;
+    saved_object = take_u32(bytes, at);
+    for (int i = 0; i < 4; ++i)
+      if (static_cast<std::int64_t>(saved_effective[i]) - bases[i] != saved_delta[i] ||
+          (saved_object == 0 && saved_delta[i] != 0))
+        saved_valid = false;
+    if (saved_live && saved_object != 0) saved_valid = false;
+  }
   machine_->w32(r + 0xe4, static_cast<std::uint32_t>(gold_value));
   machine_->w32(r + 0xe8, static_cast<std::uint32_t>(skills));
   machine_->w8(r + 0xec, static_cast<std::uint32_t>(stats));
@@ -1031,13 +1125,22 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
   for (int i = 0; i < 4; ++i)
     machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(bases[i]));
-  for (int i = 0; i < 4; ++i)
-    machine_->w32(r + 0x90 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(bases[i]));
-  effective_delta_.fill(0);
-  effective_delta_valid_ = true;
+  if (version == 2) {
+    for (int i = 0; i < 4; ++i)
+      machine_->w32(r + 0x90 + static_cast<std::uint32_t>(i) * 4,
+                    static_cast<std::uint32_t>(saved_effective[i]));
+    effective_delta_ = saved_delta;
+    effective_delta_valid_ = saved_valid;
+    live_record_ = saved_live;
+    machine_->w32(r + 0x43d8, saved_object);
+  } else {
+    // V1 did not serialize effective values or their validity. Keep the
+    // existing bytes, but do not authorize a later XP/stat recalculation.
+    effective_delta_valid_ = false;
+    live_record_ = false;
+  }
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
-  live_record_ = false;
 }
 
 } // namespace champions::menus

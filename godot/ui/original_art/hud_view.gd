@@ -48,6 +48,7 @@ func set_art(art: Dictionary, catalogue: Dictionary) -> void:
 
 func observe(value: Dictionary) -> void:
 	records.clear()
+	painter_order = PackedInt32Array()
 	missing.clear()
 	error = ""
 	if layout_service == null or dynamic_service == null:

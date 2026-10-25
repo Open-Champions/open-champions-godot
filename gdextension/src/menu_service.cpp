@@ -54,6 +54,10 @@ class ChampionsMenuService : public RefCounted {
     out["experience"] = ledger_->experience();
     out["next_xp"] = ledger_->has_xp_rules() ? ledger_->next_threshold() : 0;
     out["xp_base"] = ledger_->has_xp_rules() ? ledger_->base_threshold() : 0;
+    const bool hud_interval = ledger_->has_xp_rules() && ledger_->acknowledged() >= 1 &&
+                              ledger_->acknowledged() <= 80;
+    out["hud_next_xp"] = hud_interval ? ledger_->hud_next_threshold() : 0;
+    out["hud_xp_base"] = hud_interval ? ledger_->hud_base_threshold() : 0;
     out["xp_ready"] = ledger_->has_xp_rules();
     out["hp"] = int64_t(ledger_->hit_points());
     out["max_hp"] = int64_t(ledger_->max_hit_points());

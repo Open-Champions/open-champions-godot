@@ -10,6 +10,17 @@
 
 using namespace champions::menus;
 
+namespace champions::menus {
+struct LedgerProbe {
+  static std::uint32_t byte(const Ledger &ledger, std::uint32_t offset) {
+    return ledger.machine_->u8(ledger.machine_->u32(ledger.record() + 0x43d8) + offset);
+  }
+  static std::uint32_t half(const Ledger &ledger, std::uint32_t offset) {
+    return ledger.machine_->u16(ledger.machine_->u32(ledger.record() + 0x43d8) + offset);
+  }
+};
+} // namespace champions::menus
+
 namespace {
 int checks = 0;
 
@@ -268,8 +279,8 @@ void ledger_vectors() {
     Ledger book;
     book.set_page(3);
     expect(book.press(2, 0x40) == Action::None && book.stat_points() == 3, "stats page");
-    book.spend_stat(0);
-    expect(book.base_stat(0) == 11 && book.stat_points() == 2, "stat handler");
+    reject([&] { book.spend_stat(0); }, "stat handler needs complete level-up rules");
+    expect(book.base_stat(0) == 10 && book.stat_points() == 3, "refused stat handler preserves record");
     expect(book.passive_level_at(1) == 2, "passive");
     reject([&] { book.spend_skill(0, 1); }, "unknown skill sender refused");
     expect(book.skill_points() == 4 && book.passive_level_at(1) == 2, "skill points preserved");
@@ -360,9 +371,14 @@ void levelup_vectors() {
   reject([&] { book.set_xp_rules(bad, formulas); }, "falling threshold refused");
   book.set_xp_rules(table, formulas);
   expect(book.next_threshold() == 500 && book.experience() == 0, "level-five threshold");
+  expect(book.hud_base_threshold() == 300 && book.hud_next_threshold() == 400,
+         "pending acknowledgement indexes the old HUD interval");
   expect(book.give_xp(499) == 0 && book.level() == 5, "below threshold");
   expect(book.give_xp(1) == 1 && book.level() == 6 && book.experience() == 500,
          "exact threshold transition");
+  expect(book.base_threshold() == 500 && book.next_threshold() == 600 &&
+         book.hud_base_threshold() == 300 && book.hud_next_threshold() == 400,
+         "earned threshold advances while pending HUD interval stays acknowledged");
   expect(book.acknowledged() == 4 && book.skill_points() == 5 && book.stat_points() == 6,
          "old-level point band and pending acknowledgement");
   expect(book.max_hit_points() == 0x424c0000u && book.hit_points() == book.max_hit_points(),
@@ -372,6 +388,8 @@ void levelup_vectors() {
   expect(book.give_xp(250) == 2 && book.level() == 8 && book.stat_points() == 12 &&
          book.skill_points() == 9, "multi-level award repeats old-level grants");
   book.open_level_up();
+  expect(book.hud_base_threshold() == 700 && book.hud_next_threshold() == 800,
+         "acknowledgement advances the HUD interval to the earned level");
   StatInput gate{2, 3, 3000, 0x40u, 0x40u, 0, 0};
   auto suppressed = gate;
   suppressed.elapsed = 2999;
@@ -394,6 +412,17 @@ void levelup_vectors() {
   expect(book.press_stat(gate) && book.base_stat(3) == 14 && book.stat_points() == 11,
          "row-three message spends one point");
   expect(book.max_hit_points() == 0x42680000u, "stat spend recalculates HP maximum");
+  expect(book.record_word(0x124) == 0x43070000u,
+         "stat spend writes researched load capacity");
+  expect(LedgerProbe::byte(book, 0x474) == 0 && LedgerProbe::byte(book, 0x475) == 6 &&
+         LedgerProbe::byte(book, 0x476) == 0 && LedgerProbe::byte(book, 0x477) == 9,
+         "stat spend writes object bonus bytes");
+  expect(LedgerProbe::half(book, 0xe4) == 6,
+         "stat spend recalculates authored object armour");
+  gate.selected_row = 0;
+  expect(book.press_stat(gate) && book.base_stat(0) == 11 &&
+         book.record_word(0x124) == 0x43080000u,
+         "strength spending updates load capacity");
   expect(book.give_kill_xp(0x42000000u, 0x41f00000u) == 4,
          "solo kill formula with separate truncations");
   expect(book.experience() == 754, "kill award enters player record");
@@ -425,11 +454,58 @@ void levelup_vectors() {
   expect(ceiling.give_xp(9000) == 1 && ceiling.level() == 80 &&
          ceiling.experience() == 7999 && ceiling.next_threshold() == 8000,
          "level eighty ceiling prevents an extra transition");
+  Ledger pending;
+  Ledger::Adopted below;
+  below.level = 5;
+  below.acknowledged = 5;
+  below.experience = 499;
+  pending.adopt(below);
+  pending.set_xp_rules(table, formulas);
+  expect(pending.hud_base_threshold() == 400 && pending.hud_next_threshold() == 500,
+         "HUD interval immediately before pending level");
+  expect(pending.give_xp(1) == 1 && pending.level() == 6 && pending.acknowledged() == 5 &&
+         pending.hud_base_threshold() == 400 && pending.hud_next_threshold() == 500,
+         "pending level keeps a full acknowledged-level HUD bar");
+  pending.open_level_up();
+  expect(pending.hud_base_threshold() == 500 && pending.hud_next_threshold() == 600,
+         "opening level-up changes HUD interval only after acknowledgement");
+  Ledger refused;
+  Ledger::Adopted malformed;
+  malformed.stats[3] = -1;
+  malformed.stat_points = 3;
+  refused.adopt(malformed);
+  refused.set_xp_rules(table, formulas);
+  const auto before_xp = refused.record_bytes();
+  reject([&] { refused.give_xp(100); }, "unsupported XP recalculation refuses");
+  expect(refused.record_bytes() == before_xp, "refused XP award preserves every record byte");
+  refused.open_level_up();
+  const auto before_stat = refused.record_bytes();
+  StatInput refused_gate{2, 0, 3000, 0x40u, 0x40u, 0, 0};
+  reject([&] { refused.press_stat(refused_gate); }, "unsupported stat recalculation refuses");
+  expect(refused.record_bytes() == before_stat, "refused stat spend preserves every record byte");
   Ledger changed_equipment;
   changed_equipment.set_xp_rules(table, formulas);
   expect(changed_equipment.press(2, 0x40) == Action::Equip, "equipment mutation observed");
   reject([&] { changed_equipment.give_xp(500); },
          "level-up refuses stale effective bonuses after equipment change");
+  auto equipped_bytes = changed_equipment.save();
+  const auto suffix = equipped_bytes.size() - 44u;
+  auto put_word = [&](std::size_t at, std::uint32_t value) {
+    for (int i = 0; i < 4; ++i)
+      equipped_bytes[at + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(value >> (8 * i));
+  };
+  put_word(suffix, 25u); // authored effective Strength, base 10
+  put_word(suffix + 16u, 15u); // authored offset, kept invalid after equipment mutation
+  Ledger restored_equipment;
+  restored_equipment.load(equipped_bytes);
+  restored_equipment.set_xp_rules(table, formulas);
+  expect(restored_equipment.record_word(0x90) == 25u && restored_equipment.save() == equipped_bytes,
+         "equipped-character round trip preserves effective bonus bytes");
+  const auto before_loaded_xp = restored_equipment.record_bytes();
+  reject([&] { restored_equipment.give_xp(500); },
+         "equipment invalidation survives save and load");
+  expect(restored_equipment.record_bytes() == before_loaded_xp,
+         "loaded invalid equipment refuses without changing the record");
 }
 } // namespace
 

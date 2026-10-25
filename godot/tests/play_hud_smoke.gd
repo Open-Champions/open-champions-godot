@@ -71,6 +71,10 @@ func _run() -> void:
 	hud.set_art(partial, catalogue)
 	hud.observe_play(value, true)
 	check(not "status_frame" in hud.drawn and str(hud.refusals.get("status_frame", "")).contains("hud_statusbar00.tex"), "missing frame texture refused")
+	var invalid_tick := value.duplicate()
+	invalid_tick["ready_ticks"] = 4294967296 # just beyond the native uint32 tick domain
+	hud.observe_play(invalid_tick, true)
+	check(not hud.error.is_empty() and hud.records.is_empty() and hud.painter_order.is_empty(), "refused HUD layout clears the previous painter order")
 	# The canvas is a centred 4:3 picture: 1280x720 shows 960x720 at x 160.
 	await process_frame
 	check(is_equal_approx(minf(hud.size.y, hud.size.x * 0.75) * 4.0 / 3.0, 960.0), "4:3 width inside a 16:9 view")

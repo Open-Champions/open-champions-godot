@@ -246,6 +246,8 @@ public:
   std::int32_t experience() const;
   std::int32_t next_threshold() const;
   std::int32_t base_threshold() const;
+  std::int32_t hud_next_threshold() const;
+  std::int32_t hud_base_threshold() const;
   bool has_xp_rules() const { return xp_ready_; }
   std::uint32_t mana() const;
   std::uint32_t max_mana() const;
@@ -291,6 +293,7 @@ public:
   void load(const std::vector<std::uint8_t> &bytes);
 
 private:
+  friend struct LedgerProbe; // native contract tests inspect authored object writes
   using Machine = champions::messages::rta::Machine;
   champions::simulation::rta::items::Tables tables_;
   champions::inventory_icons::PictureTables pictures_;
@@ -317,6 +320,7 @@ private:
   Counts counts() const;
   std::uint32_t cell_address(int mode, int column, int row) const;
   bool bag_index(std::uint32_t addr, int &bag, int &index) const;
+  void ensure_recalc_supported() const;
   void recalc_level_stats();
 };
 

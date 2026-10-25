@@ -63,8 +63,10 @@ func run() -> void:
 	var xp: Dictionary = service.give_xp(500)
 	check(xp.get("ok", false) and int(xp.levels_gained) == 1 and int(xp.level) == 6 and int(xp.experience) == 500, "exact XP threshold")
 	check(int(xp.skill_points) == 5 and int(xp.stat_points) == 6 and int(xp.max_hp) == 0x424c0000 and int(xp.max_mana) == 0x41880000, "level resource and point awards")
+	check(int(xp.acknowledged) == 4 and int(xp.hud_xp_base) == 300 and int(xp.hud_next_xp) == 400, "pending level HUD interval follows acknowledged level")
 	var opened: Dictionary = service.open_level_up()
 	check(int(opened.acknowledged) == 6 and int(opened.page) == 5, "opening inventory for level-up acknowledges")
+	check(int(opened.hud_xp_base) == 500 and int(opened.hud_next_xp) == 600, "acknowledged level advances HUD interval")
 	check(service.press(2, 0x40).action == "none", "level-up page does not spend as an inventory cell")
 	check(not service.press_stat(2, 3, 0x40, 0, 2999).sent, "stat timer gate")
 	var stat: Dictionary = service.press_stat(2, 3, 0x40, 0, 3000)
@@ -72,6 +74,8 @@ func run() -> void:
 	var kill: Dictionary = service.give_kill_xp(0x42000000, 0x41f00000)
 	check(kill.get("ok", false) and int(kill.award) > 0 and int(kill.experience) == 500 + int(kill.award), "authored solo kill award reaches record")
 	check(not service.spend_skill(0, 1).get("ok", false), "skill sender stays refused")
+	var no_hud_level: Dictionary = service.adopt({"level": 1, "acknowledged": 0, "stats": [10, 10, 10, 10]})
+	check(no_hud_level.get("ok", false) and no_hud_level.get("xp_ready", false) and int(no_hud_level.hud_next_xp) == 0, "unacknowledged imported record keeps XP rules without inventing a HUD interval")
 	service.reset()
 	service.set_scheme("circle")
 	check(int(service.state().shop_mask) == 0 and service.press(0, 0x80).action == "none" and int(service.state().gold) == 500, "circle scheme has no shop button")
@@ -105,6 +109,24 @@ func run() -> void:
 	check(scene.handle_input_event(key(KEY_J)) and int(service.state().equipment_index) == 0, "host J uses the equip mask")
 	check(scene.handle_input_event(key(KEY_ESCAPE)) and not menus.open and not scene.paused, "escape closes the menu and leaves the session running")
 	check(scene.handle_input_event(key(KEY_ESCAPE)) and scene.paused, "escape still pauses when the menu is closed")
+	# A combat fixture has its own active player. An imported menu ledger may
+	# coexist with it, but must not replace its observed HP and mana.
+	scene.play_mode = true
+	scene.session_started = true
+	menus.live_imported = true
+	scene.raw_observation = {"combat_enabled": true, "hp": 25.0, "max_hp": 100.0, "mana": 40.0, "max_mana": 100.0, "ready_ticks": 7}
+	scene.refresh_menu_hud()
+	var health_right := -1
+	var mana_right := -1
+	var has_xp := false
+	for record in scene.play_hud.records:
+		if str(record.get("resource", "")).begins_with("bar_red"):
+			health_right = int(record.clip.right)
+		elif str(record.get("resource", "")).begins_with("bar_blue"):
+			mana_right = int(record.clip.right)
+		elif str(record.get("resource", "")).begins_with("bar_green"):
+			has_xp = true
+	check(health_right == 51 and mana_right == 66 and not has_xp, "combat HUD keeps active player resources and refuses unrelated ledger XP")
 	scene.queue_free()
 	await process_frame
 	print("MENU_SMOKE checks=%d failures=%d" % [checks, failures])

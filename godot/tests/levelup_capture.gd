@@ -49,14 +49,30 @@ func run() -> void:
 	var imported: Dictionary = scene.ps2_import.import_bytes(slot, 0)
 	if imported.get("ok", false):
 		var authored: PackedByteArray = scene.ps2_import.record_bytes()
+		# This fixture has no linked player-object image. Exercise the documented
+		# no-object recalc branch with coherent base/effective stats instead.
+		authored.encode_u32(0x43d8, 0)
+		authored.encode_u32(0x43f0, 0)
+		authored[0x58] = authored[0x59] # valid acknowledged level for the pre-award HUD
 		authored.encode_u32(0x7c, 100) # authored Intelligence for a positive mana maximum
-		authored.encode_u32(0x94, 100) # matching effective stat in this no-modifier fixture
+		for index in range(4):
+			authored.encode_u32(0x90 + index * 4, authored.decode_u32(0x78 + index * 4))
 		authored.encode_u32(0xac, 0x3f800000) # alive HP, enabling the observed refill
+		authored.encode_u32(0xb0, 0x3f800000) # authored positive maximum in this detached fixture
 		authored.encode_u32(0xc0, 0x3f800000) # current mana
+		authored.encode_u32(0xc4, 0x3f800000) # authored positive maximum in this detached fixture
 		imported = scene.ps2_import.replace_record(authored)
 	var adopted: Dictionary = scene.game_menus.adopt_imported() if imported.get("ok", false) else imported
 	if not adopted.get("ok", false):
 		push_error("authored save slot or selected executable refused: " + str(adopted.get("error", "")))
+		quit(1)
+		return
+	# Align the authored slot's XP with the selected executable's table before
+	# rendering the HUD or crossing the next threshold.
+	var normalized: PackedByteArray = scene.ps2_import.record_bytes()
+	normalized.encode_u32(0x5c, int(scene.game_menus.service.state().xp_base))
+	if not scene.ps2_import.replace_record(normalized).get("ok", false) or not scene.game_menus.adopt_imported().get("ok", false):
+		push_error("authored XP normalization refused")
 		quit(1)
 		return
 	var before: Dictionary = scene.game_menus.service.state()
@@ -95,6 +111,5 @@ func run() -> void:
 		push_error("rendered level-up stat interaction did not update the imported player record")
 		quit(1)
 		return
-	print("LEVELUP_CAPTURE level=%d xp=%d stat_points=%d saved=%d" % [
-		int(granted.level), int(granted.experience), int(granted.stat_points), saved])
+	print("LEVELUP_CAPTURE transitions=1 stat_spends=1 saved=%d" % saved)
 	quit(0 if saved == OK else 1)
