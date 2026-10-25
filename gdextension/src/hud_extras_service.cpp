@@ -1,4 +1,5 @@
 #include "champions/hud_extras.hpp"
+#include "champions/hud_player.hpp"
 #include "champions/ui_layout.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -46,6 +47,7 @@ class ChampionsHudExtrasService : public RefCounted {
   GDCLASS(ChampionsHudExtrasService, RefCounted)
   X::GoldState gold_;
   std::array<std::optional<uint32_t>, 4> last_observed_gold_{};
+  bool live_gold_ = false;
 
 protected:
   static void _bind_methods() {
@@ -58,6 +60,7 @@ protected:
     ClassDB::bind_method(D_METHOD("gold_bonus_life", "slot"), &ChampionsHudExtrasService::gold_bonus_life);
     ClassDB::bind_method(D_METHOD("gold_draw", "local_mask", "language", "font"), &ChampionsHudExtrasService::gold_draw);
     ClassDB::bind_method(D_METHOD("gold_state"), &ChampionsHudExtrasService::gold_state);
+    ClassDB::bind_method(D_METHOD("gold_observe_live", "input"), &ChampionsHudExtrasService::gold_observe_live);
     ClassDB::bind_method(D_METHOD("format_gold", "value", "language"), &ChampionsHudExtrasService::format_gold);
     ClassDB::bind_method(D_METHOD("potion_use", "input"), &ChampionsHudExtrasService::potion_use);
     ClassDB::bind_method(D_METHOD("selector_input", "input"), &ChampionsHudExtrasService::selector_input);
@@ -124,6 +127,7 @@ public:
   }
   Dictionary gold_reset(const PackedInt64Array &gold) {
     gold_ = X::GoldState{};
+    live_gold_ = false;
     last_observed_gold_ = {};
     for (int i = 0; i < 4 && i < gold.size(); ++i) {
       gold_.gold[std::size_t(i)] = uint32_t(gold[i]);
@@ -134,6 +138,51 @@ public:
   // A busy floater owns local payouts. A changed observed record may include
   // those payouts, a direct writer, or both; without their ordering it cannot
   // be reconciled. Refuse the composite instead of displaying stale gold.
+  Dictionary gold_observe_live(const Dictionary &input) {
+    try {
+      X::GoldState source;
+      auto raw = [](int64_t value) {
+        if (value < 0 || uint64_t(value) > UINT32_MAX)
+          throw X::Refusal("live gold raw word outside u32");
+        return uint32_t(value);
+      };
+      source.frame = raw(geti(input, "frame", -1));
+      const PackedInt64Array words = input.get("gold", PackedInt64Array());
+      const PackedInt64Array pending = input.get("pending", PackedInt64Array());
+      const Array floaters = input.get("floaters", Array());
+      if (words.size() != 4 || pending.size() != 4 || floaters.size() != X::FLOATER_COUNT)
+        throw X::Refusal("live gold requires four record/pending words and eight floaters");
+      for (int k = 0; k < 4; ++k) {
+        source.gold[std::size_t(k)] = raw(words[k]);
+        if (pending[k] < INT32_MIN || pending[k] > INT32_MAX)
+          throw X::Refusal("live gold pending outside s32");
+        source.pending[std::size_t(k)] = int32_t(pending[k]);
+      }
+      for (int k = 0; k < X::FLOATER_COUNT; ++k) {
+        if (Variant(floaters[k]).get_type() != Variant::DICTIONARY)
+          throw X::Refusal("live gold floater is not a record");
+        const Dictionary entry = floaters[k];
+        auto &f = source.floaters[std::size_t(k)];
+        f.amount = raw(geti(entry, "amount", -1));
+        if (!f.amount) continue;
+        f.start = raw(geti(entry, "start", -1));
+        f.slot = int(geti(entry, "slot", -1));
+        if (f.slot < 0 || f.slot > 3) throw X::Refusal("live gold floater slot outside 0..3");
+        const PackedInt64Array pos = entry.get("position_raw", PackedInt64Array());
+        const PackedInt64Array vel = entry.get("velocity_raw", PackedInt64Array());
+        if (pos.size() != 3 || vel.size() != 3)
+          throw X::Refusal("live gold floater requires position and velocity raw lanes");
+        for (int j = 0; j < 3; ++j) {
+          f.pos[std::size_t(j)] = raw(pos[j]);
+          f.vel[std::size_t(j)] = raw(vel[j]);
+        }
+      }
+      if (!live_gold_) gold_ = X::GoldState{};
+      X::syncLiveGold(gold_, source);
+      live_gold_ = true;
+      return success();
+    } catch (const std::exception &e) { return failure(e); }
+  }
   Dictionary gold_sync(int slot, int64_t value) {
     try {
       if (slot < 0 || slot > 3) throw X::Refusal("gold slot outside 0..3");

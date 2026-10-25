@@ -7,6 +7,7 @@
 #include "champions/level_flow.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/hud_extras.hpp"
+#include "champions/hud_player.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
@@ -16,6 +17,7 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -2081,6 +2083,80 @@ Dictionary ChampionsSessionController::combat_observation() const {
   out["history_policy"] = "latest-tick";
   out["history_complete"] = false;
   out["combat_shared_seed"] = int64_t(combat_->shared_seed());
+  if (combat_->full()) {
+    // Full owns a real Player_run record. Do not mix it with player_, which
+    // belongs to the separate character/menu/script companion.
+    try {
+      const auto &world = combat_->world();
+      const auto p = champions::hud_extras::observePlayer(0,
+          [&world](uint32_t a, unsigned n) { return world.read(a, n); },
+          [&world](uint32_t a) { return world.contains(a); });
+      Dictionary hud;
+      hud["ok"] = true;
+      hud["source"] = "full-player-record";
+      hud["slot"] = 0;
+      hud["ready_ticks"] = int64_t(p.frame);
+      hud["player_object_present"] = true;
+      hud["player_object_dead"] = bool(p.flags & 8);
+      hud["dead"] = bool(p.flags & 8);
+      const std::array<std::pair<const char *, rta::Raw>, 6> values{{
+          {"hp", p.hp}, {"max_hp", p.max_hp}, {"pending_health", p.pending_hp},
+          {"mana", p.mana}, {"max_mana", p.max_mana}, {"pending_mana", p.pending_mana}}};
+      for (const auto &v : values) {
+        hud[String(v.first) + "_raw"] = int64_t(v.second);
+        hud[v.first] = display_float(v.second);
+      }
+      hud["level"] = p.level;
+      hud["acknowledged_level"] = p.acknowledged;
+      hud["experience"] = p.experience;
+      hud["gold"] = p.gold;
+      hud["mana_cooldown"] = p.cooldown;
+      hud["gold_language"] = p.language;
+      // The bit is observed, but clearing it from a draw would mutate the
+      // simulation. Its draw/acknowledgement edge remains a labelled refusal.
+      hud["health_flash_observed"] = int64_t(p.flash);
+      if (player_tables_ && p.acknowledged >= 1 && p.acknowledged <= 80) {
+        hud["experience_base"] = player_tables_->experience[std::size_t(p.acknowledged - 1)];
+        hud["experience_next"] = player_tables_->experience[std::size_t(p.acknowledged)];
+      }
+      PackedInt32Array quick_slots, ability_ids, notice_timers, potion_counts;
+      for (auto v : p.quick_slots) quick_slots.push_back(v);
+      for (auto v : p.ability_ids) ability_ids.push_back(v);
+      for (auto v : p.notice_timers) notice_timers.push_back(v);
+      for (auto v : p.potion_counts) potion_counts.push_back(v);
+      hud["quick_slots"] = quick_slots;
+      hud["ability_ids"] = ability_ids;
+      hud["notice_timers"] = notice_timers;
+      hud["potion_counts"] = potion_counts;
+      const auto gold = champions::hud_extras::observeGold(
+          [&world](uint32_t a, unsigned n) { return world.read(a, n); });
+      Dictionary gold_view;
+      gold_view["frame"] = int64_t(gold.frame);
+      PackedInt64Array words, pending;
+      for (auto v : gold.gold) words.push_back(v);
+      for (auto v : gold.pending) pending.push_back(v);
+      gold_view["gold"] = words;
+      gold_view["pending"] = pending;
+      Array floaters;
+      for (const auto &f : gold.floaters) {
+        Dictionary entry;
+        entry["amount"] = int64_t(f.amount);
+        entry["start"] = int64_t(f.start);
+        entry["slot"] = f.slot;
+        PackedInt64Array pos, vel;
+        for (auto v : f.pos) pos.push_back(v);
+        for (auto v : f.vel) vel.push_back(v);
+        entry["position_raw"] = pos;
+        entry["velocity_raw"] = vel;
+        floaters.push_back(entry);
+      }
+      gold_view["floaters"] = floaters;
+      hud["hud_gold"] = gold_view;
+      out["hud_player"] = hud;
+    } catch (const std::exception &e) {
+      out["hud_player"] = failure(e);
+    }
+  }
   Array actors;
   for (const auto &a : combat_->actors()) {
     Dictionary value;

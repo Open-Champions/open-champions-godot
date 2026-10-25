@@ -108,3 +108,50 @@ pad nor bag-2 inventory is inferred from that record.
 - `godot/tests/hud_extras_real_smoke.gd` (opt-in) runs on the user's game folder:
   all 11 `bar_green` frames decode, the experience bar draws on every animation frame,
   the gold counter draws with the real font for 133 frames.
+
+## Round 5: live Player observations
+
+`hud_player.hpp` / `hud_player.cpp` read the attached Player's record through
+its owning memory, checking object membership, real-player/copy flags and slot.
+They never construct a Player, clamp currents, change memory or draw a seed.
+Evidence remains `f7c3964` and audited `44c6720` (the addressed input-producer
+table). The Full combat fixture now publishes this as `hud_player`, separate
+from the menu/script character companion. The HUD uses that source exclusively:
+HP, mana, both pending amounts, levels, XP and gold come from the same record,
+animation uses its actual simulation frame, and the mana cooldown uses the
+object's signed halfword. XP thresholds still require the selected executable;
+a positive mana maximum is required rather than manufactured for the fixture.
+Missing or stale live objects refuse the whole live source without falling
+back to unrelated simulation/companion values.
+
+The live gold display reads the World's existing eight floater records and
+four gold/pending words. `syncLiveGold` copies authoritative payouts and retains
+only local motion, hold and alpha. It never runs `tickGold`, replays a pickup,
+or owes another cosmetic draw. Direct record writes leave a hidden counter
+hidden; an already visible counter reads the latest authoritative value.
+The language byte also comes from live memory. Display state resets when
+leaving play, changing source, or rewinding the simulation frame (local host
+continuation policy). Live gold steps hold, alpha and motion in
+`_draw`, once per displayed frame; repeated observations do not advance it.
+The older caller-supplied synthetic pickup path retains its one-observation
+timing. Console frame-to-tick timing and raster parity are not established.
+
+Live quick-slot indices, the first eight ability IDs, potion counts and notice
+timers are exposed as metadata. Their icon drawing, timer ownership, raw pad
+and message dispatch remain refused. Reading a count does not establish an
+authoritative bag or execute a potion. The damage-flash word is observed but
+its draw-side clear/acknowledgement remains refused.
+
+**The ordinary real-level session is still an isolated movement/health actor.**
+It has no attached `Player_run` record, authoritative bag-2 inventory, potion
+edge, selector dispatch or gold/chest event producer. This round does not
+fabricate those inputs or replace campaign play with a Full fixture. Created
+record currents remain unknown there; ordinary-level mana, live combat and
+belt acceptance therefore remain unfinished. Minimap VU1 tiles, atlas layout,
+fractional reveal and scripted-icon effects retain their research refusals.
+
+`hud-player-live` checks the actual native Full World's ownership and changing
+record fields, signed widths, stale/copy/slot refusals, read-only observation,
+and the single-owner gold timeline. `play-hud` checks source isolation, live
+fills/cooldown and refusal without fallback. `combined-full-combat` checks the
+production GDExtension-to-HUD path against the Full World's observation.
