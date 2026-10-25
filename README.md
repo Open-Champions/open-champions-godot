@@ -5,117 +5,85 @@
   <img src="https://raw.githubusercontent.com/Open-Champions/.github/main/profile/assets/champions-return-to-arms-logo.png" alt="Champions: Return to Arms" width="260">
 </p>
 
-A shared native client project for **Champions of Norrath** and
-**Champions: Return to Arms**, using **Godot 4 + C++**.
+The hand-written native rebuild of **Champions: Return to Arms** and, later,
+**Champions of Norrath**: portable C++ libraries and a Godot 4 client, written by hand
+and checked function by function against the original game's behaviour as documented
+in the [research repository](https://github.com/Open-Champions/champions-return-to-arms-re).
+It holds no game data: every test runs on synthetic files, and anything read from a
+game comes from the player's own copy and stays on their machine.
 
-The default Godot scene is a bounded **movement and health test**, with an archive
-browser and `champions-data` inspector available alongside it. WASD moves the
-single actor, H applies a health-test hit, and Escape pauses. The native Session
-owns gameplay state. The scene explicitly selects [dry creature movement](docs/SESSION_CONTROL_CREATURE.md)
-with authored controls and a 512-ready-tick limit; the legacy isolated native
-Controller default remains available. See the [scene contract](docs/SESSION_CONTROL.md). The archive
-browser and CLI share a checked C++17 GOB/LMP parser. The browser opens local
-archives and shows their nested entries. A limited preview decodes documented RTA
-32-bit, plain 4-bit and 8-bit lump textures. A bounded static model viewer adds rest-pose geometry, single-bit variant visibility and optional texture-color inspection; broader formats, materials, animation and gameplay remain unfinished. No emulator, BIOS or game executable is needed to build or run these tools.
+## Direction
 
-| Game | Current evidence |
-|---|---|
-| Champions: Return to Arms | Archive inspection tested against private local files; format and behavior research available in the source project. |
-| Champions of Norrath | Included in the intended client scope. Its source project has an experimental hash-pinned executable; the exact retail revision and native archive/asset/behavior compatibility remain unverified. |
+- **One portal, two games:** *Classic* (the original game, faithful, plus the sharp art pack
+  and a steady 60 fps) and *Remastered* (Godot, 60+ fps, new HUD and lighting, five views,
+  aim where you look, Hardcore combat, the Elden Ring look from your own copy). Rooms are one or the other.
+- **Online play is exact:** every gameplay change is lockstep-safe, a room option all copies
+  agree on, tested in multi-copy rooms; with a mode off the game is byte-identical to the original.
+- **Champions of Norrath** joins later as more campaign content; each player brings their own discs.
+- **No game data, disc images, BIOS, Elden Ring data or personal information in any repository;**
+  everything from a game stays on the player's machine.
+- This repository is the **long-term clean-code line**, aiming at the same Classic/Remastered
+  product, the same 60+ fps bar and the same lockstep rules as the playable line.
 
-Do not treat a shared file extension or engine family as proof that the two games
-have identical formats. The current CLI has no game-profile detection.
+The whole direction: [docs/DIRECTION.md](docs/DIRECTION.md).
 
-The portable game-rule libraries now cover RTA core, items, combat, AMX and
-network-wire Python contracts. An [owned session host](docs/SESSION_HOST.md)
-composes them through explicit callbacks. The [object runtime](docs/OBJECT_RUNTIME.md)
-ports base-object lifetime, scheduler order and queries. Its optional
-[Session adapter](docs/SESSION_OBJECTS.md) runs the modeled scheduler on ready
-network frames. A standalone [creature damage function](docs/CREATURE_HP.md)
-updates hit points and pending damage with ordered handle callbacks. An explicit
-[owned combat adapter](docs/COMBAT_CREATURE.md) connects combat to that storage.
-A [shared handle adapter](docs/RAW_HANDLES.md) connects the existing object
-pool to an explicit readonly creature-memory view. The [Session health adapter](docs/SESSION_HP.md)
-retains base-creature health across ready frames with explicit bindings and shared
-handles. Its [base combat integration](docs/SESSION_COMBAT.md) draws directly from
-the same object random stream for explicitly configured nonplayer damage.
-The [supplied terrain kernel](docs/WORLD_QUERIES.md) provides a separate collision
-and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [bounded terrain-file loader](docs/TERRAIN_FILE.md) supplies that data from explicit RTA WORLD bytes. The [controllable scene](docs/SESSION_CONTROL.md) exercises that domain with authored input mapping. The standalone [creature collision step](docs/CREATURE_MOVEMENT.md) adds original root-motion consumption, water bookkeeping, object contacts and settling. Its [dry singleton Session adapter](docs/SESSION_CREATURE.md) now runs original movement against the same World, Level and HP memory on ready ticks. The Godot scene now explicitly selects that dry path. Original player controls, water services, animation-generated root motion and dynamic contacts remain work.
-The standalone [creature turning step](docs/CREATURE_TURN.md) adds the original
-spring, angular-velocity clamp and slow scaling over the same borrowed memory;
-the [Session turning adapter](docs/SESSION_TURN.md) now connects it to explicitly
-authored ready tasks with persistent HP/World identity. Controller and original
-player/AI dispatch remain separate work.
-The standalone [animation clock](docs/ANIMATION_CLOCK.md) implements cache-free
-track lifecycle, timing and events; scene playback and root-motion generation
-remain separate work. The optional [Session animation adapter](docs/SESSION_ANIMATION.md)
-connects owned clock state and signed events to explicitly authored ready tasks
-and existing health operations. The standalone [raw32 decoder](docs/ANIMATION_DECODER.md)
-adds owned clip/track/cache lifetime and original joint decoding under exact
-Python replay. It remains separate from Session and scene playback. Viewer extension is paused.
+## Play
 
-The controllable scene can load bounded [static WORLD ground](docs/WORLD_GEOMETRY.md) from your own RTA files, with collision and display kept separate. Water, moving pieces and unsupported starting positions refuse safely. This remains a movement and health test.
+The game you can play today is the translated native game and its Godot host in the
+research repository: **[how to get it and play](https://github.com/Open-Champions/champions-return-to-arms-re/blob/main/docs/DOWNLOADS.md)**
+(the *Champions Setup* builds it on your computer from your own disc).
 
-## Build the working tool
+This repository's own client is not a full game yet. Its workflow exports development
+packages (macOS, Windows, Linux) of the Godot test client with the archive browser;
+see the [browser build guide](docs/GODOT_BROWSER.md). Where the rebuild stands and what
+comes next: [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 
-Requirements: C++17 and CMake 3.21 or newer. This standalone tool does not depend on Godot.
+## Test
+
+None of these needs game files. The [native](.github/workflows/native.yml) and
+[Godot](.github/workflows/godot.yml) workflows run the same steps on macOS, Windows and Linux.
 
 ```sh
+# portable libraries and their exact-trace tests (C++17, CMake 3.21+)
 cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native --config Release
 ctest --test-dir build/native -C Release --output-on-failure
-build/native/champions-data list "/path to your game/level.GOB"
+
+# Python tools and packaging checks
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
-With Visual Studio on Windows, add `-A x64` or `-A ARM64` to configuration and run
-`build/native/Release/champions-data.exe`. See the [inspector guide](native/README.md)
-for output, Unicode paths, error handling and the exact validation boundary.
+The Godot extensions and their headless smoke tests need
+Godot 4.5.2 and the pinned godot-cpp: the exact commands are in the
+[Godot workflow](.github/workflows/godot.yml) and the [browser build guide](docs/GODOT_BROWSER.md).
+Checks against your own game files are described in
+[docs/PRIVATE_DATA_VALIDATION.md](docs/PRIVATE_DATA_VALIDATION.md); their inputs and
+outputs stay outside the repository.
 
-The workflow builds and runs native CTest cases on Apple Silicon and Intel Macs,
-Windows ARM64 and x64, and Linux x64. Successful jobs package the inspector with
-a checksum, license, usage guide and build information. These are command-line
-tool packages; there is no playable client download yet. Inherited platform test
-results are linked in the inspector guide; new repository runs establish this
-repository's own build status.
+## What is here
 
-## Open the Godot browser
+| Path | What |
+|---|---|
+| `native/` | portable C++17 libraries (archives, models, textures, Session, combat, items, network wire, ...) and their tests; the `champions-data` inspector ([guide](native/README.md)) |
+| `gdextension/` | the Godot bindings of the native libraries |
+| `godot/` | the Godot 4.5 client project and its headless smoke tests |
+| `tools/` | Python tools: trace comparison, packaging, vector generators |
+| `docs/` | one guide per library or system, with its evidence and limits |
 
-Follow the [browser build and validation guide](docs/GODOT_BROWSER.md). It pins
-Godot 4.5.2 and the C++ bindings, keeps private game files outside the project,
-and explains the separate platform checks. Both titles appear in the browser;
-Norrath remains explicitly unverified. A title choice is not automatic detection.
-The [Godot workflow](https://github.com/Open-Champions/open-champions-godot/actions/workflows/godot.yml)
-exports and smoke-tests standalone desktop ZIPs for macOS Universal 2, Windows
-x64/ARM64 and Linux x64. Each package includes licenses, a checksum and build
-evidence. These development packages are unsigned movement-test clients with the archive browser included.
+## The other repository
 
-## Three projects, separate evidence
+[champions-return-to-arms-re](https://github.com/Open-Champions/champions-return-to-arms-re)
+holds the research (symbols, formats, how each system works, the online-bug evidence) and
+the playable line: the game's own code translated to C++ on each player's machine, hosted in
+Godot with the portal. This repository ports from that research and aims at the same product;
+when it plays a mode as well as the translated line, it takes that mode over.
 
-- [Champions: Return to Arms source reconstruction](https://github.com/Open-Champions/champions-return-to-arms): original PS2 behavior, research and byte-matching reconstruction.
-- [Champions of Norrath source reconstruction](https://github.com/Open-Champions/champions-of-norrath): a separate game baseline and reconstruction effort.
-- **This repository:** shared portable libraries and the Godot client for both games.
+Related: [Return to Arms source reconstruction](https://github.com/Open-Champions/champions-return-to-arms)
+(byte-matching PS2 reconstruction) and [Champions of Norrath](https://github.com/Open-Champions/champions-of-norrath)
+(separate baseline, not yet established). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md);
+source origin: [docs/ORIGIN.md](docs/ORIGIN.md).
 
-[Existing Return to Arms research](https://github.com/Open-Champions/champions-return-to-arms-re)
-provides the initial evidence. A reconstructed PS2 function and a native Godot
-feature are different milestones; progress in either project is not completion
-of the other.
-
-The [texture preview guide](docs/TEXTURE_PREVIEW.md) describes the supported 32-bit, plain 4-bit and 8-bit
-subset and evidence limits. The [model preview guide](docs/MODEL_PREVIEW.md) covers
-static rest-pose geometry, variant inspection and remaining material/animation limitations.
-The portable [skeleton reader](docs/ANIMATION_METADATA.md) preserves RTA hierarchy
-and bind metadata; the [key decoder](docs/ANIMATION_KEYS.md) retains initial poses
-and velocity records. The [pose sampler](docs/ANIMATION_POSES.md) evaluates local
-joint poses at explicit ticks, and the [transform builder](docs/ANIMATION_TRANSFORMS.md)
-forms model-space joint and skin matrices. The [animation joint viewer](docs/ANIMATION_VIEWER.md)
-now displays an explicitly selected RTA clip at a chosen tick. The portable [weighted-position operation](docs/SKINNING_POSITIONS.md) applies
-explicit skin transforms. The [explicit Godot sampling bridge](docs/SKINNING_BRIDGE.md) returns owned positions for two selected entries; the [experimental sampled model viewer](docs/SKINNING_VIEWER.md) draws explicit selections with unlit geometry and an unverified-pair label. Retail pair compatibility and playback remain work. Next are
-original player controls, richer terrain presentation and independently verified
-Norrath behavior. The current controllable scene uses authored input mapping;
-optional terrain and appearance files remain private. Read the
-[two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
-[contribution guide](CONTRIBUTING.md) and
-[source origin](docs/ORIGIN.md).
+## Legal
 
 This is an independent community project. Game names identify compatibility
 targets; no affiliation or official endorsement is implied. Original game files,
