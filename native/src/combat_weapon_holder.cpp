@@ -109,7 +109,8 @@ void draw_held_part(A::Model &m,Address,Raw part,Address c) {
         iv(0),iv(0)});
 }
 
-Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &args) {
+Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &args,
+               const std::function<void(Raw,Address,Address,Raw)> &drop_service) {
   B b{m};
   auto table=b.u32(h);
   bool shield=table==VT_WEAPONSHIELD;
@@ -122,7 +123,10 @@ Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &ar
   auto hand=s32(which);
   auto bits=[&]{return b.u8(h+4);};
   auto put=[&](Raw x){b.w8(h+4,x);};
-  auto drop=[&](Raw part){drop_held_part(m,part,arg(args,1),arg(args,2),arg(args,3));};
+  auto drop=[&](Raw part){
+    if (drop_service) drop_service(part,arg(args,1),arg(args,2),arg(args,3));
+    else drop_held_part(m,part,arg(args,1),arg(args,2),arg(args,3));
+  };
   auto drawn=[&](Raw part,Raw definition,Raw parent,Raw chain) {
     if (!part||!definition||!parent||!chain) return;
     Address row=definition+8*part;

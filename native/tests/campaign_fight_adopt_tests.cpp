@@ -4,6 +4,7 @@
 #include "champions/campaign_actors.hpp"
 #include "champions/combat_runtime.hpp"
 #include "champions/core_state.hpp"
+#include "champions/minotaur.hpp"
 #include "champions/creature_hp.hpp"
 #include "champions/detail/checkpoint.hpp"
 #include "combat_runtime_internal.hpp"
@@ -207,6 +208,53 @@ void adopt_and_run() {
   check(external_runs == 2, "slot 4 reaches the external owner on the 60-frame list");
 }
 
+void minotaur_shared_health() {
+  namespace M=R::minotaur;
+  auto authority=std::make_shared<R::WorldAuthority>();
+  auto services=CR::flat_fixture_services();
+  services.hide_mask=[](R::Raw,R::Raw){return UINT64_C(0x123456789abcdef0);};
+  services.animation_start=[](CR::Address,R::Raw,R::Raw,R::Raw,R::Raw){};
+  CR::World world(authority,services,0,CR::Composition::Full);
+  auto &model=world.creature_services();
+  world.define_creature_table(M::VTABLE,{{4,M::RUN},{5,M::DRAW},{27,M::SET_STATE}});
+  world.set_class_body(M::SET_STATE,[&](CR::Address a,const auto &args){M::set_state(model,a,R::Raw(args.at(0)));});
+  std::vector<std::string> entries;
+  for(unsigned k=0;k<26;++k)entries.push_back("authored-part-"+std::to_string(k));
+  const auto bytes=lump(entries);
+  champions::resources::Manager resources;
+  resources.load_lmp("authored-class.lmp",{bytes.data(),bytes.size()});
+  C::Services bindings;
+  bindings.minotaur_construct=[&](R::Raw a,const std::string &type){M::finish_constructor(model,a,type);};
+  C::Runtime runtime(*authority->objects,resources,bindings,&authority->memory);
+  runtime.bind_minotaur_definition("authored-class.lmp",entries);
+  auto *object=authority->objects->new_object(M::ALLOCATION,{0,0,0});
+  check(object!=nullptr,"Minotaur allocation");
+  authority->register_object(*object);
+  const auto a=object->addr;
+  for(const auto &p:std::vector<std::pair<unsigned,R::Raw>>{{0x24,M::DEFINITION},{0x44,7},
+      {0x0c,0x20},{0x228,R::from_int(100)},{0x22c,R::from_int(100)}})
+    authority->memory.store(a+p.first,4,p.second);
+  object->type_name="Minotaur";
+  bool refused=false;
+  try{world.adopt_creature(a);}catch(const CR::Error &){refused=true;}
+  check(refused,"unfinished factory objects require explicit constructor adoption");
+  const auto objects_before=authority->objects->objects.size();
+  world.adopt_creature(a,true);
+  auto &actor=runtime.adopt(C::Kind::Minotaur,*object,0,0);
+  authority->register_factory(a);
+  check(authority->objects->objects.size()==objects_before,"class constructor allocates no second actor");
+  check(world.contains(a) && &actor.hp.mem==&authority->memory,"shared actor and combat memory");
+  check(world.slot_function(a,2)==0x116638&&world.slot_function(a,4)==M::RUN,"inherited damage slot and class run");
+  const auto player=world.spawn_player(0,CR::Spawn{});
+  world.take_damage(a,player,8,R::from_int(7));
+  check(actor.health()==R::from_int(93)&&world.read(a+0x228)==actor.health(),"Player damage updates the one Minotaur HP body");
+  check(world.target(a+0x364)==player,"damage links the real shared-World attacker");
+  // A constructor refusal discards just the temporary combat view; ownership,
+  // bytes and the registered factory object are preserved for the host.
+  world.unadopt_creature(a);
+  check(!world.contains(a)&&authority->find(a)==object,"temporary adoption rollback preserves owner");
+}
+
 // The combat World retains finished iterators only while something still
 // refers to them: a long run walks its lists far more than 65,536 times
 // (four walks a tick) and must not end at the host's retention budget.
@@ -333,6 +381,7 @@ int main() {
     memory_budget_after_checkpoint();
     clear_nodes_adjacent_partners();
     adopt_and_run();
+    minotaur_shared_health();
     prune_keeps_linked_iterators();
     retention_does_not_change_the_walk();
     long_run_releases_iterators();

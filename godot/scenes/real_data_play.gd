@@ -120,7 +120,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. The player is unarmed (starting equipment refused_unknown). Enemy AI (sight and everything past idle), hit reactions, loot objects, Gold and the Minotaurs remain refused."
+			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks), WarBoars and Minotaurs. The player is unarmed (starting equipment refused_unknown). Bodies use rest poses. Minotaur decisions and attack events run; delivered player damage, held-part physics and loot pickup remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -203,9 +203,8 @@ func _install_fight_enemies() -> void:
 	if fight_enemies == null: return
 	fight_enemies.clear()
 	if controller == null or not controller.get_observation().get("campaign_fight", false): return
-	var names: Array = controller.combat_resource_lump_names()
-	if names.is_empty() or _world == null: return
-	fight_enemies.install(real, inspector, _world, str(names[0]), "")
+	if _world == null: return
+	fight_enemies.install(real, inspector, _world)
 
 func _frame_player_camera() -> void:
 	if real_player == null or not real_player.body_drawn or actor_visual.mesh == null or camera == null: return

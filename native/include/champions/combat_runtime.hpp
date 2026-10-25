@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/core_math.hpp"
 #include "champions/creature_hp.hpp"
+#include "champions/arena_monsters.hpp"
 #include "champions/world_authority.hpp"
 #include <array>
 #include <map>
@@ -233,7 +234,13 @@ public:
   // damage, targeting and knockback bodies (damage_apply, Creature_takeDamage,
   // grid queries) accept it as a victim or target. The vtable at +0x48 must be
   // defined (define_creature_table) first. Never allocates, draws or links.
-  void adopt_creature(Address factory_object);
+  // during_constructor permits a temporary view of a registered host block;
+  // the caller must unadopt it if the class constructor refuses.
+  void adopt_creature(Address factory_object, bool during_constructor = false);
+  // Shared executed Creature services for independently ported class bodies.
+  // Uses this World's memory, handles, targeting, terrain and random stream.
+  arena_monsters::Model &creature_services();
+  void unadopt_creature(Address); // discard only a factory combat view
   // Writes a creature vtable image: the executed Creature base slots, then the
   // class's own overrides (slot -> function address).
   void define_creature_table(Address table,

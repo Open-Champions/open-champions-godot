@@ -24,7 +24,7 @@ struct EventParams {
   std::array<std::uint32_t, 4> masks;
   std::array<Raw, 4> times;
 };
-// monsters.bal rows are supplied from the selected game data. The five signed
+// Balance rows are supplied from the selected game data. The five unsigned
 // percentages use the original single-precision 0.01 multiplication.
 std::array<Raw, 5> balance_lookup(const std::uint8_t *, std::size_t,
                                   const std::string &type_name);
@@ -42,6 +42,10 @@ struct TickInput {
   bool sight_refused = false;
 };
 struct Services {
+  // Complete Minotaur class bodies on the same shared Creature services.
+  std::function<void(std::uint32_t, const std::string &)> minotaur_construct;
+  std::function<void(std::uint32_t)> minotaur_run;
+  std::function<void(std::uint32_t, std::uint32_t)> minotaur_set_state;
   // Creature_run, updateActive, stepAnim, knockback, pickTarget and the
   // remaining class AI questions are supplied by the caller. Empty handlers
   // are Unknown and refuse only when their branch is reached.
@@ -138,6 +142,9 @@ public:
   Runtime(objects::World &, resources::Manager &, Services,
           creature_hp::Memory *shared = nullptr);
   ~Runtime();
+  // Definition 0x501200's archive and 26 entry identifiers, resolved by the
+  // caller from the selected executable. Public fixtures use authored names.
+  void bind_minotaur_definition(std::string lump, const std::vector<std::string> &entries);
   // Supplied HP is a bounded synthetic/base-service answer. Use the balanced
   // overload when the selected level's tables and rank are available.
   // boss_rank is the caller's creature_bossRank answer; absent means Unknown
@@ -152,8 +159,8 @@ public:
   // The class-constructor part of WarBoar_ctor / WarBoarSmall_ctor on an
   // object whose GameObject_ctor and Creature_ctor already ran (the host's
   // base-constructor model wrote the stats, flags and class definition word).
-  // Does not draw, allocate or re-roll anything. Minotaur is not adoptable:
-  // its base Creature_ctor flags are Unknown (Services::minotaur_base_flags).
+  // Does not allocate or re-roll base statistics. Minotaur's class-local own
+  // draw follows the already-completed base HP draw.
   Actor &adopt(Kind, objects::GameObject &, std::uint32_t angle,
                std::optional<std::int64_t> boss_rank);
   // Documented definition-slot resolution (20 boar slots, by name) and the

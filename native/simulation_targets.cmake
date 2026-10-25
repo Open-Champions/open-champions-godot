@@ -237,13 +237,14 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
 # Isolated campaign WarBoar/Minotaur actor boundary; no play-scene binding.
 add_library(champions-campaign-actors "${CHAMPIONS_SIMULATION_ROOT}/src/campaign_actors.cpp")
+target_sources(champions-campaign-actors PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/minotaur.cpp")
 target_include_directories(champions-campaign-actors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 # The GDExtension compiles the same archive/resource-manager sources as
 # champions-archive-binding-core and sets CHAMPIONS_ACTORS_ARCHIVE to it.
 if(NOT CHAMPIONS_ACTORS_ARCHIVE)
   set(CHAMPIONS_ACTORS_ARCHIVE champions-archive)
 endif()
-target_link_libraries(champions-campaign-actors PUBLIC champions-objects champions-creature-hp ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
+target_link_libraries(champions-campaign-actors PUBLIC champions-objects champions-creature-hp champions-arena-monsters ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
 if(MSVC)
     target_compile_options(champions-campaign-actors PRIVATE /W4 /utf-8 /fp:strict)
 else()
