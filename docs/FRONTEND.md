@@ -69,7 +69,7 @@ text, locale and retail pixel parity remain unverified. The saved confirmation i
 also a labelled host layout because its frame art is not established.
 
 Still a labelled host layout (the research lists them Unknown): class art, the 3D
-model pose and the per-race animations, appearance art, the options value bars and
+model pose and the per-race animations, appearance art, the refused options value bars and
 knobs, card rows with real file data, the intro film picture, the credits data
 layout, the Exit prompt and options-load prompt. The sound clips are not voiced: the
 research captured resource names only, not the clips' sample tables, mix level or
@@ -86,7 +86,7 @@ None of the following is documented, so the flow refuses it or the host labels i
   Difficulties above the first: the unlock test `options_get4f8f38Level` was not
   executed. The values of `g_pvpModeA/B`, 0x4f7124 and the kill limit per choice.
 - Credits (`credits_run` not read). The state-14 "save config?" prompt.
-- The complete controls sub-screen, pause parent transition, communications destination, localized option words and pixel parity remain unverified. Brightness transfer, camera, pad, subtitle, damage and marker application need confirmed client setters.
+- The complete controls sub-screen, pause parent transition, communications destination, localized option words and pixel parity remain unverified. Slider art and its fill geometry are refused. Brightness transfer, camera, pad, subtitle, damage and marker application need confirmed client setters.
 - Character creation:
   - which models the class page shows, and in which order;
   - the appearance choices and their defaults;
@@ -112,11 +112,11 @@ None of the following is documented, so the flow refuses it or the host labels i
 | Main → Game type → Players → Mode → Difficulty | states 0, 1, 2, 4, 3 in that order; first entries only; `g_numPlayers` 1, `g_difficultyIdx` 1 | Ran |
 | Character pages 1–4 | class from model (`player_initNewCharacter`); 20 ability points must be spent and right adds one; name `char[0x20]`; class start stats are read at run time from the user's executable at 0x4ef400 | Observed / Ran |
 | Done | `playerSel_finish` queues `hub`. A created character starts at 500 gold, level 1 and acknowledged level 1 | Observed |
-| Options | Both observed tables expose three type-4 sliders (1/120, 0..1), nine type-3 toggles and the controls action; pause adds communications with an Unknown destination. Music, effects and stereo reach the native mixer. Other direct values persist in their documented image words while their gameplay setters remain unverified. Front-end exit enters state 14 when changed: accept requests the image write, cancel commits only in memory. Pause query/commit is statically observed. Triangle loads the 17 scalar words without button rows. | Executed values and front-end choice / Observed pause transition |
+| Options | Both observed tables expose three type-4 sliders (1/120, 0..1), nine type-3 toggles and the controls action; pause adds communications with an Unknown destination. Music, effects and stereo reach the native mixer; mono averages effect voice sides. Other direct values persist in their documented image words while their gameplay setters remain unverified. Front-end exit enters state 14; changed accept requests the image write and changed cancel commits only in memory. The unchanged choice is refused pending evidence. Pause query/commit is statically observed. Triangle loads the 17 scalar words without button rows. | Executed values and changed front-end choice / Observed pause transition |
 | Load | `memcard_requestLoad` stores `g_inFrontend`. Native session saves (`.ocplay` / `.ocnsave`) or a PS2 slot import; a slot import asks for its saved level | host + Executed import |
 | Save | opened from play (savepoint, script or host); offline it pushes `g_paused`; choosing stores latch 0x4f8f28 = 1; an error keeps it; the "saved" box clears it | Executed |
 | Pause | start opens it; `g_paused` is set offline. Entries: Return to Game, Use Gate Scroll, Load Game, Options..., Exit Game. Kick Player is net only. The exit prompt opens on No; left then cross confirms. Closing commits the options (warpMenu 0x18e2f8). `recall_executed()` closes it with lockout 60 | Ran / Observed |
-| Input | the pad goes through the executed `netwire::pad_apply`. Moves read the auto-repeat word +0x10 (press, then every 4th call after 20) (Inferred); confirm and cancel read +0xc; the lockout makes menus read a dummy pad and clears when nothing is held | Executed / Inferred |
+| Input | the pad goes through the executed `netwire::pad_apply`. Moves and option-toggle accept read the auto-repeat word +0x10 (press, then every 4th call after 20); screen confirm and cancel read +0xc. The lockout makes menus read a dummy pad and clears when nothing is held | Executed / Inferred |
 
 Session exit codes 1, 0x65 and 0xc9 restart the front end with `frontend_start`
 0, 1 and 2. What those arguments change is not documented.
@@ -145,8 +145,9 @@ Session exit codes 1, 0x65 and 0xc9 restart the front end with `frontend_start`
 
 ## Tests
 
-- `frontend-exact` (CTest) covers both option tables and pause frames, all three
-  slider walks, nine toggles, config offsets and round-trip, state-14 save choice,
+- `frontend-exact` (CTest) covers independently pinned option keys, kinds and
+  saved offsets, both tables and pause frames, all three slider walks, nine
+  toggles and held accept, signed-zero commit, config round-trip, state-14 refusal,
   boot, character creation, import, pause, save latch and exit codes.
 - `godot/tests/frontend_smoke.gd` drives both lists through the overlay, checks
   effects/stereo mixer requests and user image round-trip, plus saves and a PS2

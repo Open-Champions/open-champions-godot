@@ -325,10 +325,16 @@ void Flow::move_cursor(std::uint32_t repeat) {
 
 bool Flow::commit(bool query_only, bool save) {
   bool changed = false;
-  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i)
-    if (OPTION_ROWS[i].kind != 0 && option_live_[i] != image_word(OPTION_ROWS[i].offset))
-      changed = true;
+  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i) {
+    const auto kind = OPTION_ROWS[i].kind;
+    if (kind == 0)
+      continue;
+    const auto stored = image_word(OPTION_ROWS[i].offset);
+    changed = changed || (kind == 4 ? audio::ps2_cmp(option_live_[i], stored) != 0
+                                    : option_live_[i] != stored);
+  }
   if (query_only) return changed;
+  if (!changed) return false; // config_commitOptions copies only for nonzero count
   for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i)
     if (OPTION_ROWS[i].kind != 0)
       set_image_word(OPTION_ROWS[i].offset, option_live_[i]);
@@ -343,8 +349,8 @@ void Flow::leave_options() {
     commit(false); // 0x18d2c8 / 0x18d2e0
     go(Screen::Pause, 3);
   } else {
-    if (commit(true)) go(Screen::OptionsSave, 0);
-    else go(Screen::Main, 2);
+    (void)commit(true);
+    go(Screen::OptionsSave, 0);
   }
 }
 
@@ -377,12 +383,12 @@ void Flow::options_frame(std::uint32_t held, std::uint32_t pressed, std::uint32_
     const auto call = audio::menu_slider_call(before, held, slider_timer_);
     slider_timer_ = call.timer;
     option_live_[row] = call.value;
-  } else if ((pressed & CONFIRM) || (repeat & (LEFT | RIGHT))) {
+  } else if (repeat & (CONFIRM | LEFT | RIGHT)) {
     option_live_[row] = before ? 0u : 1u;
   }
-  if (option_live_[row] != before) {
-    if (row == 1) music_.live = option_live_[1];
-    else apply_option(cursor_);
+  if (row == 1) music_.live = option_live_[1];
+  if (kind == 4 ? audio::ps2_cmp(option_live_[row], before) != 0 : option_live_[row] != before) {
+    if (row != 1) apply_option(cursor_);
     if (row == 1 && !stream2_playing_)
       request("preview_music", options_return_ == Screen::Pause ? "mx_main_l.vag" : "mx_maintheme_l.vag", 0x41);
   }
@@ -494,8 +500,14 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     options_frame(held, pressed, repeat);
     break;
   case Screen::OptionsSave:
-    if (pressed & CONFIRM) { commit(false, true); go(Screen::Main, 2); }
-    else if (pressed & CANCEL) { commit(false, false); go(Screen::Main, 2); }
+    if (pressed & (CONFIRM | CANCEL)) {
+      if (!commit(true)) {
+        error_ = "unchanged state-14 choice is unverified; no save or exit performed";
+      } else {
+        commit(false, (pressed & CONFIRM) != 0);
+        go(Screen::Main, 2);
+      }
+    }
     break;
   case Screen::OptionsLoad:
     move_cursor(repeat);
@@ -890,17 +902,17 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("Ran: above the first difficulty the character screens take only an imported character.");
     break;
   case Screen::Options:
-    n.push_back("Both option tables and kinds are observed; slider edits use the documented 1/120 timer and toggle edits use accept or left/right. English labels and value glyphs are Host text. Controls and pause communications destinations remain unverified.");
-    n.push_back("Music, effects and stereo reach this client's native mixer. Brightness, camera, vibration, blood, subtitles, damage, chat and markers persist locally; their gameplay application is unverified in this client.");
+    n.push_back("Both option tables and kinds are observed; slider edits use the documented 1/120 timer and toggle accept/left/right use pad repeat. English labels are Host; value glyphs and bars are refused. Controls and pause communications destinations remain unverified.");
+    n.push_back("Music, effects and stereo reach this client's native mixer; mono averages positional effect sides. Brightness, camera, vibration, blood, subtitles, damage, chat and markers persist locally; their gameplay application is unverified in this client.");
     n.push_back("Frames whose auto-repeat word carries left or right are stepped like the executed no-edge calls (Inferred).");
-    n.push_back("Triangle opens Load options (card state 10). Circle commits the twelve direct values into the 760-byte image; the card filename remains Unknown, so the host stores user://frontend/options.img.");
+    n.push_back("Triangle opens Load options (card state 10). Circle follows the front-end state-14 route or the pause query/commit; the card filename remains Unknown, so the host stores user://frontend/options.img.");
     if (options_return_ == Screen::Main)
-      n.push_back("Front end state 14 query/choice call sites are Executed; its prompt art and localized wording are Unknown.");
+      n.push_back("Front end state 14 query/choice call sites are Executed. The no-change choice is unverified and refused; prompt art and localized wording are Unknown.");
     else
       n.push_back("Pause list: the controls entry is disabled only in a net game.");
     break;
   case Screen::OptionsSave:
-    n.push_back("Front-end state 14: accept requests a card save, cancel commits only in memory. Prompt art and localized words are Unknown.");
+    n.push_back("Front-end state 14: with changed values, accept requests a card save and cancel commits only in memory. The no-change choice is refused; prompt art and localized words are Unknown.");
     break;
   case Screen::OptionsLoad:
     n.push_back("memcard_optionsScreen state 0 message box 'options_warn' (0x3C, -1, 0, 0). Which on-screen choice is 1 and which is 2 is not documented.");

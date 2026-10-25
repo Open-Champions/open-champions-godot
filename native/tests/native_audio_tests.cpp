@@ -257,6 +257,28 @@ void effects() {
   const int center = space.play_sample("one", 1, 1, std::nullopt);
   check(space.voices()[std::size_t(center)].gains.left == 1, "non-positional unit gains");
 
+  Playback voice_option;
+  voice_option.add_effect("mono-fixture", effect_pcm(4000, 48000, true));
+  voice_option.set_camera(Vec3{}, Vec3{1, 0, 0});
+  check(voice_option.play_sample("mono-fixture", 1, 1, Vec3{600, 0, 0}) >= 0,
+        "asymmetric synthetic effect voice starts");
+  voice_option.tick();
+  const auto stereo_voice = voice_option.drain(Playback::fifo_limit).front();
+  check(stereo_voice[0] < stereo_voice[1], "stereo option retains effect voice pan");
+  voice_option.set_two_channel_output(false);
+  voice_option.tick();
+  const auto mono_voice = voice_option.drain(Playback::fifo_limit).front();
+  const float expected_mono = (stereo_voice[0] + stereo_voice[1]) * 0.5f;
+  check(std::abs(mono_voice[0] - mono_voice[1]) < 1e-6f &&
+            std::abs(mono_voice[0] - expected_mono) < 1e-6f,
+        "mono option averages asymmetric effect sides into both outputs");
+  voice_option.set_two_channel_output(true);
+  voice_option.tick();
+  const auto restored_voice = voice_option.drain(Playback::fifo_limit).front();
+  check(std::abs(restored_voice[0] - stereo_voice[0]) < 1e-6f &&
+            std::abs(restored_voice[1] - stereo_voice[1]) < 1e-6f,
+        "stereo option restores asymmetric effect output");
+
   Playback freeze;
   freeze.add_effect("one", effect_pcm(4000));
   const int still = freeze.play_sample("one", 1, 1, std::nullopt);

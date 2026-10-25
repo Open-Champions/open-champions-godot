@@ -391,34 +391,20 @@ Scene Flow::layout() const {
     const auto spec = front ? layout::options_list() : layout::pause_options_list();
     add_list(s, spec, list, cur, front ? HOST_LIST_TEXT : layout::PAUSE_TEXT,
              Evidence::Host, "list row (anchors Executed; pause tint Observed; English text Host)");
-    // No slider texture/value glyph was submitted by the fixture. Host bars
-    // display all three scalar values while the disc frames and font load live.
-    // Put bars between row text and frames in submission order: the painter
-    // reverses a layer, so frames paint first, then bars, then words.
-    std::vector<Draw> bars;
-    const auto anchors = layout::list_anchors(spec);
-    for (std::size_t i = 0; i < 3 && i < list.size(); ++i) {
-      float live = 0;
-      std::uint32_t bits = list[i].value;
-      static_assert(sizeof(float) == sizeof(std::uint32_t), "float is 32 bits");
-      std::memcpy(&live, &bits, 4);
-      if (!(live >= 0.0f)) // also rejects NaN
-        live = 0.0f;
-      live = std::min(live, 1.0f);
-      const int bx = 354, by = anchors[i].y + 4, bw = 58;
-      bars.push_back(rect(bx, by, bx + static_cast<int>(live * float(bw)), by + 6, 7,
-                          0x80366876, Evidence::Host, "host slider fill"));
-      bars.push_back(rect(bx, by, bx + bw, by + 6, 7, 0x80303030, Evidence::Host, "host slider track"));
-    }
-    s.draws.insert(s.draws.end() - 3, bars.begin(), bars.end());
-    host("option value bars, localized words and glyphs are Unknown; bars and English labels are Host");
-    s.unknown = {"localized words, value bars and knobs, controls screen, pause transition, retail pixel parity"};
+    // The option fixture establishes anchors and frames, but no value art,
+    // dimensions or fill rule. Refuse a visual representation of the scalars.
+    host("option value bars, localized words and glyphs are Unknown; scalar art refused");
+    s.unknown = {"option value bars and knobs refused", "localized words", "controls screen",
+                 "pause transition", "retail pixel parity"};
     break;
   }
   case Screen::OptionsSave:
     host("state-14 save-choice prompt art and localized words are Unknown");
-    add_message_box(s, "Save settings?", Evidence::Host);
-    host_text(s, 320, 300, "Cross: save to user://   Circle: continue in memory", Align::Centred);
+    add_message_box(s, error_.empty() ? "Save settings?" : "Unchanged choice refused", Evidence::Host);
+    host_text(s, 320, 300,
+              error_.empty() ? "Cross: save to user://   Circle: continue in memory"
+                             : "Unchanged choice needs an executed fixture",
+              Align::Centred);
     break;
   case Screen::OptionsLoad:
     host("the options-load message box text and choices are not captured");

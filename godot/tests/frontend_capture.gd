@@ -33,15 +33,9 @@ func shot(label: String) -> void:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	var image: Image = root.get_texture().get_image()
-	if image != null and label in ["05-options", "19-pause-options"]:
-		var filled_pixels := 0
-		for y in range(175, 320, 2):
-			for x in range(705, 830, 2):
-				var colour := image.get_pixel(x, y)
-				if colour.r > 0.55 and colour.g > 0.45 and colour.b < 0.55:
-					filled_pixels += 1
-		if filled_pixels < 100:
-			printerr("rendered option slider fills absent: ", label)
+	if label in ["05-options", "19-pause-options"]:
+		if fe.scene_view.draws.any(func(d): return d.kind == "rect" and str(d.role).contains("slider")):
+			printerr("untraced slider artwork submitted: ", label)
 			return
 	if image != null and label in ["08-load-game", "08a-load-card-synthetic", "21-save-game", "22-save-card-synthetic", "23-save-empty-card"]:
 		var frame_colour := image.get_pixel(500, 350)
