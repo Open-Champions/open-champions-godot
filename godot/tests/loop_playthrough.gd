@@ -104,15 +104,19 @@ func help_close() -> void:
 		if scene.controller.help_frame(true).get("closed", false): return
 	refusal("dialog", "help box did not close in 200 frames")
 
-func game_key(code: int) -> bool:
+func game_key(code: int, unicode := 0) -> bool:
 	var event := InputEventKey.new()
 	event.keycode = code
 	event.physical_keycode = code
+	event.unicode = unicode
 	event.pressed = true
 	var handled: bool = scene.handle_input_event(event)
 	event.pressed = false
 	scene.handle_input_event(event)
 	return handled
+
+func journal_visible() -> bool:
+	return scene != null and scene.quest_journal != null and scene.quest_journal.visible
 
 func save_json() -> void:
 	var summary := {"steps": rows, "refusals": refusal_counts,
@@ -164,6 +168,7 @@ func run() -> void:
 		tap(CROSS)
 	mark("main_menu", fe.screen())
 	await capture("02-main")
+	var name_q_owned := false
 	if fe.screen() == "main":
 		for i in range(4): tap(CROSS)
 		if fe.screen() == "difficulty": tap(CROSS)
@@ -174,10 +179,32 @@ func run() -> void:
 			for i in range(20): tap(RIGHT)
 			tap(CROSS)
 		if fe.screen() == "char-name":
+			var name_q_handled := game_key(KEY_Q, "q".unicode_at(0))
+			name_q_owned = name_q_handled and fe.name_buffer == "q" and not journal_visible()
+			mark("character_name_q", "typed" if name_q_owned else "refused",
+				{"key_handled": name_q_handled, "name_length": fe.name_buffer.length(),
+				"journal_visible": journal_visible()})
 			fe.type_name("Probe")
 			tap(DOWN)
 			tap(CROSS)
 	mark("character_created", fe.screen(), {"player_ready": scene.controller.get_observation().get("player_ready", false)})
+	var pause_q_owned := false
+	var game_menu_q_owned := false
+	if fe.screen() == "playing":
+		tap(START)
+		var pause_q_handled := game_key(KEY_Q)
+		pause_q_owned = fe.screen() == "pause" and pause_q_handled and not journal_visible()
+		tap(0x20)
+		pause_q_owned = pause_q_owned and fe.screen() == "playing" and not scene.paused
+		mark("pause_menu_q", "owned" if pause_q_owned else "refused",
+			{"key_handled": pause_q_handled, "journal_visible": journal_visible()})
+		var game_menu_opened: bool = game_key(KEY_M) and scene.game_menus.open
+		var game_menu_q_handled := game_key(KEY_Q)
+		game_menu_q_owned = game_menu_opened and game_menu_q_handled and not journal_visible()
+		game_key(KEY_ESCAPE)
+		game_menu_q_owned = game_menu_q_owned and not scene.game_menus.open
+		mark("game_menu_q", "owned" if game_menu_q_owned else "refused",
+			{"key_handled": game_menu_q_handled, "journal_visible": journal_visible()})
 	mark("first_level", "entered" if scene.real.current >= 0 and scene.play_mode else "refused",
 		{"level_index": scene.real.current, "session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
@@ -262,15 +289,32 @@ func run() -> void:
 	mark("opening_choice_quest", "set" if opening_quest_set else "refused",
 		{"before_count": opening_quests_before.get("count", -1),
 		"after_count": opening_quests_after.get("count", -1)})
+	var journal_verified := false
 	if scene.quest_journal != null:
 		var journal_key_handled := game_key(KEY_Q)
 		for i in range(3): await process_frame
-		mark("journal_after_dialog", "drawn" if journal_key_handled and scene.quest_journal.visible and scene.quest_journal.art_ready and \
-			int(scene.quest_journal.entry_count) == 1 and scene.quest_journal.refusal.is_empty() else "refused",
-			{"key_handled": journal_key_handled, "art_ready": scene.quest_journal.art_ready, "entry_count": scene.quest_journal.entry_count,
-			"font_ready": not scene.quest_journal.font().is_empty()})
+		var text_submissions := 0
+		var glyph_submissions := 0
+		var sprite_submissions := 0
+		for item in scene.quest_journal.items:
+			if item.get("kind", "") == "text":
+				text_submissions += 1
+				glyph_submissions += item.get("glyphs", []).size()
+			elif item.get("kind", "") == "sprite":
+				sprite_submissions += 1
+		journal_verified = journal_key_handled and scene.quest_journal.visible and scene.quest_journal.art_ready \
+			and int(scene.quest_journal.entry_count) == 1 and scene.quest_journal.layout_refused \
+			and scene.quest_journal.refusal.begins_with("journal layout refused:") \
+			and text_submissions == 0 and glyph_submissions == 0 and sprite_submissions == 0
+		mark("journal_after_dialog", "layout_refused" if journal_verified else "refused",
+			{"key_handled": journal_key_handled, "art_ready": scene.quest_journal.art_ready,
+			"entry_count": scene.quest_journal.entry_count, "layout_refused": scene.quest_journal.layout_refused,
+			"text_submissions": text_submissions, "glyph_submissions": glyph_submissions,
+			"sprite_submissions": sprite_submissions, "refusal": scene.quest_journal.refusal})
 		await capture("05-quest-journal")
 		game_key(KEY_Q)
+	else:
+		mark("journal_after_dialog", "refused", {"reason": "journal control missing"})
 	# The opening choice and this hub PushTrigger are checked separately in
 	# research-story-route. Exercise their native integration in this session.
 	var transition_before: int = scene.real.current
@@ -327,7 +371,7 @@ func run() -> void:
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()
-		quit(0 if at_hub and dialog_choice_completed and opening_quest_set and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available and mission2_not_inferred else 1)
+		quit(0 if name_q_owned and pause_q_owned and game_menu_q_owned and at_hub and dialog_choice_completed and opening_quest_set and journal_verified and trigger_opened_menu and selected and record_carried and at_blood1 and mission1_still_available and mission2_not_inferred else 1)
 		return
 	# Combat remains a separate diagnostic until blood1 hostile constructors
 	# yield live enemies. Direct selection of valor is not a campaign route.

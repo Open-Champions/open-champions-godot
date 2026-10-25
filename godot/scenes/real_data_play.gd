@@ -329,14 +329,17 @@ func _apply_level_change() -> bool:
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
+	# These overlays own the whole key stream, including printable Q on the
+	# character-name page. Preserve the superclass's established priority.
+	if frontend != null and frontend.active(): return super.handle_input_event(event)
+	if game_menus != null and game_menus.open: return super.handle_input_event(event)
 	# The offline help box owns confirmation while it holds the session. A
 	# simultaneous dialog or game-menu handler must not consume that key.
 	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:
 		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null:
 		var journal_key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
-		if journal_key == KEY_Q and real != null and not real.disc_dir.is_empty() and \
-			not controller.dialog_status().get("open", false) and not mission_menu_panel.visible:
+		if journal_key == KEY_Q and _journal_input_eligible():
 			toggle_quest_journal()
 			return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
@@ -351,10 +354,23 @@ func handle_input_event(event: InputEvent) -> bool:
 				return true
 	return super.handle_input_event(event)
 
+func _journal_input_eligible() -> bool:
+	return quest_journal != null and controller != null and real != null and not real.disc_dir.is_empty() \
+		and real.current >= 0 and session_started and play_mode and not paused and not stopped \
+		and menu != null and not menu.visible and frontend != null and not frontend.active() \
+		and game_menus != null and not game_menus.open and not _component_modal_open() \
+		and not terrain_dialog.visible and not asset_dialog.visible and not model_dialog.visible \
+		and not save_dialog.visible and not load_dialog.visible and not real_folder.visible \
+		and not real_recipes.visible and not real_lights.visible and not mission_menu_panel.visible \
+		and not controller.dialog_status().get("open", false) \
+		and not controller.text_hud().get("help_open", false)
+
 func toggle_quest_journal() -> void:
-	if quest_journal == null: return
+	if quest_journal == null or (not quest_journal.visible and not _journal_input_eligible()): return
 	quest_journal.visible = not quest_journal.visible
-	if quest_journal.visible: quest_journal.step_frame()
+	if quest_journal.visible:
+		quest_journal.step_frame()
+		if not quest_journal.refusal.is_empty(): status_label.text = quest_journal.refusal
 
 func start_play() -> void:
 	if level_script != null and level_script.button_pressed and real != null and real.current >= 0:
