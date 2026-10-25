@@ -401,6 +401,17 @@ func walk_exit_probe() -> bool:
 	await capture("11-walk-exit-level-change")
 	return record_carried and arrival_at_marker and scene.real.current != transition_before
 
+func load_scripted_exit_source(indices: Array[int], kind: String) -> bool:
+	for index in indices:
+		if not scene.load_real_level(index, true): continue
+		scene.start_play()
+		help_close()
+		if scene.paused and scene.session_started: scene.resume_session()
+		if not scene.controller.get_play_capabilities().get("level_script_enabled", false): continue
+		for target in scene.controller.script_exit_targets():
+			if str(target.get("kind", "")) == kind: return true
+	return false
+
 func run() -> void:
 	if not args.has("game-folder") or not args.has("out"):
 		printerr("--game-folder and --out are required")
@@ -659,10 +670,8 @@ func run() -> void:
 		if int(inventory.get("pushes", 0)) > 0: push_sources.append(index)
 		if int(inventory.get("portals", 0)) > 0: portal_sources.append(index)
 	var physical_refused := false
-	if not push_sources.is_empty() and scene.load_real_level(push_sources[0], true):
-		scene.start_play()
-		help_close()
-		if scene.paused and scene.session_started: scene.resume_session()
+	if load_scripted_exit_source(push_sources, "PushTrigger"):
+		var player: Dictionary = scene.controller.get_observation()
 		var before_use: int = int(scene.controller.script_use_status().get("uses", 0))
 		var before_action: Dictionary = scene.controller.script_command_counts().get("executed", {})
 		var use_request: Dictionary = scene.controller.dialog_use()
@@ -670,9 +679,12 @@ func run() -> void:
 		var after_use: Dictionary = scene.controller.script_use_status()
 		var after_action: Dictionary = scene.controller.script_command_counts().get("executed", {})
 		physical_refused = int(after_use.get("uses", 0)) == before_use and \
-			(not str(after_use.get("refusal", "")).is_empty() or not use_request.get("ok", false))
+			not use_request.get("ok", true) and str(use_request.get("error", "")).contains("Player_interact")
 		mark("push_trigger_use", "refused_expected" if physical_refused else "unsafe_dispatch",
-			{"candidate_levels": push_sources.size(), "uses_unchanged": int(after_use.get("uses", 0)) == before_use,
+			{"candidate_levels": push_sources.size(), "scripted_source": true,
+			"player_ready": player.get("player_ready", false),
+			"record_health_known": player.get("player_record_currents_known", false),
+			"uses_unchanged": int(after_use.get("uses", 0)) == before_use,
 			"action_counts_before": before_action, "action_counts_after": after_action,
 			"refusal": after_use.get("refusal", use_request.get("error", ""))})
 	else:
@@ -681,10 +693,7 @@ func run() -> void:
 	# Gate confirmation is visible under its own action ID. With no saved
 	# GateList or constructed destination grid, the UI and API must refuse.
 	var portal_refused := false
-	if not portal_sources.is_empty() and scene.load_real_level(portal_sources[0], true):
-		scene.start_play()
-		help_close()
-		if scene.paused and scene.session_started: scene.resume_session()
+	if load_scripted_exit_source(portal_sources, "Portal") or load_scripted_exit_source(portal_sources, "PortalHurt"):
 		scene._update_menu()
 		var button: Button = scene.actions.real_gate_confirm
 		var before_position: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
