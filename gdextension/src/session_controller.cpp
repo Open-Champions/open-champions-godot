@@ -51,6 +51,29 @@ Dictionary failure(const std::exception &error) {
   out["error"] = String::utf8(error.what());
   return out;
 }
+// Same table/bridge as play-route e141628. Read owner data at runtime;
+// research-story-route 76d4447 establishes row 1's story pointer.
+std::vector<rta::quests::MissionRow> mission_rows(const rta::arena_modes::Executable &exe) {
+  constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
+  std::vector<rta::quests::MissionRow> rows;
+  for (std::uint32_t i = 0; i < 13; ++i) {
+    const auto base = table + i * stride;
+    auto name = [&](std::uint32_t offset) {
+      const auto ptr = exe.word(base + offset);
+      return ptr ? exe.string(ptr) : std::string();
+    };
+    rows.push_back({name(0x08), name(0x0c), name(0x10), name(0x14),
+                    std::int32_t(exe.word(base + 0x20)), std::int32_t(exe.word(base + 0x24)),
+                    std::int32_t(exe.word(base + 0x28))});
+  }
+  if (rows[0].story != "blood1" || rows[1].story != "innovat1")
+    throw std::runtime_error("The executable does not establish the documented story menu entries.");
+  return rows;
+}
+bool mission2_story(const String &level) {
+  const auto name = level.to_lower();
+  return name == "innovat1" || name == "inmine1" || name == "inmine2" || name == "innovat2";
+}
 void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
           double z) {
   for (const Vector3 p :
@@ -123,6 +146,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
   ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_state"), &ChampionsSessionController::script_mission_menu_state);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
+                       &ChampionsSessionController::script_mission_menu_tick);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
   bind_text_methods();
@@ -904,6 +930,9 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    // Mission-2 objective execution is Unknown in the PASS research audit.
+    // Reuse the existing VM, but never advance past an unsupported command.
+    next->require_complete_commands(mission2_story(level_name));
     // The same options word feeds the native mixer and the script's private
     // playback model. Without an options file, use the documented boot default.
     next->set_music_volume(music_volume_bits < 0
@@ -933,6 +962,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    if (executable_)
+      next->campaign().set_rows(mission_rows(*executable_));
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;
       const PackedByteArray image = resource_lumps[name];
@@ -1054,6 +1085,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     result["ok"] = true;
     result["campaign_carried"] = carried;
     result["campaign_image_restored"] = campaign_image_restored;
+    result["script_stopped"] = scripts_->faulted();
+    result["script_diagnostic"] = String::utf8(scripts_->last_fault().c_str());
     result["executable"] = bool(executable_);
     result["music_volume"] = int64_t(scripts_->audio().music_volume());
     result["fade_level"] = int64_t(script_fade_);
@@ -1455,6 +1488,9 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   }
   const auto &counts = scripts_->counts();
   result["ok"] = true;
+  result["requires_complete_commands"] = scripts_->requires_complete_commands();
+  result["script_stopped"] = scripts_->faulted();
+  result["last_refusal"] = String::utf8(scripts_->last_refusal().c_str());
   result["started"] = static_cast<int64_t>(counts.started);
   result["reached_wait"] = static_cast<int64_t>(counts.reached_wait);
   result["reached_complete"] = static_cast<int64_t>(counts.reached_complete);
@@ -1572,11 +1608,55 @@ Dictionary ChampionsSessionController::script_level_request() const {
   std::string name = scripts_->level().pending.name;
   if (name.empty()) name = scripts_->variables().memory.cstr(0x41b6d0);
   result["queued"] = !name.empty();
+  if (scripts_->requires_complete_commands() && scripts_->faulted()) {
+    result["queued"] = false;
+    result["error"] = String::utf8(scripts_->last_fault().c_str());
+  }
   result["name"] = String::utf8(name.c_str());
   result["orientation"] = int64_t(scripts_->variables().memory.read(0x41b720));
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
   return result;
+}
+Dictionary ChampionsSessionController::script_mission_menu_state() const {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && scripts_->campaign().rows().size() == 13);
+  if (!bool(out["ok"])) return out;
+  const auto &campaign = scripts_->campaign();
+  const auto &menu = campaign.menu();
+  out["open"] = campaign.menu_open() && menu.pending.empty();
+  out["state"] = int64_t(menu.state);
+  out["counter"] = int64_t(menu.counter);
+  out["row"] = int64_t(menu.row);
+  out["column"] = int64_t(menu.col);
+  out["chooser"] = int64_t(campaign.chooser());
+  out["first_story_available"] = bool(campaign.mission_available(1));
+  out["second_story_available"] = bool(campaign.mission_available(2));
+  out["pending"] = String::utf8(menu.pending.c_str());
+  return out;
+}
+Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits, int64_t fade) {
+  try {
+    if (!scripts_ || scripts_->campaign().rows().size() != 13 || !scripts_->campaign().menu_open() ||
+        !scripts_->campaign().menu().pending.empty())
+      throw std::runtime_error("No documented mission menu is open.");
+    constexpr std::uint32_t allowed = rta::quests::BTN_CROSS | rta::quests::BTN_CIRCLE |
+                                      rta::quests::BTN_SELECT | rta::quests::BTN_UP |
+                                      rta::quests::BTN_DOWN | rta::quests::BTN_LEFT |
+                                      rta::quests::BTN_RIGHT;
+    if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 || fade < -1 || fade > 128)
+      throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
+    rta::quests::MenuInputs inputs;
+    // -1: the real scene uses the executed hud_stepFade(4) body at state 6,
+    // research-quests 7efd3ce section 4 and script-effects 52984db.
+    // Nonnegative values retain play-route's explicit test input seam.
+    inputs.fade = fade < 0 ? (scripts_->campaign().menu().state == 6
+                                 ? int(scripts_->callees().step_fade(4)) : 0) : int(fade);
+    const bool launched = scripts_->tick_mission_menu(int(pad_bits), inputs);
+    auto out = script_mission_menu_state();
+    out["launched"] = launched;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
 }
 Array ChampionsSessionController::script_exit_targets() const {
   Array result;
@@ -1596,6 +1676,11 @@ Array ChampionsSessionController::script_exit_targets() const {
     item["script_action"] = !unsupported_exit_conditions(record, script_level_objects_) &&
         (kind == "Trigger" ? record.prop("t").has_value()
          : kind == "PushTrigger" ? record.prop("action").has_value() : false);
+    if (scripts_->requires_complete_commands()) {
+      item["script_action"] = false;
+      item["refusal"] = scripts_->faulted() ? String::utf8(scripts_->last_fault().c_str())
+          : String("Mission-2 exit link pairing and entry containment are Unknown (research 047adfe).");
+    }
     result.push_back(item);
   }
   return result;
@@ -1606,6 +1691,10 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   try {
     if (!scripts_ || index < 0 || std::size_t(index) >= script_level_objects_.size())
       throw std::runtime_error("No level exit at that index.");
+    if (scripts_->requires_complete_commands() && scripts_->faulted())
+      throw std::runtime_error("Mission script stopped: " + scripts_->last_fault());
+    if (scripts_->requires_complete_commands())
+      throw std::runtime_error("Mission-2 exit link pairing and entry containment are Unknown (research 047adfe).");
     const auto &record = script_level_objects_[std::size_t(index)];
     const auto &kind = record.cls;
     if (kind != "Trigger" && kind != "PushTrigger")

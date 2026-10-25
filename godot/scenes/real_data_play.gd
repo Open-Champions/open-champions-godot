@@ -24,6 +24,10 @@ var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
 var real_exit_choice: OptionButton
+var mission_menu_panel: PanelContainer
+var mission_menu_status: Label
+var mission_story_buttons: Array[Button] = []
+var mission_menu_target := -1
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -107,6 +111,7 @@ func _ready() -> void:
 	real_exit_choice.add_item("No level exit loaded", -1)
 	menu.add_child(real_exit_choice)
 	_add_action("real_exit", "Use selected level action", activate_selected_exit)
+	_build_story_menu()
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -121,6 +126,80 @@ func _update_menu() -> void:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
 			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. The player is unarmed (starting equipment refused_unknown). Enemy AI (sight and everything past idle), hit reactions, loot objects, Gold and the Minotaurs remain refused."
+		var scripts: Dictionary = controller.script_command_counts()
+		if scripts.get("requires_complete_commands", false):
+			mode_label.text = "Mission 2 · objectives incomplete; unsupported commands stop the mission script."
+			if scripts.get("script_stopped", false):
+				mode_label.text += " " + str(scripts.get("last_refusal", "Script stopped."))
+
+func _build_story_menu() -> void:
+	mission_menu_panel = PanelContainer.new()
+	mission_menu_panel.set_anchors_preset(Control.PRESET_CENTER)
+	mission_menu_panel.offset_left = -230
+	mission_menu_panel.offset_top = -100
+	mission_menu_panel.offset_right = 230
+	mission_menu_panel.offset_bottom = 100
+	mission_menu_panel.visible = false
+	var box := VBoxContainer.new()
+	mission_menu_panel.add_child(box)
+	var title := Label.new()
+	title.text = "Mission menu · host layout"
+	box.add_child(title)
+	mission_menu_status = Label.new()
+	box.add_child(mission_menu_status)
+	for mission in [1, 2]:
+		var button := Button.new()
+		button.text = "Mission %d · Story" % mission
+		button.pressed.connect(mission_menu_select_story.bind(mission))
+		box.add_child(button)
+		mission_story_buttons.push_back(button)
+	if viewport != null: viewport.add_child(mission_menu_panel)
+	else: add_child(mission_menu_panel)
+
+func _refresh_mission_menu() -> void:
+	if mission_menu_panel == null or controller == null: return
+	var state: Dictionary = controller.script_mission_menu_state()
+	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false))
+	if not mission_menu_panel.visible: return
+	mission_story_buttons[0].disabled = not state.get("first_story_available", false)
+	mission_story_buttons[1].disabled = not state.get("second_story_available", false)
+	mission_menu_status.text = "Mission 2 is available." if not mission_story_buttons[1].disabled else "Mission 2 is locked. Complete its hub dialog action."
+	status_label.text = mission_menu_status.text
+
+func mission_menu_select_story(mission: int) -> bool:
+	var state: Dictionary = controller.script_mission_menu_state()
+	var available := bool(state.get("first_story_available", false)) if mission == 1 else bool(state.get("second_story_available", false))
+	if mission not in [1, 2] or not state.get("open", false) or not available:
+		status_label.text = "Mission selection refused: this story mission is locked."
+		return false
+	mission_menu_target = mission - 1
+	return true
+
+func mission_menu_frame() -> Dictionary:
+	var state: Dictionary = controller.script_mission_menu_state()
+	if not state.get("open", false): return state
+	var pad := 0
+	if mission_menu_target >= 0 and int(state.get("state", -1)) == 2:
+		if int(state.get("column", -1)) != 0:
+			mission_menu_target = -1
+			status_label.text = "Mission selection refused: the story column is not selected."
+		elif int(state.get("row", -1)) > mission_menu_target: pad = 0x1000
+		elif int(state.get("row", -1)) < mission_menu_target: pad = 0x4000
+		else:
+			pad = 0x40
+			mission_menu_target = -1
+	state = controller.script_mission_menu_tick(pad, -1)
+	_refresh_mission_menu()
+	if state.get("launched", false): _queue_level_change()
+	return state
+
+func _process(delta: float) -> void:
+	if controller != null and controller.script_mission_menu_state().get("open", false):
+		held_commands = 0
+		_last_clock_usec = Time.get_ticks_usec()
+		if automatic_steps: mission_menu_frame()
+		return
+	super._process(delta)
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -184,6 +263,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
+	_show_script_refusal()
 	return true
 
 func restore_default_actor() -> void:
@@ -467,8 +547,15 @@ func attach_level_script(carry_campaign := false) -> bool:
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
 	if result.get("ok", false): _refused_level_request = ""
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
+	_show_script_refusal()
 	_refresh_exit_targets()
 	return result.get("ok", false)
+
+func _show_script_refusal() -> void:
+	if controller == null: return
+	var state: Dictionary = controller.script_command_counts()
+	if state.get("requires_complete_commands", false) and state.get("script_stopped", false):
+		status_label.text = "Mission 2 script stopped: " + str(state.get("last_refusal", "unsupported behavior"))
 
 func _refresh_exit_targets() -> void:
 	if real_exit_choice == null or controller == null: return
@@ -477,6 +564,7 @@ func _refresh_exit_targets() -> void:
 	for target in controller.script_exit_targets():
 		var kind: String = str(target.get("kind", "unknown"))
 		var suffix := " · script action" if target.get("script_action", false) else " · arrival/prompt only"
+		if target.has("refusal"): suffix = " · refused: " + str(target.refusal)
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
 
 func activate_selected_exit() -> Dictionary:
@@ -538,6 +626,11 @@ func handle_input_event(event: InputEvent) -> bool:
 		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if controller.script_mission_menu_state().get("open", false):
+			if key in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+				var state: Dictionary = controller.script_mission_menu_state()
+				mission_menu_select_story(int(state.get("row", -1)) + 1)
+			return true
 		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
 			var open: bool = controller.dialog_status().get("open", false)
 			if TALK_KEYS[key] is String:
@@ -561,6 +654,7 @@ func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
 	if not _level_change_loading and controller != null:
+		_refresh_mission_menu()
 		var pending: Dictionary = controller.script_level_request()
 		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:
 			_queue_level_change()
@@ -575,6 +669,7 @@ func _observe(result: Dictionary) -> void:
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	_present_npc_dialog()
+	_show_script_refusal()
 	if real.world == null: return
 	real.world.observe(raw_observation)
 	var extra: String = real.world.label()
