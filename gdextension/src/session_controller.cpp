@@ -96,8 +96,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)), DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("save_level_object_directory", "qualified_key"),
                        &ChampionsSessionController::save_level_object_directory);
-  ClassDB::bind_method(D_METHOD("load_level_object_directory", "bytes"),
-                       &ChampionsSessionController::load_level_object_directory);
+  ClassDB::bind_method(D_METHOD("load_level_object_directory", "bytes", "required_key"),
+                       &ChampionsSessionController::load_level_object_directory, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("level_object_state_status"),
                        &ChampionsSessionController::level_object_state_status);
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
@@ -976,17 +976,24 @@ Dictionary ChampionsSessionController::save_level_object_directory(const String 
   } catch (const std::exception &e) { return failure(e); }
 }
 
-Dictionary ChampionsSessionController::load_level_object_directory(const PackedByteArray &packed) {
+Dictionary ChampionsSessionController::load_level_object_directory(const PackedByteArray &packed,
+                                                                    const String &required_key) {
   try {
     auto decoded = packed.is_empty()
         ? rta::level_object_state::Directory()
         : rta::level_object_state::Directory::decode(
               rta::level_object_state::Bytes(packed.ptr(), packed.ptr() + packed.size()));
+    const std::string key = required_key.utf8().get_data();
+    const auto *required = key.empty() ? nullptr : decoded.lookup(key);
+    if (!key.empty() && !required)
+      throw std::runtime_error("The requested level has no readable object-state slot.");
+    const auto required_records = required ? required->records.size() : 0;
     level_states_ = std::move(decoded);
     restored_object_fields_ = 0;
     Dictionary result;
     result["ok"] = true;
     result["slots"] = int64_t(level_states_.count());
+    result["required_records"] = int64_t(required_records);
     return result;
   } catch (const std::exception &e) { return failure(e); }
 }
@@ -996,6 +1003,7 @@ Dictionary ChampionsSessionController::level_object_state_status() const {
   result["slots"] = int64_t(level_states_.count());
   result["restored_records"] = int64_t(restored_object_fields_);
   result["built_records"] = scripts_ ? int64_t(scripts_->counts().objects_built) : int64_t(0);
+  result["active_key"] = scripts_ ? String::utf8(level_object_key_.c_str()) : String();
   Array refused;
   refused.push_back("Chest interaction flag, zero-gold branch, animation arguments/state and class-definition argument");
   refused.push_back("ItemProp state-bit branches, Prop load and transform arguments/state");

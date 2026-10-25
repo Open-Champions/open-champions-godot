@@ -184,7 +184,8 @@ public:
                                         std::int64_t music_volume_bits = -1,
                                         const godot::String &qualified_key = godot::String());
   godot::Dictionary save_level_object_directory(const godot::String &qualified_key);
-  godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes);
+  godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes,
+                                                const godot::String &required_key = godot::String());
   godot::Dictionary level_object_state_status() const;
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();

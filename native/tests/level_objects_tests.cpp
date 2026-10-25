@@ -172,9 +172,10 @@ int main(int argc, char **argv) {
                                      " != " + std::to_string(want));
         }
         check(seed.state == hex(c[7]), where + " shared seed");
-        // Independently specified alive writer layout (research save-world.md
-        // and creatures.md): the s16 charm is sign-extended; the adjacent s16
-        // root timer is not part of the record.
+        // Independently specified native raw-field layout. docs/creatures.md:131
+        // establishes the two in-memory HP words at +0x228/+0x22c; the original
+        // writer in docs/save-world.md emits one HP fraction instead. The s16
+        // charm is sign-extended; adjacent s16 root is not in this companion.
         auto &memory = host.variables().memory;
         memory.word(address + 0xe8, 0x12345678);
         memory.word(address + 0x228, 0x3f800000);
@@ -190,7 +191,7 @@ int main(int argc, char **argv) {
             0x00, 0x00, 0x00, 0x40, 0x6b, 0x00, 0x00, 0x00,
             0xff, 0xff, 0xff, 0xff};
         check(saved_fields.size() == 1 && saved_fields[0].fields == expected,
-              where + " exact alive Creature writer layout");
+              where + " exact alive Creature native raw-field layout");
         memory.word(address + 0xe8, 0);
         memory.word(address + 0x228, 0);
         memory.word(address + 0x22c, 0);

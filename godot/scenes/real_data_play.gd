@@ -152,6 +152,10 @@ func load_real_level(index: int, record_departing_state := true) -> bool:
 	var scripted := false
 	if level_script != null and level_script.button_pressed: scripted = attach_level_script()
 	else: controller.disable_level_script()
+	if level_script != null and level_script.button_pressed and (not scripted or \
+			str(controller.level_object_state_status().get("active_key", "")) != str(real.levels[index].stem)):
+		status_label.text = "Level refused: level object construction or restoration failed."
+		return false
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
@@ -265,6 +269,7 @@ func load_session_file(path: String) -> bool:
 	var scripted: bool = manifest.get("scripted", false)
 	var campaign := PackedByteArray()
 	var object_state := PackedByteArray()
+	var expected_object_records := 0
 	if scripted:
 		var campaign_path := path + ".campaign"
 		var source := FileAccess.open(campaign_path, FileAccess.READ)
@@ -281,10 +286,11 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Load refused: per-level object companion is absent or differs."
 			return false
 		object_state = object_file.get_buffer(object_file.get_length())
-		var directory: Dictionary = controller.load_level_object_directory(object_state)
+		var directory: Dictionary = controller.load_level_object_directory(object_state, str(level.stem))
 		if not directory.get("ok", false):
 			status_label.text = "Load refused: per-level object directory is invalid."
 			return false
+		expected_object_records = int(directory.get("required_records", -1))
 	else:
 		controller.load_level_object_directory(PackedByteArray())
 	level_script.set_pressed_no_signal(scripted)
@@ -292,7 +298,9 @@ func load_session_file(path: String) -> bool:
 	var level_loaded := load_real_level(index)
 	restoring_real_level = false
 	if not level_loaded: return false
-	if scripted and not controller.get_play_capabilities().get("level_script_enabled", false):
+	var candidate: Dictionary = controller.level_object_state_status() if scripted else {}
+	if scripted and (str(candidate.get("active_key", "")) != str(level.stem) or \
+			(int(manifest.version) == 2 and int(candidate.get("restored_records", -1)) != expected_object_records)):
 		status_label.text = "Load refused: level object construction or restoration failed."
 		return false
 	var world_path: String = str(real.cache_dir.path_join("level-%03d.world" % index))
