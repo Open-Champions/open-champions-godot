@@ -35,7 +35,9 @@ func run() -> void:
 	var state: Dictionary = service.state()
 	check(state.get("ok", false) and int(state.gold) == 500 and int(state.bag_count) == 2, "seeded gold and bag")
 	check(service.press(2, 0x40).action == "equip" and int(service.state().equipment_index) == 0, "cross equips blade")
+	check(int(service.record_word(0x43f0).value) == 0x4d8af0 + 0x130, "equip writes player record")
 	check(service.press(2, 0x40).action == "unequip" and int(service.state().equipment_index) == -1, "cross unequips blade")
+	check(int(service.record_word(0x43f0).value) == 0, "unequip clears player record")
 	service.reset()
 	check(service.press(0, 0x80).action == "buy" and int(service.state().gold) == 441, "shop buy charges 59")
 	service.reset()
@@ -64,12 +66,13 @@ func run() -> void:
 	service.reset()
 	var drawn: Dictionary = service.frame("inventory")
 	check(drawn.get("ok", false) and int(drawn.texts[0].x) == 17 and int(drawn.texts[0].y) == 89 and str(drawn.texts[0].text) == "blade", "item name sits on the hit cell")
+	check(drawn.sprites.size() == 22 and drawn.selected_texts.size() == 1 and drawn.icons.is_empty(), "bounded box and cursor art with authored item text; no invented icon")
 	check(service.frame("pause").texts.is_empty(), "pause draws no invented frame")
 	check(str(service.frame("stats").texts[0].text) == "5", "level uses the executed header position")
 	var ids := {}
 	for gap in service.gaps().gaps:
 		ids[str(gap.id)] = true
-	for id in ["item-info-coordinates", "stat-spend-input", "skill-confirm-input", "pause-frames", "memory-card-frames", "shop-choice-centre-x", "exp-threshold-table", "mana-refill-offset"]:
+	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "stat-spend-input", "skill-confirm-input", "pause-frames", "memory-card-frames", "shop-choice-centre-x", "exp-threshold-table", "mana-refill-offset"]:
 		check(ids.has(id), "refusal " + id)
 	service.press(2, 0x40)
 	var dir := "user://menu-smoke-%d" % OS.get_process_id()
@@ -82,6 +85,9 @@ func run() -> void:
 	check(menus.load_companion(dir.path_join("missing")) and int(service.state().gold) == 500 and int(service.state().equipment_index) == -1, "missing companion reseeds")
 	scene.start_diagnostic()
 	check(scene.session_started and not scene.paused, "diagnostic is running")
+	scene.actions.inventory.pressed.emit()
+	check(menus.open and menus.screen == "inventory", "in-game inventory action opens equipment screen")
+	menus.close_menu()
 	check(scene.handle_input_event(key(KEY_M)) and menus.open, "host M opens the menu")
 	check(scene.handle_input_event(key(KEY_J)) and int(service.state().equipment_index) == 0, "host J uses the equip mask")
 	check(scene.handle_input_event(key(KEY_ESCAPE)) and not menus.open and not scene.paused, "escape closes the menu and leaves the session running")

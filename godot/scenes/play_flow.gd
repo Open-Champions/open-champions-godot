@@ -125,7 +125,9 @@ func _build_flow() -> void:
 	_add_action("library", "Level library…", func(): open_component("library"))
 	_add_action("animation", "Cosmetic model / clip…", func(): open_component("animation"))
 	_add_action("art", "Original art…", func(): open_component("art"))
-	_add_action("inventory", "Inventory pictures…", func():
+	_add_action("inventory", "Inventory / equipment…", func():
+		if game_menus != null: game_menus.open_screen("inventory"))
+	_add_action("inventory_pictures", "Inspect inventory pictures…", func():
 		set_paused(true)
 		if components.has("art") and components.art.has_method("show_inventory"): components.art.show_inventory())
 	_add_action("terrain", "Open local WORLD…", func(): open_dialog(terrain_dialog))
@@ -281,7 +283,8 @@ func refresh_capabilities() -> void:
 		actions[id].tooltip_text = str(component_reasons.get(id, ""))
 		if components.has(id) and actions[id].disabled:
 			actions[id].tooltip_text = "Install the required native controller/inspector extension."
-	actions.inventory.disabled = inspector == null or not components.has("art") or not components.art.has_method("show_inventory")
+	actions.inventory.disabled = game_menus == null or game_menus.service == null
+	actions.inventory_pictures.disabled = inspector == null or not components.has("art") or not components.art.has_method("show_inventory")
 	_configure_save_formats()
 	_update_menu()
 
