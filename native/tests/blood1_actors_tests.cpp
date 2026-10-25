@@ -195,6 +195,13 @@ void run_seed(std::uint32_t seed) {
     refuses([&] { actors.tick(address); }, "state7 targeted branch remains Unknown");
     input.has_target = false; input.hit_event = false;
     a.hp.mem.store(address + 0x228, 4, R::from_int(100));
+    const auto prior_frame = a.hp.mem.load(R::creature_hp::G_SIM_FRAME, 4);
+    refuses([&] { actors.take_damage(address, 0x1000, 8, R::from_int(25)); },
+            "nonzero attacker remains Unknown");
+    check(a.health() == R::from_int(100) &&
+          a.hp.mem.load(address + 0x2dc, 4) == 0 &&
+          a.hp.mem.load(R::creature_hp::G_SIM_FRAME, 4) == prior_frame,
+          "attacker refusal leaves HP, flags and frame unchanged");
     actors.take_damage(address, 0, 8, R::from_int(25));
     check(a.health() == R::from_int(75) &&
           a.hp.mem.load(address + 0xc8, 4) == R::from_int(25) &&
@@ -222,6 +229,18 @@ void run_seed(std::uint32_t seed) {
       refuses([&] { actors.tick(address); }, "unprobed Wraith fade path refusal");
     }
   }
+  // The reference's weapon probe starts from a fresh World; the four-class
+  // loop above consumes shared draws before it reaches WarWraith.
+  O::World fresh(O::CallbackPolicy::ReferenceBase);
+  fresh.shared.state = seed;
+  parts.clear();
+  B::Runtime fresh_actors(fresh, resources, s);
+  auto &fresh_wraith = fresh_actors.construct(B::Kind::WarWraith,
+                                               {0,0,0}, 0, {}, R::from_int(100));
+  const auto reference_part = seed == 20973 ? 15u : 13u;
+  check(fresh_wraith.weapon_part == reference_part &&
+        parts == std::vector<std::uint32_t>{reference_part},
+        "fresh-object reference weapon part for seed");
   const auto count = world.objects.size();
   resources.unload("kobold.lmp");
   refuses([&] {

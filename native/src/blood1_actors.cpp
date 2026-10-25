@@ -350,6 +350,10 @@ void Runtime::tick(std::uint32_t address) {
 void Runtime::take_damage(std::uint32_t address, std::uint32_t attacker,
                           std::uint32_t flags, Raw amount) {
   auto &a = at(address);
+  // This isolated HP model has no World-backed attacker bytes. The committed
+  // blood1 probe covers only the null-attacker branch.
+  if (attacker)
+    throw Unsupported("Creature_takeDamage: nonzero attacker Unknown");
   a.hp.mem.store(creature_hp::G_SIM_FRAME, 4, std::uint32_t(world_.frame));
   a.hp.take_damage(address, attacker, flags, amount);
 }
