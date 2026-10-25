@@ -158,6 +158,12 @@ class ChampionsFrontendService : public RefCounted {
     out["exit_code"] = flow_->last_exit_code();
     out["gated_music"] = flow_->gated_music();
     out["ability_remaining"] = flow_->ability_remaining();
+    if (flow_->screen() == F::Screen::CharClass || flow_->screen() == F::Screen::CharAppearance) {
+      const int preview_model = flow_->screen() == F::Screen::CharClass
+                                    ? F::carousel_model(flow_->cursor()) : flow_->character().model;
+      out["preview_model"] = preview_model;
+      out["preview_body_code"] = String::utf8(F::body_code_of_model(preview_model));
+    }
     out["error"] = String::utf8(flow_->last_error().c_str());
     const auto &c = flow_->character();
     Dictionary ch;
@@ -170,8 +176,15 @@ class ChampionsFrontendService : public RefCounted {
     ch["acknowledged"] = c.acknowledged;
     ch["stat_points"] = c.stat_points;
     ch["skill_points"] = c.skill_points;
+    ch["skill_points_known"] = c.skill_points_known;
     ch["imported"] = c.imported;
     ch["base_known"] = c.base_known;
+    ch["appearance_known"] = c.appearance_known;
+    Array base, spent;
+    for (auto v : c.base) base.push_back(v);
+    for (auto v : c.spent) spent.push_back(v);
+    ch["base"] = base;
+    ch["spent"] = spent;
     Array stats;
     for (auto v : c.stats())
       stats.push_back(v);
@@ -318,6 +331,7 @@ public:
         c.gold = int(result.get("gold", 0));
         c.stat_points = int(result.get("stat_points", 0));
         c.skill_points = int(result.get("skill_points", 0));
+        c.skill_points_known = result.has("skill_points");
         Array stats = result.get("base_stats", Array());
         for (int i = 0; i < 4 && i < stats.size(); ++i)
           c.base[static_cast<std::size_t>(i)] = int(stats[i]);

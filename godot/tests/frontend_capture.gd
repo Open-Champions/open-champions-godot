@@ -33,6 +33,9 @@ func shot(label: String) -> void:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	var image: Image = root.get_texture().get_image()
+	if image != null and label == "13a-char-class-model-11" and bright_pixels(image, Rect2i(780, 225, 360, 360), 4) < 50:
+		printerr("selected disc body texture preview did not render")
+		return
 	if image != null and label in ["08-load-game", "08a-load-card-synthetic", "21-save-game", "22-save-card-synthetic", "23-save-empty-card"]:
 		var frame_colour := image.get_pixel(500, 350)
 		if maxf(frame_colour.r, maxf(frame_colour.g, frame_colour.b)) < 0.08 or bright_pixels(image, Rect2i(300, 730, 680, 140), 4) < 100:
@@ -140,6 +143,10 @@ func run() -> void:
 		fe.sync_font(scene.components.art)
 	fe.boot()
 	print("levels ", scene.real.levels.size(), " font_loaded ", font_ok, " game_font ", fe.fonts_loaded(), " start_stats_refused ", fe.log_lines.any(func(l): return str(l).begins_with("class start stats refused")))
+	if fe.log_lines.any(func(l): return str(l).begins_with("class start stats refused")):
+		printerr("audited class start table refused from the selected disc")
+		quit(1)
+		return
 	await shot("01-boot-card")
 	fe.tap(CROSS)
 	await shot("02-soe-logo")
@@ -191,8 +198,18 @@ func run() -> void:
 	await shot("12-difficulty")
 	fe.tap(CROSS)
 	await shot("13-char-class")
+	fe.tap(DOWN) # audited carousel position 1: model 11, class 6
+	await shot("13a-char-class-model-11")
+	if fe.view_painter.load_body_texture("im").is_empty():
+		printerr("disc body texture preview did not decode")
+		quit(1)
+		return
 	fe.tap(CROSS)
 	await shot("14-char-appearance")
+	if int(fe.view.character.model) != 11 or fe.view.character.base != [26, 37, 24, 28]:
+		printerr("model 11 did not receive the audited class 6 starting row")
+		quit(1)
+		return
 	fe.tap(CROSS)
 	for i in range(20):
 		fe.tap(RIGHT)
@@ -202,6 +219,10 @@ func run() -> void:
 	await shot("16-char-name")
 	fe.tap(DOWN)
 	fe.tap(CROSS)
+	if fe.screen() != "playing" or fe.view.character.name != "Capture" or fe.view.character.stats != [46, 37, 24, 28] or bool(fe.view.character.appearance_known) or bool(fe.view.character.skill_points_known):
+		printerr("class 6 created record does not match the audited known fields and Unknown labels")
+		quit(1)
+		return
 	print("start ", fe.start_mode, " session ", scene.session_started)
 	for _tick in range(30):
 		scene.advance_step()
@@ -256,4 +277,4 @@ func run() -> void:
 		return
 	await shot("23-save-empty-card")
 	print("captures ", saved)
-	quit(0 if saved == 24 else 1)
+	quit(0 if saved == 25 else 1)

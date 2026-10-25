@@ -52,6 +52,7 @@ inline constexpr int RECALL_LOCKOUT = 60;
 inline constexpr std::uint32_t LOCKOUT_HELD_MASK = 0xff0fffffu;
 // Character creation (docs/player.md, docs/data-tables.md 4; rig route Ran).
 inline constexpr int MODELS = 12;
+inline constexpr int CAROUSEL_POSITIONS = 13;
 inline constexpr int CLASSES = 7;
 inline constexpr int NAME_BYTES = 0x20;     // record +0x00 char[0x20]
 inline constexpr int START_GOLD = 500;      // record +0xe4, init
@@ -64,6 +65,9 @@ inline constexpr std::size_t OPTIONS_MUSIC = 0x08;
 
 // player_initNewCharacter 0x1b1d70: class from model. Throws outside 0..11.
 int class_of_model(int model);
+// Observed +8 model field of the 13 rows at 0x4fbc00. Position 0 repeats 3.
+int carousel_model(int position);
+const char *body_code_of_model(int model);
 // g_skillTreePictures class words in class order (Observed strings; that they
 // are class names is Inferred).
 const char *class_word(int class_index);
@@ -123,7 +127,11 @@ struct Character {
   std::int32_t acknowledged = START_LEVEL;
   std::int32_t stat_points = 0;  // +0xec init 0
   std::int32_t skill_points = 0; // +0xe8: init value not documented
+  bool skill_points_known = false;
   bool imported = false;
+  // The menu's reachable appearance choices and handoff bytes are Unknown.
+  // Do not represent an unobserved default as four zeroes.
+  bool appearance_known = false;
   std::string level_name; // the imported slot's level, empty for a new character
   std::array<std::int32_t, 4> stats() const;
 };
@@ -223,6 +231,7 @@ private:
   Character character_;
   bool character_ready_ = false;
   bool start_known_ = false;
+  int selected_carousel_position_ = 0;
   std::array<std::array<std::int32_t, 4>, CLASSES> start_stats_{};
   std::vector<Request> requests_;
   std::string error_;
