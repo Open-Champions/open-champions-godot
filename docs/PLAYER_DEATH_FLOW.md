@@ -23,6 +23,18 @@ The module preserves pause, cutscene, loaded-game, network peer and PvP-B
 gates and signed 16-bit timer behavior. Those gates have synthetic coverage;
 the combat World still refuses network, cutscene and PvP execution.
 
+The campaign binding explicitly refuses nonzero offline controller-out
+(0x4f6708) or warm-up (0x506048) state before writing the wipe timer or menu
+lockout or scheduling. It does not substitute the pause word for the complete
+offline freeze service: task-name queries and their early player-selection
+exception are not bound. This restricted campaign domain does not claim that
+paused and frozen are equivalent offline. The slot countdown retains its
+separate pause gate; an unsupported freeze refusal stops the all-dead check
+before that gate. Evidence: research-death-flow `8be79eb`,
+`docs/spec/player-death-flow.md:69`, `docs/issues/draw-sim-leaks.md:188-189`
+and `docs/mainloop.md:517`. Campaign-binding synthetic tests cover pause-clear
+controller-out and warm-up at both the initial timer and the zero crossing.
+
 The campaign callback runs the death task after `runObjects` (priority 10),
 at its documented priority 20, before the frame increment and end-of-tick
 alive rebuild/check. Scheduling at that final check clears the fade and

@@ -668,7 +668,11 @@ std::string Fight::start(const PlayerStart &start) {
   }();
   p.started = true;
   player_death_flow::Services death_services;
-  death_services.frozen = [&p] { return p.read(0x41b4f4) != 0; };
+  death_services.frozen = [&p] {
+    if (p.read(0x4f6708) || p.read(0x506048))
+      throw C::Unsupported("death flow: offline controller-out/warm-up freeze unsupported; task-name freeze service is not bound");
+    return p.read(0x41b4f4) != 0;
+  };
   death_services.close_menus = [&p] {
     ++p.counts.close_menu_requests;
   };

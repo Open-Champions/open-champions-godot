@@ -1,5 +1,6 @@
 #include "champions/player_death_flow.hpp"
 #include "champions/combat.hpp"
+#include "champions/campaign_fight.hpp"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -231,10 +232,61 @@ void world_task_order() {
   check(order == std::vector<std::string>({"task", "check"}), "run-pass task precedes alive/wipe check");
   check(death.running() && death.phase() == 0 && answers.calls == std::vector<std::string>({"frozen", "close", "clear"}), "newly scheduled task must not fade in its scheduling tick");
 }
+void campaign_freeze_binding() {
+  for (unsigned freeze : {0u, 1u, 2u, 3u, 4u}) {
+    for (unsigned timer : {1u, 240u}) {
+      R::world_queries::Level level;
+      R::player_services::Bundle bundle(level);
+      auto authority = std::make_shared<R::WorldAuthority>();
+      R::campaign_fight::Fight fight(authority, {}, bundle, [] { return false; });
+      check(!fight.start({}).empty(), "synthetic campaign has no executable/player");
+      auto &world = fight.world();
+      world.write(C::NUM_PLAYERS, 4, 1);
+      world.write(0x41b4f4, 4, freeze == 3);
+      world.write(0x4f6708, 4, freeze == 1 || freeze == 4);
+      world.write(0x506048, 4, freeze == 2 || freeze == 4);
+      world.write(D::WIPE_COUNTDOWN, 2, timer);
+      world.write(D::DEAD_COUNTDOWNS, 2, timer);
+      world.write(0x41b4fc, 4, 17);
+      fight.tick(0);
+      check(!fight.failed(), "campaign tick contains unsupported death freeze");
+      if (freeze == 1 || freeze == 2 || freeze == 4) {
+        check(world.read(0x41b4f4) == 0, "offline freeze with pause clear");
+        check(fight.death_error().find("offline controller-out/warm-up freeze unsupported") != std::string::npos,
+              "actual campaign binding refuses unsupported offline freeze");
+        check(world.read(D::WIPE_COUNTDOWN, 2) == timer && world.read(0x41b4fc) == 17,
+              "refused freeze leaves wipe countdown and menu lockout unchanged");
+        check(world.read(D::DEAD_COUNTDOWNS, 2) == timer,
+              "refusal stops before the separate slot gate");
+        fight.tick(0);
+        check(world.read(D::WIPE_COUNTDOWN, 2) == timer && world.read(0x41b4fc) == 17 &&
+                  world.read(D::DEAD_COUNTDOWNS, 2) == timer,
+              "subsequent ticks preserve refused freeze state");
+      } else if (freeze == 3) {
+        check(fight.death_error().empty(), "pause remains supported");
+        check(world.read(D::WIPE_COUNTDOWN, 2) == timer && world.read(0x41b4fc) == 17,
+              "pause preserves wipe and menu lockout");
+        check(world.read(D::DEAD_COUNTDOWNS, 2) == timer, "separate slot pause gate");
+      } else {
+        check(world.read(D::WIPE_COUNTDOWN, 2) == timer - 1 && world.read(0x41b4fc) == 60,
+              "unfrozen campaign advances wipe and writes lockout");
+        if (timer > 1)
+          check(world.read(D::DEAD_COUNTDOWNS, 2) == timer - 1,
+                "unpaused slot countdown still advances");
+        else
+          check(fight.death_error().find("script HUD host unavailable") != std::string::npos,
+                "unfrozen zero crossing reaches the actual scheduling service");
+      }
+      check(!fight.death_flow().running(), "freeze never schedules a death task; missing synthetic HUD refuses clear");
+      check(fight.counts().close_menu_requests == unsigned(freeze == 0 && timer == 1),
+            "only unfrozen zero crossing closes menus for scheduling");
+    }
+  }
+}
 }
 int main() {
   try {
-    checks_all_dead(); task_phases(); refusals(); lethal_player_in_world(); world_task_order();
+    checks_all_dead(); task_phases(); refusals(); lethal_player_in_world(); world_task_order(); campaign_freeze_binding();
     std::cout << "player-death-flow: " << checks << " checks passed\n";
     return 0;
   } catch (const std::exception &error) {
