@@ -81,8 +81,14 @@ func _run() -> void:
 		hud_fnt.encode_u16(glyph[0] + 14, 0xffff)
 	var explicit: Dictionary = service.hud_text_glyphs(hud_fnt, PackedByteArray([0x33]), 73, 17, 0x80323c3c)
 	verify(explicit.get("ok", false) and explicit.glyphs.size() == 1 and explicit.glyphs[0].tint == 0x80323c3c, "HUD text uses the caller tint")
-	var defaulted = service.callv("hud_text_glyphs", [hud_fnt, PackedByteArray([0x33]), 73, 17])
-	verify(not (defaulted is Dictionary and defaulted.get("ok", false)), "FONT-1 HUD text tint is a required argument")
+	# Inspect the bound signature instead of deliberately issuing an invalid
+	# four-argument call (which prints an engine error even when this test passes).
+	var tint_method: Dictionary = {}
+	for method in service.get_method_list():
+		if method.name == "hud_text_glyphs":
+			tint_method = method
+			break
+	verify(tint_method.get("args", []).size() == 5 and tint_method.args[4].name == "tint" and tint_method.get("default_args", [null]).is_empty(), "FONT-1 HUD text tint is a required argument")
 	var view: Control = load("res://ui/original_art/hud_view.gd").new()
 	root.add_child(view)
 	view.font_bytes = hud_fnt

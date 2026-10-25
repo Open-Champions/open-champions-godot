@@ -1,0 +1,130 @@
+"""Regression checks for false-green Godot logs; no game data or engine needed."""
+
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import godot_log
+import godot_matrix
+
+
+class LogTests(unittest.TestCase):
+    def test_script_engine_and_api_diagnostics(self):
+        for message in (
+            "SCRIPT ERROR: Invalid access to property 'loaded'",
+            "ERROR: Parameter m is null.",
+            "USER ERROR: test assertion failed",
+            "Parse Error: Could not resolve class",
+            "Compile Error: Identifier not found",
+            "Shader Error: Unknown identifier",
+            '<C++ Error> Condition "!is_inside_tree()" is true.',
+            'Condition "!is_inside_tree()" is true. Returning: Transform3D()',
+            'Parameter "m" is null.',
+            "Index p_surface = 0 is out of bounds (surfaces.size() = 0).",
+            "[00:01] \x1b[31;1mSCRIPT ERROR:\x1b[0m Invalid call",
+        ):
+            with self.subTest(message=message):
+                errors = godot_log.error_lines("startup\n" + message + "\nPASS\n")
+                self.assertEqual(len(errors), 1)
+                self.assertEqual(errors[0][0], 2)
+
+    def test_normal_output_and_supported_refusals(self):
+        self.assertEqual(godot_log.error_lines(
+            'Godot Engine v4.5.2\nPASS malformed input refused\n'
+            '{"ok":false,"error":"unsupported format"}\n'
+            'WARNING: test warning\nWARNING: ObjectDB instances leaked at exit\n'
+            'SCENE_PLAY_FLOW_PASS checks=65 failures=0\n'), [])
+
+    def test_allow_list_is_full_line_and_does_not_hide_nearby_errors(self):
+        exception = ((re.compile(r"ERROR: synthetic benign diagnostic"), "test-only evidence"),)
+        with patch.object(godot_log, "ALLOW_LIST", exception):
+            self.assertEqual(godot_log.error_lines("ERROR: synthetic benign diagnostic"), [])
+            self.assertEqual(len(godot_log.error_lines(
+                "ERROR: synthetic benign diagnostic changed\nERROR: real regression")), 2)
+
+
+class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.log = self.root / "nested/godot.log"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_python(self, source, **kwargs):
+        return godot_matrix.run_logged([sys.executable, "-c", source], self.log, **kwargs)
+
+    def test_zero_exit_and_pass_marker_cannot_override_either_stream(self):
+        for stream in ("sys.stdout", "sys.stderr"):
+            for message in ("SCRIPT ERROR: Invalid call", "ERROR: mesh is null"):
+                with self.subTest(stream=stream, message=message):
+                    with self.assertRaisesRegex(ValueError, "Godot error diagnostic"):
+                        self.run_python(f"import sys; print('PASS'); print({message!r}, file={stream})",
+                                        expect=["PASS"])
+                    self.assertIn(message, self.log.read_text())
+
+    def test_clean_success_and_completion_marker(self):
+        self.assertEqual(self.run_python("print('PASS')", expect=["PASS"]), "PASS\n")
+        with self.assertRaisesRegex(ValueError, "missing completion marker"):
+            self.run_python("print('prefix PASS')", expect=["PASS"])
+
+    def test_nonzero_exit_and_timeout_are_failures(self):
+        with self.assertRaisesRegex(ValueError, "exited 7"):
+            self.run_python("raise SystemExit(7)")
+        with self.assertRaisesRegex(ValueError, "timed out"):
+            self.run_python("import time; print('started', flush=True); time.sleep(30)", timeout=0.2)
+        self.assertIn("started", self.log.read_text())
+        self.assertIn("TIMEOUT", self.log.read_text())
+
+    def test_matrix_preserves_failure_and_continues_other_scenes(self):
+        args = argparse.Namespace(godot=Path(sys.executable), out=self.root, captures=False,
+                                  project=self.root, case=["archive_smoke", "scene_play_flow_smoke"], timeout=2)
+        def command(command, log, timeout):
+            if "archive_smoke" in str(log):
+                raise ValueError("synthetic log regression")
+        with patch.object(godot_matrix, "run_logged", side_effect=command):
+            self.assertEqual(godot_matrix.matrix(args), 1)
+        results = json.loads((self.root / "results.json").read_text())
+        self.assertEqual([row["status"] for row in results], ["FAIL", "PASS"])
+        self.assertIn("synthetic log regression", results[0]["error"])
+
+    def test_existing_log_cli_rejects_errors(self):
+        self.log.parent.mkdir()
+        self.log.write_text("PASS\nERROR: engine API misuse\n")
+        result = subprocess.run([sys.executable, str(Path(godot_matrix.__file__)), "check-log", str(self.log)],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("engine API misuse", result.stderr)
+
+    def test_private_playthrough_rejects_zero_exit_errors(self):
+        disc = self.root / "synthetic-empty-folder"
+        disc.mkdir()
+        executable = self.root / "fake-godot"
+        for diagnostic, expected in (("", 0), ("SCRIPT ERROR: Invalid call", 1)):
+            with self.subTest(diagnostic=diagnostic):
+                executable.write_text(
+                    f"#!{sys.executable}\nimport json, pathlib, sys\n"
+                    "out = pathlib.Path(next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--out=')))\n"
+                    "(out / 'result.json').write_text(json.dumps({'steps': [], 'refusals': {}}))\n"
+                    f"print({diagnostic!r}, file=sys.stderr)\n", encoding="utf-8")
+                executable.chmod(0o755)
+                output = self.root / ("clean" if not diagnostic else "errors")
+                result = subprocess.run([
+                    sys.executable, str(Path(godot_matrix.__file__).with_name("run_loop_playthrough.py")),
+                    "--godot", str(executable), "--game-folder", str(disc), "--out", str(output),
+                ], capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                summary = json.loads((output / "run-summary.json").read_text())
+                self.assertTrue(all(row["exit_code"] == 0 for row in summary["variants"].values()))
+                self.assertEqual(summary["variants"]["headless"]["log_errors"], expected)
+
+
+if __name__ == "__main__":
+    unittest.main()

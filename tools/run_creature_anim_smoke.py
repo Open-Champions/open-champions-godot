@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Stage the new opt-in extension in an isolated authored-fixture project."""
-import argparse,pathlib,shutil,subprocess
+import argparse,pathlib,shutil
+from godot_matrix import run_logged
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def main():
     parser=argparse.ArgumentParser()
@@ -24,10 +25,10 @@ def main():
         shutil.copy2(ROOT/'godot/tests'/name,project/'tests'/name)
     (project/'project.godot').write_text('config_version=5\n[application]\nconfig/name="Creature Animation Contract Smoke"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
     # The documented startup duration avoids the 4.5.2 first-import shutdown bug.
-    subprocess.run([args.godot,'--headless','--path',str(project),'--editor','--quit-after','120','--frame-delay','50'],check=True,timeout=120)
+    run_logged([args.godot,'--headless','--path',str(project),'--editor','--quit-after','120','--frame-delay','50'],project/'editor.log',timeout=120)
     script='freed_callable_smoke.gd' if args.freed else 'dispatch_smoke.gd' if args.dispatch else 'smoke.gd'
     cmd=[args.godot,'--path',str(project),'--script','res://creature_anim/'+script]
     if args.render:cmd+=['--','--render']
     else:cmd.insert(1,'--headless')
-    subprocess.run(cmd,check=True,timeout=120)
+    run_logged(cmd,project/(script+'.log'),timeout=120)
 if __name__=='__main__':main()

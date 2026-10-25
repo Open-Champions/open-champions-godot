@@ -8,9 +8,11 @@ expected number of times; the rider records' draws no longer counted as unmodell
     python3 -I tools/mounted_horsemen_real_smoke.py GODOT DISC CACHE_DIR SUMMARY.json FROM TO EXPECT_REFUSALS
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
+# Keep the documented python -I entry point while importing this checkout's gate.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from godot_matrix import run_logged
 
 godot, disc, cache, summary, first, last, expect = sys.argv[1:8]
 disc = str(Path(disc).resolve())
@@ -21,9 +23,16 @@ summary.parent.mkdir(parents=True, exist_ok=True)
 cmd = [godot, '--headless', '--path', 'godot', '--script', 'res://tests/real_data_scene.gd', '--',
        f'--game-folder={disc}', f'--cache={cache}', '--all', '--levels=0', f'--from={first}', f'--to={last}',
        '--ticks=60', f'--summary={summary}', '--scripts']
-code = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3000).returncode
-if code or not summary.exists():
-    print(json.dumps({'exit': code, 'summary_written': summary.exists(), 'ok': False}))
+try:
+    run_logged(cmd, summary.with_suffix('.godot.log'), timeout=3000)
+except (OSError, ValueError):
+    # Keep this driver's stdout counts-only; full diagnostics remain beside the
+    # private summary rather than echoing any paths or game identities.
+    print(json.dumps({'command_failed': True, 'summary_written': summary.exists(), 'ok': False}))
+    sys.exit(1)
+code = 0
+if not summary.exists():
+    print(json.dumps({'exit': code, 'summary_written': False, 'ok': False}))
     sys.exit(1)
 data = json.loads(summary.read_text())
 counts = data['counts']

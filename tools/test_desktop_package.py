@@ -216,6 +216,8 @@ class PackageTests(unittest.TestCase):
         executable = self.root / 'OpenChampions.exe'
         good = 'Archive browser checks: 23; failures: 0\n' + package.PASS_MARKER + '\n'
         for code, output, success in [(0, good, True), (1, good, False), (0, '', False),
+                                       (0, good + 'SCRIPT ERROR: Invalid access to property loaded\n', False),
+                                       (0, good + 'ERROR: Parameter m is null.\n', False),
                                        (0, 'prefix ' + package.PASS_MARKER, False),
                                        (0, package.PASS_MARKER + '\n', False)]:
             with self.subTest(code=code, output=output):
@@ -235,6 +237,7 @@ class PackageTests(unittest.TestCase):
     def test_sandbox_smoke_requires_completed_independent_checks(self):
         good = 'Open Champions session sandbox: 40 checks, 0 failures\nSESSION_SANDBOX_SMOKE_PASS\n'
         for code, output, success in ((0, good, True), (1, good, False),
+                                      (0, good + 'ERROR: engine API misuse\n', False),
                                       (0, 'SESSION_SANDBOX_SMOKE_PASS\n', False),
                                       (0, good.replace('0 failures', '1 failures'), False),
                                       (0, 'Archive browser checks: 23; failures: 0\n' + package.PASS_MARKER + '\n', False)):
@@ -255,6 +258,13 @@ class PackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'timed out'):
                 package.verify_export(self.root / 'program', self.root)
         self.assertIn('TIMEOUT', (self.root / 'exported-smoke.log').read_text())
+
+    def test_stderr_errors_fail_even_with_stdout_pass_marker(self):
+        good = 'Archive browser checks: 23; failures: 0\n' + package.PASS_MARKER + '\n'
+        result = subprocess.CompletedProcess([], 0, good, 'SCRIPT ERROR: Invalid call\n')
+        with mock.patch.object(package.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(ValueError, 'Godot error diagnostic'):
+                package.verify_export(self.root / 'program', self.root)
 
 
     def test_windows_runtime_import_audit(self):

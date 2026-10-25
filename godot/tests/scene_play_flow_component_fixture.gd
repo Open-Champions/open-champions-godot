@@ -8,6 +8,12 @@ var configured: Array = []
 var clears := 0
 var suspended := false
 var observations: Array = []
+# The shell's HUD and menu adapters also consume the art component's state.
+# Empty art is a valid unloaded component; omitting the fields violates that
+# contract when clear_art emits art_ready during a session replacement.
+var loaded: Dictionary = {}
+var catalogue: Dictionary = {}
+var hud_view = null
 func configure(first, second = null) -> void:
 	configured = [first, second]
 func show_library() -> void:

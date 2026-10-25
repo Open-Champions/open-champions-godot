@@ -84,10 +84,14 @@ func _run() -> void:
 	check(metrics.accepted and metrics.error_numerator==0 and metrics.new_palette_pixels==0,"Same native fidelity gate")
 	check(not browser.inspector.texture_fidelity(2147483647,4,original,8,8,exact.get_data(),2).accepted,"Binding refuses overflowing source dimensions")
 	var exported: String = Cache.export_input(4,4,original,2)
-	check("Cache input saved locally" in exported,"Explicit cache input export")
+	var export_ok := "Cache input saved locally" in exported
+	check(export_ok,"Explicit cache input export: " + exported)
 	var manifest_path: String = Cache.DIRECTORY.path_join(identity+".json")
-	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
-	check(manifest.key == identity and manifest.factor == 2 and manifest.model == Cache.MODEL,"Export settings")
+	# A refused export has no manifest. Keep the actual failed check and finish
+	# cleanup instead of parsing an absent file and aborting this coroutine.
+	if export_ok:
+		var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
+		check(manifest.key == identity and manifest.factor == 2 and manifest.model == Cache.MODEL,"Export settings")
 	for suffix in [".json", ".input.png"]:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(Cache.DIRECTORY.path_join(identity+suffix)))
 	var wrong := Image.create(1,1,false,Image.FORMAT_RGBA8)
