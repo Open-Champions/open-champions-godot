@@ -61,9 +61,10 @@ or item reward. Existing movement in a loaded World remains available.
 - Port the missing cutscene service and the selected object constructors,
   physical interactions, boss death/drop and quest item pickup. Enemy
   classes remain owned by port-mission2-hostiles.
-- Verify the real hub offer and consecutive physical exits with the same
-  Player, World, shared seed and save state. The existing loader's omitted
-  construction draws still prevent original-seed parity claims.
+- Verify the real hub offer, original arrival placement and consecutive
+  physical exits with the same Player, World, shared seed and save state.
+  The existing loader's omitted construction draws still prevent
+  original-seed parity claims.
 
 ## Verification entry points
 
