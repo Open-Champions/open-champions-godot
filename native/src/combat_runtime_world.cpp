@@ -707,6 +707,8 @@ void World::State::tick() {
   }
   w(0x403a08, 1, n);
   run_objects();
+  if (services.death_task)
+    services.death_task();
   // Authored ordering (audit C3-6): gold-run.md has hud_tickGold run from
   // hud_run, a run task, so its order against the object runs is not pinned;
   // it is placed after them here. hud_flush_gold is never called, and the
@@ -722,7 +724,9 @@ void World::State::tick() {
       w(PADS + k * PAD_SIZE + 0x10, 0);
     }
   alive();
-  if (u(NUM_PLAYERS) && !u(0x4f8420))
+  if (services.check_all_dead)
+    services.check_all_dead();
+  else if (u(NUM_PLAYERS) && !u(0x4f8420))
     throw Unsupported("party wipe: deathTask");
 }
 void World::State::domain() const {

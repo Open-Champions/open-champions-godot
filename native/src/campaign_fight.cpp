@@ -3,6 +3,7 @@
 #include "champions/campaign_rewards.hpp"
 #include "champions/player_state.hpp"
 #include "champions/script_items.hpp"
+#include "champions/script_effects.hpp"
 #include "champions/creature_anim/runtime.hpp"
 #include "champions/model.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
@@ -52,6 +53,8 @@ struct Fight::Impl {
   std::shared_ptr<Dispatch> dispatch = std::make_shared<Dispatch>();
   std::unique_ptr<C::World> world;
   std::unique_ptr<C::SessionAdapter> adapter;
+  std::unique_ptr<player_death_flow::Flow> death;
+  std::string death_error;
   script_commands::Host *host = nullptr;
   std::unique_ptr<campaign_actors::Runtime> actors;
   Counts counts;
@@ -76,6 +79,8 @@ struct Fight::Impl {
   creature_anim::StateId player_state = 0;
   bool player_ok = false;
   bool attack_was_held = false;
+  Raw death_clip = 0;
+  std::size_t death_animation_steps = 0;
   std::uint32_t gold_start = 0;
   std::size_t base_events = 0;
   // rewards of a kill (campaign_rewards)
@@ -227,6 +232,24 @@ struct Fight::Impl {
   // ---- services ----------------------------------------------------------
   C::Services build_services() {
     C::Services base;
+    base.death_task = [this] {
+      if (death && death_error.empty()) {
+        try { death->task_step(); }
+        catch (const C::Unsupported &e) {
+          death_error = e.what();
+          refuse(death_error);
+        }
+      }
+    };
+    base.check_all_dead = [this] {
+      if (death && death_error.empty()) {
+        try { death->check_all_dead(); }
+        catch (const C::Unsupported &e) {
+          death_error = e.what();
+          refuse(death_error);
+        }
+      }
+    };
     base.dialog_is_open = [this] { return dialog_open ? dialog_open() : false; };
     // No gate travel in this session's World (the level script owns gates).
     base.jumpgate_travel_state = [] { return Raw(0); };
@@ -283,14 +306,18 @@ struct Fight::Impl {
     auto start = services.animation_start;
     auto advance = services.animation_advance;
     services.animation_start = [this, start](Address a, Raw clip, Raw flags, Raw blend, Raw out) {
+      if (a == player && flags == 0x206 && !clip)
+        throw C::Unsupported("player death animation: model/weapon-class clip unavailable");
       if (!clip) return; // res_find returned null: anim_start ignores a null clip
       start(a, clip, flags, blend, out);
+      if (a == player && flags == 0x206) death_clip = clip;
       if (auto s = state_of(a)) store_cells(a, s);
     };
     services.animation_advance = [this, advance](Address a, Raw speed) -> Raw {
       auto s = state_of(a);
       if (s) load_cells(a, s);
       const Raw events = advance(a, speed);
+      if (a == player && read(a + 0x58c) == 4) ++death_animation_steps;
       if (s) store_cells(a, s);
       return events;
     };
@@ -640,6 +667,49 @@ std::string Fight::start(const PlayerStart &start) {
     }
   }();
   p.started = true;
+  player_death_flow::Services death_services;
+  death_services.frozen = [&p] { return p.read(0x41b4f4) != 0; };
+  death_services.close_menus = [&p] {
+    ++p.counts.close_menu_requests;
+  };
+  death_services.clear_fade = [&p] {
+    if (!p.host) throw C::Unsupported("death flow: script HUD host unavailable");
+    p.host->set_fade_level(0);
+  };
+  death_services.step_fade = [&p](Raw delta) {
+    if (!p.host) throw C::Unsupported("death flow: script HUD host unavailable");
+    script_effects::Effects effects(p.host->variables().memory);
+    effects.discarded.insert("ui_drawRect"); // renderer consumes the native fade observation
+    return effects.step_fade(delta);
+  };
+  death_services.find_act = [&p, level = start.level_name] {
+    if (!p.exe) throw C::Unsupported("death flow: save_findAct executable unavailable");
+    const auto count = std::int32_t(p.exe->word(0x4f8e7c));
+    if (count < 0 || count > 64) throw C::Unsupported("death flow: invalid act table count");
+    for (int act = 0; act < count; ++act) {
+      const auto list = p.exe->word(0x4f8e48 + 4 * act);
+      const auto rows = std::int32_t(p.exe->word(0x4f8e10 + 4 * act));
+      if (rows < 0 || rows > 256) throw C::Unsupported("death flow: invalid act row count");
+      for (int row = 0; row < rows; ++row) {
+        const auto name = p.exe->word(list + 8 * row);
+        if (name && p.exe->string(name) == level) return act;
+      }
+    }
+    return -1;
+  };
+  death_services.reload_checkpoint = [] {
+    throw C::Unsupported("save_reload refused: no valid in-memory checkpoint (complete saved player records, level, pose, quests and gates); populated world/decal restore and camera load unsupported; invalid-buffer behavior Unknown");
+  };
+  death_services.request_current_level = [] {
+    throw C::Unsupported("same-level restart refused: death level-loader/object restoration is not bound; current records must be retained and HP restored only with a valid level request");
+  };
+  p.death = std::make_unique<player_death_flow::Flow>(
+      player_death_flow::Memory{
+          [&p](Address address, unsigned size) { return p.world->read(address, size); },
+          [&p](Address address, unsigned size, std::uint64_t value) { p.world->write(address, size, value); }},
+      std::move(death_services));
+  p.death->level_enter(p.player_ok ? 1 : 0);
+  p.world->write(0x4f85b0, 4, 1);
   if (!player_error.empty()) p.refuse(player_error);
   return player_error;
 }
@@ -679,6 +749,10 @@ void Fight::tick(std::uint32_t command) {
     p.adapter->ready_tick(frame);
     p.counts.ticks += 1;
     for (const auto &event : p.world->events()) {
+      if (event.name == "player_dead") {
+        ++p.counts.player_deaths;
+        ++p.counts.close_menu_requests; // Player_processDamage closes local menus immediately
+      }
       if (event.name == "damage_apply" && event.args.size() >= 2 && event.args[1] == p.player &&
           p.player)
         p.counts.player_hits += 1;
@@ -707,6 +781,8 @@ std::string Fight::place_player(const Vec3 &position, Raw facing) {
 std::string Fight::restore_health(Raw hp) {
   auto &p = *p_;
   if (!p.player_ok) return "no player";
+  if ((p.read(p.player + 12) & 8) || p.read(p.player + 0x58c) == 4)
+    return "dead player cannot be healed in place: player_respawn/object replacement is required";
   p.world->write(p.player + 0x228, 4, hp);
   p.world->write(PLAYERS + 0xac, 4, hp);
   return {};
@@ -722,7 +798,7 @@ PlayerView Fight::player() const {
   v.present = true;
   v.position = {p.read(p.player + 0x10), p.read(p.player + 0x14), p.read(p.player + 0x18)};
   v.facing = p.read(p.player + 0x38, 2);
-  v.hp = p.read(p.player + 0x228);
+  v.hp = p.read(PLAYERS + 0xac);
   v.max_hp = p.read(PLAYERS + 0xb0);
   v.action_state = std::int32_t(p.read(p.player + 0x58c));
   v.weapon_class = std::int8_t(p.read(PLAYERS + 0x4a86, 1));
@@ -769,4 +845,43 @@ const std::map<std::string, std::size_t> &Fight::refusals() const {
   return merged;
 }
 combat_runtime::World &Fight::world() { return *p_->world; }
+const player_death_flow::Flow &Fight::death_flow() const {
+  if (!p_->death) throw C::Unsupported("death flow: fight not started");
+  return *p_->death;
+}
+const std::string &Fight::death_error() const { return p_->death_error; }
+DeathView Fight::death_view() const {
+  const auto &p = *p_;
+  DeathView out;
+  if (!p.death) return out;
+  out.running = p.death->running();
+  out.phase = p.death->phase();
+  out.wipe_countdown = unsigned(p.read(player_death_flow::WIPE_COUNTDOWN, 2));
+  out.dead_countdown = unsigned(p.read(player_death_flow::DEAD_COUNTDOWNS, 2));
+  out.fade = p.host ? p.host->fade_level() : 0;
+  out.refusal = p.death_error;
+  out.animation_started = p.death_clip != 0;
+  out.animation_steps = p.death_animation_steps;
+  if (p.death_clip && p.player_state) {
+    const auto track = p.anim->anim_find_track(p.player_state, p.token_clip.at(p.death_clip));
+    if (track) {
+      out.animation_time = p.anim->track(track).time;
+      out.animation_flags = p.anim->track(track).flags;
+    }
+  }
+  return out;
+}
+std::string Fight::diagnostic_lethal_hit() {
+  auto &p = *p_;
+  if (!p.player_ok || p.failed || p.read(p.player + 0x58c) == 4)
+    return "diagnostic lethal hit requires a living shared-World Player";
+  for (const auto &enemy : enemies()) {
+    if (enemy.dead || !lt(0, enemy.hp)) continue;
+    // The call queues damage; Player_run owns the HP change, ward check,
+    // death clip/state and alive rebuild on its next ready tick.
+    p.world->take_damage(p.player, enemy.address, 1, p.read(PLAYERS + 0xb0));
+    return {};
+  }
+  return "diagnostic lethal hit requires a live campaign enemy";
+}
 } // namespace champions::simulation::rta::campaign_fight
