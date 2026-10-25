@@ -49,16 +49,29 @@ func run() -> void:
 	check(service.press(3, 0).action == "workshop" and int(service.state().bag_count) == 2, "workshop does not change the bag")
 	service.set_page(3)
 	check(service.press(2, 0x40).action == "none" and int(service.state().stat_points) == 3, "stats page does not spend")
-	var spent: Dictionary = service.spend_stat(0)
-	check(spent.get("ok", false) and int(spent.base_stats[0]) == 11 and int(spent.stat_points) == 2, "stat handler")
 	var skill: Dictionary = service.spend_skill(0, 1)
-	check(skill.get("ok", false) and int(skill.skill_points) == 3 and int(skill.passive) == 3 and int(skill.rank_cost) == 10, "skill handler ignores displayed cost")
+	check(not skill.get("ok", false) and str(skill.get("error", "")).contains("Unknown") and int(service.state().skill_points) == 4, "unknown skill sender refuses without spending")
 	service.reset()
-	var granted: Dictionary = service.grant_level()
-	check(int(granted.level) == 6 and int(granted.skill_points) == 5 and int(granted.stat_points) == 6, "level-up point bands")
+	var thresholds := PackedInt32Array()
+	for index in range(81):
+		thresholds.append(index * 100)
+	var formulas := PackedInt32Array()
+	for class_index in range(8):
+		for word in [0, 0x3f800000, 0x3f800000, 0x40000000, 0x40400000, 0]:
+			formulas.append(word)
+	check(service.configure_levelup(thresholds, formulas).get("ok", false), "authored XP rules load")
+	var xp: Dictionary = service.give_xp(500)
+	check(xp.get("ok", false) and int(xp.levels_gained) == 1 and int(xp.level) == 6 and int(xp.experience) == 500, "exact XP threshold")
+	check(int(xp.skill_points) == 5 and int(xp.stat_points) == 6 and int(xp.max_hp) == 0x424c0000 and int(xp.max_mana) == 0x41880000, "level resource and point awards")
 	var opened: Dictionary = service.open_level_up()
 	check(int(opened.acknowledged) == 6 and int(opened.page) == 5, "opening inventory for level-up acknowledges")
-	check(service.press(2, 0x40).action == "none", "level-up page does not spend")
+	check(service.press(2, 0x40).action == "none", "level-up page does not spend as an inventory cell")
+	check(not service.press_stat(2, 3, 0x40, 0, 2999).sent, "stat timer gate")
+	var stat: Dictionary = service.press_stat(2, 3, 0x40, 0, 3000)
+	check(stat.get("ok", false) and stat.get("sent", false) and int(stat.base_stats[3]) == 14 and int(stat.stat_points) == 5, "stat row sends and spends")
+	var kill: Dictionary = service.give_kill_xp(0x42000000, 0x41f00000)
+	check(kill.get("ok", false) and int(kill.award) > 0 and int(kill.experience) == 500 + int(kill.award), "authored solo kill award reaches record")
+	check(not service.spend_skill(0, 1).get("ok", false), "skill sender stays refused")
 	service.reset()
 	service.set_scheme("circle")
 	check(int(service.state().shop_mask) == 0 and service.press(0, 0x80).action == "none" and int(service.state().gold) == 500, "circle scheme has no shop button")
@@ -72,7 +85,7 @@ func run() -> void:
 	var ids := {}
 	for gap in service.gaps().gaps:
 		ids[str(gap.id)] = true
-	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "stat-spend-input", "skill-confirm-input", "pause-frames", "memory-card-frames", "shop-choice-centre-x", "exp-threshold-table", "mana-refill-offset"]:
+	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "skill-confirm-input", "skill-spend-sender", "pause-frames", "memory-card-frames", "shop-choice-centre-x"]:
 		check(ids.has(id), "refusal " + id)
 	service.press(2, 0x40)
 	var dir := "user://menu-smoke-%d" % OS.get_process_id()

@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstring>
@@ -33,6 +34,11 @@ std::string text_of(const String &value) {
   auto utf = value.utf8();
   return utf.get_data() ? std::string(utf.get_data()) : std::string();
 }
+float display_float(std::uint32_t raw) {
+  float value;
+  std::memcpy(&value, &raw, sizeof(value));
+  return value;
+}
 
 class ChampionsMenuService : public RefCounted {
   GDCLASS(ChampionsMenuService, RefCounted)
@@ -45,8 +51,18 @@ class ChampionsMenuService : public RefCounted {
     out["stat_points"] = ledger_->stat_points();
     out["level"] = ledger_->level();
     out["acknowledged"] = ledger_->acknowledged();
+    out["experience"] = ledger_->experience();
+    out["next_xp"] = ledger_->has_xp_rules() ? ledger_->next_threshold() : 0;
+    out["xp_base"] = ledger_->has_xp_rules() ? ledger_->base_threshold() : 0;
+    out["xp_ready"] = ledger_->has_xp_rules();
     out["hp"] = int64_t(ledger_->hit_points());
     out["max_hp"] = int64_t(ledger_->max_hit_points());
+    out["mana"] = int64_t(ledger_->mana());
+    out["max_mana"] = int64_t(ledger_->max_mana());
+    out["hp_value"] = display_float(ledger_->hit_points());
+    out["max_hp_value"] = display_float(ledger_->max_hit_points());
+    out["mana_value"] = display_float(ledger_->mana());
+    out["max_mana_value"] = display_float(ledger_->max_mana());
     out["bag_count"] = ledger_->bag_count(0);
     out["equipment_index"] = ledger_->equipment_index(0);
     out["page"] = ledger_->page();
@@ -74,9 +90,11 @@ protected:
     ClassDB::bind_method(D_METHOD("set_cursor", "x", "y"), &ChampionsMenuService::set_cursor);
     ClassDB::bind_method(D_METHOD("set_page", "page"), &ChampionsMenuService::set_page);
     ClassDB::bind_method(D_METHOD("set_scheme", "name"), &ChampionsMenuService::set_scheme);
-    ClassDB::bind_method(D_METHOD("spend_stat", "stat"), &ChampionsMenuService::spend_stat);
     ClassDB::bind_method(D_METHOD("spend_skill", "is_skill", "value"), &ChampionsMenuService::spend_skill);
-    ClassDB::bind_method(D_METHOD("grant_level"), &ChampionsMenuService::grant_level);
+    ClassDB::bind_method(D_METHOD("press_stat", "screen_arg", "row", "edge", "panel_gate", "elapsed"), &ChampionsMenuService::press_stat);
+    ClassDB::bind_method(D_METHOD("give_xp", "amount"), &ChampionsMenuService::give_xp);
+    ClassDB::bind_method(D_METHOD("give_kill_xp", "creature_experience", "creature_max_hp"), &ChampionsMenuService::give_kill_xp);
+    ClassDB::bind_method(D_METHOD("configure_levelup", "thresholds", "class_formulas"), &ChampionsMenuService::configure_levelup);
     ClassDB::bind_method(D_METHOD("open_level_up"), &ChampionsMenuService::open_level_up);
     ClassDB::bind_method(D_METHOD("save_bytes"), &ChampionsMenuService::save_bytes);
     ClassDB::bind_method(D_METHOD("load_bytes", "bytes"), &ChampionsMenuService::load_bytes);
@@ -247,6 +265,16 @@ public:
       next->adopt_record(std::vector<std::uint8_t>(record.ptr(), record.ptr() + record.size()),
                          *tables, std::move(pictures),
                          [&image](std::uint32_t at) { return image.byte(at); });
+      M::XpTable xp{};
+      for (std::uint32_t i = 0; i < xp.size(); ++i)
+        xp[i] = champions::simulation::rta::items::s32(image.word(0x41b558u + 4u * i));
+      std::array<M::ClassFormula, 8> formulas{};
+      for (int i = 0; i < 7; ++i)
+        formulas[static_cast<std::size_t>(i)] = M::read_class_formula(
+            [&image](std::uint32_t at) { return image.word(at); }, i);
+      formulas[7] = M::read_class_formula(
+          [&image](std::uint32_t at) { return image.word(at); }, -1);
+      next->set_xp_rules(xp, formulas);
       ledger_ = std::move(next);
       return fill_state(success());
     } catch (const std::exception &error) {
@@ -283,9 +311,57 @@ public:
       return failure(error);
     }
   }
-  Dictionary spend_stat(int stat) {
+  Dictionary press_stat(int screen_arg, int row, int64_t edge, int panel_gate, int elapsed) {
     try {
-      ledger_->spend_stat(stat);
+      M::StatInput input;
+      input.screen_argument = screen_arg;
+      input.selected_row = row;
+      input.edge = static_cast<std::uint32_t>(edge);
+      input.confirm_mask = M::stored_mask(scheme_ == "cross" ? 1 : 0, 0x41bfbc);
+      input.panel_gate = panel_gate;
+      input.level_up_half = int(ledger_->record_word(0xec) >> 16) & 0xff;
+      input.elapsed = elapsed;
+      auto out = success();
+      out["sent"] = ledger_->press_stat(input);
+      return fill_state(out);
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
+  Dictionary give_xp(int amount) {
+    try {
+      auto out = success();
+      out["levels_gained"] = ledger_->give_xp(amount);
+      return fill_state(out);
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
+  Dictionary give_kill_xp(int64_t creature_experience, int64_t creature_max_hp) {
+    try {
+      if (creature_experience < 0 || creature_experience > 0xffffffffll ||
+          creature_max_hp < 0 || creature_max_hp > 0xffffffffll)
+        throw M::Refusal("kill XP inputs must be raw 32-bit words");
+      auto out = success();
+      out["award"] = ledger_->give_kill_xp(static_cast<std::uint32_t>(creature_experience),
+                                             static_cast<std::uint32_t>(creature_max_hp));
+      return fill_state(out);
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
+  Dictionary configure_levelup(const PackedInt32Array &thresholds,
+                               const PackedInt32Array &class_formulas) {
+    try {
+      if (thresholds.size() != 81 || class_formulas.size() != 48)
+        throw M::Refusal("authored level-up rules need 81 thresholds and 48 formula words");
+      M::XpTable xp{};
+      std::array<M::ClassFormula, 8> formulas{};
+      for (int i = 0; i < 81; ++i) xp[static_cast<std::size_t>(i)] = thresholds[i];
+      for (int i = 0; i < 48; ++i)
+        formulas[static_cast<std::size_t>(i / 6)][static_cast<std::size_t>(i % 6)] =
+            static_cast<std::uint32_t>(class_formulas[i]);
+      ledger_->set_xp_rules(xp, formulas);
       return fill_state(success());
     } catch (const std::exception &error) {
       return failure(error);
@@ -294,14 +370,6 @@ public:
   Dictionary spend_skill(int is_skill, int64_t value) {
     try {
       ledger_->spend_skill(is_skill, static_cast<std::uint32_t>(value));
-      return fill_state(success());
-    } catch (const std::exception &error) {
-      return failure(error);
-    }
-  }
-  Dictionary grant_level() {
-    try {
-      ledger_->grant_level();
       return fill_state(success());
     } catch (const std::exception &error) {
       return failure(error);

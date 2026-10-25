@@ -155,7 +155,7 @@ void layout_vectors() {
   for (const auto &gap : gaps())
     if (std::string(gap.id) == "stat-spend-input")
       saw = true;
-  expect(saw, "stat spend gap");
+  expect(!saw, "stat spend sender is now documented");
   expect(skill_points_for_level(0) == 1 && skill_points_for_level(5) == 1, "skill band 1");
   expect(skill_points_for_level(6) == 2 && skill_points_for_level(15) == 2, "skill band 2");
   expect(skill_points_for_level(16) == 3 && skill_points_for_level(25) == 3, "skill band 3");
@@ -271,9 +271,9 @@ void ledger_vectors() {
     book.spend_stat(0);
     expect(book.base_stat(0) == 11 && book.stat_points() == 2, "stat handler");
     expect(book.passive_level_at(1) == 2, "passive");
-    book.spend_skill(0, 1);
-    expect(book.skill_points() == 3 && book.passive_level_at(1) == 3, "skill handler");
-    expect(book.frame("skills").texts.at(0).text == "3 cost 10", "displayed cost");
+    reject([&] { book.spend_skill(0, 1); }, "unknown skill sender refused");
+    expect(book.skill_points() == 4 && book.passive_level_at(1) == 2, "skill points preserved");
+    expect(book.frame("skills").texts.at(0).text == "4 cost 8", "displayed cost");
   }
   {
     Ledger book;
@@ -339,6 +339,98 @@ void ledger_vectors() {
     expect(book.frame("pause").texts.empty(), "pause has no frame");
   }
 }
+
+void levelup_vectors() {
+  const auto formula = read_class_formula([](std::uint32_t at) -> std::uint32_t {
+    if (at == 0x1b6740u) return 0x3c013f80u; // authored lui r1, 0x3f80
+    if (at == 0x1b6744u) return 0x4481b800u; // authored mtc1 r1, f23
+    return 0u;
+  }, 0);
+  expect(formula[0] == 0x3f800000u && formula[1] == 0u,
+         "bounded class-chain reader keeps raw formula words");
+  XpTable table{};
+  for (int i = 0; i < 81; ++i) table[static_cast<std::size_t>(i)] = i * 100;
+  std::array<ClassFormula, 8> formulas{};
+  for (auto &row : formulas)
+    row = {0u, 0x3f800000u, 0x3f800000u, 0x40000000u, 0x40400000u, 0u};
+  Ledger book;
+  reject([&] { book.give_xp(500); }, "XP requires supplied table");
+  auto bad = table;
+  bad[6] = bad[5];
+  reject([&] { book.set_xp_rules(bad, formulas); }, "falling threshold refused");
+  book.set_xp_rules(table, formulas);
+  expect(book.next_threshold() == 500 && book.experience() == 0, "level-five threshold");
+  expect(book.give_xp(499) == 0 && book.level() == 5, "below threshold");
+  expect(book.give_xp(1) == 1 && book.level() == 6 && book.experience() == 500,
+         "exact threshold transition");
+  expect(book.acknowledged() == 4 && book.skill_points() == 5 && book.stat_points() == 6,
+         "old-level point band and pending acknowledgement");
+  expect(book.max_hit_points() == 0x424c0000u && book.hit_points() == book.max_hit_points(),
+         "class formula HP recalculation and alive refill");
+  expect(book.max_mana() == 0x41880000u && book.mana() == book.max_mana(),
+         "class formula mana recalculation and alive refill");
+  expect(book.give_xp(250) == 2 && book.level() == 8 && book.stat_points() == 12 &&
+         book.skill_points() == 9, "multi-level award repeats old-level grants");
+  book.open_level_up();
+  StatInput gate{2, 3, 3000, 0x40u, 0x40u, 0, 0};
+  auto suppressed = gate;
+  suppressed.elapsed = 2999;
+  expect(!book.press_stat(suppressed) && book.stat_points() == 12, "timer gate");
+  suppressed = gate;
+  suppressed.edge = 0x20;
+  expect(!book.press_stat(suppressed), "edge gate");
+  suppressed = gate;
+  suppressed.panel_gate = 1;
+  expect(!book.press_stat(suppressed), "panel gate");
+  suppressed = gate;
+  suppressed.screen_argument = 1;
+  expect(!book.press_stat(suppressed), "screen argument gate");
+  suppressed = gate;
+  suppressed.level_up_half = 1;
+  expect(!book.press_stat(suppressed), "level-up half gate");
+  suppressed = gate;
+  suppressed.selected_row = 4;
+  expect(!book.press_stat(suppressed), "row gate");
+  expect(book.press_stat(gate) && book.base_stat(3) == 14 && book.stat_points() == 11,
+         "row-three message spends one point");
+  expect(book.max_hit_points() == 0x42680000u, "stat spend recalculates HP maximum");
+  expect(book.give_kill_xp(0x42000000u, 0x41f00000u) == 4,
+         "solo kill formula with separate truncations");
+  expect(book.experience() == 754, "kill award enters player record");
+  reject([&] { book.give_kill_xp(0x7fc00000u, 0x41f00000u); },
+         "nonfinite kill source refused before record mutation");
+  expect(book.experience() == 754, "invalid kill source leaves XP unchanged");
+  Ledger capped_kill;
+  capped_kill.set_xp_rules(table, formulas);
+  expect(capped_kill.give_kill_xp(0x47c35000u, 0u) == 100 &&
+         capped_kill.experience() == 100,
+         "authored high kill XP is capped at the next threshold span");
+  Ledger empty;
+  Ledger::Adopted zero;
+  zero.stat_points = 0;
+  empty.adopt(zero);
+  empty.set_xp_rules(table, formulas);
+  empty.open_level_up();
+  gate.selected_row = 0;
+  expect(empty.press_stat(gate) && empty.base_stat(0) == 0 && empty.stat_points() == 0,
+         "zero balance still sends but handler does not spend");
+  expect((empty.record_word(0xec) & 0x00ff0000u) != 0 && !empty.press_stat(gate),
+         "empty points switch to skills half and suppress later stat sends");
+  Ledger ceiling;
+  Ledger::Adopted high;
+  high.level = 79;
+  high.acknowledged = 79;
+  ceiling.adopt(high);
+  ceiling.set_xp_rules(table, formulas);
+  expect(ceiling.give_xp(9000) == 1 && ceiling.level() == 80 &&
+         ceiling.experience() == 7999 && ceiling.next_threshold() == 8000,
+         "level eighty ceiling prevents an extra transition");
+  Ledger changed_equipment;
+  changed_equipment.set_xp_rules(table, formulas);
+  expect(changed_equipment.press(2, 0x40) == Action::Equip, "equipment mutation observed");
+  reject([&] { changed_equipment.give_xp(500); },
+         "level-up refuses stale effective bonuses after equipment change");
+}
 } // namespace
 
 int main() {
@@ -348,6 +440,7 @@ int main() {
   action_vectors();
   layout_vectors();
   ledger_vectors();
+  levelup_vectors();
   std::cout << "PASS menus " << checks << " checks\n";
   return 0;
 }

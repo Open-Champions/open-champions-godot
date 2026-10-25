@@ -30,7 +30,7 @@ func _run() -> void:
 		var entry: Dictionary = catalogue[id]
 		art[id] = {"image": image(int(entry.rect[2]), int(entry.rect[3]), 40 + art.size())}
 	hud.set_art(art, catalogue)
-	check(hud.textures.size() == 23, "22 bar frames and the status frame from the catalogue")
+	check(hud.textures.size() == 34, "33 bar frames and the status frame from the catalogue")
 	var value := {"hp": 50.0, "max_hp": 100.0, "mana": 30.0, "max_mana": 60.0, "pending_health": 20.0, "pending_mana": 10.0, "ready_ticks": 7}
 	hud.observe_play(value, false)
 	check(hud.records.is_empty() and hud.drawn.is_empty(), "nothing outside play")

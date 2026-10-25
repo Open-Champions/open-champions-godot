@@ -3,6 +3,8 @@
 #include "champions/items.hpp"
 
 #include <algorithm>
+#include <climits>
+#include <cmath>
 #include <cstring>
 #include <variant>
 
@@ -242,12 +244,57 @@ int skill_points_for_level(int level_before) {
   return 5;
 }
 
+int stat_sender_row(const StatInput &input) {
+  if (input.screen_argument != 2 || input.level_up_half != 0 ||
+      input.panel_gate != 0 || input.elapsed < 3000 ||
+      (input.edge & input.confirm_mask) == 0 || input.confirm_mask == 0 ||
+      input.selected_row < 0 || input.selected_row > 3)
+    return -1;
+  return input.selected_row;
+}
+
+ClassFormula read_class_formula(const std::function<std::uint32_t(std::uint32_t)> &word,
+                                int class_index) {
+  if (!word || class_index < -1 || class_index > 6)
+    throw Refusal("class formula reader needs the pinned class chain and class -1..6");
+  std::array<std::uint32_t, 32> reg{}, freg{};
+  std::uint32_t pc = 0x1b6740u, npc = pc + 4;
+  for (int step = 0; step < 400; ++step) {
+    if (pc == 0x1b694cu)
+      return {freg[23], freg[24], freg[25], freg[22], freg[20], freg[21]};
+    const auto ins = word(pc);
+    const auto op = ins >> 26, rs = (ins >> 21) & 31u, rt = (ins >> 16) & 31u;
+    const auto imm = ins & 0xffffu;
+    const auto signed_imm = static_cast<std::int32_t>(imm < 0x8000u ? imm : imm - 0x10000u);
+    std::uint32_t target = npc + 4;
+    if (ins == 0) {
+    } else if (op == 0x23u && imm == 0x50u) {
+      reg[rt] = static_cast<std::uint32_t>(class_index);
+    } else if (op == 0x0fu) {
+      reg[rt] = imm << 16;
+    } else if (op == 0x0du) {
+      reg[rt] = reg[rs] | imm;
+    } else if (op == 0x09u) {
+      reg[rt] = reg[rs] + static_cast<std::uint32_t>(signed_imm);
+    } else if (op == 0x11u && rs == 4u) {
+      freg[(ins >> 11) & 31u] = reg[rt];
+    } else if (op == 4u || op == 5u) {
+      if ((reg[rs] == reg[rt]) == (op == 4u))
+        target = pc + 4u + static_cast<std::uint32_t>(signed_imm * 4);
+    } else {
+      throw Refusal("selected executable has an unexpected class-chain instruction");
+    }
+    reg[0] = 0;
+    pc = npc;
+    npc = target;
+  }
+  throw Refusal("selected executable class chain did not terminate");
+}
+
 std::vector<Gap> gaps() {
   return {
       {"item-info-frame",
        "One category-dependent frame submission was executed; its second call site and full localized fields remain unexecuted."},
-      {"stat-spend-input",
-       "The edge bit and cursor value that reach the four stat-point sends were not executed."},
       {"skill-confirm-input",
        "The skill screen was not executed through to invmsg_sendSkillPoint. The handler spends one point and ignores the displayed cost."},
       {"pause-frames", "Pause-menu frame positions were not executed."},
@@ -264,8 +311,6 @@ std::vector<Gap> gaps() {
       {"shop-choice-centre-x", "Shop choice rows have a baseline y. Their centre x was not in the checked arguments."},
       {"workshop-body", "Mode 3 hands the cell to workshop_input. That body is not in this contract."},
       {"confirm-box-geometry", "An equipped sell opens hud_confirmBox. Its frame was not executed."},
-      {"exp-threshold-table", "Experience thresholds at 0x41b558 are not in this contract. Level award applies the documented point bands only."},
-      {"mana-refill-offset", "The mana field used by level-up refill is marked inferred, so grant_level refills hit points only."},
       {"stats-frame-origin", "The stats frame is 0x124 by 0x197. Its x and y were not recovered."},
       {"analog-cursor-step", "The pointer writes the free-cursor position. itemList_analogCursor's step was not in this contract."},
       {"menu-open-start-bit", "Opening the inventory is start-without-select. The start bit value was not in this contract."},
@@ -274,7 +319,7 @@ std::vector<Gap> gaps() {
       {"inventory-box-variants", "Only the reset zero-state 15-piece sequence is executed; other cosmetic states are refused."},
       {"inventory-localized-fields", "The original text content and modifier/gem/requirement fields are unknown."},
       {"inventory-icon-pulse", "The selected icon uses the observed frame-zero alpha; the running frame source is not wired."},
-      {"inventory-stat-input", "The stat-point edge and cursor gate are unknown."},
+      {"skill-spend-sender", "The skill screen sender conditions remain Unknown; this client refuses skill spending."},
       {"inventory-live-parity", "No original running-game pixel comparison has been made."},
       {"inventory-live-drop", "World placement and item prop construction are not wired to the imported player record."},
   };
@@ -354,6 +399,8 @@ void Ledger::seed() {
   m.w32(r + 0xb0, 0x40000000);
   for (int i = 0; i < 4; ++i)
     m.w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(10 + i));
+  for (int i = 0; i < 4; ++i)
+    m.w32(r + 0x90 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(10 + i));
   m.w32(r + BAG_COUNT, 2);
   write_item(r + BAG_ITEMS, items::A_DEFS, 1, 0);
   write_item(r + BAG_ITEMS + ITEM_SIZE, items::A_DEFS + 64, 1, 1ull << 35);
@@ -445,6 +492,7 @@ Action Ledger::press(int mode, std::uint32_t edge) {
   }
   if (action == Action::Buy) {
     machine_->shop_buy(0, addr);
+    effective_delta_valid_ = false;
     return action;
   }
   int bag = 0, index = 0;
@@ -458,14 +506,146 @@ Action Ledger::press(int mode, std::uint32_t edge) {
     machine_->drop_item(0, index, bag, cell.first, cell.second, 0, 0);
   else if (action == Action::Sell)
     machine_->shop_sell(0, index, bag, cell.first, cell.second, 0, 1);
+  if (action == Action::Equip || action == Action::Unequip ||
+      action == Action::Drop || action == Action::Sell)
+    effective_delta_valid_ = false;
   return action;
 }
 
-void Ledger::spend_stat(int stat) { machine_->on_stat_point(0, stat); }
+bool Ledger::press_stat(const StatInput &input) {
+  if (page() != 5 || machine_->u8(record() + 0xee) != 0)
+    return false;
+  const int row = stat_sender_row(input);
+  if (row < 0) return false;
+  spend_stat(row);
+  return true;
+}
+
+void Ledger::spend_stat(int stat) {
+  if (stat < 0 || stat > 3)
+    throw Refusal("the stats page sends only rows 0..3");
+  if (live_record_ && !xp_ready_)
+    throw Refusal("selected executable level-up rules were not supplied");
+  if (xp_ready_ && !effective_delta_valid_)
+    throw Refusal("equipment changed; level-up needs recalculated effective stats from the player service");
+  machine_->on_stat_point(0, stat);
+  if (xp_ready_) recalc_level_stats();
+}
 
 void Ledger::spend_skill(int is_skill, std::uint32_t value) {
-  machine_->on_skill_point(0, is_skill, static_cast<std::int64_t>(value));
+  (void)is_skill;
+  (void)value;
+  throw Refusal("skill-screen sender conditions are Unknown; skill spending refused");
 }
+
+void Ledger::set_xp_rules(XpTable table, std::array<ClassFormula, 8> formulas) {
+  if (table[0] < 0 || table[80] <= table[79])
+    throw Refusal("experience table has an invalid boundary");
+  for (std::size_t i = 1; i < table.size(); ++i)
+    if (table[i] <= table[i - 1])
+      throw Refusal("experience table thresholds must rise");
+  xp_table_ = table;
+  formulas_ = formulas;
+  xp_ready_ = true;
+}
+
+void Ledger::recalc_level_stats() {
+  const auto r = record();
+  const int cls = machine_->s32(r + 0x50);
+  const auto &f = formulas_[cls >= 0 && cls < 7 ? cls : 7];
+  std::array<std::uint32_t, 4> effective{};
+  for (int i = 0; i < 4; ++i) {
+    const auto base = machine_->s32(r + 0x78 + 4u * static_cast<std::uint32_t>(i));
+    const auto value = static_cast<std::int64_t>(base) + effective_delta_[i];
+    if (value < 0 || value > INT32_MAX)
+      throw Refusal("effective stat is outside the supported level-up arithmetic");
+    effective[i] = static_cast<std::uint32_t>(value);
+    machine_->w32(r + 0x90 + 4u * static_cast<std::uint32_t>(i), effective[i]);
+  }
+  const auto level = items::fint(static_cast<std::uint32_t>(this->level()));
+  const auto max_mana = items::fadd(
+      items::fmul(items::fsub(items::fint(effective[1]), f[0]), f[1]),
+      items::fmul(level, f[2]));
+  const auto max_hp = items::fsub(
+      items::fadd(items::fmul(level, f[3]), items::fmul(items::fint(effective[3]), f[4])), f[5]);
+  machine_->w32(r + 0xc4, max_mana);
+  machine_->w32(r + 0xb0, max_hp);
+  if (items::flt(max_mana, machine_->u32(r + 0xc0))) machine_->w32(r + 0xc0, max_mana);
+  if (items::flt(max_hp, machine_->u32(r + 0xac))) machine_->w32(r + 0xac, max_hp);
+}
+
+int Ledger::give_xp(std::int32_t amount) {
+  if (!xp_ready_) throw Refusal("selected executable experience table and class formulas are required");
+  if (!effective_delta_valid_)
+    throw Refusal("equipment changed; level-up needs recalculated effective stats from the player service");
+  const auto r = record();
+  const auto added = items::s32(static_cast<std::uint32_t>(experience()) + static_cast<std::uint32_t>(amount));
+  const auto exp = std::min(added, static_cast<std::int32_t>(xp_table_[80] - 1));
+  machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
+  int gained = 0;
+  while (level() >= 1 && level() < 80 && exp >= xp_table_[static_cast<std::size_t>(level())]) {
+    const auto prior = level();
+    machine_->w32(r + 0xe8, static_cast<std::uint32_t>(skill_points()) +
+                              static_cast<std::uint32_t>(skill_points_for_level(prior)));
+    machine_->w8(r + 0xec, machine_->u8(r + 0xec) + 3u);
+    machine_->w8(r + 0x59, static_cast<std::uint32_t>(prior + 1));
+    recalc_level_stats();
+    if (items::flt(0, machine_->u32(r + 0xac))) {
+      machine_->w32(r + 0xac, machine_->u32(r + 0xb0));
+      machine_->w32(r + 0xc0, machine_->u32(r + 0xc4));
+    }
+    ++gained;
+  }
+  return gained;
+}
+
+std::int32_t Ledger::give_kill_xp(std::uint32_t creature_experience,
+                                  std::uint32_t creature_max_hp) {
+  if (!xp_ready_) throw Refusal("selected executable experience table and class formulas are required");
+  float experience_float = 0.f, hp_float = 0.f;
+  std::memcpy(&experience_float, &creature_experience, sizeof(float));
+  std::memcpy(&hp_float, &creature_max_hp, sizeof(float));
+  if (!std::isfinite(experience_float) || experience_float < 0.f ||
+      !std::isfinite(hp_float) || hp_float < 0.f)
+    throw Refusal("kill XP inputs must be nonnegative finite float words");
+  if (!items::flt(0, machine_->u32(record() + 0xac))) return 0;
+  const int earned = level();
+  if (earned < 1 || earned > 80) throw Refusal("earned level is outside kill-XP cap table");
+  const auto quotient = items::fdiv(creature_experience,
+                                    items::fint(static_cast<std::uint32_t>(earned)));
+  const auto raw = items::ftrunc(items::powf(quotient, 0x3fb33333u));
+  const auto scaled = items::ftrunc(items::fmul(items::fint(static_cast<std::uint32_t>(raw)),
+                                                   0x3f400000u));
+  const auto cap = earned < 80 ? xp_table_[static_cast<std::size_t>(earned + 1)] -
+                                    xp_table_[static_cast<std::size_t>(earned)]
+                               : xp_table_[80];
+  const auto award = std::min(scaled, cap);
+  give_xp(award);
+  if (machine_->s32(record() + 0x50) == 0) {
+    const auto restored = items::fadd(machine_->u32(record() + 0xc0),
+                                      items::fmul(creature_max_hp, 0x3d088888u));
+    machine_->w32(record() + 0xc0,
+                  items::flt(machine_->u32(record() + 0xc4), restored)
+                      ? machine_->u32(record() + 0xc4) : restored);
+  }
+  return award;
+}
+
+std::int32_t Ledger::experience() const { return machine_->s32(record() + 0x5c); }
+std::int32_t Ledger::next_threshold() const {
+  if (!xp_ready_) throw Refusal("selected executable experience table is required");
+  const auto index = level();
+  if (index < 1 || index > 80) throw Refusal("earned level is outside experience table");
+  return xp_table_[static_cast<std::size_t>(index)];
+}
+std::int32_t Ledger::base_threshold() const {
+  if (!xp_ready_) throw Refusal("selected executable experience table is required");
+  const auto index = level();
+  if (index < 1 || index > 80) throw Refusal("earned level is outside experience table");
+  return xp_table_[static_cast<std::size_t>(index - 1)];
+}
+std::uint32_t Ledger::mana() const { return machine_->u32(record() + 0xc0); }
+std::uint32_t Ledger::max_mana() const { return machine_->u32(record() + 0xc4); }
 
 void Ledger::grant_level() {
   const auto r = record();
@@ -685,6 +865,10 @@ void Ledger::adopt(const Adopted &c) {
   machine_->w32(r + 0x5c, static_cast<std::uint32_t>(c.experience));
   for (int i = 0; i < 4; ++i)
     machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(c.stats[i]));
+  for (int i = 0; i < 4; ++i)
+    machine_->w32(r + 0x90 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(c.stats[i]));
+  effective_delta_.fill(0);
+  effective_delta_valid_ = true;
 }
 
 void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables tables,
@@ -723,6 +907,14 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
   for (std::uint32_t i = 0; i < CLASS_STRIDE * 7u; ++i)
     machine_->w8(CLASS_ROW + i, image_byte(CLASS_ROW + i));
   for (std::uint32_t i = 0; i < bytes.size(); ++i) machine_->w8(record() + i, bytes[i]);
+  for (int i = 0; i < 4; ++i) {
+    const auto delta = static_cast<std::int64_t>(items::s32(word(0x90 + 4u * static_cast<std::size_t>(i)))) -
+                       items::s32(word(0x78 + 4u * static_cast<std::size_t>(i)));
+    if (delta < INT32_MIN || delta > INT32_MAX)
+      throw Refusal("imported effective-stat offset is outside signed 32-bit range");
+    effective_delta_[i] = static_cast<std::int32_t>(delta);
+  }
+  effective_delta_valid_ = true;
   dragging_ = 0;
   drag_cell_ = 0;
   live_record_ = true;
@@ -839,6 +1031,10 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
   for (int i = 0; i < 4; ++i)
     machine_->w32(r + 0x78 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(bases[i]));
+  for (int i = 0; i < 4; ++i)
+    machine_->w32(r + 0x90 + static_cast<std::uint32_t>(i) * 4, static_cast<std::uint32_t>(bases[i]));
+  effective_delta_.fill(0);
+  effective_delta_valid_ = true;
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
   live_record_ = false;

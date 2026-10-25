@@ -57,10 +57,11 @@ func observe(value: Dictionary) -> void:
 	var health_ok := valid_bar(value, "hp", "max_hp")
 	var mana_ok := valid_bar(value, "mana", "max_mana")
 	var origins: Dictionary = layout_service.hud_origins(false, PackedInt32Array([0]), 1)
-	# Slot zero is this authored offline singleton view. Unknown experience,
-	# cooldown and flash gates are not submitted. Neutral inputs only obtain
+	# Slot zero is this authored offline singleton view. The player record may
+	# supply the documented XP interval; cooldown and flash gates are absent. Neutral inputs only obtain
 	# unaffected geometry when a bar is absent; that bar is discarded below.
-	var result: Dictionary = layout_service.hud_base_layers(origins.origins[0], int(value.get("ready_ticks", 0)), value.hp if health_ok else 0.0, value.max_hp if health_ok else 1.0, value.mana if mana_ok else 0.0, value.max_mana if mana_ok else 1.0, 0, 0, 1, 0, true, 0, false)
+	var xp_ok := typeof(value.get("experience")) == TYPE_INT and typeof(value.get("experience_base")) == TYPE_INT and typeof(value.get("experience_next")) == TYPE_INT and typeof(value.get("acknowledged_level")) == TYPE_INT and int(value.experience_next) > int(value.experience_base) and int(value.acknowledged_level) > 0
+	var result: Dictionary = layout_service.hud_base_layers(origins.origins[0], int(value.get("ready_ticks", 0)), value.hp if health_ok else 0.0, value.max_hp if health_ok else 1.0, value.mana if mana_ok else 0.0, value.max_mana if mana_ok else 1.0, int(value.experience) if xp_ok else 0, int(value.experience_base) if xp_ok else 0, int(value.experience_next) if xp_ok else 1, int(value.acknowledged_level) if xp_ok else 0, true, 0, false)
 	if not result.get("ok", false):
 		error = str(result.get("error", "HUD layout refused."))
 		queue_redraw()

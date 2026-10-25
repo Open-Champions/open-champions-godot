@@ -285,7 +285,7 @@ func refresh_capabilities() -> void:
 func _update_menu() -> void:
 	if menu == null:
 		return
-	mode_label.text = "Play mode · authored dry movement; original game progression and combat are unimplemented." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
+	mode_label.text = "Play mode · authored dry movement; imported XP and stat spending are available; live campaign combat remains unavailable." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
 	var combat: bool = raw_observation.get("combat_enabled", false)
 	animated_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("animated_fixture_available", false)
 	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
@@ -490,6 +490,24 @@ func load_session_file(path: String) -> bool:
 		status_label.text = "Load refused: %s. Current session retained; choose a valid native save." % status_label.text
 	return ok
 
+func refresh_menu_hud() -> void:
+	if play_hud == null:
+		return
+	var observation: Dictionary = raw_observation.duplicate()
+	if game_menus != null and game_menus.service != null:
+		var record: Dictionary = game_menus.service.state()
+		if record.get("ok", false) and record.get("xp_ready", false):
+			observation["experience"] = int(record.experience)
+			observation["experience_base"] = int(record.xp_base)
+			observation["experience_next"] = int(record.next_xp)
+			observation["level"] = int(record.level)
+			observation["acknowledged_level"] = int(record.acknowledged)
+			observation["hp"] = float(record.hp_value)
+			observation["mana"] = float(record.mana_value)
+			observation["max_hp"] = float(record.max_hp_value)
+			observation["max_mana"] = float(record.max_mana_value)
+	play_hud.observe_play(observation, play_mode)
+
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	_present_combat()
@@ -509,7 +527,7 @@ func _observe(result: Dictionary) -> void:
 	if menu != null and stopped and flow == Flow.RUNNING:
 		_show_menu(Flow.PAUSED)
 	if play_hud != null:
-		play_hud.observe_play(raw_observation, play_mode)
+		refresh_menu_hud()
 	if hud_round3 != null:
 		hud_round3.observe(raw_observation, play_mode)
 	if game_menus != null and components.has("art"):

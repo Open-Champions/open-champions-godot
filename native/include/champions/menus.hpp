@@ -4,6 +4,7 @@
 #include "champions/inventory_icon_assoc.hpp"
 
 #include <cstdint>
+#include <array>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -150,9 +151,22 @@ struct Hit {
 Hit hit_cell(int panel_x, int column, int row, int tex_height = 0, int scroll = 0);
 
 // Skill points added when a level is gained, from the level before the gain.
-// +3 stat points is separate. The experience thresholds at 0x41b558 are not in
-// this contract.
+// +3 stat points is separate. The 81 experience thresholds are supplied from
+// the selected executable or an authored synthetic fixture.
 int skill_points_for_level(int level_before);
+
+// The screen receives the already evaluated timing expression from its owner.
+// A zero balance still sends; inventory message 6 checks the balance.
+struct StatInput {
+  int screen_argument = 0, selected_row = -1, elapsed = 0;
+  std::uint32_t edge = 0, confirm_mask = 0;
+  int panel_gate = 0, level_up_half = 0;
+};
+int stat_sender_row(const StatInput &input);
+using XpTable = std::array<std::int32_t, 81>;
+using ClassFormula = std::array<std::uint32_t, 6>;
+ClassFormula read_class_formula(const std::function<std::uint32_t(std::uint32_t)> &word,
+                                int class_index);
 
 struct Gap {
   const char *id;
@@ -217,11 +231,24 @@ public:
   // Page 3, 4 and 5 draw the stats sheet and do not take a cell.
   Action press(int mode, std::uint32_t edge);
 
-  // Handlers. The stat and skill screens' pad bits were not executed, so the
-  // play scene does not bind these to a button.
+  // Stat sender is owner-local and checks the researched screen gate.
+  bool press_stat(const StatInput &input);
+  // Message handlers remain separately callable for synthetic verification.
   void spend_stat(int stat);
   void spend_skill(int is_skill, std::uint32_t value);
   void grant_level();
+  void set_xp_rules(XpTable table, std::array<ClassFormula, 8> formulas);
+  int give_xp(std::int32_t amount);
+  // Solo live-record recipient. Multiplayer sharing and orb draws remain in
+  // combat::kill_experience; the future enemy adapter supplies these raw floats.
+  std::int32_t give_kill_xp(std::uint32_t creature_experience,
+                           std::uint32_t creature_max_hp);
+  std::int32_t experience() const;
+  std::int32_t next_threshold() const;
+  std::int32_t base_threshold() const;
+  bool has_xp_rules() const { return xp_ready_; }
+  std::uint32_t mana() const;
+  std::uint32_t max_mana() const;
   void open_level_up();
 
   std::int32_t gold() const;
@@ -276,6 +303,11 @@ private:
   std::uint32_t drag_cell_ = 0;
   int drag_column_ = 0, drag_row_ = 0;
   bool live_record_ = false;
+  bool xp_ready_ = false;
+  XpTable xp_table_{};
+  std::array<ClassFormula, 8> formulas_{};
+  std::array<std::int32_t, 4> effective_delta_{};
+  bool effective_delta_valid_ = true;
   std::uint32_t stock_addr_ = STOCK;
 
   std::uint32_t record() const { return PLAYER; }
@@ -285,6 +317,7 @@ private:
   Counts counts() const;
   std::uint32_t cell_address(int mode, int column, int row) const;
   bool bag_index(std::uint32_t addr, int &bag, int &index) const;
+  void recalc_level_stats();
 };
 
 } // namespace champions::menus
