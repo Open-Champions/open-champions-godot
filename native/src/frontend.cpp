@@ -791,7 +791,7 @@ std::vector<Entry> Flow::entries() const {
     break;
   case Screen::CharAppearance:
     out.push_back(entry("continue", "Continue (default route)", "one default route Ran; menu choices Unknown"));
-    for (const char *field : {"Hair style", "Hair colour", "Beard style", "Beard colour"})
+    for (const char *field : {"Hair style", "Hair/beard colour", "Beard style", "Body skin variant"})
       out.push_back(entry("unknown", std::string(field) + " (Unknown)", "record appearance field Observed; menu choice Unknown", false,
                           "reachable choice and selected value are not established"));
     break;
