@@ -146,8 +146,11 @@ Address World::give_skill(int id, const SkillSetup &v) {
   s.skill_objects[id] = skill;
   return skill;
 }
-void World::select_disease_bolt(unsigned slot, Raw mana, Raw max_mana) {
+void World::select_disease_bolt(unsigned slot, Raw mana, Raw max_mana,
+                                unsigned rank) {
   require_full(*s_);
+  if (rank < 1 || rank > 20)
+    throw Unsupported("Disease Bolt rank needs a probed player rank 1 to 20");
   if (slot >= 4 || !lt(0, mana) || !le(mana, max_mana) ||
       (mana & 0x7f800000u) == 0x7f800000u ||
       (max_mana & 0x7f800000u) == 0x7f800000u)
@@ -185,12 +188,12 @@ void World::select_disease_bolt(unsigned slot, Raw mana, Raw max_mana) {
     s.poke(0x535e30 + k, 1, std::uint8_t(name[k]));
   }
   s.poke(r + 0x4440 + 0x20, 2, 4);
-  s.poke(r + 0x4440 + 0x24, 1, 1);
+  s.poke(r + 0x4440 + 0x24, 1, rank);
   s.poke(r + 0x4440 + 0x25, 1, 0);
   s.poke(r + 0x4a84, 1, 0);
   s.poke(r + 0x4a60, 2, 0);
   s.poke(r + 0x4b08, 2, 4);
-  s.poke(r + 0x4b0a, 2, 1);
+  s.poke(r + 0x4b0a, 2, rank);
   s.poke(r + 0x4b0c, 2, 0xffff);
   s.poke(r + 0xc0, 4, mana);
   s.poke(r + 0xc4, 4, max_mana);

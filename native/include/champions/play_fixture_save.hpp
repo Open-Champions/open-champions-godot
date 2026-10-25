@@ -81,7 +81,7 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike();
-  void select_disease_bolt();
+  void select_disease_bolt(unsigned rank = 1);
   void press_disease_bolt(bool held);
   void release_disease_bolt();
   // Wave-12 Full-fixture extensions (combat_play::Session).

@@ -39,7 +39,42 @@ func _initialize() -> void:
 	if not (admitted and spawned and paid and hit and hp_lost):
 		_fail("admission/mana/spawn/hit/damage: %s/%s/%s/%s/%s" % [admitted, spawned, paid, hit, hp_lost])
 		return
-	print("PLAY_SPELLS_SMOKE PASS: mana, spawn, fixture hit")
+	# Exercise the new rank argument through the GDExtension binding as well as
+	# the native exact-bit test. These are separate authored Full fixtures.
+	var ranked := ChampionsSessionController.new()
+	if not ranked.set_effect_recipe_constants_json(recipe, "synthetic spell smoke").get("ok", false):
+		_fail("ranked effect recipe setup")
+		return
+	if not ranked.start_play_session(true, false, false, true).get("ok", false):
+		_fail("ranked Full fixture startup")
+		return
+	var chosen: Dictionary = ranked.combat_select_disease_bolt(2)
+	if not chosen.get("ok", false) or not chosen.get("combat_spell_selected", false):
+		_fail("rank-2 selection")
+		return
+	var ranked_mana: int = int(chosen.get("combat_mana_raw", -1))
+	ranked.advance(0)
+	ranked.combat_press_disease_bolt(true)
+	var ranked_spawned := false
+	var ranked_hit := false
+	for tick in range(50):
+		var state: Dictionary = ranked.advance(0)
+		var events: Array = state.get("combat_tick_events", [])
+		if "diseasebolt_spawn" in events:
+			ranked_spawned = true
+			ranked.combat_release_disease_bolt()
+			if int(state.get("combat_mana_raw", ranked_mana)) >= ranked_mana:
+				_fail("rank-2 mana was not debited")
+				return
+		ranked_hit = ranked_hit or "diseasebolt_hit" in events
+		if ranked_hit: break
+		if state.get("failed", false):
+			_fail("rank-2 cast refused before hit: " + str(state.get("error", "")))
+			return
+	if not (ranked_spawned and ranked_hit):
+		_fail("rank-2 spawn/hit: %s/%s" % [ranked_spawned, ranked_hit])
+		return
+	print("PLAY_SPELLS_SMOKE PASS: rank-1 and rank-2 fixture casts")
 	quit(0)
 
 func _fail(message: String) -> void:

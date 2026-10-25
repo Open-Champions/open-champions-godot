@@ -455,14 +455,14 @@ void Session::cast_holy_strike() {
   if (!s_->world->target(s_->handles[0])) throw C::Error("player handle expired");
   s_->cast_pending = true;
 }
-void Session::select_disease_bolt() {
+void Session::select_disease_bolt(unsigned rank) {
   if (!full()) throw C::Unsupported("Disease Bolt selection needs the Full combat fixture");
   if (s_->status.stopped || s_->disease_selected)
     throw C::Unsupported("Disease Bolt selection is unavailable or already made");
   if (!s_->world->target(s_->handles[0])) throw C::Error("player handle expired");
   // Authored synthetic fixture resource, like the Full fixture's HP. This is
   // not a new-character current mana claim and is never used on a campaign.
-  s_->world->select_disease_bolt(0, from_int(100), from_int(100));
+  s_->world->select_disease_bolt(0, from_int(100), from_int(100), rank);
   s_->disease_selected = true;
 }
 void Session::press_disease_bolt(bool held) {

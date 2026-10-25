@@ -491,11 +491,12 @@ Value World::State::skill_virtual(Address skill, unsigned slot,
     break;
   }
   if (slot == 5 && fn == DISEASEBOLT_COST) {
-    // Level 1 is exactly the documented base. The float32 step for higher
-    // ranks is not given as bits by the audited contract.
-    if (ar(0) != 1)
-      throw Unsupported("Disease Bolt cost above rank 1 needs observed float bits");
-    return iv(from_int(9));
+    // SkillDiseaseBolt_manaCost 0x2cb33c. The documented step 2.0000129...
+    // is float32 0x40000036. Keep the PS2 model's separate mul and add:
+    // IEEE host arithmetic gives different low bits at ranks 2, 5 and 20.
+    if (ar(0) < 1 || ar(0) > 20)
+      throw Unsupported("Disease Bolt cost outside probed player ranks 1..20");
+    return iv(add(from_int(9), mul(from_int(ar(0) - 1), 0x40000036)));
   }
   if (slot != 2)
     throw Unsupported("Skill slot " + std::to_string(slot) + " reaches " +
@@ -1063,8 +1064,8 @@ Vec3 World::State::spell_ball(Address spell) {
 // refused because the audited research does not include its destructor.
 Raw World::State::diseasebolt_cast(Address skill, Raw level, Address caster,
                                    const Vec3 &pos, Raw facing) {
-  if (level != 1)
-    throw Unsupported("Disease Bolt rank above 1 needs exact cost evidence");
+  if (level < 1 || level > 20)
+    throw Unsupported("Disease Bolt cast outside probed player ranks 1..20");
   if (!caster || !(u(caster + 12) & 0x40))
     throw Unsupported("Disease Bolt nonplayer statistics are not installed in this fixture");
   for (unsigned i = 0; i < 3; ++i)

@@ -68,7 +68,7 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike(); // made in the player's next run (World::queue_cast)
-  void select_disease_bolt(); // authored rank-1 Full-fixture quick-slot A
+  void select_disease_bolt(unsigned rank = 1); // authored Full-fixture quick-slot A
   void press_disease_bolt(bool held = true); // original Player_run pad path
   void release_disease_bolt();
   // ---- Wave-12 client extensions of the Full fixture (authored set-up) ----
