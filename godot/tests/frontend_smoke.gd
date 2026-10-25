@@ -142,6 +142,29 @@ func run() -> void:
 	check(not fe.scene_view.draws.any(func(d): return d.resource == "title.tex"), "options has no title sprite")
 	var value_x: Array = fe.scene_view.draws.filter(func(d): return d.kind == "text" and str(d.role).begins_with("list row") and d.x == 297)
 	check(value_x.size() == 3, "three value rows at x=297")
+	check(fe.view.entries[0].id == "menu_bright" and fe.view.entries[2].id == "menu_sfx" and fe.view.entries[12].id == "menu_markers", "documented option keys and order")
+	tap(DOWN)
+	var effects_before := int(fe.view.entries[2].value)
+	fe.log_lines.clear()
+	frames(RIGHT, 12)
+	var effects_live := int(fe.view.entries[2].value)
+	check(effects_live > effects_before and "apply_effects_volume" in kinds(), "effects slider drives native mixer")
+	tap(DOWN)
+	check(not fe.view.entries[3].enabled, "unverified controls screen refused")
+	tap(DOWN)
+	var camera_before := int(fe.view.entries[4].value)
+	tap(CROSS)
+	var camera_live := int(fe.view.entries[4].value)
+	check(camera_live == (0 if camera_before != 0 else 1), "combat camera accept toggles")
+	for i in range(3):
+		tap(DOWN)
+	fe.log_lines.clear()
+	var stereo_before := int(fe.view.entries[7].value)
+	tap(CROSS)
+	var stereo_live := int(fe.view.entries[7].value)
+	check(stereo_live == (0 if stereo_before != 0 else 1) and "apply_stereo" in kinds(), "stereo toggle reaches native mixer")
+	for i in range(6):
+		tap(UP)
 	var before := int(fe.view.music_live)
 	fe.log_lines.clear()
 	frames(RIGHT, 12)
@@ -150,9 +173,12 @@ func run() -> void:
 	frames(0, 1)
 	var live := int(fe.view.music_live)
 	tap(CIRCLE)
+	check(fe.screen() == "options-save" and int(fe.view.state) == 14, "changed options enter state-14 save choice")
+	tap(CROSS)
 	check(fe.screen() == "main", "circle leaves options")
 	var image := FileAccess.get_file_as_bytes(fe.options_path)
 	check(image.decode_u32(8) == live, "committed music in the image file")
+	check(image.decode_u32(0x0c) == effects_live and image.decode_u32(0x2c) == camera_live and image.decode_u32(0x10) == stereo_live, "effects, camera and stereo survive user image write")
 	check(scene.audio.music_volume_bits == live, "mixer volume is the flow's word")
 	tap(CROSS)
 	tap(TRIANGLE)
@@ -229,6 +255,8 @@ func run() -> void:
 	tap(DOWN)
 	tap(CROSS)
 	check(fe.screen() == "options", "pause options")
+	check(fe.view.entries.size() == 14 and fe.view.entries[13].id == "menu_comm" and not fe.view.entries[13].enabled, "pause list has unknown communications destination")
+	check(fe.scene_view.draws.any(func(d): return d.kind == "frame" and d.x == 214 and d.y == 69 and d.h == 342), "pause option frame geometry")
 	fe.log_lines.clear()
 	frames(LEFT, 8)
 	check(fe.log_lines.any(func(l): return str(l).begins_with("preview_music mx_main_l.vag")), "pause slider previews mx_main_l.vag")
@@ -310,7 +338,7 @@ func run() -> void:
 	# Per-screen layout: documented where the research has it, host-labelled where Unknown.
 	for name in ["soe-logo", "main", "game-type", "players", "mode", "difficulty", "options", "pause", "char-ability", "char-name"]:
 		check(layouts.has(name), "layout seen for " + name)
-	for name in ["intro-movie", "char-class", "char-appearance", "credits", "load-game", "options-load"]:
+	for name in ["intro-movie", "char-class", "char-appearance", "credits", "load-game", "options-load", "options-save"]:
 		if layouts.has(name):
 			check(bool(layouts[name].host_layout) and not str(layouts[name].host_label).is_empty(), name + " is a labelled host layout")
 	if layouts.has("soe-logo"):
@@ -347,7 +375,12 @@ func run() -> void:
 	tap(CROSS)
 	tap(CROSS)
 	check(fe.screen() == "main" and not ("front_end_music" in kinds()) and int(fe.view.gated_music) == 1, "volume 0 queues no first theme")
-	for name in ["boot-card", "soe-logo", "intro-movie", "main", "game-type", "players", "mode", "difficulty", "options", "options-load", "credits", "load-game", "save-game", "saved", "char-class", "char-appearance", "char-ability", "char-name", "playing", "pause", "exit-confirm"]:
+	tap(DOWN)
+	tap(DOWN)
+	tap(CROSS)
+	check(fe.screen() == "options" and int(fe.view.entries[2].value) == effects_live and int(fe.view.entries[4].value) == camera_live and int(fe.view.entries[7].value) == stereo_live, "saved options round-trip through user image and native boot")
+	tap(CIRCLE)
+	for name in ["boot-card", "soe-logo", "intro-movie", "main", "game-type", "players", "mode", "difficulty", "options", "options-save", "options-load", "credits", "load-game", "save-game", "saved", "char-class", "char-appearance", "char-ability", "char-name", "playing", "pause", "exit-confirm"]:
 		check(visited.has(name) or name in ["boot-card", "soe-logo", "intro-movie"], "visited " + name)
 	_cleanup()
 	print("FRONTEND_SMOKE checks=%d failures=%d screens=%d" % [checks, failures, visited.size()])

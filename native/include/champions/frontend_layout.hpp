@@ -109,6 +109,7 @@ ListSpec players_list();    // 0x4f6de8, state 2
 ListSpec difficulty_list(); // 0x4f6e38, state 3
 ListSpec mode_list();       // 0x4f6c68, state 4
 ListSpec options_list();    // 0x4f6e88, state 11, origin y 238
+ListSpec pause_options_list(); // 0x44f218, state 5, origin y 240
 ListSpec pause_list();      // 0x44f3b8 normal offline table, five enabled rows, origin y 240
 
 std::array<Draw, 2> logo_sprites();    // splash_soeLogo 0x321640

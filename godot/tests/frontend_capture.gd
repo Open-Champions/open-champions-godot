@@ -33,6 +33,16 @@ func shot(label: String) -> void:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	var image: Image = root.get_texture().get_image()
+	if image != null and label in ["05-options", "19-pause-options"]:
+		var filled_pixels := 0
+		for y in range(175, 320, 2):
+			for x in range(705, 830, 2):
+				var colour := image.get_pixel(x, y)
+				if colour.r > 0.55 and colour.g > 0.45 and colour.b < 0.55:
+					filled_pixels += 1
+		if filled_pixels < 100:
+			printerr("rendered option slider fills absent: ", label)
+			return
 	if image != null and label in ["08-load-game", "08a-load-card-synthetic", "21-save-game", "22-save-card-synthetic", "23-save-empty-card"]:
 		var frame_colour := image.get_pixel(500, 350)
 		if maxf(frame_colour.r, maxf(frame_colour.g, frame_colour.b)) < 0.08 or bright_pixels(image, Rect2i(300, 730, 680, 140), 4) < 100:
@@ -160,6 +170,7 @@ func run() -> void:
 	await shot("06-options-load")
 	fe.tap(CIRCLE)
 	fe.tap(CIRCLE)
+	fe.tap(CROSS) # state-14 save choice; host modal art is unverified
 	fe.tap(DOWN)
 	fe.tap(CROSS)
 	await shot("07-credits")

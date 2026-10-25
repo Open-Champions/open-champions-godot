@@ -61,6 +61,15 @@ inline constexpr std::uint32_t CLASS_START_STATS = 0x4ef400; // 7 rows x 4 s32
 // Options image g_savedConfig 0x4f8f38 (docs/save-format.md).
 inline constexpr std::size_t OPTIONS_BYTES = 0x2f8;
 inline constexpr std::size_t OPTIONS_MUSIC = 0x08;
+// research-options-menu 603b2b7: row order, kind and saved-config offsets.
+// Row 3 is an action; pause adds the unimplemented communications action.
+struct OptionRow {
+  const char *key;
+  const char *label; // Host English text; localized resource pixels remain Unknown.
+  int kind;
+  std::size_t offset;
+};
+extern const std::array<OptionRow, 13> OPTION_ROWS;
 
 // player_initNewCharacter 0x1b1d70: class from model. Throws outside 0..11.
 int class_of_model(int model);
@@ -78,6 +87,7 @@ enum class Screen {
   Difficulty,     // state 3
   Mode,           // state 4
   Options,        // state 11 (front end) or the pause option list
+  OptionsSave,    // state 14 front-end save choice
   OptionsLoad,    // memcard_optionsScreen, card state 10
   Credits,        // state 15
   LoadGame,       // memcard_requestLoad 0x2176e0, card state 4
@@ -100,7 +110,7 @@ struct Entry {
   std::string id, label, evidence;
   bool enabled = true;
   std::string refusal; // why a disabled entry is refused
-  int type = 0;        // menuList type: 4 float slider; 0 action
+  int type = 0;        // menuList kind: 4 float slider, 3 toggle, 0 action
   std::uint32_t value = 0;
 };
 
@@ -178,6 +188,7 @@ public:
   // State.
   const audio::MusicVolumeWords &music() const { return music_; }
   const std::vector<std::uint8_t> &options_image() const { return image_; }
+  std::uint32_t option_value(int row) const;
   bool options_file_present() const { return file_present_; }
   bool paused() const { return paused_; }
   bool skip_splash() const { return skip_splash_; }
@@ -205,6 +216,7 @@ private:
   std::array<std::int64_t, 2> pad_prev_{{0, 0}};
   audio::MusicVolumeWords music_;
   std::vector<std::uint8_t> image_;
+  std::array<std::uint32_t, 13> option_live_{};
   bool file_present_ = false;
   bool paused_ = false;
   bool skip_splash_ = false;
@@ -243,9 +255,10 @@ private:
   void move_cursor(std::uint32_t repeat);
   void options_frame(std::uint32_t held, std::uint32_t pressed, std::uint32_t repeat);
   void leave_options();
-  void commit(bool query_only);
+  bool commit(bool query_only, bool save = true);
   std::uint32_t image_word(std::size_t offset) const;
   void set_image_word(std::size_t offset, std::uint32_t value);
+  void apply_option(int row);
 };
 
 } // namespace champions::frontend

@@ -16,6 +16,7 @@ Evidence pins:
 | t3/research-combat-ctors | e9777eb | `docs/spec/music-volume.md` (slider, commit, boot copy; ported as `music_volume.hpp`) |
 | t3/research-menus-layout | dc458d5 | `docs/frontend-layout.md`, `tools/ref_frontend_layout.py`, `tools/ref_frontend_screens.py` (draw calls, fonts, layers, tints, menu sounds, the first-theme gate) |
 | t3/research-save-screen | 9c2b941 | `docs/save-screen.md` (slot-list tile frame, indexed rows, BCD date and clock formatter calls, and completed-slot header-backed preview fields; `research-save-screen-r2-fix.md` audit PASS) |
+| t3/research-options-menu | 603b2b7 | `docs/options-menu.md` (both option tables, slider/toggle edits, list frames, config words and state-14 choice; audit PASS) |
 
 Status words are the research's: **Executed**, **Observed**, **Ran** (seen on the
 emulator), **Inferred**, **Unknown**.
@@ -34,7 +35,7 @@ submission first.
 
 | Element | Draw calls | Label |
 |---|---|---|
-| List rows (main, game type, players, mode, difficulty, front-end options, pause) | centred medium font (0x4f7100) on layer 7; first row y = origin_y - (11 rows + 6), step 22; origin (320,309), front-end options (320,238), pause (320,240); value rows (front-end options 0-2) shifted 23 left. Geometry, front-end font and layer Executed. **Colour**: the front-end list batch 0x1a09e8 has a fixture colour of 0 and the parent batch 0x64464646, so the front-end list colour is a **Host** identity tint (0x80808080). The pause list font word is zero in the fixture (Unknown); its medium font and colour 0x80464646 come from the later text_begin 0x18d5e8 and are **Observed**, not Executed. In-game options use two Host controls because table 0x44f218 was not captured | Executed geometry / Host colour / Observed pause |
+| List rows (main, game type, players, mode, difficulty, front-end options, pause) | centred medium font (0x4f7100) on layer 7; first row y = origin_y - (11 rows + 6), step 22. Front-end options have 13 rows at (320,238), pause options have 14 at (320,240); their first three value rows shift 23 left. Geometry and option rows are Executed. Front-end tint remains Host; the pause text tint 0x80464646 is Observed. English labels remain Host because localized strings are unverified | Executed geometry / Host words / Observed pause tint |
 | List frames | cursor (style 0, tint 0x300000ff, 40 wide, height 32 at an even y and 33 at an odd y), backing (style 2, 0x80808080, layer 7), front overlay (style 0, 0x3f000000, layer 6); the 4-row, pause and front-end options calls match the research's asserted row-0 calls. Other selected rows show a Host highlight because their frame calls were not captured. **Refused:** text widening of narrow lists (the research says only that text width "can enlarge" them and traces no width rule), so only the executed minimum-width calls are emitted | Executed row 0 / Host other rows |
 | Title | `FRONTEND.LMP/title.tex` at (141,15), layer 5, tint 0x80808080, states 0-4 only | Executed |
 | Publisher logo | `SOELOGO.LMP/soe_splash_url.tex` (192,330) and `soe_splash.tex` (64,50), layer 3, tint 0x80808080 | Executed |
@@ -85,7 +86,7 @@ None of the following is documented, so the flow refuses it or the host labels i
   Difficulties above the first: the unlock test `options_get4f8f38Level` was not
   executed. The values of `g_pvpModeA/B`, 0x4f7124 and the kill limit per choice.
 - Credits (`credits_run` not read). The state-14 "save config?" prompt.
-- Option entries other than music at index 1. The commit model covers music only.
+- The complete controls sub-screen, pause parent transition, communications destination, localized option words and pixel parity remain unverified. Brightness transfer, camera, pad, subtitle, damage and marker application need confirmed client setters.
 - Character creation:
   - which models the class page shows, and in which order;
   - the appearance choices and their defaults;
@@ -111,7 +112,7 @@ None of the following is documented, so the flow refuses it or the host labels i
 | Main → Game type → Players → Mode → Difficulty | states 0, 1, 2, 4, 3 in that order; first entries only; `g_numPlayers` 1, `g_difficultyIdx` 1 | Ran |
 | Character pages 1–4 | class from model (`player_initNewCharacter`); 20 ability points must be spent and right adds one; name `char[0x20]`; class start stats are read at run time from the user's executable at 0x4ef400 | Observed / Ran |
 | Done | `playerSel_finish` queues `hub`. A created character starts at 500 gold, level 1 and acknowledged level 1 | Observed |
-| Options | music: type-4 slider, 1/120 steps, clamped to 0..1. The repeat timer gains 0x3e4fdef8 per call, so the first four calls are idle, and it resets when the cursor moves. A change previews `mx_maintheme_l.vag` (front end) or `mx_main_l.vag` (pause) through gated `music_playGlobal(…, 0x41)` when stream 2 is idle; `music_applyVolume` runs every call. Circle leaves through `config_commitOptions`; pause leaves query, then commit. Triangle opens card state 10 (choice 1 cancels; choice 2 loads and copies the 17 scalars, not +0x00 and not the button rows) | Executed / Observed |
+| Options | Both observed tables expose three type-4 sliders (1/120, 0..1), nine type-3 toggles and the controls action; pause adds communications with an Unknown destination. Music, effects and stereo reach the native mixer. Other direct values persist in their documented image words while their gameplay setters remain unverified. Front-end exit enters state 14 when changed: accept requests the image write, cancel commits only in memory. Pause query/commit is statically observed. Triangle loads the 17 scalar words without button rows. | Executed values and front-end choice / Observed pause transition |
 | Load | `memcard_requestLoad` stores `g_inFrontend`. Native session saves (`.ocplay` / `.ocnsave`) or a PS2 slot import; a slot import asks for its saved level | host + Executed import |
 | Save | opened from play (savepoint, script or host); offline it pushes `g_paused`; choosing stores latch 0x4f8f28 = 1; an error keeps it; the "saved" box clears it | Executed |
 | Pause | start opens it; `g_paused` is set offline. Entries: Return to Game, Use Gate Scroll, Load Game, Options..., Exit Game. Kick Player is net only. The exit prompt opens on No; left then cross confirms. Closing commits the options (warpMenu 0x18e2f8). `recall_executed()` closes it with lockout 60 | Ran / Observed |
@@ -144,12 +145,11 @@ Session exit codes 1, 0x65 and 0xc9 restart the front end with `frontend_start`
 
 ## Tests
 
-- `frontend-exact` (CTest): 451 checks, including every asserted frame call, list anchor, sound trigger and the theme gate. Covers boot with and without a file, the
-  Ran state order, auto-repeat timing, the slider walk against the executed model,
-  commit and load, character creation, import, pause, lockout, save latch and exit
-  codes.
-- `godot/tests/frontend_smoke.gd` (124 checks): drives every screen on the play scene through
-  the overlay, with saves, a PS2 import and the options file in a per-process
-  `user://` directory.
+- `frontend-exact` (CTest) covers both option tables and pause frames, all three
+  slider walks, nine toggles, config offsets and round-trip, state-14 save choice,
+  boot, character creation, import, pause, save latch and exit codes.
+- `godot/tests/frontend_smoke.gd` drives both lists through the overlay, checks
+  effects/stereo mixer requests and user image round-trip, plus saves and a PS2
+  import in a per-process `user://` directory.
 - `godot/tests/frontend_capture.gd`: a game folder, every screen, PNGs to a given
   directory (keep it under `work/private/`). It needs a display.

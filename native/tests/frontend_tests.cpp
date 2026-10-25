@@ -215,10 +215,13 @@ void slider_vectors() {
   expect(f.music().live == 0, "held left from 1.0 reaches 0");
   // Cursor move resets the timer.
   tap(f, UP);
-  expect(f.slider_timer() == 0 && f.cursor() == 0, "move resets timer");
+  expect(f.slider_timer() == audio::menu_slider_call(f.option_value(0), 0, 0).timer &&
+         f.cursor() == 0, "move resets timer, then brightness release advances it once");
   tap(f, DOWN);
   // Leave: commit copies live into the image and asks for a config save.
   tap(f, CIRCLE);
+  expect(f.screen() == Screen::OptionsSave && screen_state(f.screen()) == 14, "changed options enter state 14");
+  tap(f, CROSS);
   expect(f.screen() == Screen::Main, "options left");
   expect(f.music().image == 0 && word(f.options_image(), OPTIONS_MUSIC) == 0, "commit into image");
   expect(has(f.take_requests(), "write_options"), "config save requested");
@@ -258,6 +261,93 @@ void options_load_vectors() {
   f.options_loaded(std::nullopt);
   expect(f.screen() == Screen::Options, "no file: browser -1");
   reject([&] { f.options_loaded(file); }, "unrequested load refused");
+}
+
+void option_table_vectors() {
+  Flow f = to_main();
+  tap(f, DOWN); tap(f, DOWN); tap(f, CROSS);
+  expect(f.entries().size() == 13, "front option row count");
+  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i) {
+    expect(f.entries()[i].id == OPTION_ROWS[i].key && f.entries()[i].type == OPTION_ROWS[i].kind,
+           "documented option record");
+    if (OPTION_ROWS[i].kind != 0)
+      expect(f.option_value(int(i)) == word(f.options_image(), OPTION_ROWS[i].offset), "default option word");
+  }
+  // The three float rows share the executed 1/120 menu handler and boundaries.
+  tap(f, UP); // brightness
+  auto value = f.option_value(0), timer = f.slider_timer();
+  for (int i = 0; i < 8; ++i) {
+    f.frame(RIGHT);
+    const auto call = audio::menu_slider_call(value, RIGHT, timer);
+    value = call.value; timer = call.timer;
+    expect(f.option_value(0) == value, "brightness step is the executed FPU result");
+  }
+  for (int i = 0; i < 200; ++i) f.frame(LEFT);
+  expect(f.option_value(0) == 0, "brightness clamps at zero");
+  for (int i = 0; i < 200; ++i) f.frame(RIGHT);
+  expect(f.option_value(0) == 0x3f800000u, "brightness clamps at one");
+  tap(f, DOWN); tap(f, DOWN); // effects
+  (void)f.take_requests();
+  value = f.option_value(2); timer = f.slider_timer();
+  for (int i = 0; i < 8; ++i) {
+    f.frame(LEFT);
+    const auto call = audio::menu_slider_call(value, LEFT, timer);
+    value = call.value; timer = call.timer;
+    expect(f.option_value(2) == value, "effects step is the executed FPU result");
+  }
+  expect(f.option_value(2) < 0x3f000000u && has(f.take_requests(), "apply_effects_volume"), "effects edit reaches mixer request");
+  tap(f, DOWN); tap(f, DOWN); // combat camera, past refused Controls
+  expect(f.cursor() == 4, "combat camera row");
+  tap(f, CROSS);
+  expect(f.option_value(4) == 0, "accept toggles one to zero");
+  tap(f, RIGHT);
+  expect(f.option_value(4) == 1, "right toggles zero to one");
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::OptionsSave, "changed option table asks for save");
+  tap(f, CROSS);
+  const auto saved = f.options_image();
+  expect(saved.size() == OPTIONS_BYTES && word(saved, 0x04) == 0x3f800000u &&
+         word(saved, 0x0c) == f.option_value(2), "scalar offsets committed in 760-byte image");
+  Flow restored(saved);
+  expect(restored.option_value(0) == f.option_value(0) &&
+         restored.option_value(2) == f.option_value(2) &&
+         restored.option_value(4) == f.option_value(4), "options image round-trip");
+  restored.attach_play();
+  const auto applied = restored.take_requests();
+  expect(restored.music().live == word(saved, OPTIONS_MUSIC) &&
+         has(applied, "apply_music_volume") && has(applied, "apply_effects_volume") &&
+         has(applied, "apply_stereo"), "host play attaches persisted mixer settings");
+  for (int row = 4; row <= 12; ++row) {
+    auto raw = ps2::config_set_defaults(-1);
+    const auto at = OPTION_ROWS[static_cast<std::size_t>(row)].offset;
+    raw[at] = 2; raw[at + 1] = raw[at + 2] = raw[at + 3] = 0;
+    Flow toggle = to_main(raw);
+    tap(toggle, DOWN); tap(toggle, DOWN); tap(toggle, CROSS);
+    for (int move = 1; move < row; ++move) tap(toggle, DOWN);
+    tap(toggle, CROSS);
+    expect(toggle.option_value(row) == 0, "nonzero toggle accepts to zero");
+    tap(toggle, RIGHT);
+    expect(toggle.option_value(row) == 1, "right toggles zero to one");
+  }
+  Flow no_card = to_main(saved);
+  tap(no_card, DOWN); tap(no_card, DOWN); tap(no_card, CROSS);
+  for (int move = 1; move < 4; ++move) tap(no_card, DOWN);
+  tap(no_card, CROSS);
+  tap(no_card, CIRCLE);
+  expect(no_card.screen() == Screen::OptionsSave, "changed list enters save choice");
+  (void)no_card.take_requests();
+  tap(no_card, CIRCLE);
+  expect(no_card.screen() == Screen::Main && !has(no_card.take_requests(), "write_options") &&
+         word(no_card.options_image(), 0x2c) == no_card.option_value(4),
+         "state-14 cancel commits memory without card write");
+  const auto a = layout::list_anchors(layout::pause_options_list());
+  expect(a.size() == 14 && a[0].x == 297 && a[0].y == 80 && a[13].y == 366,
+         "pause option anchors");
+  const auto frames = layout::list_frames(layout::pause_options_list(), 0);
+  expect(frames[0].x == 180 && frames[0].y == 80 && frames[0].w == 280 && frames[0].h == 32 &&
+         frames[1].x == 214 && frames[1].y == 69 && frames[1].w == 212 && frames[1].h == 342 &&
+         frames[2].x == 223 && frames[2].y == 81 && frames[2].w == 210 && frames[2].h == 334,
+         "pause option frames");
 }
 
 void character_vectors() {
@@ -379,13 +469,15 @@ void pause_vectors() {
   expect(f.screen() == Screen::Options, "pause options");
   {
     const auto s = f.layout();
-    expect(f.entries().size() == 2, "pause options use two host controls");
-    bool executed_frame = false, observed_row = false;
+    expect(f.entries().size() == 14, "pause options use fourteen observed records");
+    bool executed_frame = false, pause_colour = false;
     for (const auto &d : s.draws) {
       executed_frame = executed_frame || (d.kind == Draw::Kind::Frame && d.evidence == Evidence::Executed);
-      observed_row = observed_row || (d.kind == Draw::Kind::Text && d.evidence == Evidence::Observed);
+      pause_colour = pause_colour || (d.kind == Draw::Kind::Text && d.colour == layout::PAUSE_TEXT &&
+                                      d.evidence == Evidence::Host);
     }
-    expect(!executed_frame && !observed_row, "pause options borrow no front-end geometry or pause colour");
+    expect(executed_frame, "pause options use documented frames");
+    expect(pause_colour, "pause options use documented colour");
   }
   (void)f.take_requests();
   for (int i = 0; i < 6; ++i)
@@ -910,6 +1002,7 @@ int main() {
   repeat_vectors();
   slider_vectors();
   options_load_vectors();
+  option_table_vectors();
   character_vectors();
   import_vectors();
   pause_vectors();
