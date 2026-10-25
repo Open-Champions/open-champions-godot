@@ -170,7 +170,7 @@ bool inferred_route(const char *name) {
 // bodies run; their seams are answered by script_dialog.cpp.
 bool dialog_command(const char *name) {
   static const char *names[] = {"startDialog", "dialogRunning", "forceMutexRelease", "activateStore",
-                                "newWorldPost", "changeSwoop", "startWithSwoopDone"};
+                                "newWorldPost", "changeSwoop", "startWithSwoopDone", "trigger"};
   for (const char *each : names)
     if (std::strcmp(name, each) == 0)
       return true;
@@ -593,6 +593,18 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
     if (reason)
       counts_.text_refusals[*reason] += 1;
     return reason.has_value();
+  }
+  if (name == "trigger" && dialog_attached_) {
+    // The binder calls slot 3 on every named object (limit 100). Only the
+    // documented Creature_trigger classes have a dialog route. Check the
+    // whole set before calling any slot: an unknown target has no answer.
+    const auto found = named(machine, 100);
+    if (!found)
+      return true;
+    for (const auto *obj : *found)
+      if (!dialog_trigger_supported(obj->addr))
+        return true;
+    return false;
   }
   if (name == "givePlayerRandom") {
     // The stack's +0x00..+0x0f after ten failed generations are Unknown in

@@ -157,6 +157,8 @@ void talk(const std::vector<std::uint8_t> &script, const std::vector<std::uint8_
   add("talk.opens", c.opens);
   add("talk.anm_reads", c.anm_reads);
   add("talk.stalls", c.stalls);
+  for (const auto &[result, n] : c.triggers)
+    add("talk.trigger " + result, n);
   for (const auto &[reason, n] : c.refused)
     add("talk.refused " + reason, n);
   for (const auto &[path, n] : c.mouth)

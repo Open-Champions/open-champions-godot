@@ -14,7 +14,8 @@ namespace {
 // Words the binder (script_builtins.cpp) and the dialog machine share.
 constexpr std::uint32_t DIALOG_DATA = 0x8e2d60, SWOOP = 0x4fdce4, SWOOP_DONE = 0x4fdce8,
                         NEXT_WORLD = 0x4fdcf0, STORE_PENDING = 0x4fdd30, ACTIVE_PLAYER = 0x4d8ae4,
-                        PENDING_LEVEL = 0x41b6d0, PENDING_ORIENT = 0x41b720;
+                        PENDING_LEVEL = 0x41b6d0, PENDING_ORIENT = 0x41b720,
+                        CUTSCENE_ACTIVE = 0x44fcd0; // player-tick.md; also native/player.cpp
 // Nested dialog operations (a post action that starts another conversation).
 constexpr int MAX_DIALOG_DEPTH = 8;
 // Player_interact's box (docs/dialog.md 2.1 step 1): +-48 in x and y, from the
@@ -43,7 +44,7 @@ std::optional<std::string> prop(const objects::Props &props, const std::string &
 // (docs/dialog.md 10 "by class"): NPC (research docs/monsters-2.md, NPC
 // interact is the base 0x116bd8), GnomeNavigator and MattMarr (base slots 13
 // and 14, docs/monsters.md class table), and the Orc class of the Orc2*
-// factory names (same table). TestLocation is not in any class table: refused.
+// factory names (same table). TestLocation's factory produces no object.
 bool creature_class(const std::string &cls) {
   return cls == "NPC" || cls == "GnomeNavigator" || cls == "MattMarr" || cls.rfind("Orc2", 0) == 0;
 }
@@ -133,6 +134,9 @@ void Host::attach_dialog(DialogLevel level, DialogServices services) {
     dialog_counts_.post_actions += 1;
     if (!machine_)
       return;
+    // Message 3 clears the HUD word before script_runPostAction (section
+    // 5.2). Its text-command preflight must see the cleared word too.
+    dialog_push();
     machine_->budget = session::SCRIPT_BUDGET;
     try {
       variables_->run_post_action();
@@ -158,6 +162,7 @@ void Host::attach_dialog(DialogLevel level, DialogServices services) {
       return inner(name, args);
     throw amx::HostFault("undocumented scene service");
   };
+  dialog_push();
 }
 
 // Camera_apply(x, y, z, cam, 0) 0x2035c8 with the conversation camera's words; the pose
@@ -204,6 +209,10 @@ std::uint32_t Host::dialog_scene(const std::string &name,
     dialog_.mutex_release();
     return 0;
   }
+  if (name == "virtual" && word(0) == 3u) {
+    dialog_trigger(word(1));
+    return 0; // Creature_trigger ignores trigger's value argument.
+  }
   if (name == "net_isLocalSlot")
     return dialog_host_.is_local(static_cast<int>(word(0))) ? 1u : 0u;
   // The level lump is resident while its script runs.
@@ -249,6 +258,11 @@ void Host::dialog_push() {
   mem.string(NEXT_WORLD, dialog_.next_world);
   mem.byte(STORE_PENDING, static_cast<std::uint8_t>(dialog_.store_pending));
   mem.word(ACTIVE_PLAYER, static_cast<std::uint32_t>(dialog_.active_player));
+  // g_hudSuppressed is shared with showBust/showCompass and the HUD draw
+  // (docs/dialog.md 2.4 step 9, 5.2 type 3, 6.1). Keep it current even
+  // between ready ticks, including a refused opening's rollback.
+  mem.byte(strings::G_HUD_SUPPRESSED, static_cast<std::uint8_t>(dialog_.hud_suppressed));
+  refresh_hud_inputs();
 }
 void Host::dialog_pull() {
   auto &mem = variables_->memory;
@@ -455,6 +469,34 @@ std::vector<std::uint32_t> Host::talkers() const {
     if (prop(variables_->obj_at(address)->props, "dialogScript"))
       out.push_back(address);
   return out;
+}
+
+bool Host::dialog_trigger_supported(std::uint32_t address) const {
+  const auto *obj = variables_->obj_at(address);
+  if (!obj || !creature_class(obj->type_name))
+    return false;
+  // NPC_trigger 0x29eed0 has two overrides before Creature_trigger:
+  // cutscene mesh changes and a named actor's animation in this level
+  // (research-dialog docs/monsters-2.md, NPC). Neither body is ported here.
+  // Refuse the entire domains rather than assume an object's name excludes
+  // them. The other supported classes inherit Creature_trigger.
+  return obj->type_name != "NPC" || (!variables_->memory.read(CUTSCENE_ACTIVE) &&
+      !dialog_level_.level.empty() && lower(dialog_level_.level) != "hate3");
+}
+
+void Host::dialog_trigger(std::uint32_t address) {
+  if (!dialog_attached_ || !dialog_trigger_supported(address))
+    throw dialog::Refused("Creature_trigger slot is not documented for this class");
+  dialog_pull();
+  dialog_guard("trigger", [&] {
+    // Creature_trigger 0x11a5f0 (docs/dialog.md 2.2): display name,
+    // dialogScript and mutex; unlike interact it does not set active_player
+    // or test the player's position/facing.
+    const auto result = dialog_.trigger(dialog_host_, *dialog_view(address, nullptr));
+    dialog_counts_.triggers[result] += 1;
+  });
+  dialog_drain_log();
+  dialog_push();
 }
 
 // Every documented-class object with showName answers the use button, also

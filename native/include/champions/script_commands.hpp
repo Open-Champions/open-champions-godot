@@ -226,6 +226,7 @@ struct DialogCameraEnv {
 struct DialogCounts {
   std::uint64_t uses = 0, use_no_candidate = 0, use_ambiguous = 0, use_blocked_open = 0;
   std::map<std::string, std::uint64_t> interact; // Creature_interact results
+  std::map<std::string, std::uint64_t> triggers; // Creature_trigger results
   std::uint64_t start_messages = 0, opens = 0, open_gate_refused = 0;
   std::map<std::string, std::uint64_t> refused; // refusals by reason
   std::uint64_t nodes_shown = 0, choices_taken = 0, scripts_run = 0;
@@ -519,6 +520,8 @@ private:
   void dialog_drain_log();
   void dialog_camera_apply(const Vec3 &pos, int yaw, int pitch, Raw h, bool dialog_open);
   void dialog_complete_read();
+  bool dialog_trigger_supported(std::uint32_t address) const;
+  void dialog_trigger(std::uint32_t address);
 
   void install();
   void bind_campaign();

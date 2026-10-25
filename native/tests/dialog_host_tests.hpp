@@ -334,6 +334,9 @@ inline void run(Check check, std::string &where) {
     h.use(0, front);
     check(!h.dialog().is_open() && h.dialog().mutex == 0 && h.dialog_camera_view() == nullptr,
           "host: no dialogOffset: the opening is refused, nothing is invented");
+    check(h.variables().memory.read(champions::simulation::rta::strings::G_HUD_SUPPRESSED) == 0 &&
+              !h.hud().inputs.suppressed,
+          "host: refused camera setup restores the shared HUD word");
     bool reasoned = false;
     for (const auto &[reason, n] : h.dialog_counts().refused)
       reasoned |= reason.find("uninitialised stack slot") != std::string::npos && n >= 1;
@@ -409,6 +412,7 @@ inline void run(Check check, std::string &where) {
     h.use(0, front);
     check(!h.dialog().is_open() && h.dialog().mutex == 0,
           "host: 11 visible choices are refused instead of overrunning 0x8e2d20");
+    check(!h.hud().inputs.suppressed, "host: refused choice overflow restores the HUD gate");
   }
   {
     // showName without dialogScript: Creature_interact takes the mutex and runs
