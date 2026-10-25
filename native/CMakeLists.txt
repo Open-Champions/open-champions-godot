@@ -960,6 +960,8 @@ if(BUILD_TESTING)
     target_link_libraries(champions-player-tests PRIVATE champions-player)
     target_link_libraries(champions-player-trace PRIVATE champions-player)
     add_test(NAME player-host COMMAND champions-player-tests)
+    add_test(NAME player-vector-harness COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_player_vector_harness.py")
     add_test(NAME player-exact COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_player_vectors.py"
         --native "$<TARGET_FILE:champions-player-trace>"
