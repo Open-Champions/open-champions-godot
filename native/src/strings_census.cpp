@@ -6,6 +6,7 @@
 #include "champions/amx.hpp"
 #include "champions/archive.hpp"
 #include "champions/strings.hpp"
+#include <climits>
 #include <cctype>
 #include <filesystem>
 #include <fstream>

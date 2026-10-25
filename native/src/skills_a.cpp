@@ -4,6 +4,7 @@
 #include "champions/skills_a.hpp"
 #include "champions/detail/skill_kernel.hpp"
 #include "champions/detail/skill_spell_kernel.hpp"
+#include <climits>
 #include <algorithm>
 #include <array>
 

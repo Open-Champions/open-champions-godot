@@ -6,6 +6,7 @@
 #include "champions/animation_decoder.hpp"
 #include "champions/core_math.hpp"
 #include "champions/detail/checkpoint_control_anim_cache.hpp"
+#include <climits>
 #include <algorithm>
 #include <limits>
 #include <utility>

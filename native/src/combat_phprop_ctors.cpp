@@ -3,10 +3,18 @@
 #include "champions/combat_ctors.hpp"
 #include "champions/core_math.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <string>
 
 namespace champions::simulation::rta::combat_ctors {
 namespace {
+// Index of the highest set bit of a non-zero mask (63 - count of leading zeros),
+// written out because MSVC has no __builtin_clzll and C++17 has no std::countl_zero.
+int highest_bit(std::uint64_t mask) {
+  int bit = 63;
+  while (!((mask >> bit) & 1u)) --bit;
+  return bit;
+}
 using A::Value;
 constexpr Address G_GRID=0x5db4f0,G_OFF_GRID=0x5f76f0,S_HIDE=0x5321a8,
                   G_PROP_OPTIONS=0x44fe08;
@@ -153,7 +161,7 @@ struct B {
     }
     w32(obj+0x22c,M32);
     auto mask=u64(obj+0xe8);
-    if (mask) w32(obj+0x22c,Raw(63-__builtin_clzll(mask)));
+    if (mask) w32(obj+0x22c,Raw(highest_bit(mask)));
     call("quat_fromMat3",{iv(obj+0x1ac),iv(obj+0x110)});
     call("quat_normalize",{iv(obj+0x1ac)});
     call("rigidbody_updateDerived",{iv(obj+0x190)});
@@ -181,7 +189,7 @@ void phprop_ctor2(A::Model &m,Address obj,const Vec3 &pos,Raw facing,Address mod
                   std::uint64_t parts,Raw launch,Address item,Raw scale) {
   B b{m};b.named(obj,pos,lump,name,texture,parts,launch|4);
   b.record(obj,item,scale);b.w32(obj+0x22c,M32);b.w8(obj+0x23a,0);b.w32(obj+0x234,0);
-  if (auto mask=b.u64(obj+0xe8)) b.w32(obj+0x22c,Raw(63-__builtin_clzll(mask)));
+  if (auto mask=b.u64(obj+0xe8)) b.w32(obj+0x22c,Raw(highest_bit(mask)));
   auto joint=Raw(number(b.call("model_getMeshJoint",{iv(model),iv(b.u32(obj+0x22c))})));
   auto mat=matrix(b.call("anim_getJointMatrix",{iv(anim),iv(joint)}));
   auto rot=mat34_set_pos_rot_z_scale(b.u32(obj+0x240),{ZERO,ZERO,ZERO},s16(s16(facing)+0x4000));

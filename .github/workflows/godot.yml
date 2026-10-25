@@ -17,7 +17,9 @@ jobs:
           - {name: Godot Windows x64, os: windows-2025, arch: x64, package: windows-x64, target: windows-x64, asset: win64.exe, sha512: b21115cf3620438e17959d13946bf9c7dceabb6ff71ed32a68996a21e08615edd2d1a3d25641bb3e260d084b31f500231aa59fcf026a5228bcc20ac4e8bade60}
           - {name: Godot Linux x64, os: ubuntu-24.04, arch: x64, package: linux-x64, target: linux-x64, asset: linux.x86_64, sha512: e3ce6194b6d4d2dcef5e5b5136752c084d9d8b9071c10bc2d2011b947ec7439a257c8d23c541cb30699f16d9edea6dff36e6e84d2bec14a8fe9b4e9aacbe5a8d}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Two extensions (archive and level texture), universal on macOS: the Intel runner
+    # needed more than 20 minutes for the archive extension alone.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -62,23 +64,32 @@ jobs:
         run: |
           for target in template_debug template_release; do
             cmake -S gdextension -B "build/$target" -DGODOTCPP_TARGET="$target" -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
+            cmake -S gdextension/level_texture -B "build/level-texture-$target" -DGODOTCPP_TARGET="$target" -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
           done
       - name: Configure universal extension (macOS)
         if: runner.os == 'macOS'
         run: |
           for target in template_debug template_release; do
             cmake -S gdextension -B "build/$target" -DGODOTCPP_TARGET="$target" -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+            cmake -S gdextension/level_texture -B "build/level-texture-$target" -DGODOTCPP_TARGET="$target" -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
           done
       - name: Configure extension (Windows)
         if: runner.os == 'Windows'
         run: |
           for target in template_debug template_release; do
             cmake -S gdextension -B "build/$target" -DGODOTCPP_TARGET="$target" -A ${{ matrix.arch }} -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp"
+            cmake -S gdextension/level_texture -B "build/level-texture-$target" -DGODOTCPP_TARGET="$target" -A ${{ matrix.arch }} -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp"
           done
       - name: Build native Godot binding
         run: |
           cmake --build build/template_debug --config Release --parallel 4
           cmake --build build/template_release --config Release --parallel 4
+      # godot/champions_level_texture.gdextension is loaded by every project start, so its
+      # library must exist before the editor opens the project.
+      - name: Build level-texture extension
+        run: |
+          cmake --build build/level-texture-template_debug --config Release --parallel 4
+          cmake --build build/level-texture-template_release --config Release --parallel 4
       # Godot 4.5.2 can tear down extension docs before its --import queue drains:
       # https://github.com/godotengine/godot/issues/111645
       - name: Initialize a fresh editor and load extension
@@ -86,6 +97,14 @@ jobs:
           "$GODOT" --headless --path godot --editor --quit-after 120 --frame-delay 50
           test -f godot/.godot/extension_list.cfg
           test -f godot/.godot/global_script_class_cache.cfg
+      - name: Exercise the level-texture extension with synthetic files
+        run: |
+          "$GODOT" --headless --path godot --quit-after 300 --script res://tests/level_texture_preview_smoke.gd | tee work/level-texture-preview.log
+          grep -Eq '^level texture preview: [0-9]+ checks passed$' work/level-texture-preview.log
+          "$GODOT" --headless --path godot --quit-after 300 --script res://tests/level_texture_stream_smoke.gd | tee work/level-texture-stream.log
+          grep -Eq '^level texture stream: [0-9]+ checks, 0 failures$' work/level-texture-stream.log
+          "$GODOT" --headless --path godot --quit-after 300 --script res://tests/level_textured_session_smoke.gd | tee work/level-textured-session.log
+          grep -Eq '^level textured Session: [0-9]+ checks passed$' work/level-textured-session.log
       - name: Exercise real binding with synthetic archives
         run: |
           "$GODOT" --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd | tee work/godot-smoke.log

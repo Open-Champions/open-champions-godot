@@ -1,5 +1,6 @@
 #include "champions/ui_text_layout.hpp"
 #include <algorithm>
+#include <climits>
 #include <limits>
 #include <stdexcept>
 

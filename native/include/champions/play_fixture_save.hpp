@@ -17,6 +17,7 @@
 #include "champions/combat_play_effects.hpp"
 #include "champions/fx_simulation.hpp"
 #include "champions/level_play.hpp"
+#include <climits>
 #include <memory>
 #include <optional>
 #include <stdexcept>

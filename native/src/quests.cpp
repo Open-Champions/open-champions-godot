@@ -1,4 +1,5 @@
 #include "champions/quests.hpp"
+#include <climits>
 #include <algorithm>
 #include <cstring>
 #include <limits>
