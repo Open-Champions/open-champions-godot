@@ -117,7 +117,10 @@ class Runtime {
   resources::Manager &resources_;
   Services services_;
   std::shared_ptr<objects::ClassDef> boar_def_, minotaur_def_;
-  std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
+  mutable std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
+  bool owns_live_object(const objects::GameObject &) const;
+  void retire_stale() const;
+  Actor &register_actor(std::unique_ptr<Actor>);
   std::vector<resources::Handle> handles_;
   std::vector<std::pair<std::string, std::string>> names_;
   creature_hp::Memory *shared_ = nullptr;
@@ -167,7 +170,10 @@ public:
   std::optional<champions::Bytes> resource_bytes(std::uint32_t token);
   Actor &at(std::uint32_t);
   Actor *find(std::uint32_t);
-  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() const { return actors_; }
+  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() const {
+    retire_stale();
+    return actors_;
+  }
   // Opt-in: an Unsupported from the AI portion of a tick is recorded on the
   // actor (Actor::ai_refusal) and counted, and that actor's AI stays frozen;
   // processDamage, Creature_run and the death check keep running.

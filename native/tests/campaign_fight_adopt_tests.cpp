@@ -22,6 +22,11 @@ namespace {
 void check(bool ok, const char *why) {
   if (!ok) throw std::runtime_error(why);
 }
+template <class Function> void refuses(Function function, const char *why) {
+  bool caught = false;
+  try { function(); } catch (const C::Unsupported &) { caught = true; }
+  check(caught, why);
+}
 void put(std::vector<std::uint8_t> &b, std::size_t at, std::uint32_t v) {
   for (unsigned i = 0; i != 4; ++i) b.at(at + i) = std::uint8_t(v >> (i * 8));
 }
@@ -151,6 +156,52 @@ C::Services boar_actor_services(std::vector<std::string> &calls) {
   actor_services.knockback = [](std::uint32_t) {};
   actor_services.pick_target = [](std::uint32_t) {};
   return actor_services;
+}
+
+void destroy_and_readopt() {
+  champions::resources::Manager resources;
+  auto bytes = lump(BOAR_ENTRIES);
+  resources.load_lmp("warboar.lmp", {bytes.data(), bytes.size()});
+  auto authority = std::make_shared<R::WorldAuthority>();
+  std::vector<std::string> calls;
+  auto services = boar_actor_services(calls);
+  std::vector<std::uint32_t> ticks;
+  services.process_damage = [&](std::uint32_t address) { ticks.push_back(address); };
+  services.creature_run = [](std::uint32_t) { return 1; };
+  C::Runtime runtime(*authority->objects, resources, services, &authority->memory);
+  auto *original = authority->objects->new_object(0x3d8, {});
+  check(original != nullptr, "original adoption pool block");
+  const auto address = original->addr;
+  runtime.adopt(C::Kind::WarBoar, *original, 0, std::int64_t(0));
+  refuses([&] { runtime.adopt(C::Kind::WarBoar, *original, 0, std::nullopt); },
+          "duplicate live adoption refuses");
+  authority->objects->destroy(*original);
+  auto *replacement = authority->objects->new_object(0x3d8, {});
+  check(replacement && replacement != original && replacement->addr == address,
+        "shared World reuses the address with a distinct object");
+  check(runtime.find(address) == nullptr && runtime.actors().empty(),
+        "replacement object cannot resolve to the retired actor");
+  refuses([&] { runtime.adopt(C::Kind::WarBoar, *original, 0, std::nullopt); },
+          "retired object cannot be adopted over its replacement");
+  authority->memory.store(address + 0x228, 4, 0x42a00000);
+  auto &actor = runtime.adopt(C::Kind::WarBoarSmall, *replacement, 0, std::int64_t(0));
+  check(actor.object == replacement && actor.health() == 0x42a00000 &&
+        &runtime.at(address) == &actor && runtime.actors().size() == 1,
+        "readopted actor exposes the replacement's shared state");
+  runtime.tick(address);
+  check(ticks == std::vector<std::uint32_t>({address}), "readopted actor ticks");
+  authority->objects->destroy(*replacement);
+  auto *next = authority->objects->new_object(0x3d8, {});
+  check(next && next->addr == address, "next adoption reuses the same address");
+  auto &next_actor = runtime.adopt(C::Kind::WarBoar, *next, 0, std::int64_t(0));
+  check(next_actor.object == next && runtime.actors().size() == 1,
+        "adoption retires stale entries without an intervening lookup");
+  O::World foreign(O::CallbackPolicy::ReferenceBase);
+  auto *foreign_object = foreign.new_object(0x3d8, {});
+  check(foreign_object != nullptr, "foreign pool block");
+  refuses([&] { runtime.adopt(C::Kind::WarBoar, *foreign_object, 0, std::nullopt); },
+          "object from another World cannot be adopted");
+  check(runtime.find(address) == &next_actor, "invalid adoption preserves the live actor");
 }
 
 void adopt_and_run() {
@@ -441,6 +492,7 @@ int main() {
     memory_budget();
     memory_budget_after_checkpoint();
     clear_nodes_adjacent_partners();
+    destroy_and_readopt();
     adopt_and_run();
     boar_inherited_vectors();
     activity_follows_the_live_player();

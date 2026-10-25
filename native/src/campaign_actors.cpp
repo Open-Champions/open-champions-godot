@@ -114,6 +114,29 @@ Runtime::~Runtime() {
   world_.res_find = {};
 }
 
+bool Runtime::owns_live_object(const objects::GameObject &object) const {
+  const auto found = world_.objects.find(object.addr);
+  return found != world_.objects.end() && found->second == &object && object.alive;
+}
+
+void Runtime::retire_stale() const {
+  for (auto entry = actors_.begin(); entry != actors_.end();) {
+    if (!owns_live_object(*entry->second->object)) entry = actors_.erase(entry);
+    else ++entry;
+  }
+}
+
+Actor &Runtime::register_actor(std::unique_ptr<Actor> actor) {
+  retire_stale();
+  if (!owns_live_object(*actor->object))
+    throw Unsupported("actor object is not live in this World");
+  const auto address = actor->object->addr;
+  const auto inserted = actors_.emplace(address, std::move(actor));
+  if (!inserted.second)
+    throw Unsupported("address already has an actor");
+  return *inserted.first->second;
+}
+
 std::optional<std::pair<std::string, std::string>> Runtime::resource_name(std::uint32_t token) const {
   if (!token || token > names_.size()) return std::nullopt;
   return names_[token - 1];
@@ -144,6 +167,7 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
                               std::uint32_t angle, objects::Props props,
                               Raw initial_hp,
                               const std::function<void(Actor &)> &base_stats) {
+  retire_stale();
   if (props && !props->empty())
     throw Unsupported("Creature_ctor/properties: complete base effects Unknown");
   required(services_.model_hide_mask, "constructor/model_buildHideMask");
@@ -262,14 +286,11 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
         services_.set_def_entry_params(o->addr, p);
     }
     services_.creature_init(o->addr);
-    const auto address = o->addr;
-    auto *result = actor.get();
-    actors_.emplace(address, std::move(actor));
-    return *result;
+    return register_actor(std::move(actor));
   } catch (...) {
     // An unavailable downstream model/animation/terrain service must not
     // leave a live grid object with no actor dispatch record.
-    world_.destroy(*o);
+    if (owns_live_object(*o)) world_.destroy(*o);
     throw;
   }
 }
@@ -305,8 +326,9 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
 }
 
 Actor *Runtime::find(std::uint32_t address) {
+  retire_stale();
   auto it = actors_.find(address);
-  return it == actors_.end() || !it->second->object->alive ? nullptr : it->second.get();
+  return it == actors_.end() ? nullptr : it->second.get();
 }
 
 std::uint32_t Runtime::definition_entry(Kind kind, unsigned slot) {
@@ -318,7 +340,10 @@ std::uint32_t Runtime::definition_entry(Kind kind, unsigned slot) {
 
 Actor &Runtime::adopt(Kind kind, objects::GameObject &object, std::uint32_t angle,
                       std::optional<std::int64_t> boss_rank) {
+  retire_stale();
   if (!shared_) throw Unsupported("adopt: needs a shared-memory Runtime");
+  if (!owns_live_object(object))
+    throw Unsupported("adopt: object is not live in this World");
   if (kind == Kind::Minotaur)
     throw Unsupported("Minotaur_ctor/base creature flags Unknown");
   required(services_.model_hide_mask, "constructor/model_buildHideMask");
@@ -393,16 +418,14 @@ Actor &Runtime::adopt(Kind kind, objects::GameObject &object, std::uint32_t angl
   world_.run_every_60(object);
   for (const auto &p : BOAR_EVENTS) services_.set_def_entry_params(at, p);
   services_.creature_init(at);
-  auto *result = actor.get();
-  actors_.emplace(at, std::move(actor));
-  return *result;
+  return register_actor(std::move(actor));
 }
 
 Actor &Runtime::at(std::uint32_t address) {
-  auto it = actors_.find(address);
-  if (it == actors_.end() || !it->second->object->alive)
+  auto *actor = find(address);
+  if (!actor)
     throw Unsupported("actor address is not live in this World");
-  return *it->second;
+  return *actor;
 }
 
 void Runtime::set_state(Actor &a, std::uint32_t state) {

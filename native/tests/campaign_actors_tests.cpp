@@ -390,6 +390,34 @@ int main() {
             "missing base creature flags refuse Minotaur construction");
     check(rejected.objects.empty(), "Minotaur base refusal consumes no World block");
   }
+  {
+    O::World recycled(O::CallbackPolicy::ReferenceBase);
+    auto lifecycle_services = services;
+    lifecycle_services.set_def_entry_params = [](std::uint32_t, const C::EventParams &) {};
+    std::vector<std::uint32_t> ticks;
+    lifecycle_services.process_damage = [&](std::uint32_t address) {
+      ticks.push_back(address);
+    };
+    lifecycle_services.creature_run = [](std::uint32_t) { return 1; };
+    C::Runtime runtime(recycled, resources, lifecycle_services);
+    auto &original = runtime.construct(C::Kind::WarBoar, {}, 0, {}, R::from_int(100));
+    auto *original_object = original.object;
+    const auto address = original_object->addr;
+    recycled.destroy(*original_object);
+    auto &replacement = runtime.construct(C::Kind::WarBoarSmall, {}, 0, {}, R::from_int(80));
+    check(replacement.object->addr == address && replacement.object != original_object,
+          "reconstruction reuses the pool address with a new object identity");
+    check(runtime.find(address) == &replacement && &runtime.at(address) == &replacement,
+          "reconstructed actor remains accessible through the runtime");
+    check(runtime.actors().size() == 1 && replacement.kind == C::Kind::WarBoarSmall &&
+          replacement.health() == R::from_int(80), "replacement owns its new actor state");
+    runtime.tick(address);
+    check(ticks == std::vector<std::uint32_t>({address}), "replacement dispatches its tick");
+    recycled.destroy(*replacement.object);
+    check(runtime.actors().empty() && runtime.find(address) == nullptr,
+          "runtime retires destroyed actors on access");
+    refuses([&] { runtime.at(address); }, "destroyed actor lookup refuses");
+  }
   C::Runtime actors(world, resources, services);
   refuses([&] {
     actors.construct(C::Kind::WarBoar, {0, 0, 0}, 0,
