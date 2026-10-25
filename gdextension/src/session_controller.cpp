@@ -104,7 +104,7 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("combat_release_attack"), &ChampionsSessionController::combat_release_attack);
   ClassDB::bind_method(D_METHOD("combat_block", "held"), &ChampionsSessionController::combat_block);
   ClassDB::bind_method(D_METHOD("combat_cast_holy_strike"), &ChampionsSessionController::combat_cast_holy_strike);
-  ClassDB::bind_method(D_METHOD("combat_select_disease_bolt"), &ChampionsSessionController::combat_select_disease_bolt);
+  ClassDB::bind_method(D_METHOD("combat_select_disease_bolt", "rank"), &ChampionsSessionController::combat_select_disease_bolt, DEFVAL(1));
   ClassDB::bind_method(D_METHOD("combat_press_disease_bolt", "held"), &ChampionsSessionController::combat_press_disease_bolt, DEFVAL(true));
   ClassDB::bind_method(D_METHOD("combat_release_disease_bolt"), &ChampionsSessionController::combat_release_disease_bolt);
   ClassDB::bind_method(D_METHOD("combat_spawn_creature", "own_class"), &ChampionsSessionController::combat_spawn_creature);
@@ -2963,10 +2963,11 @@ Dictionary ChampionsSessionController::combat_cast_holy_strike() {
     return observation();
   } catch (const std::exception &e) { return failure(e); }
 }
-Dictionary ChampionsSessionController::combat_select_disease_bolt() {
+Dictionary ChampionsSessionController::combat_select_disease_bolt(int64_t rank) {
   try {
     if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt selection needs the Full combat fixture.");
-    combat_->select_disease_bolt();
+    if (rank < 1 || rank > 20) throw std::runtime_error("Disease Bolt rank needs a probed player rank 1 to 20.");
+    combat_->select_disease_bolt(unsigned(rank));
     return observation();
   } catch (const std::exception &e) { return failure(e); }
 }

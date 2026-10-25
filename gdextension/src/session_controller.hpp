@@ -205,7 +205,7 @@ public:
   godot::Dictionary combat_release_attack();
   godot::Dictionary combat_block(bool held);
   godot::Dictionary combat_cast_holy_strike();
-  godot::Dictionary combat_select_disease_bolt();
+  godot::Dictionary combat_select_disease_bolt(int64_t rank = 1);
   godot::Dictionary combat_press_disease_bolt(bool held = true);
   godot::Dictionary combat_release_disease_bolt();
   godot::Dictionary combat_spawn_creature(int64_t own_class);

@@ -247,8 +247,12 @@ void CombatScene::set_block(bool held) {
 void CombatScene::cast_holy_strike() {
   record(CAST_HOLY_STRIKE, 0, [&] { session_->cast_holy_strike(); });
 }
-void CombatScene::select_disease_bolt() {
-  record(SELECT_DISEASE_BOLT, 0, [&] { session_->select_disease_bolt(); });
+void CombatScene::select_disease_bolt(unsigned rank) {
+  require(rank >= 1 && rank <= 20, "Disease Bolt rank needs a probed player rank 1 to 20");
+  // Value zero is the original rank-one journal entry. Preserve existing
+  // fixture saves and the default Full trace byte for byte.
+  record(SELECT_DISEASE_BOLT, rank == 1 ? 0 : rank,
+         [&] { session_->select_disease_bolt(rank); });
 }
 void CombatScene::press_disease_bolt(bool held) {
   record(PRESS_DISEASE_BOLT, held, [&] { session_->press_disease_bolt(held); });
@@ -306,7 +310,10 @@ void CombatScene::apply(const Action &a) {
   case RELEASE_ATTACK: session_->release_attack(); return;
   case SET_BLOCK: valid(a.value <= 1, "journal block value"); session_->set_block(a.value != 0); return;
   case CAST_HOLY_STRIKE: session_->cast_holy_strike(); return;
-  case SELECT_DISEASE_BOLT: session_->select_disease_bolt(); return;
+  case SELECT_DISEASE_BOLT:
+    valid(a.value <= 20, "journal Disease Bolt rank");
+    session_->select_disease_bolt(a.value == 0 ? 1 : a.value);
+    return;
   case PRESS_DISEASE_BOLT:
     valid(a.value <= 1, "journal spell press value");
     session_->press_disease_bolt(a.value != 0); return;

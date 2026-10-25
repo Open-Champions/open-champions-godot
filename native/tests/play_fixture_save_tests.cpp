@@ -552,6 +552,21 @@ void refusals() {
         "only the Full fixture takes recipe constants");
 }
 
+void ranked_spell_save() {
+  FS::CombatScene scene(terrain(), combat_play::Fixture::Full, constants, identity);
+  const auto empty = scene.save();
+  check(refuses([&] { scene.select_disease_bolt(0); }, "rank"),
+        "out-of-range ranked selection refuses before journaling");
+  check(scene.save() == empty, "invalid rank leaves the fixture save unchanged");
+  scene.select_disease_bolt(2);
+  const auto bytes = scene.save();
+  auto loaded = FS::CombatScene::load(bytes, "rta", constants, identity);
+  check(loaded.scene->world().read(C::PLAYERS + 0x4b0a, 2) == 2,
+        "ranked Disease Bolt selection survives journal replay");
+  check(loaded.scene->save() == bytes,
+        "ranked Disease Bolt selection preserves the save witness");
+}
+
 // ---- (e) round-1 fixtures ----------------------------------------------------------------------------
 void round_one(combat_play::Fixture which, const std::string &name) {
   auto run = [&](int ticks, FS::CombatScene &scene, std::string &trace) {
@@ -596,6 +611,7 @@ int main(int argc, char **argv) {
     level_travel();
     world_snapshot();
     refusals();
+    ranked_spell_save();
     round_one(combat_play::Fixture::Combat, "Combat");
     round_one(combat_play::Fixture::Animated, "Animated");
   } catch (const std::exception &e) {
