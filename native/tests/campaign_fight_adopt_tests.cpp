@@ -248,11 +248,29 @@ void minotaur_shared_health() {
   const auto player=world.spawn_player(0,CR::Spawn{});
   world.take_damage(a,player,8,R::from_int(7));
   check(actor.health()==R::from_int(93)&&world.read(a+0x228)==actor.health(),"Player damage updates the one Minotaur HP body");
-  check(world.target(a+0x364)==player,"damage links the real shared-World attacker");
+  check(world.target(a+0x2e4)==player,"damage links the real shared-World attacker");
   // A constructor refusal discards just the temporary combat view; ownership,
   // bytes and the registered factory object are preserved for the host.
   world.unadopt_creature(a);
-  check(!world.contains(a)&&authority->find(a)==object,"temporary adoption rollback preserves owner");
+  const auto combat_actors = world.actors();
+  check(std::find(combat_actors.begin(), combat_actors.end(), a) == combat_actors.end() &&
+        authority->find(a)==object,"temporary adoption rollback preserves owner");
+  const auto serial = actor.object_serial;
+  authority->unregister_object(*object);
+  authority->objects->destroy(*object);
+  auto *replacement = authority->objects->new_object(M::ALLOCATION, {0, 0, 0});
+  check(replacement && replacement->addr == a && replacement->serial != serial,
+        "Minotaur pool address reused with a fresh identity");
+  check(runtime.find(a) == nullptr, "old Minotaur actor cannot alias the replacement");
+  authority->register_object(*replacement);
+  replacement->type_name = "Minotaur";
+  authority->memory.store(a + 0x24, 4, M::DEFINITION);
+  authority->memory.store(a + 0x228, 4, R::from_int(80));
+  authority->memory.store(a + 0x22c, 4, R::from_int(80));
+  world.adopt_creature(a, true);
+  auto &rebound = runtime.adopt(C::Kind::Minotaur, *replacement, 0, 0);
+  check(runtime.find(a) == &rebound && rebound.object_serial == replacement->serial &&
+        rebound.health() == R::from_int(80), "replacement Minotaur adopts the new shared body");
 }
 
 // The combat World retains finished iterators only while something still

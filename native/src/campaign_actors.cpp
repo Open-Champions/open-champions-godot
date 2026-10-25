@@ -78,7 +78,7 @@ std::array<Raw, 5> balance_lookup(const std::uint8_t *data, std::size_t size,
 }
 
 Actor::Actor(Kind k, objects::GameObject *o, creature_hp::Memory *shared)
-    : kind(k), object(o),
+    : kind(k), object(o), object_serial(o->serial),
       hp_owned_(shared ? std::make_unique<creature_hp::Model>(*shared)
                        : std::make_unique<creature_hp::Model>()),
       hp(*hp_owned_) {}
@@ -144,6 +144,7 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
                               std::uint32_t angle, objects::Props props,
                               Raw initial_hp,
                               const std::function<void(Actor &)> &base_stats) {
+  retire_stale();
   if (props && !props->empty())
     throw Unsupported("Creature_ctor/properties: complete base effects Unknown");
   required(services_.model_hide_mask, "constructor/model_buildHideMask");
@@ -260,9 +261,9 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
     }
     services_.creature_init(o->addr);
     const auto address = o->addr;
-    auto *result = actor.get();
-    actors_.emplace(address, std::move(actor));
-    return *result;
+    const auto inserted = actors_.emplace(address, std::move(actor));
+    if (!inserted.second) throw Unsupported("constructor: address already has an actor");
+    return *inserted.first->second;
   } catch (...) {
     // An unavailable downstream model/animation/terrain service must not
     // leave a live grid object with no actor dispatch record.
@@ -301,9 +302,21 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
       });
 }
 
+void Runtime::retire_stale() {
+  for (auto entry = actors_.begin(); entry != actors_.end();) {
+    const auto live = world_.objects.find(entry->first);
+    if (live == world_.objects.end() || live->second != entry->second->object ||
+        live->second->serial != entry->second->object_serial || !live->second->alive)
+      entry = actors_.erase(entry);
+    else
+      ++entry;
+  }
+}
+
 Actor *Runtime::find(std::uint32_t address) {
+  retire_stale();
   auto it = actors_.find(address);
-  return it == actors_.end() || !it->second->object->alive ? nullptr : it->second.get();
+  return it == actors_.end() ? nullptr : it->second.get();
 }
 
 std::uint32_t Runtime::definition_entry(Kind kind, unsigned slot) {
@@ -316,6 +329,7 @@ std::uint32_t Runtime::definition_entry(Kind kind, unsigned slot) {
 
 Actor &Runtime::adopt(Kind kind, objects::GameObject &object, std::uint32_t angle,
                       std::optional<std::int64_t> boss_rank) {
+  retire_stale();
   if (!shared_) throw Unsupported("adopt: needs a shared-memory Runtime");
   if (kind == Kind::Minotaur) {
     required(services_.minotaur_construct,"Minotaur constructor");
@@ -428,10 +442,9 @@ Actor &Runtime::adopt(Kind kind, objects::GameObject &object, std::uint32_t angl
 }
 
 Actor &Runtime::at(std::uint32_t address) {
-  auto it = actors_.find(address);
-  if (it == actors_.end() || !it->second->object->alive)
-    throw Unsupported("actor address is not live in this World");
-  return *it->second;
+  auto *actor = find(address);
+  if (!actor) throw Unsupported("actor address is not live in this World");
+  return *actor;
 }
 
 void Runtime::set_state(Actor &a, std::uint32_t state) {

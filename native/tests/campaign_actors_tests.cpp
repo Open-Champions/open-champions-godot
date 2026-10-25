@@ -517,5 +517,21 @@ int main() {
       check(order == std::vector<std::string>({"hand", "hand", "variant", "state0", "init"}),
             "Minotaur ctor hand, own draw/hide mask, setState(0), init order");
     }
+  {
+    O::World reused(O::CallbackPolicy::ReferenceBase);
+    C::Runtime runtime(reused, resources, services);
+    auto &original = runtime.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100), 0);
+    const auto address = original.object->addr;
+    const auto serial = original.object_serial;
+    reused.destroy(*original.object);
+    check(runtime.find(address) == nullptr, "destroyed actor is not findable");
+    auto &replacement = runtime.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(80), 0);
+    check(replacement.object->addr == address && replacement.object_serial != serial,
+          "replacement reuses the pool address with a fresh serial");
+    check(runtime.find(address) == &replacement && replacement.health() == R::from_int(80),
+          "replacement owns a live actor, not a dangling insertion result");
+    reused.destroy(*replacement.object);
+    check(runtime.actors().empty(), "enumeration retires destroyed actors");
+  }
   return 0;
 }

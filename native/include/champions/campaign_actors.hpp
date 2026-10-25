@@ -83,6 +83,7 @@ struct Services {
 struct Actor {
   Kind kind;
   objects::GameObject *object;
+  const std::uint64_t object_serial;
   std::uint32_t state = 0, last_attack = 0, hit_frame = 0;
   std::uint32_t forward_offset = 0, scale = 0, turn_rate = 0, kind_byte = 0;
   std::uint32_t small_marker = 0;
@@ -133,6 +134,7 @@ class Runtime {
                         objects::Props, Raw,
                         const std::function<void(Actor &)> &);
   void tick_boar(Actor &, const TickInput &);
+  void retire_stale();
   void set_state(Actor &, std::uint32_t);
 public:
   // `shared` (optional): the World authority's memory. Adopted actors read
@@ -171,7 +173,7 @@ public:
   std::optional<champions::Bytes> resource_bytes(std::uint32_t token);
   Actor &at(std::uint32_t);
   Actor *find(std::uint32_t);
-  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() const { return actors_; }
+  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() { retire_stale(); return actors_; }
   // Opt-in: an Unsupported from the AI portion of a tick is recorded on the
   // actor (Actor::ai_refusal) and counted, and that actor's AI stays frozen;
   // processDamage, Creature_run and the death check keep running.
