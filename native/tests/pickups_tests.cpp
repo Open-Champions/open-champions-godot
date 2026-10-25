@@ -202,6 +202,27 @@ void adopted_chest_lifetime() {
   authority->objects->destroy(*other, 3);
   authority->unregister_object(*other);
 }
+void chest_branch_refusals() {
+  for (const auto &props : std::vector<std::vector<std::string>>{{"action=authored"}, {"action="}, {"name=fixture", "action=authored"}}) {
+    for (unsigned initial_state : {0u, 1u}) {
+      unsigned state = initial_state, loot = 0, completion = 0;
+      bool refused = false;
+      try {
+        P::require_supported_chest(props, false);
+        ++state; ++loot; ++completion;
+      } catch (const C::Unsupported &error) { refused = std::string(error.what()).find("action script") != std::string::npos; }
+      check(refused && state == initial_state && loot == 0 && completion == 0,
+            "action-bearing opening/completion refuses before state or loot mutation");
+    }
+  }
+  bool refused = false;
+  try { P::require_supported_chest({}, true); }
+  catch (const C::Unsupported &error) { refused = std::string(error.what()).find("timed explosion") != std::string::npos; }
+  check(refused, "trapped opening refuses before dispensing or opening");
+  P::require_supported_chest({}, false);
+  P::require_supported_chest({"name=fixture", "item=authored"}, false);
+  check(true, "nontrapped Chest with no action properties has a demonstrable no-op action loop");
+}
 void allocation_loss() {
   Ground g; const auto a = g.flying();
   while (g.authority->objects->pool.allocate(0x190)) {}
@@ -404,7 +425,7 @@ void item_constructors() {
 int main() {
   try {
     inventory_limits(); equip_callback(); bounds(); flight_and_settle(); adopted_chest_lifetime(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
-    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors();
+    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals();
     std::cout << "pickup checks " << checks << " passed\n"; return 0;
   } catch(const std::exception &e) { std::cerr << "pickup check " << checks << ": " << e.what() << '\n'; return 1; }
 }

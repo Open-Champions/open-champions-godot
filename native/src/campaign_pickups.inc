@@ -206,6 +206,7 @@
   void chest_use(Address a, Raw slot) {
     auto it = chests.find(a);
     if (!live_chest(a)) throw C::Unsupported("interactable class has no live Chest slot 14");
+    pickups::require_supported_chest(it->second.props, read(a + 0x58, 1) != 0);
     if (read(a + 0x84)) {
       world->write(a + 0x54, 4, 1);
       world->add_gold_floater(slot, {read(a + 0x10), read(a + 0x14), read(a + 0x18)},
@@ -227,18 +228,12 @@
     auto it = chests.find(a);
     if (!live_chest(a)) return false;
     auto &chest = it->second;
-    if (read(a + 0x58, 1)) {
-      refuse("trapped Chest run: explosion/action path not executed by loot-drop probes");
-      return true;
-    }
+    pickups::require_supported_chest(chest.props, read(a + 0x58, 1) != 0);
     anim->advance(ONE, chest.animation, false);
     world->write(a + 0x62, 2, anim->state(chest.animation).flags);
     if (anim->state(chest.animation).flags & 0x80) {
       world->write(a + 0x84, 4, 2);
       host->variables().world->stop_running(*host->variables().obj_at(a));
-      // The interpreter recorded the action service, not arbitrary action
-      // scripts. Keep that boundary explicit rather than silently skipping it.
-      refuse("Chest completion action scripts and rendered lid remain unverified");
     }
     return true;
   }

@@ -7,6 +7,7 @@
 // RTA US v2.00, research-loot-drop 77c2f70 and research-pickups 9911a6b.
 // Runtime names/bytes are borrowed from the user's selected executable/disc.
 namespace champions::simulation::rta::pickups {
+void require_supported_chest(const std::vector<std::string> &props, bool trapped);
 struct Grant {
   std::uint32_t descriptor;
   std::int32_t variant;

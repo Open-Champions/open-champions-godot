@@ -1,6 +1,13 @@
 #include "champions/pickups.hpp"
 #include <algorithm>
 namespace champions::simulation::rta::pickups {
+void require_supported_chest(const std::vector<std::string> &props, bool trapped) {
+  if (trapped)
+    throw combat_runtime::Unsupported("trapped Chest opening refused: timed explosion service is not evidenced");
+  for (const auto &property : props)
+    if (property.compare(0, 7, "action=") == 0)
+      throw combat_runtime::Unsupported("Chest opening/completion refused: action script service is not composed");
+}
 std::vector<Grant> starting_grants(unsigned cls) {
   if (cls > 6) throw script_items::Refused("starting class outside 0..6");
   std::vector<Grant> grants;
