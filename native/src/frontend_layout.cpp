@@ -511,31 +511,35 @@ Scene Flow::layout() const {
     s.unknown = {"saved confirmation box frame, localized text, fade and sound"};
     break;
   case Screen::CharClass: {
-    host("class art, the 3D model pose, cursor and highlight and the per-race animation are Unknown");
+    host("carousel order Observed; class art, the 3D model pose, cursor timing and per-race animation are Unknown");
     // Class selection has no phase of its own in the research (frontend-layout.md),
     // and phase 1 is "import selection": its (41,29) wrapped call and its sounds
     // are not mapped to this screen (REFUSED). The footer and the line are Host.
     add_footer(s, "Cross: choose   Circle: back   Triangle: import", true);
-    host_text(s, 41, 29, "Choose a model (class art is not documented)", Align::Left, Font::Small, 6);
-    const int per = 6;
+    host_text(s, 41, 29, "Choose a model (13-position carousel; preview Unknown)", Align::Left, Font::Small, 6);
     for (std::size_t i = 0; i < list.size(); ++i) {
-      const int col = static_cast<int>(i) / per, row = static_cast<int>(i) % per;
-      const int x = 190 + col * 260, y = 120 + row * 30;
+      const int x = 150, y = 79 + static_cast<int>(i) * 24;
       if (static_cast<int>(i) == cur)
-        s.draws.push_back(rect(x - 120, y - 3, x + 120, y + 19, 6, 0x80366876, Evidence::Host, "host row highlight"));
+        s.draws.push_back(rect(x - 125, y - 3, x + 125, y + 19, 6, 0x80366876, Evidence::Host, "host row highlight"));
       s.draws.push_back(text(Font::Small, Align::Centred, 7, x, y, HOST_LIST_TEXT, list[i].label, Evidence::Host, "host row"));
     }
-    s.unknown = {"which models the page shows and in what order, class art, cursor and highlight"};
+    s.unknown = {"carousel input timing, class art, camera preview, cursor and highlight"};
     break;
   }
   case Screen::CharAppearance:
-    host("the appearance art and choices are Unknown");
-    add_footer(s, "Cross: continue   Circle: back");
+    host("record appearance fields are Observed; reachable menu choices, values and art are Unknown");
+    add_footer(s, "Cross: continue on default route   Circle: back");
     // Phase 2 (ref_frontend_screens PLAYERSEL_PHASES): batch 0x0A316864 precedes the
     // wide (41,38) call; the colour 0x08585E5D is set after it.
-    s.draws.push_back(text(Font::Small, Align::Left, 6, 41, 38, 0x0A316864, "Appearance: default", Evidence::Inferred,
+    s.draws.push_back(text(Font::Small, Align::Left, 6, 41, 38, 0x0A316864, "Appearance (selected values Unknown)", Evidence::Inferred,
                            "phase-2 wide text (text Host)", "0x227018"));
-    s.unknown = {"look and skin art, the choices and their defaults"};
+    for (std::size_t i = 0; i < list.size(); ++i) {
+      const int y = 105 + static_cast<int>(i) * 32;
+      if (static_cast<int>(i) == cur)
+        s.draws.push_back(rect(60, y - 4, 365, y + 20, 6, 0x80366876, Evidence::Host, "host row highlight"));
+      host_text(s, 70, y, list[i].label, Align::Left, Font::Small, 7);
+    }
+    s.unknown = {"look and skin art, option bounds and their selected values, menu-to-record handoff"};
     break;
   case Screen::CharAbility: {
     add_footer(s, "Right: add a point   Cross: continue   Circle: back");

@@ -265,15 +265,42 @@ void character_vectors() {
   for (int i = 0; i < 5; ++i)
     tap(f, CROSS);
   expect(f.screen() == Screen::CharClass, "at class page");
-  expect(f.entries().size() == 12, "twelve models");
-  std::array<std::array<std::int32_t, 4>, CLASSES> rows{};
-  for (int c = 0; c < CLASSES; ++c)
-    rows[static_cast<std::size_t>(c)] = {c * 10 + 1, c * 10 + 2, c * 10 + 3, c * 10 + 4};
+  expect(f.entries().size() == 13, "thirteen carousel positions");
+  const std::array<int, CAROUSEL_POSITIONS> order{{0, 11, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}};
+  const std::array<int, CAROUSEL_POSITIONS> classes{{0, 6, 5, 0, 0, 3, 3, 1, 1, 4, 4, 2, 2}};
+  for (int p = 0; p < CAROUSEL_POSITIONS; ++p)
+    expect(carousel_model(p) == order[static_cast<std::size_t>(p)] &&
+           class_of_model(carousel_model(p)) == classes[static_cast<std::size_t>(p)] &&
+           f.entries()[static_cast<std::size_t>(p)].label.find("Model " + std::to_string(order[static_cast<std::size_t>(p)])) == 0,
+           "audited carousel row");
+  expect(std::string(body_code_of_model(11)) == "im", "model 11 body resource code");
+  reject([&] { (void)carousel_model(13); }, "out-of-range carousel position refused");
+  const std::array<std::array<std::int32_t, 4>, CLASSES> rows{{
+      {{35, 20, 25, 35}}, {{26, 36, 27, 26}}, {{28, 30, 27, 30}},
+      {{28, 25, 35, 27}}, {{23, 39, 25, 28}}, {{32, 22, 31, 30}},
+      {{26, 37, 24, 28}}}};
+  auto wrong = rows;
+  wrong[6][0] = 27;
+  reject([&] { f.set_class_start_stats(wrong); }, "unmatched stat table refused");
   f.set_class_start_stats(rows);
-  for (int i = 0; i < 10; ++i)
-    tap(f, DOWN);
+  for (int i = 0; i < 3; ++i) tap(f, DOWN);
   tap(f, CROSS);
-  expect(f.character().model == 10 && f.character().class_index == 5, "model 10 is class 5");
+  expect(f.character().model == 0, "duplicated carousel position selects model 0");
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::CharClass && f.cursor() == 3,
+         "cancel returns to the selected duplicate position");
+  tap(f, UP);
+  tap(f, UP);
+  tap(f, UP);
+  tap(f, DOWN); // the second carousel position is model 11, class 6
+  tap(f, CROSS);
+  expect(f.character().model == 11 && f.character().class_index == 6 &&
+         f.character().base == rows[6], "model 11, class 6 starts with the audited row");
+  tap(f, DOWN);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::CharAppearance && f.last_error().find("Unknown") != std::string::npos,
+         "unverified appearance option refused");
+  tap(f, UP);
   tap(f, CROSS);
   expect(f.screen() == Screen::CharAbility, "ability page");
   tap(f, CROSS);
@@ -281,7 +308,7 @@ void character_vectors() {
   for (int i = 0; i < 25; ++i)
     tap(f, RIGHT);
   expect(f.ability_remaining() == 0, "20 spent, extra ignored");
-  expect(f.character().stats()[0] == 51 + 20, "first row takes the points");
+  expect(f.character().stats()[0] == 26 + 20, "class 6 strength row takes the points");
   tap(f, CROSS);
   expect(f.screen() == Screen::CharName, "name page");
   tap(f, DOWN);
@@ -291,6 +318,10 @@ void character_vectors() {
   f.set_name("Host");
   tap(f, CROSS);
   expect(f.screen() == Screen::Playing && f.character_ready(), "character finished");
+  expect(f.character().name == "Host" && f.character().stats() == std::array<std::int32_t, 4>{{46, 37, 24, 28}} &&
+         !f.character().appearance_known && f.character().gold == 500 && f.character().level == 1 &&
+         f.character().acknowledged == 1 && !f.character().skill_points_known,
+         "created record keeps known fields and labels appearance and skill points Unknown");
   bool hub = false;
   for (const auto &r : f.take_requests())
     hub = hub || (r.kind == "start_play" && r.arg == "hub");
@@ -305,7 +336,7 @@ void character_vectors() {
     a.stats[i] = f.character().stats()[static_cast<std::size_t>(i)];
   ledger.adopt(a);
   expect(ledger.gold() == 500 && ledger.level() == 1 && ledger.acknowledged() == 1, "ledger adopts init values");
-  expect(ledger.base_stat(0) == 71 && ledger.bag_count(0) == 0, "ledger stats and empty bag");
+  expect(ledger.base_stat(0) == 46 && ledger.bag_count(0) == 0, "ledger stats and empty bag");
   expect(ledger.equipment_index(0) == -1, "ledger equipment empty");
   a.level = 200;
   reject([&] { ledger.adopt(a); }, "level over s8 refused");
