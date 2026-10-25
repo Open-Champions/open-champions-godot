@@ -979,6 +979,21 @@ bool Playback::poll_level(std::uint32_t draw) {
   return queued;
 }
 
+bool Playback::poll_level_without_cosmetic() {
+  if (!level_active_)
+    return false;
+  if (countdown_ == 1)
+    throw std::invalid_argument("ambient cosmetic draw unavailable");
+  --countdown_;
+  // The countdown's zero branch needs g_cosmeticSeed, which this host does
+  // not expose. Earlier polls still use the documented g_drawFrame cadence.
+  if (draw_cadence(draw_frame_) && !streams_[0].active && queues_[0].empty())
+    for (const auto &e : level_.entries)
+      if (e.name.find("amb_") != std::string::npos)
+        return queue_stream(0, e.name, 3, StreamSource::level);
+  return false;
+}
+
 // --- tick and mix -----------------------------------------------------------
 
 void Playback::mix(std::array<float, 2> &out) {

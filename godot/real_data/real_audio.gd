@@ -9,6 +9,7 @@ var installed_global_bank: Dictionary = {}
 var level_bank: Dictionary = {}
 var skipped_events := 0
 var bank_errors: Array[String] = []
+var ambient_poll_refused := false
 
 func _vat(bank: Dictionary) -> PackedByteArray:
 	return FileAccess.get_file_as_bytes(bank.vat) if bank.has("vat") else PackedByteArray()
@@ -26,6 +27,8 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	level_key = key
 	menu_accumulator = 0
 	events.clear()
+	bank_errors.clear()
+	ambient_poll_refused = false
 	# end_session keeps the process-lifetime global VAT and mixer state. The
 	# disc bank is read-only, so reopening the same bank only makes a second
 	# 108 MB native copy overlap the first during a level reset.
@@ -41,10 +44,9 @@ func reset(play: bool, tick := 0, key := "") -> void:
 		if not level_bank.is_empty() and not bridge.handoff_level_entry(false):
 			var handoff_error: String = bridge.get_last_error()
 			if not handoff_error.is_empty(): bank_errors.append(handoff_error)
-		if not level_bank.is_empty():
-			# game_loadLevel services sound twice after the new sound setup.
-			bridge.sound_tick(0)
-			bridge.sound_tick(0)
+		# game_loadLevel services sound twice after the new sound setup, even
+		# when this level has no bank to install.
+		if not bridge.service_loader_sound_pair(): bank_errors.append(bridge.get_last_error())
 	elif not global_bank.is_empty() and not bridge.play_menu_music(false) and bridge.get_observation().music_gate_open:
 		bank_errors.append(bridge.get_last_error())
 	player.play()
@@ -54,9 +56,35 @@ func reset(play: bool, tick := 0, key := "") -> void:
 func start_level(key: String) -> void:
 	level_key = key
 	if level_bank.is_empty(): return
-	# Initial countdown 1 is the existing explicit demo policy (research leaves it unspecified).
-	if not bridge.set_level_vat(level_bank.directory, _vat(level_bank), 0, 1):
+	# mainloop_loadRequestedWorld stores 60 before the loader's two sound calls.
+	if not bridge.set_level_vat(level_bank.directory, _vat(level_bank), 0, 60):
 		bank_errors.append(bridge.get_last_error())
+
+func ready_tick(packet: Dictionary) -> void:
+	if bridge == null: return
+	if not playing: reset(true, packet.tick - 1, packet.level_key)
+	if packet.tick != last_tick + 1:
+		errors.append("Audio requires consecutive native ready ticks")
+		return
+	if packet.level_key != level_key: start_level(packet.level_key)
+	update_camera()
+	for event in packet.events: animation_event(event, packet.tick)
+	var serviced := false
+	if packet.has("cosmetic_draw"):
+		ambient_poll_refused = false
+		serviced = bridge.sound_tick(int(packet.cosmetic_draw))
+	elif ambient_poll_refused:
+		serviced = bridge.service_session_sound_without_ambient()
+	else:
+		serviced = bridge.sound_tick_without_cosmetic()
+		if not serviced and bridge.get_last_error() == "ambient cosmetic draw unavailable":
+			ambient_poll_refused = true
+			bank_errors.append(bridge.get_last_error())
+			serviced = bridge.service_session_sound_without_ambient()
+	if not serviced: bank_errors.append(bridge.get_last_error())
+	last_tick = packet.tick
+	pushed_frames += bridge.pump_frames(800)
+	update_label()
 
 func animation_event(_event: Dictionary, _tick: int) -> void:
 	skipped_events += 1

@@ -275,6 +275,9 @@ public:
   // mainloop_pollAmbientAudio, once per displayed frame; draw is 0..7199.
   // The amb_ poll reads g_drawFrame and does not advance it.
   bool poll_level(std::uint32_t cosmetic_draw);
+  // Use the documented countdown and g_drawFrame cadence without fabricating
+  // a cosmetic RNG draw. Refuse before the poll that would consume one.
+  bool poll_level_without_cosmetic();
   void advance_draw_frame() { draw_frame_ = (draw_frame_ + 1) & 0xffffffffu; }
   // audio_streamStop: clear the queue and the active name. The volume word stays.
   void stream_stop(std::size_t stream);

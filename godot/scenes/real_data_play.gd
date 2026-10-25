@@ -7,6 +7,7 @@ const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const LoadingDisplay = preload("res://real_data/loading_display.gd")
 signal loading_started
+signal loading_start_submitted
 const TextHud = preload("res://ui/text_hud.gd")
 var real: Node
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
@@ -299,6 +300,25 @@ func _wait_loading_present() -> void:
 	if DisplayServer.get_name() == "headless": await get_tree().process_frame
 	else: await RenderingServer.frame_post_draw
 
+func _loading_terrain_state() -> Dictionary:
+	if real == null or terrain_root == null:
+		return {"ok": false, "error": "Terrain state unavailable."}
+	if not real.stream_textures:
+		return {"ok": true, "busy": false}
+	if not terrain_root.has_meta("level_texture_streamed") or not terrain_root.has_method("loading_busy"):
+		return {"ok": false, "error": "Terrain stream readiness unavailable."}
+	return {"ok": true, "busy": bool(terrain_root.loading_busy())}
+
+func _refuse_loaded_transition(requested: String, reason: String) -> bool:
+	_refused_level_request = requested
+	loading_display.phase = "hidden"
+	loading_display.visible = false
+	automatic_steps = false
+	_level_change_loading = false
+	stop_session()
+	status_label.text = "Level transition refused: " + reason
+	return false
+
 func _apply_level_change() -> bool:
 	_level_change_queued = false
 	if _level_change_loading or controller == null or real == null: return false
@@ -337,12 +357,13 @@ func _apply_level_change() -> bool:
 		automatic_steps = old_automatic
 		_level_change_loading = false
 		return false
-	# The start slice makes three dark submissions before the animated display.
+	# The start slice submits its five tinted sprites on each of three presents.
+	loading_start_submitted.emit()
 	for i in range(3): await _wait_loading_present()
 	loading_display.phase = "loading"
 	loading_display.queue_redraw()
 	loading_started.emit()
-	# The session owns input while the display and ten idle-stream presents run.
+	# The session owns input while the display and readiness warm-up run.
 	# Loading itself is synchronous in this client; frames around it remain
 	# observable, while actual concurrent renderer-thread timing is unverified.
 	await _wait_loading_present()
@@ -351,7 +372,19 @@ func _apply_level_change() -> bool:
 		str(pending.get("entrance", "")), requested)
 	if changed and was_playing: start_play()
 	if changed:
-		for i in range(LoadingDisplay.WARMUP_PRESENTS): await _wait_loading_present()
+		var warmup := LoadingDisplay.WARMUP_PRESENTS
+		var displayed := 0
+		while warmup > 0:
+			await _wait_loading_present()
+			displayed += 1
+			var readiness := _loading_terrain_state()
+			if not readiness.get("ok", false):
+				return _refuse_loaded_transition(requested, str(readiness.get("error", "Loading readiness unavailable.")))
+			if displayed >= 1500 and readiness.get("busy", false):
+				return _refuse_loaded_transition(requested, "Terrain still busy at the documented warm-up escape.")
+			# This offline host has no pending-equipment queue, peer barrier, or
+			# store-stock adapter. Never infer their completion from elapsed time.
+			warmup = LoadingDisplay.warmup_remaining(warmup, bool(readiness.get("busy", false)), false, displayed)
 	else:
 		loading_display.visible = false
 		loading_display.phase = "hidden"

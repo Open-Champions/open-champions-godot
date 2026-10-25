@@ -535,6 +535,30 @@ void music() {
   entry.set_level_vat(zero_vat(0x800), parse_vat_directory(view(no_entry), 0x800), 0, 60);
   check(entry.handoff_level_entry(false) && entry.queued_count(2) == 1,
         "missing enttag queues stream-2 stop");
+
+  Playback loader;
+  loader.set_level_vat(zero_vat(0x2000), level_entries, 0, 60);
+  const auto before_sound = loader.frame();
+  const auto before_draw = loader.draw_frame();
+  loader.tick();
+  loader.tick();
+  check(loader.frame() == before_sound + 2 && loader.draw_frame() == before_draw &&
+            loader.level_countdown() == 60 && loader.queued_count(0) == 0 &&
+            loader.queued_count(2) == 0,
+        "two loader sound updates neither poll ambience nor advance draw");
+  for (int i = 0; i < 59; ++i) {
+    loader.poll_level_without_cosmetic();
+    loader.tick();
+    loader.advance_draw_frame();
+  }
+  check(loader.level_countdown() == 1 && loader.queued_count(2) == 0,
+        "session boundary resumes countdown and draw cadence without random input");
+  const auto sound_before_refusal = loader.frame();
+  const auto draw_before_refusal = loader.draw_frame();
+  check(throws([&] { loader.poll_level_without_cosmetic(); }) &&
+            loader.level_countdown() == 1 && loader.frame() == sound_before_refusal &&
+            loader.draw_frame() == draw_before_refusal,
+        "unknown cosmetic draw refuses before the ambient decision mutates state");
 }
 
 void playback_vectors() {

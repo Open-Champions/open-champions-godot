@@ -3,13 +3,15 @@ extends SceneTree
 # Synthetic selection and present-count cases from research-loading's executed
 # alias/start/fade slices. No game bytes are part of this test.
 const Display = preload("res://real_data/loading_display.gd")
+const TerrainStream = preload("res://scenes/level_texture_stream.gd")
 var checks := 0
+var failures := 0
 
 func expect(ok: bool, message: String) -> void:
 	checks += 1
 	if not ok:
+		failures += 1
 		push_error("Loading display: " + message)
-		quit(1)
 
 func _initialize() -> void:
 	var art := {"lblood1.lmp": true, "linnova2.lmp": true, "lvalor.lmp": true,
@@ -35,6 +37,46 @@ func _initialize() -> void:
 		"fade boundary channels")
 	expect(Display.strip_positions(639) == Vector2i(639, -1) and
 		Display.strip_positions(640) == Vector2i(0, -640), "strip wrap")
+	for frame in range(3):
+		var start := Display.submissions("start", frame, "titleload.tex")
+		expect(start.size() == 5 and start.map(func(r): return r.name) ==
+			["titleload.tex", "shot.tex", "scrollbar.tex", "scrollbar2.tex", "scrollbar3.tex"],
+			"five start submissions in documented order")
+		var start_fields_ok := true
+		for record in start:
+			start_fields_ok = start_fields_ok and record.position == Vector2.ZERO and \
+				record.layer == 6 and record.tint == Display.START_TINT
+		expect(start_fields_ok, "start position, layer and tint")
+	var normal := Display.submissions("loading", 639, "titleload.tex")
+	expect(normal.map(func(r): return r.name) == ["shot.tex", "titleload.tex",
+		"scrollbar2.tex", "scrollbar2.tex", "scrollbar3.tex", "scrollbar3.tex"],
+		"normal submission order")
+	expect(normal[0].position == Vector2(0, 100) and normal[1].position == Vector2(228, 185) and
+		normal[2].position == Vector2(639, 0) and normal[3].position == Vector2(-1, 0) and
+		normal[4].position == Vector2(639, 352) and normal[5].position == Vector2(-1, 352),
+		"normal positions")
+	var painted := Display.painter_records(normal)
+	expect(painted[0] == normal[5] and painted[5] == normal[0],
+		"layer-6 painter reverses retained submissions")
+	var neutral := Display.sprite_tint(Display.NORMAL_TINT)
+	var strip := Display.sprite_tint(Display.STRIP_TINT)
+	var start_tint := Display.sprite_tint(Display.START_TINT)
+	expect(neutral == Color(1, 1, 1, 1) and strip == Color(1, 1, 1, 20.0 / 128.0) and
+		start_tint == Color(0.75, 0.75, 0.75, 1), "sprite /128 tint adapter")
+	expect(Display.warmup_remaining(4, true, false, 12) == 10 and
+		Display.warmup_remaining(3, false, true, 12) == 3 and
+		Display.warmup_remaining(3, false, false, 12) == 2 and
+		Display.warmup_remaining(10, true, false, 1500) == 0,
+		"terrain reset, pending equipment floor and 1500-present escape")
+	var terrain := TerrainStream.new()
+	terrain.wanted = PackedInt32Array([1, 2])
+	terrain.resident = {1: []}
+	expect(terrain.loading_busy(), "missing wanted terrain cell is busy")
+	terrain.resident[2] = []
+	expect(not terrain.loading_busy(), "complete terrain window is ready")
+	terrain.pending_cell = 3
+	expect(terrain.loading_busy(), "pending terrain build is busy")
+	terrain.free()
 	var display := Display.new()
 	display.begin_fade()
 	expect(display.fade_present == 0 and Display.fade_value(display.fade_present) == 0,
@@ -46,5 +88,6 @@ func _initialize() -> void:
 	expect(display.phase == "hidden" and display.fade_present == 33,
 		"fade ends after the neutral present")
 	display.free()
-	print("LOADING_CASES %d/%d" % [checks, checks])
-	quit(0)
+	if "--inject-failure" in OS.get_cmdline_user_args(): expect(false, "injected failure")
+	print("LOADING_CASES %d/%d" % [checks - failures, checks])
+	quit(1 if failures else 0)

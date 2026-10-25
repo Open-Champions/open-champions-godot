@@ -31,6 +31,12 @@ var pending_built: Array = []
 var pending_group := 0
 const BUILD_BUDGET_USEC := 2500 # Client frame scheduling only.
 
+func loading_busy() -> bool:
+	if pending_thread != null or pending_cell >= 0: return true
+	for cell in wanted:
+		if not resident.has(int(cell)): return true
+	return false
+
 func _init() -> void:
 	name = "OwnedTexturedTerrainDisplay"
 	set_meta("level_texture_streamed", true)

@@ -58,6 +58,9 @@ public:
   int64_t get_gated_flag_entries() const;
   Dictionary get_observation() const;
   bool sound_tick(int32_t cosmetic_draw);
+  bool sound_tick_without_cosmetic();
+  bool service_loader_sound_pair();
+  bool service_session_sound_without_ambient();
   int32_t pump_frames(int32_t max_frames);
   String get_last_error() const { return last_error_; }
 };

@@ -285,6 +285,7 @@ func run() -> void:
 	var record_before: Dictionary = scene.controller.get_observation()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	if selected and DisplayServer.get_name() != "headless":
+		scene.loading_start_submitted.connect(func(): call_deferred("capture", "10-start"), CONNECT_ONE_SHOT)
 		scene.loading_started.connect(func(): call_deferred("capture", "10-loading"), CONNECT_ONE_SHOT)
 	var transition_ok: bool = selected and bool(await scene._apply_level_change())
 	var loading_frames: int = scene.loading_display.loading_frame

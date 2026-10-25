@@ -9,6 +9,9 @@ const TITLE_POS := Vector2(228, 185)
 const FADE_PRESENTS := 32
 const WARMUP_PRESENTS := 10
 const BLANK_FIELDS := 6
+const START_TINT := 0x80606060
+const NORMAL_TINT := 0x80808080
+const STRIP_TINT := 0x14808080
 const TITLE_NAMES := {1: "titleloadsp.tex", 2: "titleloadit.tex", 3: "titleloadfr.tex", 4: "titleloadgr.tex"}
 
 var textures := {}
@@ -58,6 +61,41 @@ static func strip_positions(frame: int) -> Vector2i:
 	var x := frame % 640
 	return Vector2i(x, x - 640)
 
+static func warmup_remaining(remaining: int, terrain_busy: bool,
+		equipment_pending: bool, displayed: int) -> int:
+	if displayed >= 1500: return 0
+	if terrain_busy: return WARMUP_PRESENTS
+	var next := maxi(remaining - 1, 0)
+	return maxi(next, 3) if equipment_pending else next
+
+# ui_drawSpriteImpl's TFX modulate and alpha use 0x80 as neutral. This is
+# the same sprite adapter used by original_art/hud_view.gd, not Color8 /255.
+static func sprite_tint(word: int) -> Color:
+	return Color(float(word & 255) / 128.0, float((word >> 8) & 255) / 128.0,
+		float((word >> 16) & 255) / 128.0, float((word >> 24) & 255) / 128.0)
+
+static func submissions(which: String, frame: int, title_name: String) -> Array[Dictionary]:
+	var records: Array[Dictionary] = []
+	if which == "start":
+		for name in [title_name, "shot.tex", "scrollbar.tex", "scrollbar2.tex", "scrollbar3.tex"]:
+			records.append({"name": name, "position": Vector2.ZERO, "layer": 6, "tint": START_TINT})
+	elif which == "loading":
+		records.append({"name": "shot.tex", "position": SHOT_RECT.position, "layer": 6, "tint": NORMAL_TINT})
+		records.append({"name": title_name, "position": TITLE_POS, "layer": 6, "tint": NORMAL_TINT})
+		var positions := strip_positions(frame)
+		for strip in [["scrollbar2.tex", 0], ["scrollbar3.tex", 352]]:
+			for x in [positions.x, positions.y]:
+				records.append({"name": strip[0], "position": Vector2(x, strip[1]),
+					"layer": 6, "tint": STRIP_TINT})
+	return records
+
+static func painter_records(records: Array[Dictionary]) -> Array[Dictionary]:
+	# The UI packet list prepends each record within its layer. These retained
+	# loading records all use layer 6, so the GS consumes them in reverse.
+	var out: Array[Dictionary] = []
+	for index in range(records.size() - 1, -1, -1): out.append(records[index])
+	return out
+
 func configure(real: Node, inspector: Object, level_name: String, language := 0) -> bool:
 	textures.clear()
 	refusal = ""
@@ -98,7 +136,7 @@ func configure(real: Node, inspector: Object, level_name: String, language := 0)
 			return false
 	loading_frame = 0
 	fade_present = 0
-	phase = "dark"
+	phase = "start"
 	visible = true
 	queue_redraw()
 	return true
@@ -129,7 +167,7 @@ func _draw() -> void:
 	if scale_factor <= 0: return
 	var origin := (size - DESIGN * scale_factor) * 0.5
 	if phase != "fade": draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
-	if phase == "blank" or phase == "dark": return
+	if phase == "blank": return
 	draw_set_transform(origin, 0.0, Vector2.ONE * scale_factor)
 	if phase == "fade":
 		# gfx_present uses the pre-step multiplier. Present 33 first uses 128.
@@ -137,14 +175,9 @@ func _draw() -> void:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 1.0 - c))
 		return
-	if textures.has("shot.tex"):
-		draw_texture_rect(textures["shot.tex"], SHOT_RECT, false, Color8(128, 128, 128, 128))
 	var title_name: String = "titleload.tex"
 	for name in TITLE_NAMES.values():
 		if textures.has(name): title_name = name
-	if textures.has(title_name): draw_texture(textures[title_name], TITLE_POS, Color8(128, 128, 128, 128))
-	var positions := strip_positions(loading_frame)
-	for strip in [["scrollbar2.tex", 0], ["scrollbar3.tex", 352]]:
-		if not textures.has(strip[0]): continue
-		for shift in [positions.x, positions.y]:
-			draw_texture(textures[strip[0]], Vector2(shift, strip[1]), Color8(128, 128, 128, 20))
+	for record in painter_records(submissions(phase, loading_frame, title_name)):
+		if textures.has(record.name):
+			draw_texture(textures[record.name], record.position, sprite_tint(record.tint))
