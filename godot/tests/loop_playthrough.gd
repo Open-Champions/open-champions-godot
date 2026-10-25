@@ -572,10 +572,17 @@ func run() -> void:
 	var menu_after: Dictionary = scene.controller.script_mission_menu_state()
 	var menu_open: bool = bool(menu_after.get("ok", false) and menu_after.get("open", false))
 	var trigger_opened_menu: bool = hub_trigger_found and menu_was_closed and trigger_result.get("ok", false) and menu_open
+	var trigger_counts: Dictionary = scene.controller.script_command_counts()
 	scene._refresh_mission_menu()
 	mark("hub_trigger_mission_menu", "opened" if trigger_opened_menu else "refused",
 		{"hub_trigger_found": hub_trigger_found, "dialog_choice_completed": dialog_choice_completed,
-		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false), "menu_open": menu_open,
+		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false),
+		"trigger_error": str(trigger_result.get("error", "")),
+		"script_fault": str(trigger_result.get("script_fault", "")),
+		"script_refusal_stops": int(trigger_counts.get("refusal_stops", 0)),
+		"script_faults": int(trigger_counts.get("faults", 0)),
+		"script_executed_commands": trigger_counts.get("executed", {}),
+		"script_refused_commands": trigger_counts.get("refused", {}), "menu_open": menu_open,
 		"host_panel_visible": scene.mission_menu_panel.visible})
 	await capture("10-mission-menu")
 	var selected: bool = trigger_opened_menu and scene.mission_menu_select_first_story()
@@ -767,12 +774,6 @@ func run() -> void:
 	var swing_msec := Time.get_ticks_msec() - swing_start_msec
 	if target_dead: advance(0, SETTLE_TICKS)
 	var after: Dictionary = scene.controller.get_observation()
-	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
-	var saved_hp := float(after.get("hp", -1.0))
-	var saved_gold := int(after.get("gold", -1))
-	var saved_experience := int(after.get("experience", -1))
-	var saved_level := int(after.get("level", -1))
-	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var actors_after: Array = after.get("fight_enemies", [])
 	var enemy_damaged := false
 	var enemy_died := false
@@ -907,6 +908,8 @@ func run() -> void:
 	var saved_state: Dictionary = scene.controller.get_observation()
 	var saved_hp := float(saved_state.get("hp", -1.0))
 	var saved_gold := int(saved_state.get("gold", -1))
+	var saved_experience := int(saved_state.get("experience", -1))
+	var saved_level := int(saved_state.get("level", -1))
 	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	help_close()
 	if scene.controller.dialog_status().get("open", false):

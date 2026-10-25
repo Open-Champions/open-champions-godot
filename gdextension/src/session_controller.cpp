@@ -1871,6 +1871,8 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
     result["queued"] = bool(script_level_request().get("queued", false));
   } catch (const std::exception &e) {
     result["error"] = String::utf8(e.what());
+    if (scripts_ && !scripts_->last_fault().empty())
+      result["script_fault"] = String::utf8(scripts_->last_fault().c_str());
   }
   return result;
 }
