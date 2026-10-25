@@ -400,7 +400,7 @@ void World::State::player_death(Address p) {
         throw Unsupported("PvP mode A kill credit (mana, a skill 0x3b orb)");
     }
   if (u(G_PVP_B))
-    throw Unsupported("PvP mode B arena lives");
+    arena_match::Model(mem).on_player_killed(p, target(p + LAST_ATTACKER));
   w(p + 0x2dc, 0);
 }
 void World::State::player_stagger(Address p) {

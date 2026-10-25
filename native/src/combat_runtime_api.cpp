@@ -449,6 +449,25 @@ void World::arena_intro_visit() {
     s_->w(0x41b4fc, 0);
   }
 }
+void World::arena_task_visit(arena_match::Services services, Raw pressed,
+                              Raw confirm, Raw cancel) {
+  require_full(*s_);
+  if (!services.walk)
+    services.walk = [this](const std::function<void(Address)> &fn) { s_->for_each_grid(fn); };
+  if (!services.move_off_grid)
+    services.move_off_grid = [this](Address a) { s_->move_off_grid(a); };
+  arena_match::Model(s_->mem, std::move(services)).visit(pressed, confirm, cancel);
+}
+void World::arena_reset_scores() {
+  require_full(*s_);
+  arena_match::Model(s_->mem).reset_scores();
+}
+void World::creature_on_death(Address creature, Raw quiet) {
+  require_full(*s_);
+  if (s_->actor(creature).player || !(s_->u(creature + 12) & 0x20))
+    throw Unsupported("Creature_onDeath requires a nonplayer creature");
+  s_->model.slot28_on_death(creature, quiet);
+}
 void World::bind_prop_model(Address prop, champions::Bytes vif) {
   require_full(*s_);
   s_->actor(prop);

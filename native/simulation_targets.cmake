@@ -235,6 +235,17 @@ else()
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
+# RTA arena scoring, recipe arithmetic and bounded match-task services.
+add_library(champions-arena-match "${CHAMPIONS_SIMULATION_ROOT}/src/arena_match.cpp")
+target_include_directories(champions-arena-match PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-arena-match PUBLIC champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-arena-match PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-arena-match PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-match)
+
 # AntQueen, Skeleton and Soul constructors, set-states and run prologues
 # (research-combat-ctors e9777eb) on the arena model.
 add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors.cpp"
