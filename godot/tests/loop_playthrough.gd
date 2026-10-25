@@ -153,6 +153,93 @@ func help_close() -> void:
 		if scene.controller.help_frame(true).get("closed", false): return
 	refusal("dialog", "help box did not close in 200 frames")
 
+func move_key(code: int, pressed: bool) -> bool:
+	var event := InputEventKey.new()
+	event.keycode = code
+	event.physical_keycode = code
+	event.pressed = pressed
+	return scene.handle_input_event(event)
+
+# Exercise authored inputs through the campaign bridge, never the Full fixture
+# helpers or equipment writes. The unarmed stand-in must refuse guard/heavy.
+func campaign_moves() -> bool:
+	var checks := {}
+	var initial: Dictionary = scene.controller.get_observation()
+	if not initial.get("fight_player_ready", false):
+		mark("combat_moves", "refused", {"real_player": false})
+		return false
+	scene.release_controls()
+	advance(0, 30)
+	var edges := int(scene.raw_observation.fight_counts.attack_edges)
+	checks.attack_key = move_key(KEY_J, true)
+	for i in range(32): scene.advance_step()
+	checks.held_once = int(scene.raw_observation.fight_counts.attack_edges) == edges + 1 \
+		and int(scene.raw_observation.fight_player_action_state) == 1 \
+		and int(scene.raw_observation.fight_player_combo_step) == 0
+	move_key(KEY_J, false)
+	scene.advance_step()
+	checks.combo_key = move_key(KEY_J, true)
+	for i in range(8): scene.advance_step()
+	checks.combo = int(scene.raw_observation.fight_player_combo_step) == 1
+	await capture("04-combat-combo")
+	move_key(KEY_J, false)
+	advance(0, 100)
+	checks.guard_key = move_key(KEY_K, true)
+	for i in range(3): scene.advance_step()
+	checks.unarmed_guard_refused = "guard: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+		and not bool(scene.raw_observation.fight_player_blocking) \
+		and int(scene.raw_observation.fight_player_action_state) != 8
+	checks.guard_move_key = move_key(KEY_U, true)
+	scene.advance_step()
+	checks.guard_move_refused = "guard_move: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+		and int(scene.raw_observation.fight_player_action_state) != 11
+	move_key(KEY_K, false)
+	move_key(KEY_U, false)
+	scene.advance_step()
+	var mana: float = scene.raw_observation.fight_player_mana
+	edges = int(scene.raw_observation.fight_counts.attack_edges)
+	checks.heavy_key = move_key(KEY_L, true)
+	scene.advance_step()
+	checks.heavy_refused = "heavy_attack: refused_unknown" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+		and int(scene.raw_observation.fight_player_attack_kind) != 2 \
+		and int(scene.raw_observation.fight_counts.attack_edges) == edges
+	# Ordinary ready ticks can regenerate mana; a refusal cannot spend it.
+	checks.heavy_mana_not_spent = float(scene.raw_observation.fight_player_mana) >= mana
+	await capture("04-combat-refusal")
+	move_key(KEY_L, false)
+	scene.advance_step()
+	for binding in [[KEY_1, "ability_slot_1"], [KEY_2, "ability_slot_2"]]:
+		checks[binding[1] + "_key"] = move_key(binding[0], true)
+		scene.advance_step()
+		checks[binding[1] + "_refused"] = (binding[1] + ": refused_unknown") in str(scene.raw_observation.get("fight_move_refusal", "")) \
+			and int(scene.raw_observation.fight_counts.attack_edges) == edges
+		checks[binding[1] + "_mana_not_spent"] = float(scene.raw_observation.fight_player_mana) >= mana
+		move_key(binding[0], false)
+		scene.advance_step()
+	# Pause with attack still held. Resuming and pressing again must create an
+	# edge in the native mapper as well as clearing the host's command word.
+	move_key(KEY_J, true)
+	scene.advance_step()
+	edges = int(scene.raw_observation.fight_counts.attack_edges)
+	scene.set_paused(true)
+	checks.pause_releases = scene.held_commands == 0
+	scene.resume_session()
+	move_key(KEY_J, true)
+	scene.advance_step()
+	checks.resume_edge = int(scene.raw_observation.fight_counts.attack_edges) == edges + 1
+	move_key(KEY_J, false)
+	advance(0, 100)
+	var counts: Dictionary = scene.raw_observation.fight_counts
+	checks.animation_hooks = int(counts.player_animation_starts) > 0 and int(counts.player_animation_advances) > 0
+	checks.world_running = not bool(scene.raw_observation.get("fight_failed", true))
+	var passed := 0
+	for value in checks.values(): passed += int(value)
+	mark("combat_moves", "passed" if passed == checks.size() else "refused", {
+		"checks": checks.size(), "passed": passed, "observed": checks,
+		"animation_starts": counts.player_animation_starts,
+		"animation_advances": counts.player_animation_advances})
+	return passed == checks.size()
+
 func game_key(code: int) -> bool:
 	var event := InputEventKey.new()
 	event.keycode = code
@@ -380,6 +467,15 @@ func run() -> void:
 		{"level_index": scene.real.current, "level_found": fight_level >= 0,
 		"session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
+	var moves_passed := await campaign_moves()
+	if args.has("moves-only"):
+		save_json()
+		scene.queue_free()
+		scene = null
+		fe = null
+		await process_frame
+		quit(0 if moves_passed else 1)
+		return
 	var before: Dictionary = scene.controller.get_observation()
 	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))

@@ -254,6 +254,11 @@ func _observe(result: Dictionary) -> void:
 	if result.get("facing_enabled", false) and not result.get("fight_player_ready", false):
 		health_label.text += "\nFacing test · angle %d · velocity %d · mode %d" % [result.facing_raw, result.angular_velocity_raw, result.turn_mode]
 	if result.get("fight_player_ready", false):
+		health_label.text += "\nCombat · state %d · combo step %d · variant %d · guarding %s" % [
+			int(result.get("fight_player_action_state", 2)), int(result.get("fight_player_combo_step", 0)),
+			int(result.get("fight_player_attack_variant", 0)), str(result.get("fight_player_blocking", false))]
+		if not str(result.get("fight_move_refusal", "")).is_empty():
+			health_label.text += "\n" + str(result.fight_move_refusal)
 		health_label.text += "\nStarting equipment: %s · weapon class %d (%s, not campaign evidence)" % [
 			str(result.get("fight_starting_equipment", "unknown")), int(result.get("fight_player_weapon_class", -1)),
 			str(result.get("fight_player_weapon_class_source", "unknown"))]

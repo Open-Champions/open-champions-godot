@@ -2,6 +2,11 @@
 
 ## Current milestone
 
+Campaign [player combat inputs](PLAYER_COMBAT_MOVES.md) now feed attack/combo,
+held guard and guard-swap into the shared World's real Player. Unarmed starting
+equipment remains labelled; heavy and the two ability-slot requests name their
+unbound learned-record prerequisites and refuse explicitly.
+
 The default Godot scene is a bounded, Session-backed movement and health test with
 authored controls. A standalone C++17 archive inspector and archive browser remain
 available using the same parser through GDExtension. They list GOB/LMP

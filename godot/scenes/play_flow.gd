@@ -433,17 +433,21 @@ func _full_key(event: InputEvent) -> bool:
 			if event.pressed: _combat_call("combat_cast_holy_strike", [])
 	return true
 
-# Ordinary real-level play with the shared-World fight: J is the attack button
-# of the executed player tick (native command bit 16 = pad attack).
+# Authored keyboard commands for the shared-World Player. The native tick owns
+# combos and guard transitions; heavy is a diagnostic request until its learned
+# old-inline record is bound.
+const FIGHT_KEYS := {KEY_J: 16, KEY_K: 32, KEY_U: 64, KEY_L: 128, KEY_1: 256, KEY_2: 512}
+
 func _fight_key(event: InputEvent) -> bool:
 	if not event is InputEventKey or event.echo or not raw_observation.get("fight_player_ready", false): return false
 	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
-	if key != KEY_J: return false
+	if not FIGHT_KEYS.has(key): return false
+	var command: int = FIGHT_KEYS[key]
 	if not event.pressed:
-		held_commands &= ~16
+		held_commands &= ~command
 		return true
 	if paused or stopped or _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible: return false
-	held_commands |= 16
+	held_commands |= command
 	return true
 
 func handle_input_event(event: InputEvent) -> bool:

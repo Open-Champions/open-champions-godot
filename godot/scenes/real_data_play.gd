@@ -120,7 +120,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoar-family enemies. The player is unarmed (starting equipment refused_unknown). Enemy AI (sight and everything past idle), hit reactions, loot objects, Gold and the Minotaurs remain refused."
+			mode_label.text = "Play mode · WASD moves · J attack / combo · K hold guard · U guard move · L heavy request · 1/2 ability slots. Unarmed stand-in: guard needs equipment; heavy and abilities need learned records (refused_unknown). Loot objects, Gold and incomplete enemy AI remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
