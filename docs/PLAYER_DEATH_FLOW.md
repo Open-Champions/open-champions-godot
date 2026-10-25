@@ -33,6 +33,9 @@ act lists, then asks the required checkpoint or same-level loader service.
 Phase 2 waits for the pending request to clear and qualified names to match.
 The original scheduler setup is Observed only; no new original-instruction
 execution is claimed for it.
+These hooks cover the combat World's tasks. The controller's separate
+script/dialog pumping is an authored composition; complete original task
+interleaving and script-driven revival/loading are not established here.
 
 The Godot binding exposes the task, countdowns, native animation state,
 menu-close request serial, fade and refusal. Local menus close on death and
