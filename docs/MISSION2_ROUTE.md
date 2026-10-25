@@ -14,6 +14,8 @@ owner executable supplies the 13 table rows at `0x4fe540`, stride `0x34`;
 row 1's story pointer is checked against the documented `innovat1` entry.
 No route destinations, table payloads or mission text are extracted into
 the repository. The host layout shows the availability gate explicitly.
+`native/include/champions/mission_menu_table.hpp` owns the portable table
+reader; the Godot bridge supplies its result to the native campaign.
 
 The menu advances once per displayed frame, freezes player input, and
 uses the existing `hud_stepFade(4)` port while state 6 waits for 128.
@@ -21,6 +23,7 @@ It does not supply a forced finished fade. The bridge retains play-route's
 explicit fade-input seam for controlled tests; the real scene passes -1
 to select the actual fade service. State 8 produces the pending-world
 request, and the existing level loader carries player and campaign state.
+Button chords refuse: the research executed one button per tick.
 
 `Host::require_complete_commands` is enabled for all four documented
 mission-2 story level identities. An unsupported command stops the script

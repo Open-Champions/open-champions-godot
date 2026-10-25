@@ -1,4 +1,5 @@
 #include "session_controller.hpp"
+#include "champions/mission_menu_table.hpp"
 #include "champions/ui_text_gaps.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
@@ -50,25 +51,6 @@ Dictionary failure(const std::exception &error) {
   out["ok"] = false;
   out["error"] = String::utf8(error.what());
   return out;
-}
-// Same table/bridge as play-route e141628. Read owner data at runtime;
-// research-story-route 76d4447 establishes row 1's story pointer.
-std::vector<rta::quests::MissionRow> mission_rows(const rta::arena_modes::Executable &exe) {
-  constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
-  std::vector<rta::quests::MissionRow> rows;
-  for (std::uint32_t i = 0; i < 13; ++i) {
-    const auto base = table + i * stride;
-    auto name = [&](std::uint32_t offset) {
-      const auto ptr = exe.word(base + offset);
-      return ptr ? exe.string(ptr) : std::string();
-    };
-    rows.push_back({name(0x08), name(0x0c), name(0x10), name(0x14),
-                    std::int32_t(exe.word(base + 0x20)), std::int32_t(exe.word(base + 0x24)),
-                    std::int32_t(exe.word(base + 0x28))});
-  }
-  if (rows[0].story != "blood1" || rows[1].story != "innovat1")
-    throw std::runtime_error("The executable does not establish the documented story menu entries.");
-  return rows;
 }
 bool mission2_story(const String &level) {
   const auto name = level.to_lower();
@@ -963,7 +945,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
     if (executable_)
-      next->campaign().set_rows(mission_rows(*executable_));
+      next->campaign().set_rows(rta::quests::read_mission_rows(*executable_));
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;
       const PackedByteArray image = resource_lumps[name];
@@ -1640,11 +1622,15 @@ Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits
     if (!scripts_ || scripts_->campaign().rows().size() != 13 || !scripts_->campaign().menu_open() ||
         !scripts_->campaign().menu().pending.empty())
       throw std::runtime_error("No documented mission menu is open.");
+    if (scripts_->requires_complete_commands() && scripts_->faulted())
+      throw std::runtime_error("Mission script stopped: " + scripts_->last_fault());
     constexpr std::uint32_t allowed = rta::quests::BTN_CROSS | rta::quests::BTN_CIRCLE |
                                       rta::quests::BTN_SELECT | rta::quests::BTN_UP |
                                       rta::quests::BTN_DOWN | rta::quests::BTN_LEFT |
                                       rta::quests::BTN_RIGHT;
-    if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 || fade < -1 || fade > 128)
+    if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 ||
+        (pad_bits != 0 && (std::uint64_t(pad_bits) & (std::uint64_t(pad_bits) - 1)) != 0) ||
+        fade < -1 || fade > 128)
       throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
     rta::quests::MenuInputs inputs;
     // -1: the real scene uses the executed hud_stepFade(4) body at state 6,
