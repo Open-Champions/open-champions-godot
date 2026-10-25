@@ -49,6 +49,36 @@ func run() -> void:
 	check(not fade.visible, "an absent task cannot leave a stale death overlay")
 	var controller: RefCounted = ClassDB.instantiate("ChampionsSessionController")
 	check(not controller.fight_diagnostic_lethal_hit().get("ok", true), "diagnostic refuses without a live shared-World fight")
+	# Exercise the actual scene's diagnostic label at the playthrough window
+	# width with authored observation data. The native death itself is tested
+	# separately; these values only check presentation and tooltip retention.
+	root.size = Vector2i(1120, 780)
+	var sandbox = load("res://scenes/session_sandbox.tscn").instantiate()
+	sandbox.automatic_steps = false
+	root.add_child(sandbox)
+	await process_frame
+	var state: Dictionary = controller.get_observation()
+	state["fight_player_ready"] = true
+	state["fight_player_action_state"] = 4
+	state["hp"] = 0.0
+	state["fight_starting_equipment"] = "refused_unknown"
+	state["fight_player_weapon_class_source"] = "unarmed_fallback_standin"
+	var reason := "save_reload refused: no valid in-memory checkpoint; complete saved player records, populated world/decal restore and camera load are required; invalid-buffer behavior Unknown"
+	state["fight_death_error"] = reason
+	sandbox.diagnostic_player_death = true
+	sandbox._observe(state)
+	for frame in range(3): await process_frame
+	check("world/camera restoration required" in sandbox.health_label.text, "reload boundary stays readable in the scene")
+	check(sandbox.health_label.tooltip_text == reason, "complete native refusal is retained in the tooltip")
+	check(sandbox.health_label.get_global_rect().end.x <= root.size.x, "death label fits the playthrough window width")
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--capture=") and DisplayServer.get_name() != "headless":
+			RenderingServer.force_draw()
+			root.get_texture().get_image().save_png(argument.trim_prefix("--capture="))
+	state["fight_death_error"] = ""
+	sandbox._observe(state)
+	check(sandbox.health_label.tooltip_text.is_empty(), "a new observation clears stale refusal detail")
+	sandbox.queue_free()
 	background.queue_free()
 	fade.queue_free()
 	controller = null
