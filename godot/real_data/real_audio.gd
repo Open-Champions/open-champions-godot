@@ -38,6 +38,13 @@ func reset(play: bool, tick := 0, key := "") -> void:
 			bank_errors.append(bridge.get_last_error())
 	if play:
 		start_level(key)
+		if not level_bank.is_empty() and not bridge.handoff_level_entry(false):
+			var handoff_error: String = bridge.get_last_error()
+			if not handoff_error.is_empty(): bank_errors.append(handoff_error)
+		if not level_bank.is_empty():
+			# game_loadLevel services sound twice after the new sound setup.
+			bridge.sound_tick(0)
+			bridge.sound_tick(0)
 	elif not global_bank.is_empty() and not bridge.play_menu_music(false) and bridge.get_observation().music_gate_open:
 		bank_errors.append(bridge.get_last_error())
 	player.play()

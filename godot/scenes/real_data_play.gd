@@ -5,6 +5,8 @@ extends "res://scenes/play_flow.gd"
 # archives are read from it at run time and never become project resources.
 const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
+const LoadingDisplay = preload("res://real_data/loading_display.gd")
+signal loading_started
 const TextHud = preload("res://ui/text_hud.gd")
 var real: Node
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
@@ -21,6 +23,8 @@ var real_exit_choice: OptionButton
 var mission_menu_panel: PanelContainer
 var mission_menu_status: Label
 var mission_first_story: Button
+var loading_layer: CanvasLayer
+var loading_display: Control
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -122,6 +126,14 @@ func _ready() -> void:
 	mission_box.add_child(mission_first_story)
 	if viewport != null: viewport.add_child(mission_menu_panel)
 	else: add_child(mission_menu_panel)
+	loading_layer = CanvasLayer.new()
+	loading_layer.layer = 100
+	add_child(loading_layer)
+	loading_display = LoadingDisplay.new()
+	loading_display.set_anchors_preset(Control.PRESET_FULL_RECT)
+	loading_display.mouse_filter = Control.MOUSE_FILTER_STOP
+	loading_display.visible = false
+	loading_layer.add_child(loading_display)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -283,6 +295,10 @@ func _queue_level_change() -> void:
 	_level_change_queued = true
 	call_deferred("_apply_level_change")
 
+func _wait_loading_present() -> void:
+	if DisplayServer.get_name() == "headless": await get_tree().process_frame
+	else: await RenderingServer.frame_post_draw
+
 func _apply_level_change() -> bool:
 	_level_change_queued = false
 	if _level_change_loading or controller == null or real == null: return false
@@ -311,16 +327,49 @@ func _apply_level_change() -> bool:
 		status_label.text = "Level change refused: same-level reload state is not ported."
 		return false
 	_level_change_loading = true
+	var old_automatic := automatic_steps
+	automatic_steps = false
+	release_controls()
+	var art_ready: bool = loading_display.configure(real, inspector, base)
+	if not art_ready:
+		status_label.text = "Loading art refused: " + loading_display.refusal
+		_refused_level_request = requested
+		automatic_steps = old_automatic
+		_level_change_loading = false
+		return false
+	# The start slice makes three dark submissions before the animated display.
+	for i in range(3): await _wait_loading_present()
+	loading_display.phase = "loading"
+	loading_display.queue_redraw()
+	loading_started.emit()
+	# The session owns input while the display and ten idle-stream presents run.
+	# Loading itself is synchronous in this client; frames around it remain
+	# observable, while actual concurrent renderer-thread timing is unverified.
+	await _wait_loading_present()
 	var was_playing: bool = play_mode and session_started and not stopped
 	var changed := load_real_level(destination, true, real.current_qualified,
 		str(pending.get("entrance", "")), requested)
 	if changed and was_playing: start_play()
+	if changed:
+		for i in range(LoadingDisplay.WARMUP_PRESENTS): await _wait_loading_present()
+	else:
+		loading_display.visible = false
+		loading_display.phase = "hidden"
 	if not changed: _refused_level_request = requested
+	if changed:
+		loading_display.phase = "blank"
+		loading_display.queue_redraw()
+		for i in range(LoadingDisplay.BLANK_FIELDS): await _wait_loading_present()
+		loading_display.begin_fade()
+		# The first normal frame and control opportunity follow the blank fields.
+		# The colour offset recovers on subsequent presents, not simulation ticks.
+	automatic_steps = old_automatic
 	_level_change_loading = false
 	return changed
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
+	if _level_change_loading: return true
 	# The offline help box owns confirmation while it holds the session. A
 	# simultaneous dialog or game-menu handler must not consume that key.
 	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:

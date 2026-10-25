@@ -518,6 +518,23 @@ void music() {
   check(!s.poll_level(0) && s.queued_count(2) == 1 && s.queued_count(0) == 0 &&
             s.level_countdown() == 14400,
         "0x20 on stream 2 suppresses the level track");
+
+  const auto entry_dir = directory({{"other.vag", 0}, {"first_enttag.vag", 0x800},
+                                    {"second_enttag.vag", 0x1000}, {"", 0x1800}});
+  Playback entry;
+  entry.set_music_volume(float_one);
+  entry.set_level_vat(zero_vat(0x1800), parse_vat_directory(view(entry_dir), 0x1800), 0, 60);
+  check(entry.handoff_level_entry(true) && entry.queued_count(2) == 0,
+        "recall retains stream-2 queue");
+  check(entry.handoff_level_entry(false) && entry.queued_count(2) == 1,
+        "first enttag queued");
+  entry.tick();
+  check(entry.streams()[2].name == "first_enttag.vag" && entry.streams()[2].flags == 0x22,
+        "entry music uses first directory match and flags 2");
+  const auto no_entry = directory({{"other.vag", 0}, {"", 0x800}});
+  entry.set_level_vat(zero_vat(0x800), parse_vat_directory(view(no_entry), 0x800), 0, 60);
+  check(entry.handoff_level_entry(false) && entry.queued_count(2) == 1,
+        "missing enttag queues stream-2 stop");
 }
 
 void playback_vectors() {

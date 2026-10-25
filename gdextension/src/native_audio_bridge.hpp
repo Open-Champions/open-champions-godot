@@ -51,6 +51,7 @@ public:
   void end_session();
   bool play_menu_music(bool wait_for_current);
   bool music_play_global(const String &name, int64_t flags);
+  bool handoff_level_entry(bool recall);
   bool play_boss_music(const String &creature_type, const String &object_name);
   bool stop_boss_music();
   double get_stream_time(int32_t stream) const;

@@ -239,6 +239,9 @@ public:
   // Both read g_musicVolume and queue nothing below the gate 0x3d4ccccc.
   bool music_play_global(const std::string &name, std::uint32_t flags);
   bool music_play_level(const std::string &name, std::uint32_t flags);
+  // game_loadLevel: first case-sensitive enttag entry in directory order,
+  // otherwise a stream-2 stop. Recall leaves the current queue untouched.
+  bool handoff_level_entry(bool recall);
   bool play_menu_music(bool wait_for_current);
   static std::optional<std::string> boss_music_name(const std::string &creature_type,
                                                     const std::string &object_name);

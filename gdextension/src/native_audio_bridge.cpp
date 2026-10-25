@@ -68,6 +68,7 @@ void ChampionsNativeAudio::_bind_methods() {
   ClassDB::bind_method(D_METHOD("end_session"), &ChampionsNativeAudio::end_session);
   ClassDB::bind_method(D_METHOD("play_menu_music", "wait_for_current"), &ChampionsNativeAudio::play_menu_music);
   ClassDB::bind_method(D_METHOD("music_play_global", "name", "flags"), &ChampionsNativeAudio::music_play_global);
+  ClassDB::bind_method(D_METHOD("handoff_level_entry", "recall"), &ChampionsNativeAudio::handoff_level_entry);
   ClassDB::bind_method(D_METHOD("play_boss_music", "creature_type", "object_name"),
                        &ChampionsNativeAudio::play_boss_music);
   ClassDB::bind_method(D_METHOD("stop_boss_music"), &ChampionsNativeAudio::stop_boss_music);
@@ -300,6 +301,16 @@ bool ChampionsNativeAudio::music_play_global(const String &name, int64_t flags) 
       throw std::invalid_argument("flags are a 32-bit word");
     auto utf = name.utf8();
     return model_.music_play_global(utf.get_data() ? utf.get_data() : "", static_cast<std::uint32_t>(flags));
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
+
+bool ChampionsNativeAudio::handoff_level_entry(bool recall) {
+  try {
+    last_error_ = "";
+    return model_.handoff_level_entry(recall);
   } catch (const std::exception &e) {
     fail(e.what());
     return false;

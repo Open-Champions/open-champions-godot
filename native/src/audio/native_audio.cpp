@@ -805,6 +805,15 @@ bool Playback::music_play_level(const std::string &name, std::uint32_t flags) {
   return queue_music(name, flags, StreamSource::level);
 }
 
+bool Playback::handoff_level_entry(bool recall) {
+  if (recall) return true;
+  for (const auto &entry : level_.entries) {
+    if (entry.name.find("enttag") != std::string::npos)
+      return music_play_level(entry.name, 2);
+  }
+  return queue_stop(2);
+}
+
 bool Playback::play_menu_music(bool wait_for_current) {
   // frontend_run's first request reaches music_playGlobal's volume gate
   // (research-menus-layout 8f528ce); keep its original queue flags.
