@@ -25,6 +25,12 @@ endforeach()
 if(BUILD_TESTING)
   add_executable(champions-level-flow-tests "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_tests.cpp")
   target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow champions-objects champions-terrain-file)
+  # Avoid pathological Clang optimization of this large generated assertion
+  # driver. Every fixture/check still runs; gameplay libraries and trace
+  # executables retain full Release optimization.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(champions-level-flow-tests PRIVATE $<$<CONFIG:Release>:-O0>)
+  endif()
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()
 
