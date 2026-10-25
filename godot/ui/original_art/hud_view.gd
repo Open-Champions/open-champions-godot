@@ -169,10 +169,13 @@ func advance_glow() -> void:
 			records[index] = stepped
 			return
 
-func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
+func bar_inputs_known(value: Dictionary, current: String, maximum: String) -> bool:
 	for key in [current, maximum]:
 		if typeof(value.get(key)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value[key])): return false
-	return float(value[current]) >= 0.0 and float(value[maximum]) > 0.0
+	return float(value[maximum]) > 0.0
+
+func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
+	return bar_inputs_known(value, current, maximum) and float(value[current]) >= 0.0
 
 # 640x448 logical canvas to this control; a 4:3 square-pixel picture is 640x480.
 func _canvas_transform() -> void:

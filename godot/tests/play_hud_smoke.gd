@@ -127,6 +127,12 @@ func _run() -> void:
 	check(not "pending_mana" in hud.drawn and not "pending_health" in hud.drawn and hud.refusals.has("pending_mana"), "positive HP does not supply a missing dead bit")
 	hud.observe_play({"hp": 20.0, "max_hp": 100.0, "mana": 10.0, "max_mana": 50.0, "pending_mana": 3.0, "dead": false, "ready_ticks": 44}, true)
 	check("pending_mana" in hud.drawn and not "pending_health" in hud.drawn, "observed clear dead bit admits only the pending mana rectangle")
+	var negative_currents := {"hp": -5.0, "max_hp": 100.0, "pending_health": 20.0,
+		"mana": -2.0, "max_mana": 50.0, "pending_mana": 10.0, "dead": false, "ready_ticks": 44}
+	hud.observe_play(negative_currents, true)
+	check("pending_health" in hud.drawn and "pending_mana" in hud.drawn, "negative currents do not add an undocumented pending-rectangle gate")
+	hud.observe_play(dict_with(negative_currents, {"dead": true}), true)
+	check(not "pending_health" in hud.drawn and not "pending_mana" in hud.drawn, "the observed dead bit still suppresses both overlays at negative currents")
 	# The experience bar (hud-xp.md): drawn for acknowledged level > 0 with the
 	# bar_green frame (tick >> 2) % 11, origin (27, 56), clip right
 	# trunc(27 + (xp - lower) / (upper - lower) * 99).
@@ -145,6 +151,13 @@ func _run() -> void:
 	var order: Array[String] = []
 	for record in hud.records: order.append(hud._element(record))
 	check(order == ["health_bar", "experience", "mana_bar", "status_frame"], "experience bar sits between health and mana in submission order: %s" % [order])
+	var xp_without_mana := xp_value.duplicate()
+	xp_without_mana.erase("mana")
+	xp_without_mana.erase("max_mana")
+	hud.observe_play(xp_without_mana, true)
+	order.clear()
+	for record in hud.records: order.append(hud._element(record))
+	check(order == ["health_bar", "experience", "status_frame"], "an absent mana bar does not move XP after the status frame")
 	hud.observe_play(dict_with(xp_value, {"acknowledged_level": 0}), true)
 	check(not "experience" in hud.drawn, "acknowledged level 0 draws no experience bar")
 	hud.observe_play(dict_with(xp_value, {"experience": 0}), true)

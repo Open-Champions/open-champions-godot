@@ -123,6 +123,11 @@ object's signed halfword. XP thresholds still require the selected executable;
 a positive mana maximum is required rather than manufactured for the fixture.
 Missing or stale live objects refuse the whole live source without falling
 back to unrelated simulation/companion values.
+The pending-overlay adapter also accepts negative observed currents with a
+positive maximum, retaining the executed dead-bit-only gate. Empty negative
+base fills do not suppress their independent pending rectangles.
+XP retains its position before the glow/frame in submission order even when
+the mana bar is absent; the painter still draws the frame before XP.
 
 The live gold display reads the World's existing eight floater records and
 four gold/pending words. `syncLiveGold` copies authoritative payouts and retains

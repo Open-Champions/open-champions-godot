@@ -158,13 +158,15 @@ func _element(record: Dictionary) -> String:
 # dead bit clear and their own pending value above zero: no health gate.
 # Inverted rectangles are passed through; they cover no pixels.
 func _add_status_extras(value: Dictionary) -> void:
-	if extras == null or not valid_bar(value, "hp", "max_hp"): return
+	# Executed pending arithmetic accepts negative currents. A negative base
+	# fill is empty, but it must not suppress the independently gated overlays.
+	if extras == null or not bar_inputs_known(value, "hp", "max_hp"): return
 	# hud_view's older layout path also submits an XP bar after player-state
 	# merged. Use the executed hud_extras draw once, with its exact clip.
 	for i in range(records.size() - 1, -1, -1):
 		if str(records[i].get("resource", "")).begins_with("bar_green"):
 			records.remove_at(i)
-	var mana_ok := valid_bar(value, "mana", "max_mana")
+	var mana_ok := bar_inputs_known(value, "mana", "max_mana")
 	var origins: Dictionary = layout_service.hud_origins(false, PackedInt32Array([SLOT]), 1)
 	var request := {
 		"slot": SLOT, "x": int(origins.origins[SLOT]), "local": true,
@@ -194,10 +196,13 @@ func _add_status_extras(value: Dictionary) -> void:
 			records.insert(at, entry)
 			at += 1
 		elif str(draw.resource).begins_with("bar_green"):
-			var mana_index := -1
+			var next_index := records.size()
 			for i in range(records.size()):
-				if str(records[i].get("resource", "")).begins_with("bar_blue"): mana_index = i
-			records.insert(mana_index if mana_index >= 0 else records.size(), draw.duplicate())
+				var resource := str(records[i].get("resource", ""))
+				if resource.begins_with("bar_blue") or resource.begins_with("hud_statusbar00"):
+					next_index = i
+					break
+			records.insert(next_index, draw.duplicate())
 	var layers := PackedInt32Array()
 	for record in records: layers.append(int(record.layer))
 	var order: Dictionary = dynamic_service.painter_indices(layers)
