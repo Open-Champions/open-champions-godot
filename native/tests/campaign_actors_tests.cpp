@@ -531,6 +531,10 @@ int main() {
     check(runtime.find(address) == &replacement && replacement.health() == R::from_int(80),
           "replacement owns a live actor, not a dangling insertion result");
     reused.destroy(*replacement.object);
+    auto &direct = runtime.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(60), 0);
+    check(direct.object->addr == address && runtime.find(address) == &direct &&
+          direct.health() == R::from_int(60), "construction retires stale entries without a prior lookup");
+    reused.destroy(*direct.object);
     check(runtime.actors().empty(), "enumeration retires destroyed actors");
   }
   return 0;

@@ -1,5 +1,11 @@
 # One native client, two games
 
+The RTA [Minotaur class adapter](MINOTAUR.md) now constructs Valor's six
+placements in the shared combat World, with runtime-resolved resources, exact
+class state/event contracts and inherited player-to-creature damage. Animated
+presentation, delivered enemy damage, held-part publication and loot pickup
+remain explicit boundaries; this is not an end-to-end Minotaur fight claim.
+
 ## Current milestone
 
 The default Godot scene is a bounded, Session-backed movement and health test with

@@ -261,7 +261,6 @@ void minotaur_shared_health() {
   auto *replacement = authority->objects->new_object(M::ALLOCATION, {0, 0, 0});
   check(replacement && replacement->addr == a && replacement->serial != serial,
         "Minotaur pool address reused with a fresh identity");
-  check(runtime.find(a) == nullptr, "old Minotaur actor cannot alias the replacement");
   authority->register_object(*replacement);
   replacement->type_name = "Minotaur";
   authority->memory.store(a + 0x24, 4, M::DEFINITION);
