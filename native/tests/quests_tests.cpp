@@ -842,6 +842,24 @@ int main(int argc, char **argv) {
   test_mission_rows();
   test_level_change();
   test_menu_and_save();
+  // mission-menu-art.md: the lockstep alternate bits move down/right; a row
+  // change returns to the story column even after visiting a medal column.
+  {
+    q::MenuWorld world;
+    world.rows.resize(13);
+    world.available = {1, 2};
+    world.complete = {1};
+    world.rows[0].flag24 = 1;
+    world.rows[0].medal = "medal";
+    q::Menu menu;
+    menu.state = 2;
+    menu.col = 1;
+    q::menu_tick(menu, 0x200000, world);
+    check(menu.row == 1 && menu.col == 0, "alternate down resets the story column");
+    menu.row = 0;
+    q::menu_tick(menu, 0x400000, world);
+    check(menu.col == 1, "alternate right reaches the completed medal column");
+  }
   test_host();
   if (failed) {
     std::cerr << failed << " failed\n";

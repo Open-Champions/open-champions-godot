@@ -294,6 +294,7 @@ public:
   godot::Dictionary set_ui_frame_driver(bool driven);
   // The visible units of a text key without advancing the miss ring.
   godot::PackedInt32Array text_key_units(const godot::String &key) const;
+  godot::Dictionary text_lookup(const godot::String &key) const;
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);
