@@ -5,6 +5,8 @@ signal level_loaded(path: String)
 signal preview_changed(active: bool)
 signal art_ready(ready: bool)
 var configured: Array = []
+var loaded: Dictionary = {}
+var catalogue: Dictionary = {}
 var clears := 0
 var suspended := false
 var observations: Array = []
