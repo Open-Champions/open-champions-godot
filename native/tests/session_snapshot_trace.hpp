@@ -247,6 +247,12 @@ inline std::string script(const S::ScriptSnapshot &v) {
                    texts(v.registered_names)});
 }
 inline std::string old_snapshot(const S::Snapshot &v) {
+  if (v.animation_cache)
+    throw std::runtime_error(
+        "legacy trace cannot omit active animation cache extension");
+  if (v.recovery)
+    throw std::runtime_error(
+        "legacy trace cannot omit active recovery extension");
   if (v.turning)
     throw std::runtime_error(
         "legacy trace cannot omit active turning extension");
@@ -290,21 +296,29 @@ inline std::string strings(const std::vector<std::string> &x) {
   return sequence(out);
 }
 inline std::string world_snapshot(const O::WorldSnapshot &s) {
-  R::Pool baseline;
-  std::set<std::uint32_t> keys;
-  for (const auto &v : baseline.link)
-    keys.insert(v.first);
-  for (const auto &v : s.pool.link)
-    keys.insert(v.first);
+  // Pool initialization is integer-only and this comparison baseline never
+  // changes across observations or FPU configurations.
+  static const R::Pool baseline;
   std::vector<std::string> delta, links, objs, live, names, tasks, centres,
       pads, spawn;
-  for (auto k : keys) {
-    auto a = baseline.link.find(k);
-    auto b = s.pool.link.find(k);
-    if (a == baseline.link.end() || b == s.pool.link.end() ||
-        a->second != b->second)
-      delta.push_back(
-          sequence({n(k), b == s.pool.link.end() ? "_" : n(b->second)}));
+  // Merge the ordered maps directly, preserving the sorted union without
+  // allocating a set of all pool addresses for every observation.
+  auto a = baseline.link.begin();
+  auto b = s.pool.link.begin();
+  while (a != baseline.link.end() || b != s.pool.link.end()) {
+    if (b == s.pool.link.end() ||
+        (a != baseline.link.end() && a->first < b->first)) {
+      delta.push_back(sequence({n(a->first), "_"}));
+      ++a;
+    } else if (a == baseline.link.end() || b->first < a->first) {
+      delta.push_back(sequence({n(b->first), n(b->second)}));
+      ++b;
+    } else {
+      if (a->second != b->second)
+        delta.push_back(sequence({n(b->first), n(b->second)}));
+      ++a;
+      ++b;
+    }
   }
   for (const auto &l : s.links) {
     const auto kind = static_cast<int>(l.kind);

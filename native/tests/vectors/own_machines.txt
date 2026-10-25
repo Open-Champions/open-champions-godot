@@ -1,0 +1,1743 @@
+# Synthetic own-machine ticks. Defaults match the reference tick:
+# clock 1000, queue 1, other fields 0. 253 cases.
+# research-anim 5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b
+# tools/ref_own_machines.py sha256 c6d2ffc52eaa2a1b887e119de0e43e1c2478d74760ba7032ad8f20eec7316e5b
+# tools/test_ref_own_machines.py sha256 c0ce6946ca5d6ad27abdd6c6e5dcf396db46fb096344488f21c42cd7fc052f40
+CASE Gnaw 0
+F seen 1
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Gnaw 0
+CALL v25
+CALL away
+END
+CASE Gnaw 0
+F away 1
+REQ 1
+CALL v25
+CALL away
+CALL v27
+END
+CASE Gnaw 1
+F seen 1
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Gnaw 1
+CALL v25
+CALL move_dest
+END
+CASE Gnaw 3
+REQ 0
+CALL v27
+END
+CASE Gnaw 3
+F target 1
+F see 1
+REQ 5
+CALL see
+CALL v27
+END
+CASE Gnaw 3
+F target 1
+SEQ see 0 1
+CALL see
+CALL see
+CALL turn
+END
+CASE Gnaw 3
+F target 1
+SEQ see 0 0
+CALL see
+CALL see
+CALL move_target
+END
+CASE Gnaw 5
+F target 1
+F see 1
+REQ 6
+CALL see
+CALL v27
+END
+CASE Gnaw 5
+F target 1
+SEQ see 0 1
+CALL see
+CALL see
+CALL turn
+END
+CASE Gnaw 5
+F target 1
+SEQ see 0 0
+REQ 3
+CALL see
+CALL see
+CALL unroot
+CALL v27
+END
+CASE Gnaw 5
+F target 1
+F rooted 1
+SEQ see 0 0
+CALL see
+CALL see
+CALL unroot
+END
+CASE Gnaw 6
+F target 1
+F anim 8
+CALL turn
+END
+CASE Gnaw 6
+F target 1
+F anim 0
+F events 1
+REQ 5
+CALL turn
+CALL hit_arc
+CALL v27
+END
+CASE Gnaw 16
+F ready 1
+REQ 0
+CALL ready
+CALL v27
+END
+CASE Gnaw 16
+CALL ready
+CALL flee
+END
+CASE Gnaw 18
+F anim 16
+END
+CASE Gnaw 18
+REQ 5
+CALL v27
+END
+CASE Gnaw 19
+REQ 3
+CALL unstun
+CALL v27
+END
+CASE Gnaw 19
+F stunned 1
+CALL unstun
+END
+CASE Gnaw 20
+CALL dead
+CALL delete
+END
+CASE Gnaw 7
+REQ 0
+CALL v27
+END
+CASE Skelight 0
+F seen 1
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Skelight 0
+F away 1
+REQ 1
+CALL v25
+CALL away
+CALL v27
+END
+CASE Skelight 0
+CALL v25
+CALL away
+END
+CASE Skelight 1
+F seen 1
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Skelight 1
+CALL v25
+CALL move_dest
+END
+CASE Skelight 3
+REQ 0
+CALL v27
+END
+CASE Skelight 3
+F target 1
+F see 1
+REQ 6
+CALL see
+CALL v27
+END
+CASE Skelight 3
+F target 1
+SEQ see 0 1
+CALL see
+CALL see
+CALL turn
+END
+CASE Skelight 3
+F target 1
+CALL see
+CALL see
+CALL move_target
+END
+CASE Skelight 5
+F target 1
+F see 1
+REQ 6
+CALL see
+CALL v27
+END
+CASE Skelight 5
+F target 1
+REQ 3
+CALL see
+CALL unroot
+CALL v27
+END
+CASE Skelight 5
+F target 1
+F rooted 1
+CALL see
+CALL unroot
+END
+CASE Skelight 6
+F target 1
+F anim 8
+F timer 5
+CALL turn
+WORD 244 5
+END
+CASE Skelight 6
+F target 1
+F anim 0
+F timer 5
+F events 1
+CALL h17
+CALL hit_arc
+WORD 244 4
+END
+CASE Skelight 6
+F target 1
+F anim 0
+F timer 1
+F events 1
+REQ 3
+CALL h17
+CALL hit_arc
+CALL v27
+WORD 244 0
+END
+CASE Skelight 6
+F anim 0
+F timer 5
+WORD 244 4
+END
+CASE Skelight 6
+F anim 8
+F timer 0
+REQ 3
+CALL v27
+WORD 244 0
+END
+CASE Skelight 6
+F anim 0
+F timer 0
+REQ 3
+CALL v27
+WORD 244 4294967295
+END
+CASE Skelight 16
+F ready 1
+REQ 0
+CALL ready
+CALL v27
+END
+CASE Skelight 16
+CALL ready
+CALL flee
+END
+CASE Skelight 18
+REQ 3
+CALL v27
+END
+CASE Skelight 19
+REQ 0
+CALL unstun
+CALL v27
+END
+CASE Skelight 19
+F stunned 1
+CALL unstun
+END
+CASE Skelight 20
+CALL dead
+END
+CASE Skelight 23
+F anim 128
+REQ 0
+CALL v27
+CALL fx
+END
+CASE Skelight 23
+CALL fx
+END
+CASE Skelight 7
+END
+CASE GnomeNavigator 0
+F cflags 4194304
+F clock 1000
+F timer 0
+REQ 1
+CALL v27
+END
+CASE GnomeNavigator 0
+F cflags 8388608
+F away 1
+F clock 100
+F timer 5000
+REQ 1
+CALL away
+CALL v27
+END
+CASE GnomeNavigator 0
+F cflags 12582912
+F away 0
+F clock 100
+F timer 5000
+CALL away
+END
+CASE GnomeNavigator 0
+F clock 1000
+F timer 0
+F away 1
+END
+CASE GnomeNavigator 1
+F arrived 1
+F clock 100
+F timer 5000
+REQ 0
+CALL move_to
+CALL v27
+END
+CASE GnomeNavigator 1
+F arrived 0
+F clock 1000
+F timer 0
+REQ 0
+CALL move_to
+CALL v27
+END
+CASE GnomeNavigator 1
+F arrived 0
+F clock 100
+F timer 5000
+CALL move_to
+END
+CASE GnomeNavigator 3
+REQ 0
+CALL v27
+END
+CASE GnomeNavigator 3
+F target 1
+END
+CASE GnomeNavigator 5
+REQ 3
+CALL unroot
+CALL v27
+END
+CASE GnomeNavigator 5
+F rooted 1
+CALL unroot
+END
+CASE GnomeNavigator 19
+REQ 0
+CALL unstun
+CALL v27
+END
+CASE GnomeNavigator 19
+F stunned 1
+CALL unstun
+END
+CASE GnomeNavigator 20
+CALL dead
+END
+CASE GnomeNavigator 6
+END
+CASE GnomeNavigator 18
+END
+CASE Mermaid 0
+F clock 1000
+F timer 0
+REQ 1
+CALL move_by
+CALL v27
+END
+CASE Mermaid 0
+F clock 100
+F timer 5000
+CALL move_by
+END
+CASE Mermaid 1
+F clock 1000
+F timer 0
+REQ 0
+CALL move_by
+CALL v27
+END
+CASE Mermaid 1
+F clock 100
+F timer 5000
+F arrived 1
+CALL move_by
+CALL move_dest
+END
+CASE Mermaid 3
+REQ 0
+CALL move_by
+CALL v27
+END
+CASE Mermaid 3
+F target 1
+CALL move_by
+END
+CASE Mermaid 5
+REQ 3
+CALL move_by
+CALL unroot
+CALL v27
+END
+CASE Mermaid 5
+F rooted 1
+CALL move_by
+CALL unroot
+END
+CASE Mermaid 18
+F anim 0
+REQ 0
+CALL move_by
+CALL v27
+END
+CASE Mermaid 18
+F anim 16
+CALL move_by
+END
+CASE Mermaid 20
+F anim 128
+CALL move_by
+CALL stop
+END
+CASE Mermaid 20
+CALL move_by
+END
+CASE Mermaid 19
+CALL move_by
+END
+CASE Mermaid 2
+CALL move_by
+END
+CASE Natasla 0
+END
+CASE Natasla 1
+F seen 1
+F away 1
+F target 1
+END
+CASE Natasla 20
+END
+CASE NPC 0
+F cflags 134217728
+REQ 1
+CALL v27
+END
+CASE NPC 0
+END
+CASE NPC 1
+CALL move_dest
+END
+CASE NPC 3
+F target 1
+F seen 1
+END
+CASE Critter 0
+F move 1
+F clock 1000
+F timer 0
+REQ 1
+CALL move_by
+CALL v27
+END
+CASE Critter 0
+F move 1
+F clock 100
+F timer 5000
+CALL move_by
+CALL away
+END
+CASE Critter 0
+F move 1
+F clock 1000
+F timer 0
+F anim 8
+CALL move_by
+END
+CASE Critter 0
+F move 1
+F away 1
+F clock 100
+F timer 5000
+REQ 1
+CALL move_by
+CALL away
+CALL v27
+END
+CASE Critter 0
+F clock 1000
+F timer 0
+CALL move_by
+END
+CASE Critter 0
+F fidget_a 1
+F move 1
+F clock 1000
+F fid_time 0
+F timer 5000
+CALL move_by
+CALL anim_bio
+CALL rand
+END
+CASE Critter 0
+F fidget_a 1
+F fidget_b 1
+F move 1
+F clock 1000
+F fid_time 0
+F timer 5000
+F rand 1
+CALL move_by
+CALL rand
+CALL anim_bio
+CALL rand
+END
+CASE Critter 0
+F class_flags 16
+F move 1
+F clock 1000
+F timer 0
+REQ 1
+CALL v27
+END
+CASE Critter 0
+F class_flags 16
+F move 1
+F clock 100
+F timer 5000
+CALL away
+END
+CASE Critter 0
+F fidget_a 1
+F move 1
+F clock 1000
+F fid_time 0
+F timer 0
+CALL move_by
+CALL anim_bio
+CALL rand
+END
+CASE Critter 1
+F idle 1
+F arrived 1
+F clock 100
+F timer 5000
+REQ 0
+CALL move_to
+CALL v27
+END
+CASE Critter 1
+F arrived 1
+F clock 100
+F timer 5000
+CALL move_to
+CALL clear_path
+CALL wander
+CALL rand
+END
+CASE Critter 1
+F idle 1
+F clock 1000
+F timer 0
+REQ 0
+CALL move_to
+CALL v27
+END
+CASE Critter 1
+F idle 1
+F anim 8
+F clock 1000
+F timer 0
+REQ 0
+CALL move_to
+CALL v27
+END
+CASE Critter 1
+F class_flags 2
+F arrived 1
+F clock 100
+F timer 5000
+CALL move_direct
+CALL clear_path
+CALL wander
+CALL rand
+END
+CASE Critter 1
+F idle 1
+F class_flags 8
+F arrived 1
+F clock 100
+F timer 5000
+CALL move_to
+CALL clear_path
+CALL wander
+CALL rand
+END
+CASE Critter 1
+F idle 1
+F class_flags 8
+F clock 1000
+F timer 0
+REQ 0
+CALL move_to
+CALL v27
+END
+CASE Critter 1
+F idle 1
+F clock 100
+F timer 5000
+CALL move_to
+END
+CASE Critter 1
+F class_flags 16
+F idle 1
+F clock 1000
+F timer 0
+REQ 0
+CALL v27
+END
+CASE Critter 16
+F idle 1
+REQ 0
+CALL v27
+END
+CASE Critter 16
+REQ 1
+CALL v27
+END
+CASE Critter 16
+F target 1
+F flee_clip 1
+F clock 100
+F timer 5000
+CALL flee_from
+END
+CASE Critter 16
+F target 1
+F flee_clip 1
+F idle 1
+F clock 1000
+F timer 0
+REQ 0
+CALL flee_from
+CALL handle_clear
+CALL v27
+END
+CASE Critter 20
+CALL stop
+CALL v28
+END
+CASE Critter 22
+F path 1
+CALL path
+CALL approach
+END
+CASE Critter 22
+CALL path
+END
+CASE Critter 22
+F path 1
+F snap 1
+CALL path
+END
+CASE Critter 23
+F fidget_a 1
+F clock 1000
+F fid_time 0
+CALL anim_bio
+CALL rand
+END
+CASE Critter 7
+END
+CASE AntQueen 0
+F seen 1
+F queue 1
+F clock 100
+F timer 5000
+REQ 3
+CALL aq_ground
+CALL v25
+CALL v27
+END
+CASE AntQueen 0
+F seen 0
+F queue 1
+F clock 100
+F timer 5000
+CALL aq_ground
+CALL v25
+CALL v25
+END
+CASE AntQueen 0
+F queue 1
+F clock 100
+F timer 5000
+SEQ v25 0 1
+REQ 3
+CALL aq_ground
+CALL v25
+CALL v25
+CALL v27
+END
+CASE AntQueen 0
+F seen 1
+F queue 4
+F clock 100
+F timer 5000
+CALL aq_ground
+CALL v25
+CALL v25
+END
+CASE AntQueen 0
+F seen 0
+F queue 4
+F clock 1000
+F timer 0
+REQ 1
+CALL aq_ground
+CALL v25
+CALL v25
+CALL v27
+END
+CASE AntQueen 1
+F seen 1
+REQ 3
+CALL aq_air
+CALL v25
+CALL v27
+END
+CASE AntQueen 1
+CALL aq_air
+CALL v25
+CALL move_dest
+END
+CASE AntQueen 3
+REQ 0
+CALL aq_air
+CALL v27
+END
+CASE AntQueen 3
+F target 1
+F rand 0
+F enemy 1
+F flight 5000
+F clock 100
+REQ 7
+CALL aq_air
+CALL rand
+CALL enemy
+CALL v27
+END
+CASE AntQueen 3
+F target 1
+F rand 0
+F enemy 0
+F flight 5000
+F clock 100
+CALL aq_air
+CALL rand
+CALL enemy
+CALL move_target
+END
+CASE AntQueen 3
+F target 1
+F rand 1
+F see 1
+F flight 5000
+F clock 100
+REQ 6
+CALL aq_air
+CALL rand
+CALL see
+CALL v27
+END
+CASE AntQueen 3
+F target 1
+F rand 1
+F see 0
+F flight 5000
+F clock 100
+CALL aq_air
+CALL rand
+CALL see
+CALL move_target
+END
+CASE AntQueen 3
+F target 1
+F rand 1
+F see 0
+F flight 0
+F clock 1000
+F queue 1
+REQ 8
+CALL aq_air
+CALL rand
+CALL see
+CALL move_target
+CALL v27
+END
+CASE AntQueen 3
+F target 1
+F rand 1
+F see 0
+F flight 0
+F clock 1000
+F queue 4
+CALL aq_air
+CALL rand
+CALL see
+CALL move_target
+END
+CASE AntQueen 5
+F target 1
+F rand 0
+F enemy 1
+REQ 7
+CALL rand
+CALL enemy
+CALL v27
+END
+CASE AntQueen 5
+F target 1
+F rand 1
+F see 1
+REQ 6
+CALL rand
+CALL see
+CALL v27
+END
+CASE AntQueen 5
+F rand 1
+F see 0
+REQ 3
+CALL rand
+CALL unroot
+CALL v27
+END
+CASE AntQueen 5
+F rand 1
+F see 0
+F rooted 1
+CALL rand
+CALL unroot
+END
+CASE AntQueen 5
+F rand 0
+F enemy 0
+REQ 3
+CALL rand
+CALL unroot
+CALL v27
+END
+CASE AntQueen 5
+F target 1
+F rand 0
+F enemy 0
+REQ 3
+CALL rand
+CALL enemy
+CALL unroot
+CALL v27
+END
+CASE AntQueen 6
+F target 1
+F anim 8
+F events 0
+CALL aq_ground
+CALL turn
+END
+CASE AntQueen 6
+F target 1
+F anim 8
+F events 1
+CALL aq_ground
+CALL hit_reach
+END
+CASE AntQueen 6
+F target 1
+F anim 0
+REQ 3
+CALL aq_ground
+CALL turn
+CALL v27
+END
+CASE AntQueen 7
+F anim 8
+F events 1
+CALL aq_ground
+CALL 000000
+CALL hit_or
+END
+CASE AntQueen 7
+F anim 0
+REQ 3
+CALL aq_ground
+CALL v27
+END
+CASE AntQueen 7
+F anim 0
+F events 1
+REQ 3
+CALL aq_ground
+CALL 000000
+CALL hit_or
+CALL v27
+END
+CASE AntQueen 8
+F flight 5000
+F clock 100
+REQ 0
+CALL aq_air
+CALL v27
+WORD 980 5000
+END
+CASE AntQueen 8
+F target 1
+F anim 8
+F flight 5000
+F clock 100
+CALL aq_air
+WORD 980 5000
+END
+CASE AntQueen 8
+F target 1
+F anim 0
+F see 1
+F flight 5000
+F clock 100
+F rand 0
+REQ 9
+CALL aq_air
+CALL see
+CALL v27
+CALL rand
+WORD 980 0
+END
+CASE AntQueen 8
+F target 1
+F anim 0
+F see 1
+F flight 5000
+F clock 100
+F rand 1
+REQ 9
+CALL aq_air
+CALL see
+CALL v27
+CALL rand
+WORD 980 5000
+END
+CASE AntQueen 8
+F target 1
+F anim 0
+F see 0
+F flight 5000
+F clock 100
+CALL aq_air
+CALL see
+CALL see
+CALL move_target
+WORD 980 5000
+END
+CASE AntQueen 8
+F target 1
+F anim 0
+F flight 0
+F clock 1000
+REQ 23
+CALL aq_air
+CALL v27
+WORD 980 0
+END
+CASE AntQueen 9
+F target 1
+F anim 8
+F events 1
+CALL aq_ground
+CALL 000000
+CALL hit_reach
+CALL turn
+END
+CASE AntQueen 9
+F target 1
+F anim 0
+REQ 8
+CALL aq_ground
+CALL turn
+CALL v27
+END
+CASE AntQueen 10
+F target 1
+F anim 0
+F events 1
+REQ 23
+CALL aq_ground
+CALL 000000
+CALL hit_reach
+CALL turn
+CALL v27
+END
+CASE AntQueen 10
+F target 1
+F anim 8
+CALL aq_ground
+CALL turn
+END
+CASE AntQueen 18
+F anim 16
+CALL aq_ground
+END
+CASE AntQueen 18
+F anim 0
+F queue 1
+REQ 3
+CALL aq_ground
+CALL v27
+END
+CASE AntQueen 18
+F anim 0
+F queue 4
+CALL aq_ground
+END
+CASE AntQueen 19
+REQ 0
+CALL unstun
+CALL v27
+END
+CASE AntQueen 19
+F stunned 1
+CALL unstun
+END
+CASE AntQueen 20
+CALL aq_ground
+CALL dead
+END
+CASE AntQueen 23
+REQ 0
+CALL aq_air
+CALL v27
+WORD 980 0
+END
+CASE AntQueen 23
+F target 1
+F anim 8
+F flight 5000
+F clock 100
+CALL aq_air
+WORD 980 5000
+END
+CASE AntQueen 23
+F target 1
+F anim 0
+F flight 5000
+F clock 100
+CALL aq_air
+CALL move_to
+WORD 980 5000
+END
+CASE AntQueen 23
+F target 1
+F anim 0
+F flight 5000
+F clock 100
+F arrived 1
+CALL aq_air
+CALL move_to
+WORD 980 0
+END
+CASE AntQueen 23
+F target 1
+F anim 0
+F flight 5000
+F clock 100
+F stuck 31
+CALL aq_air
+CALL move_to
+WORD 980 0
+END
+CASE AntQueen 23
+F target 1
+F anim 0
+F flight 5000
+F clock 100
+F stuck 30
+CALL aq_air
+CALL move_to
+WORD 980 5000
+END
+CASE AntQueen 23
+F target 1
+F anim 0
+F flight 0
+F clock 1000
+F see 1
+REQ 24
+CALL aq_air
+CALL turn
+CALL see
+CALL v27
+WORD 980 0
+END
+CASE AntQueen 23
+F target 1
+F anim 0
+F flight 0
+F clock 1000
+F see 0
+CALL aq_air
+CALL turn
+CALL see
+WORD 980 0
+END
+CASE AntQueen 24
+F anim 8
+CALL aq_ground
+END
+CASE AntQueen 24
+F anim 0
+F queue 1
+REQ 3
+CALL aq_ground
+CALL v27
+END
+CASE AntQueen 24
+F anim 0
+F queue 4
+CALL aq_ground
+END
+CASE AntQueen 25
+F target 1
+F clock 1000
+F timer 1120
+F queue 1
+CALL aq_ground
+CALL cos16
+CALL sin16
+CALL pool
+END
+CASE AntQueen 25
+F target 1
+F clock 1000
+F timer 0
+F queue 1
+REQ 3
+CALL aq_ground
+CALL v27
+END
+CASE AntQueen 25
+F target 1
+F clock 100
+F timer 5000
+F queue 1
+CALL aq_ground
+END
+CASE AntQueen 16
+END
+CASE AntQueen 2
+END
+CASE Skeleton 0
+F seen 1
+F clock 100
+F timer 5000
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Skeleton 0
+F clock 100
+F timer 5000
+CALL v25
+CALL away
+END
+CASE Skeleton 0
+F away 1
+F clock 100
+F timer 5000
+REQ 1
+CALL v25
+CALL away
+CALL v27
+END
+CASE Skeleton 0
+F clock 1000
+F timer 0
+REQ 1
+CALL v25
+CALL v27
+END
+CASE Skeleton 0
+F kind 4
+F seen 1
+F clock 100
+F timer 5000
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Skeleton 0
+F kind 4
+F clock 100
+F timer 5000
+CALL v25
+CALL v25
+CALL away
+END
+CASE Skeleton 0
+F kind 4
+SEQ v25 0 1
+F clock 100
+F timer 5000
+REQ 3
+CALL v25
+CALL v25
+CALL v27
+END
+CASE Skeleton 1
+F seen 1
+REQ 3
+CALL v25
+CALL v27
+END
+CASE Skeleton 1
+F clock 1000
+F timer 0
+REQ 0
+CALL v25
+CALL v27
+END
+CASE Skeleton 1
+F clock 100
+F timer 5000
+CALL v25
+CALL move_dest
+END
+CASE Skeleton 1
+F kind 4
+F clock 100
+F timer 5000
+CALL v25
+CALL v25
+CALL move_dest
+END
+CASE Skeleton 3
+REQ 0
+CALL v27
+END
+CASE Skeleton 3
+F target 1
+F see 1
+REQ 6
+CALL see
+CALL v27
+END
+CASE Skeleton 3
+F target 1
+SEQ see 0 1
+CALL see
+CALL ally
+CALL see
+CALL turn
+END
+CASE Skeleton 3
+F target 1
+F ally 1
+F rand 7
+REQ 5
+CALL see
+CALL ally
+CALL rand
+CALL v27
+END
+CASE Skeleton 3
+F target 1
+CALL see
+CALL ally
+CALL see
+CALL move_target
+END
+CASE Skeleton 3
+F kind 4
+F target 1
+F see 1
+REQ 8
+CALL see
+CALL v27
+END
+CASE Skeleton 3
+F kind 4
+F target 1
+SEQ see 0 1
+CALL see
+CALL see
+CALL turn
+END
+CASE Skeleton 3
+F kind 4
+F target 1
+CALL see
+CALL see
+CALL move_target
+END
+CASE Skeleton 5
+F target 1
+F see 1
+REQ 6
+CALL see
+CALL v27
+END
+CASE Skeleton 5
+F target 1
+F clock 1000
+F timer 0
+REQ 3
+CALL see
+CALL unroot
+CALL v27
+END
+CASE Skeleton 5
+F target 1
+F clock 100
+F timer 5000
+F ally 1
+CALL see
+CALL unroot
+CALL ally
+END
+CASE Skeleton 5
+F target 1
+F clock 100
+F timer 5000
+F ally 0
+REQ 3
+CALL see
+CALL unroot
+CALL ally
+CALL v27
+END
+CASE Skeleton 5
+F clock 100
+F timer 5000
+CALL see
+CALL unroot
+END
+CASE Skeleton 5
+F target 1
+F rooted 1
+F clock 1000
+F timer 0
+CALL see
+CALL unroot
+END
+CASE Skeleton 5
+F kind 4
+F target 1
+F see 1
+REQ 8
+CALL see
+CALL v27
+END
+CASE Skeleton 6
+F target 1
+F anim 8
+F timer 5
+CALL turn
+WORD 244 5
+END
+CASE Skeleton 6
+F target 1
+F anim 0
+F timer 5
+F events 1
+CALL h17
+CALL hit_reach
+WORD 244 4
+END
+CASE Skeleton 6
+F target 1
+F anim 0
+F timer 1
+F events 1
+REQ 3
+CALL h17
+CALL hit_reach
+CALL v27
+WORD 244 0
+END
+CASE Skeleton 6
+F target 1
+F anim 8
+F timer 1
+F events 1
+CALL h17
+CALL hit_reach
+CALL turn
+WORD 244 1
+END
+CASE Skeleton 8
+F anim 8
+F timer 5
+REQ 0
+CALL v27
+WORD 244 5
+END
+CASE Skeleton 8
+F anim 0
+F timer 5
+REQ 0
+CALL v27
+WORD 244 4
+END
+CASE Skeleton 8
+F anim 0
+F timer 1
+REQ 0
+REQ 3
+CALL v27
+CALL v27
+WORD 244 0
+END
+CASE Skeleton 8
+F target 1
+F anim 8
+F timer 5
+F events 0
+CALL cos16
+CALL sin16
+CALL lead
+CALL v26
+WORD 244 5
+END
+CASE Skeleton 8
+F target 1
+F anim 0
+F timer 1
+REQ 3
+CALL cos16
+CALL sin16
+CALL lead
+CALL v27
+WORD 244 0
+END
+CASE Skeleton 16
+F ready 1
+REQ 0
+CALL ready
+CALL v27
+END
+CASE Skeleton 16
+CALL ready
+CALL flee
+END
+CASE Skeleton 17
+F clock 1000
+F timer 0
+REQ 3
+CALL v27
+END
+CASE Skeleton 17
+F clock 100
+F timer 5000
+END
+CASE Skeleton 18
+F anim 0
+REQ 3
+CALL v27
+END
+CASE Skeleton 18
+F anim 16
+END
+CASE Skeleton 19
+REQ 0
+CALL unstun
+CALL v27
+END
+CASE Skeleton 20
+CALL dead
+END
+CASE Skeleton 23
+F anim 0
+REQ 0
+CALL fx
+CALL v27
+END
+CASE Skeleton 23
+F anim 16
+CALL fx
+END
+CASE Skeleton 7
+END
+CASE Soul 0
+F frame 0
+F demon 1
+F clock 100
+F timer 5000
+REQ 24
+CALL move_by
+CALL demon
+CALL v27
+END
+CASE Soul 0
+F frame 0
+F demon 0
+F clock 100
+F timer 5000
+CALL move_by
+CALL demon
+CALL away
+END
+CASE Soul 0
+F frame 1
+F clock 100
+F timer 5000
+F away 1
+REQ 1
+CALL move_by
+CALL away
+CALL v27
+END
+CASE Soul 0
+F frame 1
+F clock 1000
+F timer 0
+REQ 1
+CALL move_by
+CALL v27
+END
+CASE Soul 0
+F frame 1
+F clock 100
+F timer 5000
+CALL move_by
+CALL away
+END
+CASE Soul 0
+F owner 1
+F frame 0
+F demon 1
+F clock 100
+F timer 5000
+REQ 24
+CALL demon
+CALL v27
+END
+CASE Soul 1
+F frame 0
+F demon 1
+F clock 100
+F timer 5000
+REQ 24
+CALL move_by
+CALL demon
+CALL v27
+END
+CASE Soul 1
+F frame 1
+F arrived 1
+F clock 100
+F timer 5000
+REQ 0
+CALL move_by
+CALL move_to
+CALL v27
+END
+CASE Soul 1
+F frame 1
+F clock 1000
+F timer 0
+REQ 0
+CALL move_by
+CALL move_to
+CALL v27
+END
+CASE Soul 1
+F frame 1
+F clock 100
+F timer 5000
+CALL move_by
+CALL move_to
+END
+CASE Soul 24
+F frame 0
+F demon 0
+F clock 100
+F timer 5000
+REQ 0
+CALL move_by
+CALL demon
+CALL v27
+END
+CASE Soul 24
+F frame 0
+F demon 1
+F clock 100
+F timer 5000
+CALL move_by
+CALL demon
+END
+CASE Soul 24
+F frame 1
+F demon 0
+F clock 100
+F timer 5000
+CALL move_by
+END
+CASE Soul 3
+REQ 0
+CALL move_by
+CALL v27
+END
+CASE Soul 3
+F target 1
+CALL move_by
+END
+CASE Soul 5
+REQ 0
+CALL move_by
+CALL unroot
+CALL v27
+END
+CASE Soul 5
+F rooted 1
+CALL move_by
+CALL unroot
+END
+CASE Soul 18
+F anim 0
+REQ 24
+CALL move_by
+CALL v27
+END
+CASE Soul 18
+F anim 16
+CALL move_by
+END
+CASE Soul 25
+F anim 0
+REQ 24
+CALL move_by
+CALL v27
+END
+CASE Soul 23
+F clock 1000
+F timer 0
+REQ 1
+CALL move_by
+CALL v27
+END
+CASE Soul 23
+F clock 100
+F timer 5000
+CALL move_by
+END
+CASE Soul 20
+F clock 1000
+F timer 0
+CALL move_by
+CALL samples
+CALL delete
+END
+CASE Soul 20
+F clock 100
+F timer 5000
+CALL move_by
+CALL samples
+END
+CASE Soul 20
+F anim 128
+F clock 100
+F timer 5000
+CALL move_by
+CALL samples
+CALL delete
+END
+CASE Soul 34
+F clock 1000
+F timer 0
+CALL move_by
+CALL samples
+CALL stop
+END
+CASE Soul 34
+F clock 100
+F timer 5000
+CALL move_by
+CALL samples
+END
+CASE Soul 34
+F anim 128
+F clock 100
+F timer 5000
+CALL move_by
+CALL samples
+CALL stop
+END
+CASE Soul 27
+F clock 1000
+F timer 0
+CALL samples
+CALL mat_place
+CALL mat_rot
+CALL cos16
+CALL sin16
+CALL delete
+END
+CASE Soul 27
+F clock 100
+F timer 5000
+F z 0
+CALL samples
+CALL mat_place
+CALL mat_rot
+CALL cos16
+CALL sin16
+CALL terrain
+CALL delete
+END
+CASE Soul 27
+F clock 100
+F timer 5000
+F z 1120403456
+CALL samples
+CALL mat_place
+CALL mat_rot
+CALL cos16
+CALL sin16
+CALL terrain
+END
+CASE Soul 26
+F owner 1
+END
+CASE Soul 6
+CALL move_by
+END

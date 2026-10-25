@@ -1,0 +1,17 @@
+{
+  "commit": "5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b",
+  "groups": {
+    "root": 47,
+    "steered": 10,
+    "special": 10,
+    "none": 6
+  },
+  "cases": 28633,
+  "generator_sha256": {
+    "tools/generate_creature_dispatch.py": "f30f055840fb091a82ee1be4dc635e9f03318015144aeabf02883fb8b8132fe7",
+    "tools/creature_dispatch_player_vectors.py": "2cace879d7f945467cc4329466437be09bde90471c7d3c51bda886bb3de39d89"
+  },
+  "sources_sha256": "c3778b8e77124082d6419ea127a876333560d154eae63d38a6ce296941bcf5a5",
+  "payload_sha256": "374ab81a1989180a02dd3e5c1a117279ed24c1b0db7142efc3409c9fc9ca99fc",
+  "data_sha256": "20dea7752d1e1a77b4239af2ac40fac334a9187fd939f85eda03000d2e1ddbf3"
+}

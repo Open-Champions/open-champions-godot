@@ -1,0 +1,25 @@
+# Boot screens, front end, character creation, options, load/save and pause
+# (docs/FRONTEND.md). Navigation and state only; no Godot dependency.
+include_guard(GLOBAL)
+set(CHAMPIONS_FRONTEND_ROOT "${CMAKE_CURRENT_LIST_DIR}")
+add_library(champions-frontend "${CHAMPIONS_FRONTEND_ROOT}/src/frontend.cpp" "${CHAMPIONS_FRONTEND_ROOT}/src/frontend_layout.cpp")
+target_include_directories(champions-frontend PUBLIC "${CHAMPIONS_FRONTEND_ROOT}/include")
+# The native build names the audio library champions-native-audio; the Godot
+# extension build compiles the same sources as champions-native-audio-binding-core.
+if(TARGET champions-native-audio)
+    set(CHAMPIONS_FRONTEND_AUDIO champions-native-audio)
+else()
+    set(CHAMPIONS_FRONTEND_AUDIO champions-native-audio-binding-core)
+endif()
+target_link_libraries(champions-frontend PUBLIC champions-netwire champions-ps2-save champions-dialog-gaps ${CHAMPIONS_FRONTEND_AUDIO})
+set_target_properties(champions-frontend PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(champions-frontend PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-frontend PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+if(BUILD_TESTING AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CHAMPIONS_FRONTEND_ROOT)
+    add_executable(champions-frontend-tests "${CHAMPIONS_FRONTEND_ROOT}/tests/frontend_tests.cpp")
+    target_link_libraries(champions-frontend-tests PRIVATE champions-frontend champions-menus)
+    add_test(NAME frontend-exact COMMAND champions-frontend-tests)
+endif()

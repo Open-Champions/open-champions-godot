@@ -7,6 +7,7 @@
 // 41e847af5360724ab62d208594f8027ea3c1b686 model.
 #include "champions/creature_movement.hpp"
 #include "champions/core_math.hpp"
+#include "champions/detail/checkpoint.hpp"
 #include <utility>
 
 namespace champions::simulation::rta::creature_movement {
@@ -145,8 +146,8 @@ Vec3 Model::vec(Address a) const {
 }
 void Model::write(Address a, std::size_t size, std::uint64_t value) {
   span(a, size);
-  if (writes.size() >= limits_.history_entries ||
-      events.size() >= limits_.history_entries)
+  if (writes_prefix_ + writes.size() >= limits_.history_entries ||
+      events_prefix_ + events.size() >= limits_.history_entries)
     throw ResourceLimit("movement write/event history budget exceeded");
   if (size < 8)
     value &= (UINT64_C(1) << (size * 8)) - 1;
@@ -164,8 +165,8 @@ Value Model::call(const std::string &name, std::vector<Value> args) {
   for (auto &arg : args)
     if (arg.kind == ValueKind::Integer)
       arg.scalar = std::uint32_t(arg.scalar);
-  if (calls.size() >= limits_.history_entries ||
-      events.size() >= limits_.history_entries)
+  if (calls_prefix_ + calls.size() >= limits_.history_entries ||
+      events_prefix_ + events.size() >= limits_.history_entries)
     throw ResourceLimit("movement call/event history budget exceeded");
   const Call entry{name, std::move(args)};
   calls.push_back(entry);
@@ -204,6 +205,10 @@ Value Model::vcall(Address obj, std::uint32_t slot, std::vector<Value> args) {
 }
 Value Model::vcall_body(Address obj, std::uint32_t slot,
                         std::vector<Value> args) {
+  if (virtual_dispatch) {
+    auto dispatch = virtual_dispatch;
+    return dispatch(obj, slot, std::move(args));
+  }
   if (slot != 6 && slot != 10 && slot != 11)
     throw Error("unsupported movement virtual slot");
   validate_values(args);
@@ -439,5 +444,17 @@ void Model::settle(Address c) {
   write(c + 0xc, 4, u32(c + 0xc) | 0x8000000);
   move_body(c, {});
   write(c + 0xc, 4, u32(c + 0xc) & 0xf7ffffff);
+}
+void Model::checkpoint_history(detail::Checkpoint &a) {
+  if (!a.reading)
+    return;
+  writes_prefix_ = a.deferred() ? a.records(writes) : 0;
+  calls_prefix_ = a.deferred() ? a.records(calls) : 0;
+  events_prefix_ = a.deferred() ? a.records(events) : 0;
+  detail::Checkpoint::require(
+      writes_prefix_ + writes.size() <= limits_.history_entries &&
+          calls_prefix_ + calls.size() <= limits_.history_entries &&
+          events_prefix_ + events.size() <= limits_.history_entries,
+      "checkpoint model history limits");
 }
 } // namespace champions::simulation::rta::creature_movement

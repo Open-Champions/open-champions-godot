@@ -1,0 +1,24 @@
+{
+  "commit": "523b3db9f22525bd03c70b9ecb8ba252e7bd77fe",
+  "policy": "rta-ui-text-gaps-v1",
+  "seeds": [
+    20973,
+    7
+  ],
+  "lines": 3701,
+  "sha256": {
+    "docs/ui-text-gaps.md": "ad9a7e04bff159af461d54b6d978206f78ab73842d653316eb10414738d53b59",
+    "docs/spec/ui-text-gaps.md": "8790095b9158e08dce87827e02049a175b1a8139612117df4bf3ed43844ff723",
+    "tools/ref_ui_text_gaps.py": "897c994d2dd0ade4d6daf159f82603c83889d53ab02574861ade06a8128325df",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_anim.py": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8",
+    "tools/ref_strings.py": "7e40f746a4ab66feb21afb4a6e38f27d08a9048135776452102364374c268b77",
+    "tools/ref_ui_composite.py": "d385f748665d89874ca5dd9a5e681705bd3528752090d55f3f4ad2fb55fc12c5",
+    "tools/ref_ui_layout.py": "5ec836ae9a79ca10e015d7f293088a27d797dc779373205ad07732709e2f2af7",
+    "tools/ref_hud_dynamic.py": "ecd0c744bec55803c9107c6f92b3689c41ef82c258ab203b6f95d9652ab745fc",
+    "tools/test_ref_ui_text_gaps.py": "32c45cb96531e18145092c294ac5a0e8e548f91efe9d8d88f3457d5a9c9c2ded",
+    "tools/difftest_ui_text_gaps.py": "37f0ab26e0482e348accb6ed0c85e70dba782f80c709422014d1deb571312205",
+    "tools/ui_text_gaps_census.py": "75cbecd69ce2b0dc5e45020c3ac3d65ab56ec01e43a568e8f0dfb91b4cbecd1a"
+  },
+  "vectors_sha256": "82853156fa60c7b65ddd0a7a396cf9fb3bd03a10553c327d1b1b1e7a3c412b2e"
+}

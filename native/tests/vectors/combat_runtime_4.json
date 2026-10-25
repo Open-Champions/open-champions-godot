@@ -1,0 +1,19 @@
+{
+  "schema": "combat-runtime-4-v1",
+  "research_commit": "95c17ae49f04b99626a3db856fd3b66764442caa",
+  "references": {
+    "docs/spec/combat-round4.md": "58ef1a4f0561551624f68e9042c068de611376a6c28f3eab7426a1553c0fffda",
+    "docs/combat-runtime.md": "31030e6cd3d722db3bcf76443e8548ab68efdc74b30b63342bb3f1b07c92b73c",
+    "tools/ref_combat_round4.py": "e4b83af89ac4d06d12be58b74259dc56664c8d1cf59cdb83098c15ace3c1e3dd",
+    "tools/test_ref_combat_round4.py": "516f697c19c1a52775a8373567a2f575aba9aac829e90c5701e320a858c1e46e",
+    "tools/difftest_combat_round4.py": "16d3735e3ea0cbf69fa9141adf3292cf7652e97cfbec57fc1c93b0383cf4713a",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_combat_ranged.py": "7755ff203383b92d39a190475b5704fb3fc512abcc107924e09189913d42bda5",
+    "tools/ref_combat_ptick.py": "b90cc565e1651c659248945d5e98695449e1f6de20138928b18ade69568fb79c",
+    "tools/ref_combat_runtime.py": "328fbc428e26d50ac5cdb455d1614cf35148216151ba7904bb2ef92984e25ddd"
+  },
+  "vector_sha256": "13ded0ed01c47f23296043ded6e5b6d30de0013723309c1170b71b634690f33b",
+  "content_sha256": "514933f5e083a0eb035cc002b552eb8e8291ff64e01be233baf0fa12ae7c5e74",
+  "cases": 9
+}

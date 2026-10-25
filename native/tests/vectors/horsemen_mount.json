@@ -1,0 +1,22 @@
+{
+  "schema": "horsemen-mount-v1",
+  "research_commit": "397c35cd99ac3fd3660834f5e4ac37767bbfbc3a",
+  "references": {
+    "tools/ref_horsemen_mount.py": "09612c24210f0ee24b5be26e45881ef772c018163417a6bcc31e4a595873ac8f",
+    "tools/ref_arena_monsters.py": "80dbcdcc890a12838989d9acae501062849eaa6ffc51c03cb6ddf36a3d9cb5b8",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/test_ref_horsemen_mount.py": "c7c9b5da93fac895a26fe7050396e58bb644fcabcabcc7f1ab9c4d409b5d6af1",
+    "docs/spec/horsemen-mount.md": "49132a2465d0464dd2754be58902deaff340171b05f66aa63e1e61b96186a8bf",
+    "tools/difftest_horsemen_mount.py": "2b556e6f68fca6f164447bfb9ce712093cd6f6dcb91b4d24d0e8a53e908582c1"
+  },
+  "cases": 1101,
+  "rig": {
+    "rider": 65536,
+    "mount": 69632,
+    "players": 73728,
+    "definition": 131072,
+    "nodes": 458752
+  },
+  "note": "Cases replay the rig of tools/test_ref_horsemen_mount.py with scripted external answers; expected values are the research model output. No game data."
+}

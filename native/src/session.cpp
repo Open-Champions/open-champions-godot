@@ -1,5 +1,7 @@
 #include "champions/session.hpp"
 #include "champions/combat_damage.hpp"
+#include "champions/detail/checkpoint_control_anim_cache.hpp"
+#include "champions/session_control.hpp"
 #include <algorithm>
 #include <exception>
 #include <type_traits>
@@ -145,6 +147,7 @@ struct Session::State {
     std::optional<world_queries::Vec3> last_velocity;
     std::optional<std::uint32_t> last_bits;
     std::vector<CreatureCallbackResult> callback_results;
+    std::size_t results_prefix = 0, calls_prefix = 0;
   };
   // Declared after HP: borrowed model dies before its Memory owner.
   std::unique_ptr<CreatureState> creature;
@@ -167,6 +170,17 @@ struct Session::State {
     std::vector<AnimationOperation> operations;
   };
   std::unique_ptr<AnimationState> animation;
+  struct AnimationCacheState {
+    AnimationCacheLimits limits;
+    animation_runtime::Runtime runtime;
+    std::vector<AnimationCacheBindingSnapshot> bindings;
+    std::string phase = "idle";
+    std::size_t depth = 0, calls_this_tick = 0;
+    std::vector<AnimationCacheOperation> operations;
+    AnimationCacheState(std::size_t slots, AnimationCacheLimits supplied)
+        : limits(supplied), runtime(slots, supplied.runtime) {}
+  };
+  std::unique_ptr<AnimationCacheState> animation_cache;
   struct TurningState {
     TurnLimits limits;
     std::unique_ptr<creature_movement::Model> model;
@@ -177,6 +191,11 @@ struct Session::State {
   };
   // Borrowed turning storage also dies before the earlier HP Memory owner.
   std::unique_ptr<TurningState> turning;
+  struct RecoveryState {
+    RecoverySnapshot state;
+    std::unique_ptr<player::Tick> tick;
+  };
+  std::unique_ptr<RecoveryState> recovery;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
@@ -360,18 +379,23 @@ struct Session::State {
                                        std::uint32_t address) const {
     require(bool(world), "terrain movement requires the object runtime");
     // The current map alone is insufficient: a caller may have removed a live
-    // retained actor from it. Snapshot observes every retained generation.
-    const auto state = world->snapshot();
+    // retained actor from it. Observe every retained generation without
+    // copying the full grid, handles and histories.
+    world->validate_snapshot_references();
+    const auto identities = world->live_retained_identities();
     std::size_t alive = 0;
-    for (const auto &object : state.objects) {
-      if (!object.alive)
-        continue;
+    for (const auto &identity : identities) {
       ++alive;
-      require(object.serial == serial && object.addr == address,
+      require(identity.first == serial && identity.second == address,
               "isolated movement forbids any other live retained object");
     }
-    require(alive == 1 && state.live.size() == 1 && state.live.count(address) &&
-                state.live.at(address) == serial,
+    const auto registered = world->objects.find(address);
+    const auto registered_identity =
+        registered == world->objects.end()
+            ? std::optional<std::pair<std::uint64_t, std::uint32_t>>{}
+            : world->handle_object_identity(registered->second);
+    require(alive == 1 && world->objects.size() == 1 && registered_identity &&
+                registered_identity->first == serial,
             "mover requires the sole current live World generation");
     const auto found = world->objects.find(address);
     require(found != world->objects.end(), "mover is not in the live registry");
@@ -658,6 +682,77 @@ struct Session::State {
       throw;
     }
   }
+  AnimationCacheBindingSnapshot &cache_binding(HpId id) {
+    auto &bindings = animation_cache->bindings;
+    auto found =
+        std::find_if(bindings.begin(), bindings.end(),
+                     [&](const auto &b) { return b.binding.id == id; });
+    require(found != bindings.end(), "unknown animation cache binding");
+    animation_identity(id);
+    const auto &current = hp->bindings[hp_index(id)];
+    require(found->binding.world_serial == current.world_serial &&
+                found->binding.address == current.address &&
+                found->binding.adapter_generation == current.adapter_generation,
+            "animation cache binding identity changed");
+    return *found;
+  }
+  void cache_ready() const {
+    require(bool(animation_cache), "animation cache policy is disabled");
+    hp_preflight();
+    require(submitting && world_depth == 1 && world_phase == "tasks" &&
+                object_run_completed && task_priority && *task_priority > 10,
+            "animation cache requires explicit post-runObjects ready task");
+    require(!animation_cache->depth && !hp->depth &&
+                !hp->adapter->operation_depth() &&
+                !hp->adapter->raw_callback_depth() &&
+                (!creature || !creature->depth) &&
+                (!terrain || !terrain->depth) &&
+                (!turning || !turning->depth) &&
+                (!recovery || !recovery->state.depth),
+            "nested animation cache or gameplay operations are unsupported");
+    require(world->frame >= 0 && std::uint64_t(world->frame) <= UINT32_MAX,
+            "animation cache frame must fit unsigned 32 bits");
+    if (animation_cache->calls_this_tick >=
+        animation_cache->limits.calls_per_tick)
+      throw ResourceLimit("animation cache ready-tick call limit exceeded");
+  }
+  void cache_clip(animation_runtime::ClipId id, bool null) const {
+    require(id || null, "animation cache requires nonnull clip");
+    if (id)
+      (void)animation_cache->runtime.clip(id);
+  }
+  template <class Fn>
+  void cache_invoke(AnimationCacheOperation operation,
+                    AnimationCacheBindingSnapshot *binding, Fn &&function) {
+    auto &a = *animation_cache;
+    if (history() >= MAX_EVENT_HISTORY ||
+        a.operations.size() >= a.limits.history)
+      throw ResourceLimit("animation cache retained history exhausted");
+    operation.frame = std::uint32_t(world->frame);
+    a.operations.push_back(std::move(operation));
+    auto &entry = a.operations.back();
+    a.runtime.set_sim_frame(entry.frame);
+    ++a.calls_this_tick;
+    if (binding)
+      ++binding->calls_this_tick;
+    a.phase = entry.kind;
+    a.depth = 1;
+    if (entry.kind == "advance_animation_cache") {
+      binding->advanced_this_tick = true;
+      binding->last_event.reset();
+    }
+    if (entry.kind == "decode_animation_cache")
+      binding->last_decoded.reset();
+    try {
+      function(entry);
+      entry.completed = true;
+      a.depth = 0;
+      a.phase = "idle";
+    } catch (...) {
+      a.depth = 0; // Keep every Runtime prefix and incomplete accepted record.
+      throw;
+    }
+  }
   void available() const {
     if (failed)
       throw Failed("session failure is latched; construct a new session");
@@ -675,9 +770,10 @@ struct Session::State {
       }
     }
   }
+  std::size_t history_prefix = 0;
   std::size_t history() const {
-    std::size_t result =
-        events.size() + seed.draws.size() + net.log.size() + net.outbox.size();
+    std::size_t result = history_prefix + events.size() + seed.draws.size() +
+                         net.log.size() + net.outbox.size();
     if (hp) {
       const auto &m = hp->adapter->model();
       result += m.mem.log().size() + m.writes.size() + m.calls.size() +
@@ -690,8 +786,13 @@ struct Session::State {
       result += creature->model->writes.size() + creature->model->calls.size() +
                 creature->model->events.size() +
                 creature->callback_results.size();
+    if (recovery)
+      result += recovery->tick->writes.size() + recovery->tick->calls.size() +
+                recovery->tick->events.size();
     if (animation)
       result += animation->operations.size();
+    if (animation_cache)
+      result += animation_cache->operations.size();
     if (turning)
       result += turning->operations.size() + turning->model->writes.size() +
                 turning->model->calls.size() + turning->model->events.size();
@@ -1098,10 +1199,11 @@ void Session::enable_creature_movement() {
                 "creature service outside its movement call");
         s.creature->phase = phase;
         auto result = callback(model, args);
-        if (s.creature->callback_results.size() >=
+        if (s.creature->results_prefix + s.creature->callback_results.size() >=
             s.hp->limits.memory.history_entries)
           throw ResourceLimit("creature callback result history exhausted");
-        s.creature->callback_results.push_back({model.calls.size(), result});
+        s.creature->callback_results.push_back(
+            {s.creature->calls_prefix + model.calls.size(), result});
         s.creature->phase = "move_by";
         return result;
       };
@@ -1291,7 +1393,7 @@ std::uint32_t Session::move_creature(HpId id,
       throw ResourceLimit("creature mover has already run this ready tick");
     auto &o = s.creature_object();
     s.terrain_hp_preflight();
-    (void)s.hp->handles->snapshot();
+    s.hp->handles->validate();
     // Ten possible body writes, four service calls/results, and bounded
     // publication are well below this reserve. Shared Memory.log counts once.
     if (s.history() > MAX_EVENT_HISTORY - 128)
@@ -1325,6 +1427,173 @@ std::uint32_t Session::move_creature(HpId id,
           c.publication_error = "nonstandard creature publication failure";
         }
       c.depth = 0;
+      std::rethrow_exception(primary);
+    }
+  });
+}
+
+void Session::enable_recovery(HpId id,
+                              const session_recovery::Initial &initial) {
+  auto &s = *state_;
+  s.guard("enable_recovery", [&] {
+    s.setup();
+    require(!s.recovery, "recovery is already enabled");
+    s.hp_preflight();
+    session_recovery::validate(initial);
+    const auto b = s.hp->bindings[s.hp_index(id)];
+    auto &o = s.isolated_object(b.world_serial, b.address);
+    require(bool(o.flags & 0x20000) == initial.copy_at_setup,
+            "recovery copy setup must match authoritative World flags");
+    const auto cls = s.world->pool.class_of(o.addr);
+    require(cls < Pool::CLASSES.size() && Pool::CLASSES[cls][0] >= 0x478,
+            "recovery actor allocation is too small for player helper fields");
+    auto &record = *s.hp->adapter->lookup(b.address);
+    const auto binding = s.hp->adapter->binding(record);
+    require(binding.generation == b.adapter_generation &&
+                binding.projection ==
+                    combat_creature::Projection::CreatureFields &&
+                binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+                record.cls == U"Creature" && record.spells.empty() &&
+                record.hp == initial.health,
+            "recovery requires original base HP binding, no spells and "
+            "matching initial HP");
+    auto &mem = s.hp->adapter->model().mem;
+    const auto setup = session_recovery::setup(b.address, initial);
+    const std::array<std::pair<std::uint32_t, std::uint32_t>, 3> regions{
+        {{initial.record, session_recovery::RECORD_SIZE},
+         {session_recovery::passive_table(initial), 0xa80},
+         {b.address + 0x3c8, 0xb0}}};
+    const auto overlap = [](std::uint64_t a, std::uint64_t n, std::uint64_t c,
+                            std::uint64_t m) { return a < c + m && c < a + n; };
+    // Validate all reservations, aliases and sparse capacity before publishing
+    // any setup byte or binding. Actor tail belongs to its verified allocation.
+    for (std::size_t k = 0; k < regions.size(); ++k) {
+      const auto [a, n] = regions[k];
+      require(a && std::uint64_t(a) + n <= UINT64_C(0x100000000),
+              "recovery setup range exceeds raw32");
+      if (k < 2)
+        for (std::size_t j = 0; j < Pool::CLASSES.size(); ++j)
+          require(!overlap(a, n, s.world->pool.base[j],
+                           std::uint64_t(Pool::CLASSES[j][0]) *
+                               Pool::CLASSES[j][1]),
+                  "recovery setup aliases World allocation arena");
+      require(!overlap(a, n, HandlePool::NODE_BASE,
+                       HandlePool::NODE_COUNT * HandlePool::NODE_SIZE) &&
+                  !overlap(a, n, creature_hp::G_SIM_FRAME, 4),
+              "recovery setup aliases managed storage");
+      for (const auto &r : s.hp->adapter->bindings())
+        require(!overlap(a, n, r.address, r.extent),
+                "recovery setup aliases HP record");
+      for (const auto &r : s.hp->adapter->raw_regions())
+        require(!overlap(a, n, r.address, r.size),
+                "recovery setup aliases raw reservation");
+      for (std::size_t j = 0; j < k; ++j)
+        require(!overlap(a, n, regions[j].first, regions[j].second),
+                "recovery setup aliases itself");
+      const auto it = mem.bytes().lower_bound(a);
+      require(it == mem.bytes().end() || it->first >= std::uint64_t(a) + n,
+              "recovery setup aliases existing sparse backing");
+      for (std::uint64_t j = 0; j < n; ++j)
+        require(!mem.overlay() || !mem.overlay()->covers(a + std::uint32_t(j)),
+                "recovery setup aliases raw graph");
+    }
+    std::size_t bytes = 0;
+    for (const auto &w : setup)
+      bytes += w.size;
+    require(s.hp->adapter->raw_regions().size() + regions.size() <= 64,
+            "recovery raw reservation capacity");
+    require(mem.bytes().size() <= s.hp->limits.memory.memory_bytes &&
+                bytes <= s.hp->limits.memory.memory_bytes - mem.bytes().size(),
+            "recovery setup exceeds sparse memory capacity");
+    auto next = std::make_unique<State::RecoveryState>();
+    next->state.binding = b;
+    next->state.initial = initial;
+    next->tick = std::make_unique<player::Tick>(
+        mem, b.address, player::Tick::Policy::RequireHandlers);
+    session_recovery::bind_services(*next->tick, initial);
+    for (std::size_t k = 0; k < regions.size(); ++k)
+      s.hp->adapter->reserve_raw(regions[k].first, regions[k].second,
+                                 "session.recovery." + std::to_string(k));
+    for (const auto &w : setup)
+      mem.poke(w.address, w.size, w.value);
+    s.recovery = std::move(next);
+  });
+}
+void Session::recover_player(HpId id) {
+  auto &s = *state_;
+  s.guard("recover_player", [&] {
+    require(s.recovery && s.recovery->state.binding.id == id,
+            "unknown recovery binding");
+    auto &r = s.recovery->state;
+    require(s.submitting && s.world_depth == 1 && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "recovery requires a post-runObjects ready task");
+    require(!r.depth && !s.hp->depth && !s.hp->adapter->operation_depth() &&
+                !s.hp->adapter->raw_callback_depth(),
+            "nested recovery/HP is unsupported");
+    require(!r.calls_this_tick, "recovery already ran this ready tick");
+    s.hp_preflight();
+    const auto b = r.binding;
+    s.isolated_object(b.world_serial, b.address);
+    auto &record = *s.hp->adapter->lookup(b.address);
+    const auto binding = s.hp->adapter->binding(record);
+    require(
+        binding.generation == b.adapter_generation &&
+            binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+            binding.projection == combat_creature::Projection::CreatureFields &&
+            record.cls == U"Creature" && record.spells.empty(),
+        "recovery binding generation or closed base/no-spell domain changed");
+    s.hp->handles->validate();
+    auto &t = *s.recovery->tick;
+    auto &mem = t.mem;
+    // Immutable descriptor inputs are revalidated, never inferred from stats.
+    for (const auto &w : session_recovery::setup(b.address, r.initial)) {
+      const auto off = std::int64_t(w.address) - r.initial.record;
+      if (off == 0xac || off == 0xb4 || off == 0xc0 || off == 0xc8)
+        continue;
+      const auto mask =
+          w.size == 8 ? UINT64_MAX : (UINT64_C(1) << (w.size * 8)) - 1;
+      require(mem.load(w.address, w.size) == (w.value & mask),
+              "recovery immutable setup changed outside selected domain");
+    }
+    require(s.history() <= MAX_EVENT_HISTORY - 128,
+            "recovery history reserve exhausted");
+    ++r.calls_this_tick;
+    r.depth = 1;
+    r.phase = "import";
+    r.publication_error.clear();
+    bool imported = false;
+    const auto publish = [&] {
+      mem.poke(std::uint64_t(b.address) + 0x228, 4,
+               mem.load(r.initial.record + 0xac, 4));
+      s.hp->adapter->publish();
+      s.hp_publish_scalars();
+    };
+    try {
+      s.hp_import_scalars();
+      s.hp->adapter->project();
+      mem.poke(r.initial.record + 0xac, 4, record.hp);
+      imported = true;
+      r.phase = "regen_health";
+      t.regen_health(b.address);
+      r.phase = "regen_mana";
+      t.regen_mana(b.address);
+      r.phase = "publish";
+      publish();
+      r.depth = 0;
+      r.phase = "idle";
+    } catch (...) {
+      const auto primary = std::current_exception();
+      if (imported)
+        try {
+          publish();
+        } catch (const std::exception &e) {
+          r.publication_error = e.what();
+        } catch (...) {
+          r.publication_error = "nonstandard recovery publication failure";
+        }
+      r.depth = 0;
       std::rethrow_exception(primary);
     }
   });
@@ -1456,7 +1725,8 @@ void Session::enable_animation(AnimationLimits limits) {
   s.guard("enable_animation", [&] {
     s.setup();
     s.hp_preflight();
-    require(!s.animation, "animation runtime is already enabled");
+    require(!s.animation && !s.animation_cache,
+            "animation policies are mutually exclusive");
     if (!limits.clips || limits.clips > MAX_ANIMATION_CLIPS ||
         !limits.bindings || limits.bindings > MAX_ANIMATION_BINDINGS ||
         !limits.cells || limits.cells > MAX_ANIMATION_CELLS ||
@@ -1591,6 +1861,195 @@ void Session::set_animation_event(AnimationClipId clip_id, std::size_t slot,
                                clip->events[slot] = event;
                                return {};
                              });
+  });
+}
+
+void Session::enable_animation_cache(std::size_t slots,
+                                     AnimationCacheLimits limits) {
+  auto &s = *state_;
+  s.guard("enable_animation_cache", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(!s.animation && !s.animation_cache,
+            "animation policies are mutually exclusive");
+    if (!limits.calls_per_tick || limits.calls_per_tick > 64 ||
+        !limits.history || limits.history > MAX_EVENT_HISTORY)
+      throw ResourceLimit(
+          "animation cache host limits exceed supported capacity");
+    auto value = std::make_unique<State::AnimationCacheState>(slots, limits);
+    s.animation_cache = std::move(value);
+  });
+}
+animation_runtime::ClipId
+Session::add_animation_cache_clip(const std::vector<std::uint8_t> &bytes,
+                                  const std::string &name) {
+  auto &s = *state_;
+  return s.guard("add_animation_cache_clip", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(bool(s.animation_cache), "animation cache policy is disabled");
+    return s.animation_cache->runtime.add_clip(bytes, name);
+  });
+}
+animation_runtime::ClipId
+Session::add_animation_cache_clip(const animation_runtime::Clip &clip) {
+  auto &s = *state_;
+  return s.guard("add_animation_cache_clip", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(bool(s.animation_cache), "animation cache policy is disabled");
+    require(clip.joint_count >= 0 && clip.joint_count <= 64 &&
+                clip.bind.size() == std::size_t(clip.joint_count) &&
+                clip.depth.size() == std::size_t(clip.joint_count),
+            "animation cache supplied skeleton metadata shape");
+    return s.animation_cache->runtime.add_clip(clip);
+  });
+}
+animation_runtime::StateId
+Session::bind_animation_cache(HpId id, std::int32_t capacity) {
+  auto &s = *state_;
+  return s.guard("bind_animation_cache", [&] {
+    s.setup();
+    require(bool(s.animation_cache), "animation cache policy is disabled");
+    s.animation_identity(id);
+    auto &a = *s.animation_cache;
+    for (const auto &b : a.bindings)
+      require(b.binding.id != id, "duplicate animation cache binding");
+    // Reserve the host record before Runtime allocation. Deterministic runtime
+    // safety checks are atomic; true allocation failure follows Runtime's
+    // prefix contract.
+    a.bindings.reserve(a.bindings.size() + 1);
+    const auto state = a.runtime.add_state(capacity);
+    AnimationCacheBindingSnapshot binding;
+    binding.binding = s.hp->bindings[s.hp_index(id)];
+    binding.state = state;
+    a.bindings.push_back(std::move(binding));
+    return state;
+  });
+}
+animation_runtime::TrackId
+Session::start_animation_cache(HpId id, animation_runtime::ClipId clip,
+                               Raw blend, std::uint32_t flags) {
+  auto &s = *state_;
+  return s.guard("start_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    s.cache_clip(clip, true);
+    if (flags & animation_runtime::PROTECTED)
+      throw animation_runtime::Unsupported(
+          "Session animation cache refuses ROOT/YAW");
+    AnimationCacheOperation op;
+    op.kind = "start_animation_cache";
+    op.binding = id;
+    op.clip = clip;
+    op.parameter = blend;
+    op.flags = flags;
+    animation_runtime::TrackId result = 0;
+    s.cache_invoke(std::move(op), &b, [&](auto &entry) {
+      result =
+          s.animation_cache->runtime.anim_start(blend, b.state, clip, flags);
+      entry.track = result;
+    });
+    return result;
+  });
+}
+void Session::stop_animation_cache(HpId id, animation_runtime::ClipId clip,
+                                   Raw blend) {
+  auto &s = *state_;
+  s.guard("stop_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    s.cache_clip(clip, true);
+    AnimationCacheOperation op;
+    op.kind = "stop_animation_cache";
+    op.binding = id;
+    op.clip = clip;
+    op.parameter = blend;
+    s.cache_invoke(std::move(op), &b, [&](auto &) {
+      s.animation_cache->runtime.anim_stop(blend, b.state, clip);
+    });
+  });
+}
+std::int32_t Session::advance_animation_cache(HpId id, Raw speed) {
+  auto &s = *state_;
+  return s.guard("advance_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    if (b.advanced_this_tick)
+      throw ResourceLimit(
+          "animation cache binding already advanced this ready tick");
+    AnimationCacheOperation op;
+    op.kind = "advance_animation_cache";
+    op.binding = id;
+    op.parameter = speed;
+    std::int32_t result = 0;
+    s.cache_invoke(std::move(op), &b, [&](auto &entry) {
+      result = s.animation_cache->runtime.anim_advance(speed, b.state, false,
+                                                       false, false);
+      entry.result = result;
+      b.last_event = result;
+    });
+    return result;
+  });
+}
+void Session::set_animation_cache_event(animation_runtime::ClipId clip,
+                                        std::size_t index,
+                                        animation_decoder::Event event) {
+  auto &s = *state_;
+  s.guard("set_animation_cache_event", [&] {
+    s.cache_ready();
+    s.cache_clip(clip, false);
+    require(index < 4, "animation cache event index outside four slots");
+    AnimationCacheOperation op;
+    op.kind = "set_animation_cache_event";
+    op.clip = clip;
+    op.event_index = index;
+    op.event = event;
+    s.cache_invoke(std::move(op), nullptr, [&](auto &) {
+      s.animation_cache->runtime.clip(clip).events[index] = event;
+    });
+  });
+}
+AnimationCacheDecoded
+Session::decode_animation_cache(HpId id, animation_runtime::TrackId track) {
+  auto &s = *state_;
+  return s.guard("decode_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    auto &r = s.animation_cache->runtime;
+    const auto &state = r.state(b.state);
+    require(std::find(state.tracks.begin(), state.tracks.begin() + state.count,
+                      track) != state.tracks.begin() + state.count,
+            "selected animation cache cell is not live in binding");
+    const auto &cell = r.track(track);
+    s.cache_clip(cell.clip, false);
+    const auto count = r.clip(cell.clip).joint_count;
+    require(count >= 0 && count <= 64,
+            "animation cache joint count outside fixed slot");
+    AnimationCacheOperation op;
+    op.kind = "decode_animation_cache";
+    op.binding = id;
+    op.track = track;
+    AnimationCacheDecoded result;
+    result.track = track;
+    result.time = cell.time;
+    result.joints.reserve(
+        std::size_t(count)); // Allocate result storage before decoder work.
+    s.cache_invoke(std::move(op), &b, [&](auto &entry) {
+      result.slot = r.animtrack_decode(track);
+      // Publish sampled prefixes into the operation before each subsequent
+      // read.
+      entry.decoded = result;
+      for (std::int32_t i = 0; i < count; ++i) {
+        animation_runtime::JointValues value;
+        value.position = r.joint_pos(result.slot, i, result.time);
+        value.quaternion = r.joint_quat(result.slot, i, result.time);
+        result.joints.push_back(value);
+        entry.decoded = result;
+      }
+      b.last_decoded = result;
+    });
+    return result;
   });
 }
 
@@ -1971,11 +2430,20 @@ void Session::ready_tick() {
           s.terrain->calls_this_tick = 0;
         if (s.creature)
           s.creature->calls_this_tick = 0;
+        if (s.recovery)
+          s.recovery->state.calls_this_tick = 0;
         if (s.animation) {
           s.animation->calls_this_tick = 0;
           for (auto &entry : s.animation->bindings) {
             entry.calls_this_tick = 0;
             entry.advanced_this_tick = false;
+          }
+        }
+        if (s.animation_cache) {
+          s.animation_cache->calls_this_tick = 0;
+          for (auto &b : s.animation_cache->bindings) {
+            b.calls_this_tick = 0;
+            b.advanced_this_tick = false;
           }
         }
         if (s.turning) {
@@ -2166,9 +2634,96 @@ Raw Session::roll_damage(Raw minimum, Raw maximum) {
     return result;
   });
 }
+session_control::Observation
+Session::control_observation(std::uint64_t actor_serial, HpId hp) const {
+  const auto &s = *state_;
+  require(s.world && s.hp && s.hp->bindings.size() == 1 &&
+              s.hp->objects.size() == 1,
+          "control owned state is unavailable");
+  const auto index = s.hp_index(hp);
+  const auto *actor = s.hp->objects[index];
+  const auto &binding = s.hp->bindings[index];
+  const auto *record = s.hp->adapter->lookup(binding.address);
+  require(actor && actor->serial == actor_serial &&
+              binding.world_serial == actor_serial &&
+              actor->addr == binding.address && record,
+          "control actor observation is unavailable");
+  session_control::Observation out;
+  out.position = actor->pos;
+  out.facing = actor->angle;
+  out.vz = actor->vz;
+  out.radius = actor->radius;
+  out.hp = record->hp;
+  if (s.recovery) {
+    const auto &mem = s.recovery->tick->mem;
+    const auto r = s.recovery->state.initial.record;
+    out.recovery_enabled = true;
+    out.max_health = s.recovery->state.initial.max_health;
+    out.max_mana = s.recovery->state.initial.max_mana;
+    out.mana = Raw(mem.load(r + 0xc0, 4));
+    out.pending_health = Raw(mem.load(r + 0xb4, 4));
+    out.pending_mana = Raw(mem.load(r + 0xc8, 4));
+  }
+  if (s.turning) {
+    const auto &t = *s.turning;
+    const auto &mem = t.model->mem;
+    out.facing_enabled = true;
+    out.turn_rate = Raw(mem.load(binding.address + 0xb0, 4));
+    out.angular_velocity = std::uint16_t(mem.load(binding.address + 0x110, 2));
+    out.turn_slow = std::uint8_t(mem.load(binding.address + 0x2fc, 1));
+    const auto selected =
+        std::find_if(t.bindings.begin(), t.bindings.end(),
+                     [hp](const auto &b) { return b.binding.id == hp; });
+    require(selected != t.bindings.end(),
+            "control turn binding is unavailable");
+    out.turn_result = selected->last_result;
+  }
+  if (s.animation_cache) {
+    const auto &bindings = s.animation_cache->bindings;
+    const auto found =
+        std::find_if(bindings.begin(), bindings.end(),
+                     [hp](const auto &b) { return b.binding.id == hp; });
+    require(found != bindings.end(), "control cache binding is unavailable");
+    out.animation_cache_enabled = true;
+    out.animation_event = found->last_event;
+    out.animation_decoded = found->last_decoded;
+  }
+  out.frame = s.world->frame;
+  out.failed = s.failed;
+  return out;
+}
+animation_runtime::TrackId Session::control_animation_track(HpId hp) const {
+  const auto &s = *state_;
+  require(bool(s.animation_cache), "control cache policy is unavailable");
+  const auto &bindings = s.animation_cache->bindings;
+  const auto found =
+      std::find_if(bindings.begin(), bindings.end(),
+                   [hp](const auto &b) { return b.binding.id == hp; });
+  require(found != bindings.end(), "control cache binding is unavailable");
+  const auto &state = s.animation_cache->runtime.state(found->state);
+  return state.count ? state.tracks[std::size_t(state.count - 1)] : 0;
+}
+std::size_t Session::control_animation_operations() const {
+  require(bool(state_->animation_cache), "control cache policy is unavailable");
+  return state_->animation_cache->operations.size();
+}
 netwire::Machine Session::network() const { return copy_network(state_->net); }
 
 bool Session::failed() const noexcept { return state_->failed; }
+ActorObservation Session::observe_actor(HpId id) const {
+  const auto &s = *state_;
+  s.budgets();
+  require(bool(s.world) && bool(s.hp), "control owned state is unavailable");
+  const auto i = s.hp_index(id);
+  const auto &binding = s.hp->bindings[i];
+  const auto *actor = s.hp->objects[i];
+  const auto *record = s.hp->adapter->lookup(binding.address);
+  require(actor && record && actor->serial == binding.world_serial &&
+              actor->addr == binding.address,
+          "control actor observation is unavailable");
+  return {actor->pos, actor->vz,    actor->radius,
+          record->hp, actor->angle, s.world->frame};
+}
 Snapshot Session::snapshot() const {
   const auto &s = *state_;
   s.budgets();
@@ -2197,6 +2752,20 @@ Snapshot Session::snapshot() const {
     value.object_run_completed = s.object_run_completed;
     value.task_priority = s.task_priority;
     out.turning = std::move(value);
+  }
+  if (s.animation_cache) {
+    const auto &a = *s.animation_cache;
+    AnimationCacheSnapshot value;
+    value.limits = a.limits;
+    value.runtime = a.runtime.snapshot();
+    value.bindings = a.bindings;
+    value.phase = a.phase;
+    value.depth = a.depth;
+    value.calls_this_tick = a.calls_this_tick;
+    value.operations = a.operations;
+    value.object_run_completed = s.object_run_completed;
+    value.task_priority = s.task_priority;
+    out.animation_cache = std::move(value);
   }
   if (s.animation) {
     const auto &a = *s.animation;
@@ -2237,6 +2806,20 @@ Snapshot Session::snapshot() const {
     value.object_run_completed = s.object_run_completed;
     value.task_priority = s.task_priority;
     out.animation = std::move(value);
+  }
+  if (s.recovery) {
+    auto r = s.recovery->state;
+    const auto &t = *s.recovery->tick;
+    r.writes = t.writes;
+    r.calls = t.calls;
+    r.events = t.events;
+    r.draws = t.draws;
+    r.R0 = t.R0;
+    r.object_run_completed = s.object_run_completed;
+    r.task_priority = s.task_priority;
+    r.callbacks = {{"SpellBlessed_typeinfo", "supplied.type_token", true},
+                   {"creature_findSpellByType", "NoActiveSpells", true}};
+    out.recovery = std::move(r);
   }
   if (s.terrain) {
     TerrainSnapshot t;
@@ -2389,5 +2972,381 @@ Snapshot Session::snapshot() const {
   out.draws = s.seed.draws;
   out.events = s.events;
   return out;
+}
+play_session::Retained Session::play_retained() const {
+  const auto &s = *state_;
+  require(s.hp && s.creature, "play retention requires HP and creature");
+  const auto &h = s.hp->adapter->model();
+  const auto &w = s.hp->adapter->world();
+  const auto &c = *s.creature;
+  play_session::Retained out;
+  std::size_t i = 0;
+  auto count = [&](const auto &v) {
+    out.records[i] = v.size();
+    out.capacity[i++] = v.capacity();
+  };
+  count(s.events);
+  count(s.seed.draws);
+  count(s.net.log);
+  count(s.net.outbox);
+  count(h.mem.log());
+  count(h.writes);
+  count(h.calls);
+  count(h.events);
+  count(w.events);
+  count(w.seed.draws);
+  count(w.cosmetic.draws);
+  count(c.model->writes);
+  count(c.model->calls);
+  count(c.model->events);
+  count(c.callback_results);
+  return out;
+}
+void Session::retire_play_history() {
+  auto &s = *state_;
+  require(s.world && s.hp && s.creature && s.terrain && !s.failed &&
+              !s.submitting && !s.executing && !s.world_depth &&
+              s.world_phase == "idle" && s.hp->phase == "idle" &&
+              !s.hp->depth && s.creature->phase == "idle" &&
+              !s.creature->depth && !s.recovery && !s.turning && !s.animation &&
+              !s.animation_cache && s.tasks.empty() && s.messages.empty() &&
+              s.items.empty() && s.definitions.empty() && s.scripts.empty() &&
+              !s.history_prefix && !s.creature->results_prefix &&
+              !s.creature->calls_prefix && s.net.num_peers == 1 &&
+              s.net.network_mode == 1 && s.net.log.empty() &&
+              s.net.outbox.empty(),
+          "play retirement requires idle successful closed dry singleton");
+  s.validate_world();
+  s.world->validate_snapshot_references();
+  require(s.world->live_retained_identities().size() == 1,
+          "play retirement requires one retained live identity");
+  auto &h = s.hp->adapter->model();
+  auto &w = s.hp->adapter->world();
+  auto &c = *s.creature;
+  require(s.seed.draws.empty() && w.seed.draws.empty() &&
+              w.cosmetic.draws.empty() && !w.shared_random_draw_count() &&
+              !h.draws && !c.model->draws,
+          "play retirement unexpected random service");
+  // Everything below is nonallocating; all live state stays in its owner.
+  s.events.clear();
+  h.mem.clear_log();
+  h.writes.clear();
+  h.calls.clear();
+  h.events.clear();
+  w.events.clear();
+  c.model->writes.clear();
+  c.model->calls.clear();
+  c.model->events.clear();
+  c.callback_results.clear();
+}
+void Session::checkpoint(detail::Checkpoint &a) {
+  auto &s = *state_;
+  using A = detail::Checkpoint;
+  A::require(!s.animation_cache || a.control_anim_cache,
+             "checkpoint refuses active animation cache policy");
+  A::require(s.world && s.hp && s.terrain && !s.animation &&
+                 (!s.animation_cache || a.control_anim_cache) &&
+                 s.items.empty() && s.definitions.empty() &&
+                 s.scripts.empty() && s.tasks.empty() && s.messages.empty() &&
+                 !s.failed && !s.submitting && !s.executing && !s.world_depth,
+             "checkpoint requires idle closed Controller Session");
+  a.fields(s.started, s.object_run_completed, s.task_priority, s.world_phase,
+           s.seed.state);
+  a.history(s.seed.draws, s.events);
+  a.value(s.net);
+  A::require(!s.task_priority && s.world_phase == "idle" &&
+                 s.net.num_peers == 1 && s.net.num_players == 1 &&
+                 s.net.network_mode == 1 && s.net.lif >= 1 &&
+                 s.net.lif <= (a.play_continuation
+                                   ? std::int64_t(play_session::MAX_TICKS + 2)
+                                   : 8009) &&
+                 s.net.sim_frame >= 0 &&
+                 s.net.sim_frame <= (a.play_continuation
+                                         ? std::int64_t(play_session::MAX_TICKS)
+                                         : 2000),
+             "checkpoint Session domain");
+  detail::CheckpointAccess::run(*s.world, a);
+  detail::CheckpointAccess::run(*s.hp->adapter, a);
+  a.fields(s.hp->phase, s.hp->calls_this_tick);
+  A::require(s.hp->phase == "idle" &&
+                 s.hp->calls_this_tick <= s.hp->limits.calls_per_tick,
+             "checkpoint HP phase");
+  auto data = s.terrain->level.snapshot().data;
+  // Terrain geometry is immutable in this closed controller; only query
+  // stamps/cached rectangles are mutable. Initial geometry is in the envelope.
+  a.value(data.stamp);
+  for (auto &e : data.elements)
+    a.fields(e.stamp, e.f_min_x, e.f_min_y, e.f_max_x, e.f_max_y);
+  if (a.reading)
+    s.terrain->level =
+        world_queries::Level(data, s.terrain->level.snapshot().limits);
+  a.fields(s.terrain->phase, s.terrain->calls_this_tick,
+           s.terrain->last_velocity, s.terrain->last_result);
+  A::require(s.terrain->phase == "idle" && s.terrain->calls_this_tick <= 1,
+             "checkpoint terrain phase");
+  if (s.creature) {
+    auto &c = *s.creature;
+    a.fields(c.phase, c.calls_this_tick, c.last_velocity, c.last_bits);
+    a.history(c.callback_results, c.model->writes, c.model->calls,
+              c.model->events);
+    detail::CheckpointAccess::history(*c.model, a);
+    if (a.reading) {
+      c.results_prefix = a.deferred() ? a.records(c.callback_results) : 0;
+      c.calls_prefix = a.deferred() ? a.records(c.model->calls) : 0;
+    }
+    a.value(c.model->draws);
+    A::require(c.phase == "idle" && c.calls_this_tick <= 1,
+               "checkpoint creature phase");
+    for (const auto &r : c.callback_results)
+      if (!(r.call > 0 && r.call <= c.calls_prefix + c.model->calls.size()))
+        throw Error("checkpoint callback result index " +
+                    std::to_string(r.call) + "/" +
+                    std::to_string(c.model->calls.size()));
+  }
+  if (s.recovery) {
+    auto &r = s.recovery->state;
+    auto &t = *s.recovery->tick;
+    a.fields(r.phase, r.calls_this_tick, t.draws, t.R0);
+    a.history(t.writes, t.calls, t.events);
+    A::require(r.phase == "idle" && r.calls_this_tick <= 1 && !t.draws && !t.R0,
+               "checkpoint recovery phase/locals");
+    const auto &mem = t.mem;
+    for (const auto &w :
+         session_recovery::setup(r.binding.address, r.initial)) {
+      const auto off = std::int64_t(w.address) - r.initial.record;
+      if (off == 0xac || off == 0xb4 || off == 0xc0 || off == 0xc8)
+        continue;
+      const auto mask =
+          w.size == 8 ? UINT64_MAX : (UINT64_C(1) << (w.size * 8)) - 1;
+      A::require(mem.load(w.address, w.size) == (w.value & mask),
+                 "checkpoint recovery immutable setup");
+    }
+    A::require(mem.load(r.initial.record + 0xac, 4) ==
+                   s.hp->adapter->lookup(r.binding.address)->hp,
+               "checkpoint recovery HP projection mismatch");
+  }
+  if (s.turning) {
+    auto &t = *s.turning;
+    A::require(t.bindings.size() == 1 && t.limits.bindings == 1 &&
+                   t.limits.calls_per_tick == 1,
+               "checkpoint closed turning domain");
+    auto &b = t.bindings.front();
+    // Identities and immutable constructor setup are never replaced by input.
+    a.fields(b.calls_this_tick, b.turned_this_tick, b.last_result, t.phase,
+             t.publication_error, t.depth, t.calls_this_tick, t.model->draws);
+    a.history(t.model->writes, t.model->calls, t.model->events, t.operations);
+    detail::CheckpointAccess::history(*t.model, a);
+    const auto &object = s.turn_object(b.binding.id);
+    const auto &identity = s.hp->bindings[s.hp_index(b.binding.id)];
+    A::require(b.binding.world_serial == identity.world_serial &&
+                   b.binding.address == identity.address &&
+                   b.binding.adapter_generation == identity.adapter_generation,
+               "checkpoint turn identity");
+    const auto &mem = t.model->mem;
+    A::require(t.phase == "idle" && t.publication_error.empty() && !t.depth &&
+                   !t.model->draws && a.records(t.model->calls) == 0 &&
+                   t.calls_this_tick <= 1 &&
+                   t.calls_this_tick == b.calls_this_tick &&
+                   b.turned_this_tick == bool(b.calls_this_tick) &&
+                   (!b.turned_this_tick || bool(b.last_result)) &&
+                   mem.load(object.addr + 0xb0, 4) == b.initial.rate &&
+                   mem.load(object.addr + 0x2fc, 1) == b.initial.slow &&
+                   mem.load(object.addr + 0x38, 2) == object.angle &&
+                   mem.load(object.addr + 0x10, 4) == object.pos[0] &&
+                   mem.load(object.addr + 0x14, 4) == object.pos[1],
+               "checkpoint turn state/shared memory");
+    for (const auto &op : t.operations)
+      A::require(op.kind == "turn_toward" && op.binding == b.binding.id &&
+                     (op.mode == 0 || op.mode == 1) && op.completed &&
+                     bool(op.result) && op.frame <= s.world->frame,
+                 "checkpoint turn operation");
+    if (!a.deferred()) {
+      A::require(!t.operations.empty() || (!b.last_result && object.angle == 0),
+                 "checkpoint initial turn state");
+      A::require(t.model->events.size() == t.model->writes.size(),
+                 "checkpoint turn event count");
+      std::uint16_t velocity = b.initial.angular_velocity;
+      std::uint32_t facing = 0;
+      std::size_t wi = 0;
+      std::optional<std::uint32_t> previous_frame;
+      for (const auto &op : t.operations) {
+        A::require(!previous_frame || op.frame > *previous_frame,
+                   "checkpoint turn frame order");
+        previous_frame = op.frame;
+        unsigned stores = 0;
+        bool published = false;
+        while (wi < t.model->writes.size()) {
+          const auto &w = t.model->writes[wi];
+          const auto &e = t.model->events[wi++];
+          A::require(e.kind == creature_movement::EventKind::Write &&
+                         e.write.address == w.address &&
+                         e.write.size == w.size && e.write.value == w.value &&
+                         e.call.name.empty() && e.call.args.empty() &&
+                         w.size == 2 && w.value <= UINT16_MAX,
+                     "checkpoint turn ordered store");
+          ++stores;
+          if (w.address == object.addr + 0x110) {
+            A::require(stores <= 2, "checkpoint turn velocity order");
+            velocity = std::uint16_t(w.value);
+          } else {
+            A::require(w.address == object.addr + 0x38 && stores >= 2 &&
+                           stores <= 3,
+                       "checkpoint turn facing order");
+            facing = std::uint32_t(w.value);
+            published = true;
+            break;
+          }
+        }
+        A::require(published, "checkpoint turn missing publication");
+      }
+      A::require(wi == t.model->writes.size() &&
+                     mem.load(object.addr + 0x110, 2) == velocity &&
+                     (t.operations.empty() ||
+                      (object.angle == facing &&
+                       b.last_result == t.operations.back().result)),
+                 "checkpoint turn history/current consistency");
+    }
+    A::require(a.records(t.model->writes) == a.records(t.model->events) &&
+                   a.records(t.model->writes) <= 3 * a.records(t.operations),
+               "checkpoint turn histories");
+  }
+  if (s.animation_cache) {
+    auto &c = *s.animation_cache;
+    A::require(c.bindings.size() == 1, "checkpoint closed cache binding count");
+    auto &b = c.bindings.front();
+    auto identity = b.binding;
+    auto state = b.state;
+    a.fields(identity.id, identity.world_serial, identity.address,
+             identity.adapter_generation, state);
+    A::require(identity.id == b.binding.id &&
+                   identity.world_serial == b.binding.world_serial &&
+                   identity.address == b.binding.address &&
+                   identity.adapter_generation ==
+                       b.binding.adapter_generation &&
+                   state == b.state,
+               "checkpoint cache immutable actor/state identity");
+    s.animation_identity(b.binding.id);
+    detail::CheckpointAccess::run(c.runtime, a);
+    a.fields(c.phase, c.depth, c.calls_this_tick, b.calls_this_tick,
+             b.advanced_this_tick, b.last_event, b.last_decoded);
+    a.bounded_history(c.operations, c.limits.history);
+    const auto r = c.runtime.snapshot();
+    A::require(
+        c.phase == "idle" && !c.depth &&
+            c.calls_this_tick <= c.limits.calls_per_tick &&
+            c.calls_this_tick == b.calls_this_tick &&
+            b.advanced_this_tick == bool(c.calls_this_tick) &&
+            bool(b.last_event) == b.advanced_this_tick &&
+            r.states.size() == 1 && r.states.front().id == b.state &&
+            r.decoder.tracks.size() == r.states.front().value.tracks.size() &&
+            !r.decoder.cosmetic_seed && r.decoder.sim_frame <= s.world->frame &&
+            a.records(c.operations) <= c.limits.history,
+        "checkpoint cache counters/domain");
+    auto decoded = [&](const AnimationCacheDecoded &d) {
+      A::require(d.track && d.track <= r.decoder.tracks.size() && d.slot &&
+                     d.slot <= r.decoder.slots.size(),
+                 "checkpoint decoded membership");
+      auto clip = r.decoder.tracks[d.track - 1].value.clip;
+      // Historical observations may refer to a cell whose contents have since
+      // moved. Joint count is independently bounded, never repaired from it.
+      A::require(d.joints.size() <= 4 && clip <= r.decoder.clips.size(),
+                 "checkpoint decoded joint bound");
+    };
+    if (b.last_decoded)
+      decoded(*b.last_decoded);
+    const auto &live = c.runtime.state(b.state);
+    if (live.count) {
+      const auto selected = live.tracks[std::size_t(live.count - 1)];
+      const auto &track = c.runtime.track(selected);
+      A::require(b.last_decoded && b.last_decoded->track == selected &&
+                     b.last_decoded->slot == track.slot &&
+                     b.last_decoded->time == track.time &&
+                     b.last_decoded->joints.size() ==
+                         std::size_t(c.runtime.clip(track.clip).joint_count),
+                 "checkpoint cache current selected sample mismatch");
+      // Existing pure sampling reads only restored slot records. No decoding,
+      // allocation, LRU touch, clock advance or history replay occurs here.
+      ScopedFpu arithmetic(
+          Fpu(s.config.model, s.config.mul_bias, s.config.div_nearest));
+      for (std::size_t j = 0; j < b.last_decoded->joints.size(); ++j)
+        A::require(
+            c.runtime.joint_pos(track.slot, std::int64_t(j), track.time) ==
+                    b.last_decoded->joints[j].position &&
+                c.runtime.joint_quat(track.slot, std::int64_t(j), track.time) ==
+                    b.last_decoded->joints[j].quaternion,
+            "checkpoint cache sampled values/current slot mismatch");
+    }
+    std::uint32_t previous = 0;
+    std::size_t calls = 0, advances = 0;
+    for (const auto &op : c.operations) {
+      A::require(op.completed && op.binding == b.binding.id &&
+                     op.frame >= previous && op.frame <= s.world->frame &&
+                     op.clip <= r.decoder.clips.size() &&
+                     op.track <= r.decoder.tracks.size() && !op.event_index &&
+                     !op.event.seconds && !op.event.mask,
+                 "checkpoint cache operation membership/order");
+      if (op.frame != previous) {
+        calls = advances = 0;
+        previous = op.frame;
+      }
+      ++calls;
+      if (op.kind == "start_animation_cache")
+        A::require(op.clip && op.track && !op.parameter &&
+                       op.flags == (animation_runtime::LOOP |
+                                    animation_runtime::KEEP) &&
+                       !op.result && !op.decoded,
+                   "checkpoint cache start policy");
+      else if (op.kind == "stop_animation_cache")
+        A::require(op.clip && !op.track && !op.parameter && !op.flags &&
+                       !op.result && !op.decoded,
+                   "checkpoint cache stop policy");
+      else if (op.kind == "advance_animation_cache") {
+        ++advances;
+        A::require(!op.clip && !op.track && op.parameter == ONE && !op.flags &&
+                       op.result && *op.result >= -128 && *op.result <= 127 &&
+                       !op.decoded,
+                   "checkpoint cache advance policy");
+      } else {
+        A::require(op.kind == "decode_animation_cache" && !op.clip &&
+                       op.track && !op.parameter && !op.flags && !op.result &&
+                       op.decoded && op.decoded->track == op.track,
+                   "checkpoint cache decode policy");
+        decoded(*op.decoded);
+      }
+      A::require(calls <= c.limits.calls_per_tick && advances <= 1,
+                 "checkpoint cache per-frame work");
+    }
+    if (!a.deferred()) {
+      A::require(c.operations.empty()
+                     ? (!c.calls_this_tick && !b.last_event &&
+                        !b.last_decoded && !r.decoder.sim_frame)
+                     : (r.decoder.sim_frame == c.operations.back().frame &&
+                        c.calls_this_tick == calls && advances == 1),
+                 "checkpoint cache current/history frame");
+      std::optional<std::int32_t> event;
+      std::optional<AnimationCacheDecoded> last_decode;
+      for (const auto &op : c.operations) {
+        if (op.result)
+          event = op.result;
+        if (op.decoded)
+          last_decode = op.decoded;
+      }
+      A expected, actual;
+      expected.fields(event, last_decode);
+      actual.fields(b.last_event, b.last_decoded);
+      A::require(expected.bytes == actual.bytes,
+                 "checkpoint cache last observation/history");
+    }
+  }
+  s.validate_world();
+  // Prefix records constrain every subsequent budget without being read.
+  if (a.reading)
+    s.history_prefix = a.deferred() ? a.deferred_records() : 0;
+  A::require(
+      a.deferred_records() <= MAX_HISTORY &&
+          (!a.deferred() || s.hp->adapter->world().shared_random_draw_count() <=
+                                MAX_HISTORY - a.deferred_records()),
+      "checkpoint deferred aggregate history budget");
+  s.budgets();
 }
 } // namespace champions::simulation::rta::session

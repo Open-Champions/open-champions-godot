@@ -1,0 +1,15 @@
+{
+  "schema": "rta-script-effects-v1",
+  "reference_commit": "52984db",
+  "pins": {
+    "docs/script-effects.md": "f633f3df2e3e7c6336b091d86c199d68d1b1cdec49c10e85d9e2d545f694f3f5",
+    "tools/ref_amx.py": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2",
+    "tools/ref_script_effects.py": "d7e6cc778279a917629650672370f0a4efa9ce1e2678cc67c01e8433f19510b6"
+  },
+  "generator_sha256": "0edbee714dca872b000a5bb716d10f32756183e621d8c6a8c5e098446b5eacc5",
+  "vectors_sha256": "4c19666d5705552c2beba1000317df4fe0c8fa8eb3b7d5a158895de3ce1fc2da",
+  "cases": 36
+}

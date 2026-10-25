@@ -1,0 +1,10 @@
+{
+  "branch": "t3/research-saves",
+  "commit": "8d43286b9ca85227bc9782dbcf9f4e785b226053",
+  "sha256": {
+    "docs/save-format.md": "ecb02d7f2829074a5c709817a3b6a70123ccb14bbaec090e9c653306d6de50b2",
+    "tools/ref_save.py": "c9e59ceb4baf18306594717c49e35be18d866cd6e3fe59fe3da7dfc720b6620d",
+    "tools/test_ref_save.py": "78850cad5f4ddb2a3515771cf977649dfcc99f654c755439060342fb2907db89",
+    "tools/difftest_save.py": "961aae99df8926f95d15bb4125222141dd3a6dbd994db55dfe22cbdad0bcd924"
+  }
+}

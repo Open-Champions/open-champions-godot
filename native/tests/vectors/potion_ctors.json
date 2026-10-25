@@ -1,0 +1,17 @@
+{
+  "schema": "potion-ctors-v1",
+  "research_commit": "e9777eb25a150123e48452f25968e8ee263d0003",
+  "references": {
+    "docs/spec/potion-ctors.md": "db27aa470106689a9f073f3beadc7c37a6bb8d6a49896c67a5efea25e52d9364",
+    "tools/ref_potion_ctors.py": "4b7a2520c01f7acf831ec0041384d5af9aec4a4466c671018ad63de0f249af42",
+    "tools/test_ref_potion_ctors.py": "db3dfd87d12c3d1e07f791fc04145eeb64053927289b094726f422b8219f1dc0",
+    "tools/difftest_potion_ctors.py": "b9dac01c745c9eb27157668d654ab1961a729d017df2b1e10cab9c4d30b88d8c",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "tools/ref_skills_a.py": "6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae"
+  },
+  "vector_sha256": "d791036f555648914d4c6d86041a09ae774f69e0439709fcd6a514fc24142aa8",
+  "content_sha256": "7efef309b0f274f31667aea93ad1d0be56bd31b9a9ac800c989157974e94feae",
+  "cases": 126
+}

@@ -1,0 +1,33 @@
+{
+  "commit": "5694ae3c63e7ddff4b2177adf2ae783b23dd6a9b",
+  "sha256": {
+    "docs/spec/rendered-creature-animation.md": "7ed276a4a06b58cd4a3dfde52777506f0b3c3b2a55b448dc9561e77383ebd2bb",
+    "docs/spec/research-anim-handoff.md": "603794307c89c2acc7ab95076453124731f8d01cb45205f90f1858c3908999cd",
+    "docs/spec/animation.md": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab",
+    "docs/spec/monsters-1.md": "4c70c678d0f2d0060f330054b157778e2b3535fed56e9fca456ce2bedbe76348",
+    "tools/ref_anim.py": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_monsters_1.py": "33a76a127c66ffd0b4c8c91c014d250c91c567cd168c2bc8870d5abae647c4d0",
+    "tools/ref_creature_animation.py": "3d55ce6558f398fa287ca09d977a75795a65107365a0e0c6a0485e414e658344",
+    "tools/test_ref_anim.py": "ebcd168d85c8e483a765a56951319ba2d1974c9db7f7d707654a753ce4dfe8d9",
+    "tools/test_ref_creature_animation.py": "d848bc4670a92e6299e9aad28e9a9dbcf3bb9b3da5952361727614649ce96cd3",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "docs/spec/creature-animation-dispatch.md": "7ab8c3b4a5044fb41c1c892c19678d396679feb1fdb3a99c88c4890476f1237d",
+    "docs/spec/creature-animation-dispatch-classes.md": "2a55b6a781f2e55d619b0d3f880aed787ff48806ebd5535ad8315d44a3031d65",
+    "docs/spec/player-animation-dispatch.md": "64678b5c749d9f82d17935d117f1ba88bd26b7916ee3ffbefc127122ee418131",
+    "docs/spec/player-tick.md": "843c1701bd0d1d4e4c5d92309805c46f306c8b8aa79e9f7eacfb58e3a2cd2d1b",
+    "tools/ref_creature_dispatch.py": "6a8cbf4d800064ded6be402a6019e0633aeb212a44fc44794eaa9e8bf701855a",
+    "tools/ref_creature_dispatch_data.py": "d0b930b9302053f43e064d30dd90a6e9a6774416590ce99181b1856dc4a07847",
+    "tools/test_ref_creature_dispatch.py": "3edeb13fbf19e5bc86c982437da2d3a3824f1334cdca559e4494e11a66c75da8",
+    "tools/ref_player.py": "ee8750f778e520158243abfec0887633bd97d69b7274ae752dfa2531f297bc3d",
+    "tools/test_ref_player.py": "01ed34c6309bcaa4dc47ea5b4fabe50e34fc5970d4cdecf387d22f01b21473b8",
+    "docs/spec/movement-camera.md": "3d4c9aa29a3e37e8054f834cabdf6eb392b69aeb856af1a8a4db1fd94b34f73b",
+    "tools/difftest_player.py": "dabb453fa62eb3e3ca66c28d5d80decc9e89fdcef86bf8266027bc5af0bcee47",
+    "tools/ref_skill_anim.py": "dc7be53fda2877f5ef2cd291dc9a9c5639da5a5449b094ed27de739a33e99563",
+    "tools/ref_field_precedence.py": "5c1e1e89ea498f6aad12fe619fee14969f099909acdacb36333340f16d0c5cac",
+    "tools/ref_own_machines.py": "c6d2ffc52eaa2a1b887e119de0e43e1c2478d74760ba7032ad8f20eec7316e5b",
+    "tools/test_ref_own_machines.py": "c0ce6946ca5d6ad27abdd6c6e5dcf396db46fb096344488f21c42cd7fc052f40",
+    "docs/spec/own-state-machines.md": "b4e3cefab9ed53b29a070aacc58af3426b04ede0842208998f0bc08dec5d0171"
+  }
+}

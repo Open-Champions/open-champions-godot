@@ -1,0 +1,8405 @@
+{
+ "classes": {
+  "BlindingLightEffect": {
+   "calls": [
+    {
+     "address": 3096376,
+     "args": {
+      "a0": null,
+      "a1": 1073971537,
+      "a2": null,
+      "a3": 1074191230,
+      "f12": 7.7426228523254395,
+      "f13": null,
+      "f14": -7.472538471221924,
+      "f15": null,
+      "f16": 6.531456470489502,
+      "f17": 6.496140480041504,
+      "f18": 5.81108283996582,
+      "f19": null,
+      "sp+0x0": 0.3377847373485565,
+      "sp+0x10": -2.5294203758239746,
+      "sp+0x18": null,
+      "sp+0x8": -6.1634721755981445
+     },
+     "function": "BlindingLightEffect_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3096428
+    },
+    {
+     "address": 3097316,
+     "args": {
+      "a0": 1074611995,
+      "a1": 1074397375,
+      "a2": null,
+      "f12": null
+     },
+     "function": "BlindingLightEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3097368
+    }
+   ],
+   "phases": [
+    {
+     "address": 3096376,
+     "calls_in_code": "LightEffect:1",
+     "function": "BlindingLightEffect_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)",
+      "own"
+     ],
+     "model": "ref_skills_a.blindinglight_effect_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3097316,
+     "calls_in_code": "particle:1",
+     "function": "BlindingLightEffect_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_a.blindinglight_effect_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "ColdArrowProjectile": {
+   "calls": [
+    {
+     "address": 2981580,
+     "args": {
+      "a0": null,
+      "a1": 1073880160,
+      "a2": null,
+      "f12": -0.9014931321144104
+     },
+     "function": "ColdArrowProjectile_end",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2981668
+    },
+    {
+     "address": 2980524,
+     "args": {
+      "a0": 1074671846,
+      "a1": null
+     },
+     "function": "ColdArrowProjectile_onHit",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2980576
+    },
+    {
+     "address": 2977716,
+     "args": {},
+     "function": "ColdArrowProjectile_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2977768
+    },
+    {
+     "address": 2981580,
+     "args": {
+      "a0": null,
+      "a1": 1074211579,
+      "a2": null,
+      "f12": -7.8085784912109375
+     },
+     "function": "ColdArrowProjectile_end",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2981632
+    },
+    {
+     "address": 2978760,
+     "args": {
+      "a0": null,
+      "a1": 1073986070,
+      "a2": null,
+      "f12": -3.7159345149993896
+     },
+     "function": "ColdArrowProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2978848
+    },
+    {
+     "address": 2978760,
+     "args": {
+      "a0": 1074709197,
+      "a1": 1073930316,
+      "a2": 1074511680,
+      "f12": null
+     },
+     "function": "ColdArrowProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2978812
+    },
+    {
+     "address": 2978188,
+     "args": {},
+     "function": "ColdArrowProjectile_ctor2",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2978240
+    },
+    {
+     "address": 2980524,
+     "args": {
+      "a0": 1074019733,
+      "a1": 1074620249
+     },
+     "function": "ColdArrowProjectile_onHit",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2980612
+    },
+    {
+     "address": 2981580,
+     "args": {
+      "a0": 1074307338,
+      "a1": 1074734717,
+      "a2": 1074237785,
+      "f12": 6.524327754974365
+     },
+     "function": "ColdArrowProjectile_end",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2981704
+    }
+   ],
+   "phases": [
+    {
+     "address": 2977716,
+     "calls_in_code": "lightLink:1",
+     "function": "ColdArrowProjectile_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.coldarrow_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2978188,
+     "calls_in_code": "lightLink:1",
+     "function": "ColdArrowProjectile_ctor2",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.coldarrow_ctor2",
+     "phase": "cast"
+    },
+    {
+     "address": 2978760,
+     "calls_in_code": "particle:2",
+     "function": "ColdArrowProjectile_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.coldarrow_run",
+     "phase": "run"
+    },
+    {
+     "address": 2980524,
+     "calls_in_code": "fx_spawn:2",
+     "function": "ColdArrowProjectile_onHit",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.coldarrow_on_hit",
+     "phase": "event"
+    },
+    {
+     "address": 2981580,
+     "calls_in_code": "particle:3",
+     "function": "ColdArrowProjectile_end",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.coldarrow_end",
+     "phase": "event"
+    }
+   ]
+  },
+  "DarknessProjectile": {
+   "calls": [
+    {
+     "address": 2946704,
+     "args": {
+      "a0": 1073855216,
+      "a1": 1073952356,
+      "a2": 1074519020,
+      "f12": -1.3298122882843018
+     },
+     "function": "DarknessProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2946756
+    },
+    {
+     "address": 2946144,
+     "args": {},
+     "function": "DarknessProjectile_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2946196
+    }
+   ],
+   "phases": [
+    {
+     "address": 2946144,
+     "calls_in_code": "lightLink:1",
+     "function": "DarknessProjectile_ctor",
+     "generators": [],
+     "model": "ref_skills_b.darkness_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2946704,
+     "calls_in_code": "particle:1",
+     "function": "DarknessProjectile_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.darkness_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "DiseaseBolt": {
+   "calls": [
+    {
+     "address": 2924968,
+     "args": {
+      "a0": 1074150300,
+      "a1": 1074421502,
+      "a2": null,
+      "f12": 4.661008834838867
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2925056
+    },
+    {
+     "address": 2924968,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2925236
+    },
+    {
+     "address": 2924968,
+     "args": {
+      "a0": null,
+      "a1": 1074239469
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2925020
+    },
+    {
+     "address": 2924968,
+     "args": {
+      "a0": 1074756689,
+      "a1": null,
+      "a2": null,
+      "f12": 4.436525344848633
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2925092
+    },
+    {
+     "address": 2924968,
+     "args": {
+      "a0": 1074054113,
+      "a1": null,
+      "a2": 1074509710,
+      "f12": -3.8098413944244385
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2925164
+    },
+    {
+     "address": 2924968,
+     "args": {
+      "a0": 1074532940,
+      "a1": 1074768522,
+      "a2": null,
+      "f12": -1.1293774843215942
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2925200
+    },
+    {
+     "address": 2924968,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074117746,
+      "f12": -7.905560493469238
+     },
+     "function": "DiseaseBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2925128
+    }
+   ],
+   "phases": [
+    {
+     "address": 2924968,
+     "calls_in_code": "fx_spawn:1 particle:6",
+     "function": "DiseaseBolt_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_a.diseasebolt_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "DiseaseCloud": {
+   "calls": [
+    {
+     "address": 2942688,
+     "args": {
+      "a0": 10551968,
+      "a1": null,
+      "a2": 1074563579,
+      "f12": 1.0390625
+     },
+     "function": "DiseaseCloud_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2942776
+    },
+    {
+     "address": 2942688,
+     "args": {
+      "a0": 10551632,
+      "a1": 1074624640,
+      "a2": null,
+      "f12": 1.0234375
+     },
+     "function": "DiseaseCloud_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2942740
+    },
+    {
+     "address": 2942688,
+     "args": {
+      "a0": 10552304,
+      "a1": 1074063704,
+      "a2": 1074711876,
+      "f12": 1.0546875
+     },
+     "function": "DiseaseCloud_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2942812
+    }
+   ],
+   "phases": [
+    {
+     "address": 2942688,
+     "calls_in_code": "particle:3",
+     "function": "DiseaseCloud_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.diseasecloud_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "DiseaseTrail": {
+   "calls": [
+    {
+     "address": 2930268,
+     "args": {
+      "a0": null,
+      "a1": 1074760437,
+      "a2": 1074462351,
+      "f12": -3.057039737701416
+     },
+     "function": "DiseaseTrail_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2930392
+    },
+    {
+     "address": 2930268,
+     "args": {
+      "a0": 1074653948,
+      "a1": 1074382667,
+      "a2": 1074683931,
+      "f12": null
+     },
+     "function": "DiseaseTrail_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2930320
+    },
+    {
+     "address": 2930268,
+     "args": {
+      "a0": 1073840035,
+      "a1": 1074218375,
+      "a2": 1074196612,
+      "f12": -5.662313938140869
+     },
+     "function": "DiseaseTrail_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2930356
+    }
+   ],
+   "phases": [
+    {
+     "address": 2930268,
+     "calls_in_code": "particle:3",
+     "function": "DiseaseTrail_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_a.diseasetrail_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "ExplodeArrowProjectile": {
+   "calls": [
+    {
+     "address": 2995468,
+     "args": {
+      "a0": 1074156527,
+      "a1": null
+     },
+     "function": "ExplodeArrowProjectile_explode",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2995556
+    },
+    {
+     "address": 2995468,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1073914035,
+      "a3": 1074253834,
+      "f12": null,
+      "f13": -5.227562427520752,
+      "f14": 6.981898307800293,
+      "f15": -7.388175010681152,
+      "f16": -6.766735553741455,
+      "f17": -5.657978057861328,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": 8.238064765930176,
+      "sp+0x10": -4.177638053894043,
+      "sp+0x18": null,
+      "sp+0x8": 2.314661741256714
+     },
+     "function": "ExplodeArrowProjectile_explode",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 2995520
+    },
+    {
+     "address": 2994556,
+     "args": {
+      "a0": 1074446990,
+      "a1": 1074420588,
+      "a2": 1074130721,
+      "f12": 0.14216415584087372
+     },
+     "function": "ExplodeArrowProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2994608
+    },
+    {
+     "address": 2995468,
+     "args": {
+      "a0": null,
+      "a1": 1074504207
+     },
+     "function": "ExplodeArrowProjectile_explode",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2995592
+    },
+    {
+     "address": 2995468,
+     "args": {},
+     "function": "ExplodeArrowProjectile_explode",
+     "meaning": {},
+     "primitive": "ringBurst",
+     "site": 2995628
+    }
+   ],
+   "phases": [
+    {
+     "address": 2994556,
+     "calls_in_code": "particle:1",
+     "function": "ExplodeArrowProjectile_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.explodearrow_run",
+     "phase": "run"
+    },
+    {
+     "address": 2995468,
+     "calls_in_code": "LightEffect:1 fx_spawn:2 ringBurst:1",
+     "function": "ExplodeArrowProjectile_explode",
+     "generators": [
+      "SHARED(LightEffect)",
+      "own"
+     ],
+     "model": "ref_skills_b.explodearrow_explode",
+     "phase": "event"
+    }
+   ]
+  },
+  "FireArrowProjectile": {
+   "calls": [
+    {
+     "address": 2975720,
+     "args": {
+      "a0": null,
+      "a1": 512,
+      "a2": 567,
+      "a3": 622,
+      "f12": 1.0703125,
+      "f13": -5.8120269775390625,
+      "t0": 677,
+      "t1": 1074075674,
+      "t2": 732,
+      "t3": 787
+     },
+     "function": "FireArrowProjectile_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 2975772
+    },
+    {
+     "address": 2974784,
+     "args": {},
+     "function": "FireArrowProjectile_ctor2",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2974836
+    },
+    {
+     "address": 2974264,
+     "args": {},
+     "function": "FireArrowProjectile_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2974316
+    },
+    {
+     "address": 2975404,
+     "args": {},
+     "function": "FireArrowProjectile_run",
+     "meaning": {},
+     "primitive": "puff",
+     "site": 2975456
+    }
+   ],
+   "phases": [
+    {
+     "address": 2974264,
+     "calls_in_code": "lightLink:1",
+     "function": "FireArrowProjectile_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.firearrow_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2974784,
+     "calls_in_code": "lightLink:1",
+     "function": "FireArrowProjectile_ctor2",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.firearrow_ctor2",
+     "phase": "cast"
+    },
+    {
+     "address": 2975404,
+     "calls_in_code": "puff:1",
+     "function": "FireArrowProjectile_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.firearrow_run",
+     "phase": "run"
+    },
+    {
+     "address": 2975720,
+     "calls_in_code": "glow:1",
+     "function": "FireArrowProjectile_draw",
+     "generators": [],
+     "model": "ref_fx_skills.firearrow_draw",
+     "phase": "draw"
+    }
+   ]
+  },
+  "FireFlare": {
+   "calls": [
+    {
+     "address": 2998032,
+     "args": {
+      "a0": 1074128272,
+      "a1": null,
+      "a2": 1074002008,
+      "f12": 0.4331177771091461
+     },
+     "function": "FireFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2998120
+    },
+    {
+     "address": 2998032,
+     "args": {
+      "a0": null,
+      "a1": 1074019549,
+      "a2": 1074389843,
+      "f12": null
+     },
+     "function": "FireFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2998084
+    },
+    {
+     "address": 2998032,
+     "args": {
+      "a0": null,
+      "a1": 1074396305,
+      "a2": 1074488434,
+      "f12": -3.981276750564575
+     },
+     "function": "FireFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2998192
+    },
+    {
+     "address": 2998032,
+     "args": {
+      "a0": 1073951137,
+      "a1": 1074211588,
+      "a2": null,
+      "f12": null
+     },
+     "function": "FireFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2998156
+    },
+    {
+     "address": 2998032,
+     "args": {
+      "a0": null,
+      "a1": 1074147917,
+      "a2": 1074566156,
+      "f12": null
+     },
+     "function": "FireFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2998228
+    }
+   ],
+   "phases": [
+    {
+     "address": 2998032,
+     "calls_in_code": "particle:5",
+     "function": "FireFlare_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_a.fireflare_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "FireStorm": {
+   "calls": [
+    {
+     "address": 2965576,
+     "args": {},
+     "function": "FireStorm_ctor2",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2965628
+    },
+    {
+     "address": 2966008,
+     "args": {},
+     "function": "FireStorm_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2966060
+    },
+    {
+     "address": 2966656,
+     "args": {
+      "a0": 1073947675,
+      "a1": null,
+      "a2": 1074199506,
+      "a3": null,
+      "f12": -0.05104399845004082,
+      "f13": 0.09672259539365768,
+      "f14": null,
+      "f15": 1.7437958717346191,
+      "f16": null,
+      "f17": null,
+      "f18": -2.9554643630981445,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": 7.310587406158447,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "FireStorm_initCommon",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 2966708
+    }
+   ],
+   "phases": [
+    {
+     "address": 2965576,
+     "calls_in_code": "lightLink:1",
+     "function": "FireStorm_ctor2",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.firestorm_ctor2",
+     "phase": "cast"
+    },
+    {
+     "address": 2966008,
+     "calls_in_code": "lightLink:1",
+     "function": "FireStorm_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.firestorm_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2966656,
+     "calls_in_code": "LightEffect:1",
+     "function": "FireStorm_initCommon",
+     "generators": [
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.firestorm_init_common",
+     "phase": "cast"
+    }
+   ]
+  },
+  "FireStormFlare": {
+   "calls": [
+    {
+     "address": 2962368,
+     "args": {
+      "a0": 10552640,
+      "a1": 1073822920,
+      "a2": 1074477856,
+      "f12": 1.0859375
+     },
+     "function": "FireStormFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2962456
+    },
+    {
+     "address": 2962368,
+     "args": {
+      "a0": 10552976,
+      "a1": 1073860819,
+      "a2": 1074317288,
+      "f12": 1.1015625
+     },
+     "function": "FireStormFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2962492
+    },
+    {
+     "address": 2962368,
+     "args": {
+      "a0": 1074075218,
+      "a1": 1074393596,
+      "a2": 842,
+      "a3": 897,
+      "f12": -3.736549139022827
+     },
+     "function": "FireStormFlare_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "angle",
+      "a2": "type",
+      "a3": "grow",
+      "f12": "size"
+     },
+     "primitive": "decal",
+     "site": 2962420
+    },
+    {
+     "address": 2962368,
+     "args": {
+      "a0": 10553312,
+      "a1": null,
+      "a2": null,
+      "f12": 1.1171875
+     },
+     "function": "FireStormFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2962528
+    },
+    {
+     "address": 2962368,
+     "args": {
+      "a0": 10552976,
+      "a1": null,
+      "a2": 1074227810,
+      "f12": 1.1484375
+     },
+     "function": "FireStormFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2962600
+    },
+    {
+     "address": 2962368,
+     "args": {
+      "a0": 10552640,
+      "a1": 1073802426,
+      "a2": null,
+      "f12": 1.1328125
+     },
+     "function": "FireStormFlare_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2962564
+    }
+   ],
+   "phases": [
+    {
+     "address": 2962368,
+     "calls_in_code": "decal:1 particle:5",
+     "function": "FireStormFlare_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.firestormflare_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "FrostShard": {
+   "calls": [
+    {
+     "address": 3107644,
+     "args": {
+      "a0": null,
+      "a1": 1074774780
+     },
+     "function": "FrostShard_run",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 3107696
+    },
+    {
+     "address": 3107644,
+     "args": {
+      "a0": null,
+      "a1": 1074334794,
+      "a2": 1074479893,
+      "f12": -5.837971210479736
+     },
+     "function": "FrostShard_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3107732
+    },
+    {
+     "address": 3107644,
+     "args": {
+      "a0": 1074531453,
+      "a1": 1074245256,
+      "a2": 1074760137,
+      "f12": null
+     },
+     "function": "FrostShard_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3107768
+    }
+   ],
+   "phases": [
+    {
+     "address": 3107644,
+     "calls_in_code": "fx_spawn:1 particle:2",
+     "function": "FrostShard_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_a.frostshard_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "GroundPoundEffect": {
+   "calls": [
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1074043745,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914580
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1074447782,
+      "a1": null,
+      "a2": 1074019850,
+      "f12": 8.08424186706543
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914472
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1074595832,
+      "a1": 1074223395,
+      "a2": null,
+      "a3": 1074023731,
+      "f12": null,
+      "f13": 8.997415542602539,
+      "f14": -4.066709041595459,
+      "f15": -2.0910873413085938,
+      "f16": -4.857685089111328,
+      "f17": -4.482480049133301,
+      "f18": -6.770999431610107,
+      "f19": 3.9974565505981445,
+      "sp+0x0": 4.1447248458862305,
+      "sp+0x10": null,
+      "sp+0x18": 3.310894727706909,
+      "sp+0x8": null
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 2914364
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1074411815,
+      "a1": null,
+      "a2": 1073900092,
+      "f12": -0.2858954668045044
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914652
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": null,
+      "a1": 1074734609,
+      "a2": null,
+      "f12": -3.810359001159668
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914508
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1073837675,
+      "a1": 1074575548,
+      "a2": null,
+      "f12": 2.8641037940979004
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914436
+    },
+    {
+     "address": 2913452,
+     "args": {},
+     "function": "GroundPoundEffect_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2913504
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074315506,
+      "a3": null,
+      "f12": null
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "angle",
+      "a2": "type",
+      "a3": "grow",
+      "f12": "size"
+     },
+     "primitive": "decal",
+     "site": 2914400
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1073890652,
+      "a1": null,
+      "a2": 1074232972,
+      "f12": -8.598180770874023
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914544
+    },
+    {
+     "address": 2914312,
+     "args": {
+      "a0": 1074062117,
+      "a1": null,
+      "a2": 1074749532,
+      "f12": -4.845682621002197
+     },
+     "function": "GroundPoundEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2914616
+    }
+   ],
+   "phases": [
+    {
+     "address": 2913452,
+     "calls_in_code": "lightLink:1",
+     "function": "GroundPoundEffect_ctor",
+     "generators": [],
+     "model": "ref_skills_b.groundpound_effect_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2914312,
+     "calls_in_code": "LightEffect:1 decal:1 particle:7",
+     "function": "GroundPoundEffect_run",
+     "generators": [
+      "SHARED(LightEffect)",
+      "own",
+      "seed3"
+     ],
+     "model": "ref_skills_b.groundpound_effect_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "HammerOfWrath": {
+   "calls": [
+    {
+     "address": 3072104,
+     "args": {
+      "a0": 1074069744,
+      "a1": 1074564061,
+      "a2": 1074626085,
+      "f12": 1.150744080543518
+     },
+     "function": "HammerOfWrath_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3072156
+    }
+   ],
+   "phases": [
+    {
+     "address": 3072104,
+     "calls_in_code": "particle:1",
+     "function": "HammerOfWrath_run",
+     "generators": [
+      "own",
+      "seed3"
+     ],
+     "model": "ref_skills_a.hammer_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "HolyBolt": {
+   "calls": [
+    {
+     "address": 3104692,
+     "args": {
+      "a0": 1073763189,
+      "a1": 1074050069,
+      "a2": 1074417115,
+      "a3": 1074492292,
+      "f12": 7.864866256713867,
+      "f13": 2.5461533069610596,
+      "f14": -7.0737385749816895,
+      "f15": 7.815897464752197,
+      "f16": -6.002030372619629,
+      "f17": 6.49695348739624,
+      "f18": 2.319429874420166,
+      "f19": -7.642580986022949,
+      "sp+0x0": 3.298130989074707,
+      "sp+0x10": -8.181880950927734,
+      "sp+0x18": -0.3753122091293335,
+      "sp+0x8": null
+     },
+     "function": "HolyBolt_onHit",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3104744
+    },
+    {
+     "address": 3101256,
+     "args": {},
+     "function": "HolyBolt_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3101308
+    },
+    {
+     "address": 3102640,
+     "args": {
+      "a0": 1074431077,
+      "a1": null,
+      "a2": 1074649411,
+      "f12": -2.056431293487549
+     },
+     "function": "HolyBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3102692
+    },
+    {
+     "address": 3102640,
+     "args": {},
+     "function": "HolyBolt_run",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 3102728
+    },
+    {
+     "address": 3101256,
+     "args": {},
+     "function": "HolyBolt_ctor",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 3101380
+    },
+    {
+     "address": 3101256,
+     "args": {
+      "a0": 1074607108,
+      "a1": 1074182651,
+      "a2": null,
+      "a3": null,
+      "f12": 6.284337520599365,
+      "t0": 1074073556,
+      "t1": 1074315611,
+      "t2": null
+     },
+     "function": "HolyBolt_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3101344
+    },
+    {
+     "address": 3104692,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1073906306,
+      "f12": null
+     },
+     "function": "HolyBolt_onHit",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3104780
+    }
+   ],
+   "phases": [
+    {
+     "address": 3101256,
+     "calls_in_code": "lightLink:1 trail:1 trailPoint:1",
+     "function": "HolyBolt_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.holybolt_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3102640,
+     "calls_in_code": "particle:1 trailPoint:1",
+     "function": "HolyBolt_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_a.holybolt_run",
+     "phase": "run"
+    },
+    {
+     "address": 3104692,
+     "calls_in_code": "LightEffect:1 particle:1",
+     "function": "HolyBolt_onHit",
+     "generators": [
+      "SHARED(LightEffect)",
+      "own"
+     ],
+     "model": "ref_skills_a.holybolt_hit",
+     "phase": "event"
+    }
+   ]
+  },
+  "HolyStrike": {
+   "calls": [
+    {
+     "address": 3062864,
+     "args": {},
+     "function": "HolyStrike_run",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 3063168
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": 1074621584,
+      "a1": 1074130143,
+      "a2": 1073799555,
+      "f12": -0.936916172504425
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3062988
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": 1073887288,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3063024
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074135700,
+      "f12": -8.49052619934082
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3063132
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": 1074500580,
+      "a1": 1073898453,
+      "a2": 1074125265,
+      "f12": 0.3235498368740082
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3062952
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3063060
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": 0.7195786237716675
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3063096
+    },
+    {
+     "address": 3062864,
+     "args": {
+      "a0": 1074367947,
+      "a1": 1074573120,
+      "a2": null,
+      "a3": null,
+      "f12": -8.792143821716309,
+      "f13": null,
+      "f14": -4.99082612991333,
+      "f15": null,
+      "f16": -4.50780725479126,
+      "f17": 0.2866864800453186,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": 1.0220232009887695,
+      "sp+0x10": null,
+      "sp+0x18": 1.7239470481872559,
+      "sp+0x8": 0.018620114773511887
+     },
+     "function": "HolyStrike_run",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3062916
+    },
+    {
+     "address": 3067280,
+     "args": {
+      "a0": null,
+      "a1": 952,
+      "a2": 1007,
+      "a3": 1062,
+      "f12": 1.1640625,
+      "f13": null,
+      "t0": 1117,
+      "t1": 1074112621,
+      "t2": 1074334988,
+      "t3": 1172
+     },
+     "function": "HolyStrike_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3067332
+    },
+    {
+     "address": 3062344,
+     "args": {
+      "a0": 1074181428,
+      "a1": 1074070629,
+      "a2": 1074102213,
+      "a3": null,
+      "f12": -1.5583630800247192,
+      "t0": 1074154021,
+      "t1": 1074538694,
+      "t2": null
+     },
+     "function": "HolyStrike_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3062396
+    },
+    {
+     "address": 3062344,
+     "args": {},
+     "function": "HolyStrike_ctor",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 3062432
+    }
+   ],
+   "phases": [
+    {
+     "address": 3062344,
+     "calls_in_code": "trail:1 trailPoint:1",
+     "function": "HolyStrike_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.holystrike_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3062864,
+     "calls_in_code": "LightEffect:1 particle:6 trailPoint:1",
+     "function": "HolyStrike_run",
+     "generators": [
+      "SHARED(LightEffect)",
+      "own"
+     ],
+     "model": "ref_skills_a.holystrike_run",
+     "phase": "run"
+    },
+    {
+     "address": 3067280,
+     "calls_in_code": "glow:1",
+     "function": "HolyStrike_draw",
+     "generators": [],
+     "model": "ref_fx_skills.holystrike_draw",
+     "phase": "draw"
+    }
+   ]
+  },
+  "LightningStrikeSpell": {
+   "calls": [
+    {
+     "address": 3255880,
+     "args": {},
+     "function": "LightningStrikeSpell_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3255968
+    },
+    {
+     "address": 3255880,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074065882,
+      "a3": 1074742529,
+      "f12": -5.3288893699646,
+      "f13": 2.6464834213256836,
+      "f14": 5.314427375793457,
+      "f15": 3.780641555786133,
+      "f16": null,
+      "f17": -5.2669830322265625,
+      "f18": 0.9126809239387512,
+      "f19": 1.6631532907485962,
+      "sp+0x0": null,
+      "sp+0x10": 2.766348123550415,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "LightningStrikeSpell_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3255932
+    }
+   ],
+   "phases": [
+    {
+     "address": 3255880,
+     "calls_in_code": "LightEffect:1 lightLink:1",
+     "function": "LightningStrikeSpell_ctor",
+     "generators": [
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c._storm_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "MultiFireProjectile": {
+   "calls": [
+    {
+     "address": 2990780,
+     "args": {
+      "a0": 10554320,
+      "a1": 1073936602,
+      "a2": null,
+      "f12": 1.1953125
+     },
+     "function": "MultiFireProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2990832
+    },
+    {
+     "address": 2992424,
+     "args": {
+      "a0": 1667,
+      "a1": 1074684811
+     },
+     "function": "MultiFireProjectile_end",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2992512
+    },
+    {
+     "address": 2990436,
+     "args": {
+      "a0": 1227,
+      "a1": 1282,
+      "a2": 1337,
+      "a3": 1392,
+      "f12": 1.1796875,
+      "t0": 1447,
+      "t1": 1502,
+      "t2": 1557
+     },
+     "function": "MultiFireProjectile_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 2990488
+    },
+    {
+     "address": 2990436,
+     "args": {},
+     "function": "MultiFireProjectile_ctor",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 2990524
+    },
+    {
+     "address": 2990780,
+     "args": {},
+     "function": "MultiFireProjectile_run",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 2990868
+    },
+    {
+     "address": 2992424,
+     "args": {
+      "a0": 1612,
+      "a1": 1074542603
+     },
+     "function": "MultiFireProjectile_end",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2992476
+    }
+   ],
+   "phases": [
+    {
+     "address": 2990436,
+     "calls_in_code": "trail:1 trailPoint:1",
+     "function": "MultiFireProjectile_ctor",
+     "generators": [],
+     "model": "ref_fx_skills.multifire_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2990780,
+     "calls_in_code": "particle:1 trailPoint:1",
+     "function": "MultiFireProjectile_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.multifire_run",
+     "phase": "run"
+    },
+    {
+     "address": 2992424,
+     "calls_in_code": "fx_spawn:2",
+     "function": "MultiFireProjectile_end",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.multifire_end",
+     "phase": "event"
+    }
+   ]
+  },
+  "PoisonArrowProjectile": {
+   "calls": [
+    {
+     "address": 2987464,
+     "args": {
+      "a0": 1074622193,
+      "a1": 1074065977,
+      "a2": 1074074291,
+      "f12": -6.1568074226379395
+     },
+     "function": "PoisonArrowProjectile_end",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2987516
+    },
+    {
+     "address": 2985600,
+     "args": {
+      "a0": 1073745592,
+      "a1": null,
+      "a2": 1073779212,
+      "f12": null
+     },
+     "function": "PoisonArrowProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2985652
+    },
+    {
+     "address": 2985024,
+     "args": {},
+     "function": "PoisonArrowProjectile_ctor2",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2985076
+    },
+    {
+     "address": 2985600,
+     "args": {
+      "a0": 1074334269,
+      "a1": 1074367492,
+      "a2": 1074247590,
+      "f12": null
+     },
+     "function": "PoisonArrowProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2985688
+    },
+    {
+     "address": 2984548,
+     "args": {},
+     "function": "PoisonArrowProjectile_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2984600
+    }
+   ],
+   "phases": [
+    {
+     "address": 2984548,
+     "calls_in_code": "lightLink:1",
+     "function": "PoisonArrowProjectile_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.poisonarrow_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2985024,
+     "calls_in_code": "lightLink:1",
+     "function": "PoisonArrowProjectile_ctor2",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.poisonarrow_ctor2",
+     "phase": "cast"
+    },
+    {
+     "address": 2985600,
+     "calls_in_code": "particle:2",
+     "function": "PoisonArrowProjectile_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_b.poisonarrow_run",
+     "phase": "run"
+    },
+    {
+     "address": 2987464,
+     "calls_in_code": "particle:1",
+     "function": "PoisonArrowProjectile_end",
+     "generators": [],
+     "model": "ref_skills_b.poisonarrow_end",
+     "phase": "event"
+    }
+   ]
+  },
+  "PoisonBolt": {
+   "calls": [
+    {
+     "address": 3211724,
+     "args": {
+      "a0": 1074317426,
+      "a1": 1074080007,
+      "a2": null,
+      "f12": null
+     },
+     "function": "PoisonBolt_burst",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3211776
+    },
+    {
+     "address": 3209216,
+     "args": {
+      "a0": 1074586938,
+      "a1": null,
+      "a2": 1074394594,
+      "f12": -1.8590160608291626
+     },
+     "function": "PoisonBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3209268
+    },
+    {
+     "address": 3209216,
+     "args": {
+      "a0": 1074311415,
+      "a1": 1073927191,
+      "a2": null,
+      "f12": 6.755622386932373
+     },
+     "function": "PoisonBolt_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3209304
+    },
+    {
+     "address": 3208088,
+     "args": {},
+     "function": "PoisonBolt_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3208140
+    }
+   ],
+   "phases": [
+    {
+     "address": 3208088,
+     "calls_in_code": "lightLink:1",
+     "function": "PoisonBolt_ctor",
+     "generators": [],
+     "model": "ref_skills_c.poisonbolt_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3209216,
+     "calls_in_code": "particle:2",
+     "function": "PoisonBolt_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_c.poisonbolt_run",
+     "phase": "run"
+    },
+    {
+     "address": 3211724,
+     "calls_in_code": "particle:1",
+     "function": "PoisonBolt_burst",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_skills_c.poisonbolt_burst",
+     "phase": "event"
+    }
+   ]
+  },
+  "PoisonRain": {
+   "calls": [
+    {
+     "address": 3117652,
+     "args": {
+      "a0": 1074372812,
+      "a1": 1074335999,
+      "a2": 1074253121,
+      "f12": null
+     },
+     "function": "PoisonRain_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3117740
+    },
+    {
+     "address": 3117652,
+     "args": {
+      "a0": 1073749590,
+      "a1": 1074426630,
+      "a2": 1074686864,
+      "f12": null
+     },
+     "function": "PoisonRain_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3117776
+    },
+    {
+     "address": 3117652,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074571298,
+      "a3": null,
+      "f12": 6.721341133117676,
+      "f13": -4.900068283081055,
+      "f14": null,
+      "f15": -8.881985664367676,
+      "f16": null,
+      "f17": null,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": -3.893702983856201,
+      "sp+0x10": -8.066571235656738,
+      "sp+0x18": -1.1457347869873047,
+      "sp+0x8": null
+     },
+     "function": "PoisonRain_run",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3117704
+    },
+    {
+     "address": 3116872,
+     "args": {
+      "a0": 1074738577,
+      "a1": 1074744737,
+      "a2": null,
+      "a3": 1074604120,
+      "f12": null,
+      "f13": -1.3128622770309448,
+      "f14": 6.579661846160889,
+      "f15": 1.3502967357635498,
+      "f16": -4.162662982940674,
+      "f17": null,
+      "f18": -2.2565975189208984,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": -2.5764307975769043,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "PoisonRain_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3116924
+    }
+   ],
+   "phases": [
+    {
+     "address": 3116872,
+     "calls_in_code": "LightEffect:1",
+     "function": "PoisonRain_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.poisonrain_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3117652,
+     "calls_in_code": "LightEffect:1 particle:2",
+     "function": "PoisonRain_run",
+     "generators": [
+      "SHARED(LightEffect)",
+      "own"
+     ],
+     "model": "ref_skills_a.poisonrain_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "PusStorm": {
+   "calls": [
+    {
+     "address": 3190636,
+     "args": {},
+     "function": "PusStorm_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3190724
+    },
+    {
+     "address": 3190636,
+     "args": {
+      "a0": 1074111946,
+      "a1": 1074700215,
+      "a2": 1074533254,
+      "a3": null,
+      "f12": null,
+      "f13": -7.062422275543213,
+      "f14": -2.890389919281006,
+      "f15": 7.188736438751221,
+      "f16": -6.599941253662109,
+      "f17": null,
+      "f18": 5.833832263946533,
+      "f19": null,
+      "sp+0x0": 1.8176668882369995,
+      "sp+0x10": 5.631165981292725,
+      "sp+0x18": 6.158020973205566,
+      "sp+0x8": null
+     },
+     "function": "PusStorm_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3190688
+    }
+   ],
+   "phases": [
+    {
+     "address": 3190636,
+     "calls_in_code": "LightEffect:1 lightLink:1",
+     "function": "PusStorm_ctor",
+     "generators": [
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c._storm_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "Pustule": {
+   "calls": [
+    {
+     "address": 3194336,
+     "args": {
+      "a0": 10554992,
+      "a1": 1074018969,
+      "a2": 1074012965,
+      "f12": 1.2265625
+     },
+     "function": "Pustule_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3194424
+    },
+    {
+     "address": 3194336,
+     "args": {
+      "a0": 10554656,
+      "a1": 1073840509,
+      "a2": 1074234028,
+      "f12": 1.2109375
+     },
+     "function": "Pustule_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3194388
+    }
+   ],
+   "phases": [
+    {
+     "address": 3194336,
+     "calls_in_code": "particle:2",
+     "function": "Pustule_run",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.pustule_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "ShockOfFrost": {
+   "calls": [
+    {
+     "address": 3110848,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "ShockOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3111044
+    },
+    {
+     "address": 3110848,
+     "args": {
+      "a0": 1074457246,
+      "a1": 1074038240
+     },
+     "function": "ShockOfFrost_run",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 3110900
+    },
+    {
+     "address": 3110848,
+     "args": {
+      "a0": 1074187588,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "ShockOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3110972
+    },
+    {
+     "address": 3109892,
+     "args": {},
+     "function": "ShockOfFrost_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3109944
+    },
+    {
+     "address": 3110848,
+     "args": {
+      "a0": 1074004360,
+      "a1": 1074540583,
+      "a2": 1074467111,
+      "f12": -7.856060981750488
+     },
+     "function": "ShockOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3110936
+    },
+    {
+     "address": 3110848,
+     "args": {
+      "a0": 1073878593,
+      "a1": null,
+      "a2": 1074782756,
+      "f12": -6.218957901000977
+     },
+     "function": "ShockOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3111008
+    }
+   ],
+   "phases": [
+    {
+     "address": 3109892,
+     "calls_in_code": "lightLink:1",
+     "function": "ShockOfFrost_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.shockoffrost_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3110848,
+     "calls_in_code": "fx_spawn:1 particle:4",
+     "function": "ShockOfFrost_run",
+     "generators": [
+      "SHARED",
+      "own"
+     ],
+     "model": "ref_skills_a.shockoffrost_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "ShockProjectile": {
+   "calls": [
+    {
+     "address": 2899940,
+     "args": {},
+     "function": "ShockProjectile_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2899992
+    },
+    {
+     "address": 2900708,
+     "args": {
+      "a0": 1074413973,
+      "a1": 1073934971,
+      "a2": null,
+      "a3": 1074542724,
+      "f12": -4.7932844161987305,
+      "f13": 4.899758815765381,
+      "t0": 1074609454
+     },
+     "function": "ShockProjectile_run",
+     "meaning": {
+      "a0": "from*",
+      "a1": "to*",
+      "a2": "width",
+      "a3": "depth",
+      "f12": "jitter",
+      "f13": "scale",
+      "t0": "rgba"
+     },
+     "primitive": "beam",
+     "site": 2900760
+    },
+    {
+     "address": 2903652,
+     "args": {
+      "a0": 1074723362,
+      "a1": 1722,
+      "a2": 1777,
+      "a3": 1832,
+      "f12": 1.2421875,
+      "f13": null,
+      "t0": 1073871088,
+      "t1": 1074786273,
+      "t2": 1074691924,
+      "t3": 1887
+     },
+     "function": "ShockProjectile_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 2903704
+    },
+    {
+     "address": 2900708,
+     "args": {
+      "a0": 1073943267,
+      "a1": 1073942749,
+      "a2": 1073899287,
+      "f12": null
+     },
+     "function": "ShockProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2900868
+    },
+    {
+     "address": 2900708,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": 2.6355087757110596
+     },
+     "function": "ShockProjectile_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2900832
+    },
+    {
+     "address": 2900708,
+     "args": {},
+     "function": "ShockProjectile_run",
+     "meaning": {},
+     "primitive": "beamUpdate",
+     "site": 2900796
+    }
+   ],
+   "phases": [
+    {
+     "address": 2899940,
+     "calls_in_code": "lightLink:1",
+     "function": "ShockProjectile_ctor",
+     "generators": [],
+     "model": "ref_skills_b.shock_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2900708,
+     "calls_in_code": "beam:1 beamUpdate:1 particle:2",
+     "function": "ShockProjectile_run",
+     "generators": [
+      "SHARED",
+      "own"
+     ],
+     "model": "ref_skills_b.shock_run",
+     "phase": "run"
+    },
+    {
+     "address": 2903652,
+     "calls_in_code": "glow:1",
+     "function": "ShockProjectile_draw",
+     "generators": [],
+     "model": "ref_fx_skills.shock_draw",
+     "phase": "draw"
+    }
+   ]
+  },
+  "SkillColdAxe": {
+   "calls": [
+    {
+     "address": 3252440,
+     "args": {
+      "a0": 1074006102,
+      "a1": null,
+      "a2": null,
+      "a3": 1074351171,
+      "f12": -2.898484706878662,
+      "f13": null,
+      "f14": 6.222033500671387,
+      "f15": -3.8199822902679443,
+      "f16": -2.4660158157348633,
+      "f17": -3.3446664810180664,
+      "f18": 7.477400779724121,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": 5.320182800292969,
+      "sp+0x8": -8.052024841308594
+     },
+     "function": "SkillColdAxe_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3252492
+    }
+   ],
+   "phases": [
+    {
+     "address": 3252440,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillColdAxe_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.coldaxe_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillDrowsy": {
+   "calls": [
+    {
+     "address": 3203568,
+     "args": {
+      "a0": 1074764351,
+      "a1": 1073938440,
+      "a2": null,
+      "a3": 1073744876,
+      "f12": -6.02913761138916,
+      "f13": 8.995892524719238,
+      "f14": 4.554073333740234,
+      "f15": null,
+      "f16": null,
+      "f17": null,
+      "f18": 8.359746932983398,
+      "f19": -7.0298638343811035,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "SkillDrowsy_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3203620
+    }
+   ],
+   "phases": [
+    {
+     "address": 3203568,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillDrowsy_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.drowsy_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillFireAxe": {
+   "calls": [
+    {
+     "address": 3250076,
+     "args": {
+      "a0": 1074742679,
+      "a1": 1074769315,
+      "a2": null,
+      "a3": null,
+      "f12": 5.147496223449707,
+      "f13": 3.5504908561706543,
+      "f14": null,
+      "f15": -8.304496765136719,
+      "f16": -1.4791008234024048,
+      "f17": null,
+      "f18": 3.829812526702881,
+      "f19": null,
+      "sp+0x0": 4.2868547439575195,
+      "sp+0x10": 3.203106164932251,
+      "sp+0x18": -0.5445067882537842,
+      "sp+0x8": null
+     },
+     "function": "SkillFireAxe_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3250128
+    }
+   ],
+   "phases": [
+    {
+     "address": 3250076,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillFireAxe_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.fireaxe_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillHammerOfWrath": {
+   "calls": [
+    {
+     "address": 3078944,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "a3": null,
+      "f12": 6.348308086395264,
+      "f13": -2.4859793186187744,
+      "f14": null,
+      "f15": -4.073169708251953,
+      "f16": null,
+      "f17": null,
+      "f18": null,
+      "f19": 2.4284698963165283,
+      "sp+0x0": null,
+      "sp+0x10": 2.3921990394592285,
+      "sp+0x18": -1.7336573600769043,
+      "sp+0x8": null
+     },
+     "function": "SkillHammerOfWrath_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3078996
+    }
+   ],
+   "phases": [
+    {
+     "address": 3078944,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillHammerOfWrath_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.hammer_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillMultiFire": {
+   "calls": [
+    {
+     "address": 2988688,
+     "args": {
+      "a0": 1074727604,
+      "a1": 1074604541,
+      "a2": 1074421429,
+      "a3": 1074233002,
+      "f12": null,
+      "f13": -0.99204421043396,
+      "f14": 6.466893196105957,
+      "f15": 2.3232710361480713,
+      "f16": 3.3674943447113037,
+      "f17": 5.167748928070068,
+      "f18": -0.4228014349937439,
+      "f19": 3.709059000015259,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "SkillMultiFire_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 2988740
+    }
+   ],
+   "phases": [
+    {
+     "address": 2988688,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillMultiFire_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)",
+      "cosmetic"
+     ],
+     "model": "ref_skills_b.multifire_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillRaiseArmy": {
+   "calls": [
+    {
+     "address": 3224804,
+     "args": {
+      "a0": 1074657065,
+      "a1": 1074003120,
+      "a2": 1074381073,
+      "a3": 1074394316,
+      "f12": 3.818039655685425,
+      "f13": null,
+      "f14": null,
+      "f15": null,
+      "f16": null,
+      "f17": 2.6867456436157227,
+      "f18": -8.075956344604492,
+      "f19": -5.0787811279296875,
+      "sp+0x0": 5.6110758781433105,
+      "sp+0x10": null,
+      "sp+0x18": null,
+      "sp+0x8": 1.9238966703414917
+     },
+     "function": "SkillRaiseArmy_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3224856
+    }
+   ],
+   "phases": [
+    {
+     "address": 3224804,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillRaiseArmy_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.raisearmy_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillRepulseUndead": {
+   "calls": [
+    {
+     "address": 3099956,
+     "args": {
+      "a0": 1074598711,
+      "a1": null,
+      "a2": 1073857653,
+      "a3": null,
+      "f12": -0.027667419984936714,
+      "f13": 1.7452489137649536,
+      "f14": 2.259321689605713,
+      "f15": -7.709875106811523,
+      "f16": 3.1733460426330566,
+      "f17": 1.4573572874069214,
+      "f18": 7.333561420440674,
+      "f19": -4.191959381103516,
+      "sp+0x0": -6.540666103363037,
+      "sp+0x10": 8.699893951416016,
+      "sp+0x18": -1.3907883167266846,
+      "sp+0x8": -3.56740665435791
+     },
+     "function": "SkillRepulseUndead_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3100008
+    }
+   ],
+   "phases": [
+    {
+     "address": 3099956,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillRepulseUndead_cast",
+     "generators": [
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.repulse_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillRiposte": {
+   "calls": [
+    {
+     "address": 3005644,
+     "args": {
+      "a0": 1073857397,
+      "a1": null,
+      "a2": 1073790686,
+      "f12": 6.75519323348999
+     },
+     "function": "SkillRiposte_counterAttack",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3005732
+    },
+    {
+     "address": 3005644,
+     "args": {
+      "a0": 1074404376,
+      "a1": null,
+      "a2": 1074381562,
+      "f12": 4.803521633148193
+     },
+     "function": "SkillRiposte_counterAttack",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3005696
+    }
+   ],
+   "phases": [
+    {
+     "address": 3005644,
+     "calls_in_code": "particle:2",
+     "function": "SkillRiposte_counterAttack",
+     "generators": [
+      "SHARED",
+      "cosmetic"
+     ],
+     "model": "ref_skills_a.riposte_counter_attack",
+     "phase": "event"
+    }
+   ]
+  },
+  "SkillStrongStance": {
+   "calls": [
+    {
+     "address": 3179896,
+     "args": {
+      "a0": 1074582354,
+      "a1": 1074222236,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SkillStrongStance_trigger",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3179984
+    },
+    {
+     "address": 3179896,
+     "args": {
+      "a0": 1073935046,
+      "a1": null,
+      "a2": null,
+      "a3": 1073961936,
+      "f12": -0.9805194139480591,
+      "f13": null,
+      "f14": 3.159383535385132,
+      "f15": 8.564107894897461,
+      "f16": -4.147152423858643,
+      "f17": null,
+      "f18": null,
+      "f19": -0.2774710953235626,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": 3.193035840988159,
+      "sp+0x8": null
+     },
+     "function": "SkillStrongStance_trigger",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3179948
+    }
+   ],
+   "phases": [
+    {
+     "address": 3179896,
+     "calls_in_code": "LightEffect:1 particle:1",
+     "function": "SkillStrongStance_trigger",
+     "generators": [
+      "SHARED(LightEffect)",
+      "seed3"
+     ],
+     "model": "ref_skills_b.strongstance_trigger",
+     "phase": "event"
+    }
+   ]
+  },
+  "SkillStunningStrike": {
+   "calls": [
+    {
+     "address": 3181748,
+     "args": {
+      "a0": 1074751657,
+      "a1": 1074428606,
+      "a2": 1074286998,
+      "a3": 1074783359,
+      "f12": null,
+      "f13": null,
+      "f14": -8.276238441467285,
+      "f15": 5.469576835632324,
+      "f16": -8.230209350585938,
+      "f17": -6.288689136505127,
+      "f18": -7.163363933563232,
+      "f19": 3.361107349395752,
+      "sp+0x0": -1.6656900644302368,
+      "sp+0x10": -6.151900291442871,
+      "sp+0x18": null,
+      "sp+0x8": -2.1505658626556396
+     },
+     "function": "SkillStunningStrike_spawnEffect",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3181800
+    }
+   ],
+   "phases": [
+    {
+     "address": 3181748,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillStunningStrike_spawnEffect",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_b.stunningstrike_effect",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillSummonArrows": {
+   "calls": [
+    {
+     "address": 3143156,
+     "args": {
+      "a0": 1074245981,
+      "a1": 1074578901,
+      "a2": null,
+      "a3": 1073977975,
+      "f12": 3.0994648933410645,
+      "f13": 5.9471025466918945,
+      "f14": null,
+      "f15": null,
+      "f16": -2.877335548400879,
+      "f17": -6.322455406188965,
+      "f18": -1.8626261949539185,
+      "f19": -3.5888805389404297,
+      "sp+0x0": -8.95455265045166,
+      "sp+0x10": null,
+      "sp+0x18": 0.9491662979125977,
+      "sp+0x8": null
+     },
+     "function": "SkillSummonArrows_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3143208
+    }
+   ],
+   "phases": [
+    {
+     "address": 3143156,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillSummonArrows_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.summonarrows_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillSummonAxe": {
+   "calls": [
+    {
+     "address": 3139140,
+     "args": {
+      "a0": 1073776245,
+      "a1": null,
+      "a2": 1074198350,
+      "a3": 1074277935,
+      "f12": -3.1574244499206543,
+      "f13": null,
+      "f14": null,
+      "f15": -4.6045708656311035,
+      "f16": -8.75268268585205,
+      "f17": -1.4204235076904297,
+      "f18": 6.390895843505859,
+      "f19": null,
+      "sp+0x0": 0.124356210231781,
+      "sp+0x10": 6.565342903137207,
+      "sp+0x18": 2.418490171432495,
+      "sp+0x8": -4.790341854095459
+     },
+     "function": "SkillSummonAxe_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3139192
+    }
+   ],
+   "phases": [
+    {
+     "address": 3139140,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillSummonAxe_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.summonaxe_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillSummonBadger": {
+   "calls": [
+    {
+     "address": 3213044,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074442195,
+      "a3": 1073918573,
+      "f12": -6.086603164672852,
+      "f13": 3.9422502517700195,
+      "f14": -5.183185577392578,
+      "f15": null,
+      "f16": 7.078339099884033,
+      "f17": -4.443289756774902,
+      "f18": 7.068337917327881,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": -0.871830403804779,
+      "sp+0x8": -7.642549991607666
+     },
+     "function": "SkillSummonBadger_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3213096
+    }
+   ],
+   "phases": [
+    {
+     "address": 3213044,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillSummonBadger_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.summonbadger_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillSummonSkeleton": {
+   "calls": [
+    {
+     "address": 3020964,
+     "args": {
+      "a0": 1074519704,
+      "a1": null,
+      "a2": null,
+      "f12": -4.563057899475098
+     },
+     "function": "SkillSummonSkeleton_cast",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3021016
+    },
+    {
+     "address": 3020964,
+     "args": {
+      "a0": null,
+      "a1": 1074591732,
+      "a2": 1074107034,
+      "f12": 3.2169604301452637
+     },
+     "function": "SkillSummonSkeleton_cast",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3021052
+    }
+   ],
+   "phases": [
+    {
+     "address": 3020964,
+     "calls_in_code": "particle:2",
+     "function": "SkillSummonSkeleton_cast",
+     "generators": [
+      "SHARED",
+      "cosmetic"
+     ],
+     "model": "ref_arena_monsters.summon_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SkillUnspokenWord": {
+   "calls": [
+    {
+     "address": 3133488,
+     "args": {
+      "a0": 1074290514,
+      "a1": 1073876660,
+      "a2": 1074521652,
+      "a3": null,
+      "f12": 5.193769454956055,
+      "f13": 6.3790283203125,
+      "f14": 6.265267372131348,
+      "f15": -8.517107009887695,
+      "f16": -7.322671413421631,
+      "f17": 8.63890266418457,
+      "f18": null,
+      "f19": 4.27631139755249,
+      "sp+0x0": -0.12605324387550354,
+      "sp+0x10": 2.707597255706787,
+      "sp+0x18": -2.8205816745758057,
+      "sp+0x8": -3.056410312652588
+     },
+     "function": "SkillUnspokenWord_cast",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3133540
+    }
+   ],
+   "phases": [
+    {
+     "address": 3133488,
+     "calls_in_code": "LightEffect:1",
+     "function": "SkillUnspokenWord_cast",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.unspokenword_cast",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SmokeGen": {
+   "calls": [
+    {
+     "address": 3263480,
+     "args": {
+      "a0": null,
+      "a1": 1074261272,
+      "a2": 1074764786,
+      "a3": 1074565548,
+      "f12": 1.2578125,
+      "f13": -6.6095805168151855,
+      "t0": 1073810663,
+      "t1": null,
+      "t2": null,
+      "t3": 1942
+     },
+     "function": "SmokeGen_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3263532
+    }
+   ],
+   "phases": [
+    {
+     "address": 3263480,
+     "calls_in_code": "glow:1",
+     "function": "SmokeGen_draw",
+     "generators": [],
+     "model": "ref_fx_skills.smokegen_draw",
+     "phase": "draw"
+    }
+   ]
+  },
+  "SpellAncestralCall": {
+   "calls": [
+    {
+     "address": 3017140,
+     "args": {},
+     "function": "SpellAncestralCall_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3017228
+    },
+    {
+     "address": 3018000,
+     "args": {
+      "a0": null,
+      "a1": 1073863471,
+      "a2": 1074592226,
+      "f12": 2.339876890182495
+     },
+     "function": "SpellAncestralCall_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3018124
+    },
+    {
+     "address": 3017140,
+     "args": {
+      "a0": null,
+      "a1": 1074096614,
+      "a2": null,
+      "a3": null,
+      "f12": null,
+      "f13": -3.4130218029022217,
+      "f14": -8.11097240447998,
+      "f15": -0.15697292983531952,
+      "f16": 8.503555297851562,
+      "f17": null,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": -3.2327189445495605,
+      "sp+0x10": null,
+      "sp+0x18": -8.661174774169922,
+      "sp+0x8": 6.587380886077881
+     },
+     "function": "SpellAncestralCall_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3017192
+    },
+    {
+     "address": 3018000,
+     "args": {},
+     "function": "SpellAncestralCall_run",
+     "meaning": {},
+     "primitive": "beamUpdate",
+     "site": 3018088
+    },
+    {
+     "address": 3018000,
+     "args": {
+      "a0": 1074228768,
+      "a1": 1074127784,
+      "a2": 1073830687,
+      "a3": 1074469407,
+      "f12": 3.305335760116577,
+      "f13": null,
+      "t0": null
+     },
+     "function": "SpellAncestralCall_run",
+     "meaning": {
+      "a0": "from*",
+      "a1": "to*",
+      "a2": "width",
+      "a3": "depth",
+      "f12": "jitter",
+      "f13": "scale",
+      "t0": "rgba"
+     },
+     "primitive": "beam",
+     "site": 3018052
+    },
+    {
+     "address": 3020192,
+     "args": {},
+     "function": "SpellAncestralCall_tintAndGlow",
+     "meaning": {},
+     "primitive": "modelParticlesLight",
+     "site": 3020244
+    }
+   ],
+   "phases": [
+    {
+     "address": 3017140,
+     "calls_in_code": "LightEffect:1 particleGroup:1",
+     "function": "SpellAncestralCall_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_b.ancestralcall_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3018000,
+     "calls_in_code": "beam:1 beamUpdate:1 particle:1",
+     "function": "SpellAncestralCall_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.ancestralcall_run",
+     "phase": "run"
+    },
+    {
+     "address": 3020192,
+     "calls_in_code": "modelParticlesLight:1",
+     "function": "SpellAncestralCall_tintAndGlow",
+     "generators": [],
+     "model": "ref_skills_b.ancestralcall_tint_and_glow",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellArena": {
+   "calls": [
+    {
+     "address": 3169212,
+     "args": {
+      "a0": 10555664,
+      "a1": null,
+      "a2": null,
+      "f12": 1.2890625
+     },
+     "function": "SpellArena_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3169300
+    },
+    {
+     "address": 3169212,
+     "args": {
+      "a0": 10555328,
+      "a1": 1074387527,
+      "a2": null,
+      "f12": 1.2734375
+     },
+     "function": "SpellArena_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3169264
+    }
+   ],
+   "phases": [
+    {
+     "address": 3169212,
+     "calls_in_code": "particle:2",
+     "function": "SpellArena_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_fx_skills.arena_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellBash": {
+   "calls": [
+    {
+     "address": 3008476,
+     "args": {
+      "a0": 1074626981,
+      "a1": 1074068067,
+      "a2": null,
+      "a3": 1074650979,
+      "f12": null,
+      "f13": -7.411468029022217,
+      "f14": null,
+      "f15": -8.51516342163086,
+      "f16": 6.789853572845459,
+      "f17": null,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": 2.5463178157806396,
+      "sp+0x8": null
+     },
+     "function": "SpellBash_run",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3008528
+    },
+    {
+     "address": 3010028,
+     "args": {
+      "a0": null,
+      "a1": 1074296183,
+      "a2": 1073765557,
+      "f12": null
+     },
+     "function": "SpellBash_windupFx",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3010080
+    }
+   ],
+   "phases": [
+    {
+     "address": 3008476,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellBash_run",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)",
+      "spell"
+     ],
+     "model": "ref_skills_b.bash_run",
+     "phase": "run"
+    },
+    {
+     "address": 3010028,
+     "calls_in_code": "particle:1",
+     "function": "SpellBash_windupFx",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.bash_windup_fx",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellBattleCry": {
+   "calls": [
+    {
+     "address": 3152436,
+     "args": {
+      "a0": 1074382309,
+      "a1": 1074152023,
+      "a2": 1074335633,
+      "f12": -2.517484426498413
+     },
+     "function": "SpellBattleCry_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3152524
+    },
+    {
+     "address": 3152436,
+     "args": {
+      "a0": 1073837177,
+      "a1": null,
+      "a2": 1074688015,
+      "f12": null
+     },
+     "function": "SpellBattleCry_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3152632
+    },
+    {
+     "address": 3152436,
+     "args": {
+      "a0": 1074307557,
+      "a1": 1074198746,
+      "a2": null,
+      "f12": 4.905134677886963
+     },
+     "function": "SpellBattleCry_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3152560
+    },
+    {
+     "address": 3152436,
+     "args": {
+      "a0": null,
+      "a1": 1074546650,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellBattleCry_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3152668
+    },
+    {
+     "address": 3152436,
+     "args": {
+      "a0": 1073967759,
+      "a1": null,
+      "a2": null,
+      "a3": 1074250150,
+      "f12": -1.228813886642456,
+      "f13": 2.5901052951812744,
+      "f14": 3.746196985244751,
+      "f15": 4.202204704284668,
+      "f16": 5.054770469665527,
+      "f17": -1.3748408555984497,
+      "f18": -8.489127159118652,
+      "f19": -0.9311167597770691,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": -1.2342228889465332,
+      "sp+0x8": 0.9666270613670349
+     },
+     "function": "SpellBattleCry_run",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3152488
+    },
+    {
+     "address": 3152436,
+     "args": {},
+     "function": "SpellBattleCry_run",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3152704
+    },
+    {
+     "address": 3152436,
+     "args": {
+      "a0": 1074189854,
+      "a1": null,
+      "a2": 1074031390,
+      "f12": 5.148159027099609
+     },
+     "function": "SpellBattleCry_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3152596
+    }
+   ],
+   "phases": [
+    {
+     "address": 3152436,
+     "calls_in_code": "LightEffect:1 particle:5 particleGroup:1",
+     "function": "SpellBattleCry_run",
+     "generators": [
+      "SHARED(LightEffect)",
+      "spell"
+     ],
+     "model": "ref_skills_c.battlecry_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellBlessed": {
+   "calls": [
+    {
+     "address": 3011772,
+     "args": {
+      "a0": 1074087190,
+      "a1": null,
+      "a2": 1074457341,
+      "f12": null
+     },
+     "function": "SpellBlessed_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3011860
+    },
+    {
+     "address": 3011772,
+     "args": {
+      "a0": 1074474863,
+      "a1": null,
+      "a2": 1073853420,
+      "a3": null,
+      "f12": -5.202413558959961,
+      "f13": null,
+      "t0": 1073850764,
+      "t1": null,
+      "t2": 1074388449,
+      "t3": 1073762663
+     },
+     "function": "SpellBlessed_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3011824
+    },
+    {
+     "address": 3010680,
+     "args": {},
+     "function": "SpellBlessed_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3010732
+    },
+    {
+     "address": 3011772,
+     "args": {
+      "a0": 1073835526,
+      "a1": 1074510169,
+      "a2": null,
+      "f12": -6.576502799987793
+     },
+     "function": "SpellBlessed_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3011896
+    }
+   ],
+   "phases": [
+    {
+     "address": 3010680,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellBlessed_ctor",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_a.blessed_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3011772,
+     "calls_in_code": "glow:1 particle:2",
+     "function": "SpellBlessed_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.blessed_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellBloodLust": {
+   "calls": [
+    {
+     "address": 3159260,
+     "args": {
+      "a0": 1074233432,
+      "a1": 1074554974,
+      "a2": 1074207910,
+      "a3": 1074629018,
+      "f12": -4.442388534545898,
+      "f13": -6.98222017288208,
+      "t0": null,
+      "t1": 1074753400,
+      "t2": null,
+      "t3": 1074199654
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3159312
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": null,
+      "a1": 1073857517,
+      "a2": 1074519655,
+      "a3": null,
+      "f12": null,
+      "f13": -6.173740386962891,
+      "t0": 1073850810,
+      "t1": 1074491305,
+      "t2": null,
+      "t3": null
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3159384
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": 1074179265,
+      "a1": 1074145183,
+      "a2": null,
+      "f12": -6.230412006378174
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3159492
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": null,
+      "a1": 1073851461,
+      "a2": null,
+      "a3": null,
+      "f12": 1.2147529125213623,
+      "f13": null,
+      "t0": null,
+      "t1": null,
+      "t2": null,
+      "t3": null
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3159348
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": null,
+      "a1": 1073893167,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3159456
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074772870,
+      "a3": 1074199706,
+      "f12": -0.6944081783294678,
+      "f13": null,
+      "t0": null,
+      "t1": null,
+      "t2": null,
+      "t3": 1073830048
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3159420
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": null,
+      "a1": 1074685834,
+      "a2": 1074542541,
+      "f12": 7.812309265136719
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3159528
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": 1073766718,
+      "a1": 1074225851,
+      "a2": 1074620357,
+      "f12": 7.550405502319336
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3159564
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": null,
+      "a1": 1073877185,
+      "a2": 1074635758,
+      "f12": -5.049481391906738
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3159636
+    },
+    {
+     "address": 3159260,
+     "args": {
+      "a0": 1073753642,
+      "a1": null,
+      "a2": 1074632735,
+      "f12": 0.5832570195198059
+     },
+     "function": "SpellBloodLust_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3159600
+    }
+   ],
+   "phases": [
+    {
+     "address": 3159260,
+     "calls_in_code": "glow:4 particle:6",
+     "function": "SpellBloodLust_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.bloodlust_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellCharge": {
+   "calls": [
+    {
+     "address": 2921972,
+     "args": {
+      "a0": 1074773723,
+      "a1": 1074662117,
+      "a2": 1074483524,
+      "f12": null
+     },
+     "function": "SpellCharge_onContact",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2922096
+    },
+    {
+     "address": 2919604,
+     "args": {
+      "a0": 1073783330,
+      "a1": null,
+      "a2": null,
+      "a3": 1074277667,
+      "f12": 6.9636077880859375,
+      "t0": 1073881164,
+      "t1": null,
+      "t2": null
+     },
+     "function": "SpellCharge_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 2919692
+    },
+    {
+     "address": 2921972,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1073795704,
+      "f12": -3.8402788639068604
+     },
+     "function": "SpellCharge_onContact",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2922060
+    },
+    {
+     "address": 2920236,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074587140,
+      "f12": null
+     },
+     "function": "SpellCharge_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2920324
+    },
+    {
+     "address": 2921972,
+     "args": {
+      "a0": 1073819453,
+      "a1": 1073782943
+     },
+     "function": "SpellCharge_onContact",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 2922024
+    },
+    {
+     "address": 2920236,
+     "args": {},
+     "function": "SpellCharge_run",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 2920360
+    },
+    {
+     "address": 2920236,
+     "args": {
+      "a0": 1074230253,
+      "a1": null,
+      "a2": 1074614434,
+      "f12": null
+     },
+     "function": "SpellCharge_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2920288
+    },
+    {
+     "address": 2919604,
+     "args": {},
+     "function": "SpellCharge_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2919656
+    },
+    {
+     "address": 2919604,
+     "args": {},
+     "function": "SpellCharge_ctor",
+     "meaning": {},
+     "primitive": "trailPoint",
+     "site": 2919728
+    }
+   ],
+   "phases": [
+    {
+     "address": 2919604,
+     "calls_in_code": "lightLink:1 trail:1 trailPoint:1",
+     "function": "SpellCharge_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.charge_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2920236,
+     "calls_in_code": "particle:2 trailPoint:1",
+     "function": "SpellCharge_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.charge_run",
+     "phase": "run"
+    },
+    {
+     "address": 2921972,
+     "calls_in_code": "fx_spawn:1 particle:2",
+     "function": "SpellCharge_onContact",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.charge_on_contact",
+     "phase": "event"
+    }
+   ]
+  },
+  "SpellColdWeapons": {
+   "calls": [
+    {
+     "address": 3036536,
+     "args": {
+      "a0": 1074368322,
+      "a1": null,
+      "a2": null,
+      "f12": -5.8458638191223145
+     },
+     "function": "SpellColdWeapons_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3036624
+    },
+    {
+     "address": 3036536,
+     "args": {
+      "a0": 1074618054,
+      "a1": 1074690006,
+      "a2": null,
+      "f12": -2.32621169090271
+     },
+     "function": "SpellColdWeapons_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3036588
+    },
+    {
+     "address": 3035028,
+     "args": {
+      "a0": null,
+      "a1": 1074446636,
+      "a2": 1074441445,
+      "a3": 1074326879,
+      "f12": null,
+      "f13": 6.058298587799072,
+      "f14": null,
+      "f15": -8.491762161254883,
+      "f16": -6.296701431274414,
+      "f17": -8.293229103088379,
+      "f18": null,
+      "f19": 3.87069034576416,
+      "sp+0x0": -7.274662017822266,
+      "sp+0x10": null,
+      "sp+0x18": -1.0397480726242065,
+      "sp+0x8": 2.7170798778533936
+     },
+     "function": "SpellColdWeapons_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3035080
+    }
+   ],
+   "phases": [
+    {
+     "address": 3035028,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellColdWeapons_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.weaponbuff_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3036536,
+     "calls_in_code": "particle:2",
+     "function": "SpellColdWeapons_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.weaponbuff_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellConeOfFire": {
+   "calls": [
+    {
+     "address": 3080956,
+     "args": {
+      "a0": 1074705773,
+      "a1": 1074521149,
+      "a2": null,
+      "f12": -4.191744327545166
+     },
+     "function": "SpellConeOfFire_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3081080
+    },
+    {
+     "address": 3080956,
+     "args": {
+      "a0": 1074444945,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellConeOfFire_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3081044
+    },
+    {
+     "address": 3080956,
+     "args": {
+      "a0": 1073863786,
+      "a1": 1074216884,
+      "a2": 1074506725,
+      "f12": 8.017285346984863
+     },
+     "function": "SpellConeOfFire_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3081008
+    },
+    {
+     "address": 3080364,
+     "args": {},
+     "function": "SpellConeOfFire_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3080416
+    }
+   ],
+   "phases": [
+    {
+     "address": 3080364,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellConeOfFire_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.coneoffire_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3080956,
+     "calls_in_code": "particle:3",
+     "function": "SpellConeOfFire_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.coneoffire_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellConeOfFrost": {
+   "calls": [
+    {
+     "address": 3054864,
+     "args": {
+      "a0": null,
+      "a1": 1074499052,
+      "a2": 1074367388,
+      "f12": null
+     },
+     "function": "SpellConeOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3054916
+    },
+    {
+     "address": 3054864,
+     "args": {
+      "a0": 1074032317,
+      "a1": 1074644972,
+      "a2": 1073867447,
+      "f12": 7.455720901489258
+     },
+     "function": "SpellConeOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3054952
+    },
+    {
+     "address": 3054864,
+     "args": {
+      "a0": 1074399237,
+      "a1": 1073978431,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellConeOfFrost_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3054988
+    },
+    {
+     "address": 3054344,
+     "args": {},
+     "function": "SpellConeOfFrost_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3054396
+    }
+   ],
+   "phases": [
+    {
+     "address": 3054344,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellConeOfFrost_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.coneoffrost_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3054864,
+     "calls_in_code": "particle:3",
+     "function": "SpellConeOfFrost_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_b.coneoffrost_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellConeOfShock": {
+   "calls": [
+    {
+     "address": 3259080,
+     "args": {},
+     "function": "SpellConeOfShock_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3259132
+    }
+   ],
+   "phases": [
+    {
+     "address": 3259080,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellConeOfShock_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_c.coneofshock_spell_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SpellConvertEnemy": {
+   "calls": [
+    {
+     "address": 2949460,
+     "args": {},
+     "function": "SpellConvertEnemy_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 2949512
+    },
+    {
+     "address": 2949972,
+     "args": {
+      "a0": 1073753442,
+      "a1": 1074676075,
+      "a2": 1074258777,
+      "f12": 0.9836726784706116
+     },
+     "function": "SpellConvertEnemy_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2950024
+    }
+   ],
+   "phases": [
+    {
+     "address": 2949460,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellConvertEnemy_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.convert_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2949972,
+     "calls_in_code": "particle:1",
+     "function": "SpellConvertEnemy_run",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.convert_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellConvertUndead": {
+   "calls": [
+    {
+     "address": 2952384,
+     "args": {},
+     "function": "SpellConvertUndead_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 2952436
+    },
+    {
+     "address": 2952924,
+     "args": {
+      "a0": 1074760551,
+      "a1": 1074098066,
+      "a2": 1073863935,
+      "f12": 4.372153282165527
+     },
+     "function": "SpellConvertUndead_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2952976
+    }
+   ],
+   "phases": [
+    {
+     "address": 2952384,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellConvertUndead_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.convert_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2952924,
+     "calls_in_code": "particle:1",
+     "function": "SpellConvertUndead_run",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.convert_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellCriticalHit": {
+   "calls": [
+    {
+     "address": 3046092,
+     "args": {
+      "a0": 1073963370,
+      "a1": 1074080748,
+      "a2": 1074371418,
+      "f12": 1.5029751062393188
+     },
+     "function": "SpellCriticalHit_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3046144
+    },
+    {
+     "address": 3045768,
+     "args": {},
+     "function": "SpellCriticalHit_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3045820
+    },
+    {
+     "address": 3045768,
+     "args": {},
+     "function": "SpellCriticalHit_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3045856
+    }
+   ],
+   "phases": [
+    {
+     "address": 3045768,
+     "calls_in_code": "lightLink:1 particleGroup:1",
+     "function": "SpellCriticalHit_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.crit_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3046092,
+     "calls_in_code": "particle:1",
+     "function": "SpellCriticalHit_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.crit_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellCyclone": {
+   "calls": [
+    {
+     "address": 2957792,
+     "args": {
+      "a0": 1074686902,
+      "a1": null,
+      "a2": null,
+      "f12": 3.822417974472046
+     },
+     "function": "SpellCyclone_updateFx",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2957844
+    },
+    {
+     "address": 2957792,
+     "args": {
+      "a0": 1073850834,
+      "a1": null,
+      "a2": 1074739943,
+      "f12": 2.900562286376953
+     },
+     "function": "SpellCyclone_updateFx",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2957880
+    },
+    {
+     "address": 2955208,
+     "args": {},
+     "function": "SpellCyclone_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2955260
+    }
+   ],
+   "phases": [
+    {
+     "address": 2955208,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellCyclone_ctor",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_b.cyclone_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2957792,
+     "calls_in_code": "particle:2",
+     "function": "SpellCyclone_updateFx",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.cyclone_update_fx",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellDiseaseBlade": {
+   "calls": [
+    {
+     "address": 3246804,
+     "args": {
+      "a0": 1074061625,
+      "a1": null,
+      "a2": 1074650789,
+      "a3": 1074733958,
+      "f12": 2.731081008911133,
+      "f13": 5.658716201782227,
+      "f14": null,
+      "f15": 0.5189722776412964,
+      "f16": null,
+      "f17": null,
+      "f18": -7.239828586578369,
+      "f19": 1.9065035581588745,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": 3.0053858757019043,
+      "sp+0x8": null
+     },
+     "function": "SpellDiseaseBlade_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3246856
+    }
+   ],
+   "phases": [
+    {
+     "address": 3246804,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellDiseaseBlade_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.diseaseblade_spell_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SpellDiseaseEffect": {
+   "calls": [
+    {
+     "address": 2971732,
+     "args": {
+      "a0": null,
+      "a1": 1074689150,
+      "a2": 1074018870,
+      "a3": 1074431595,
+      "f12": -7.787910461425781,
+      "f13": null,
+      "t0": null,
+      "t1": 1074512028,
+      "t2": 1074395651,
+      "t3": 1074284867
+     },
+     "function": "SpellDiseaseEffect_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 2971784
+    }
+   ],
+   "phases": [
+    {
+     "address": 2971732,
+     "calls_in_code": "glow:1",
+     "function": "SpellDiseaseEffect_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_a.disease_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellDiseaseShield": {
+   "calls": [
+    {
+     "address": 2937624,
+     "args": {
+      "a0": 1074634770,
+      "a1": 1074458785,
+      "a2": null,
+      "f12": -7.615127086639404
+     },
+     "function": "SpellDiseaseShield_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2937712
+    },
+    {
+     "address": 2937624,
+     "args": {
+      "a0": 1074613138,
+      "a1": 1074567307,
+      "a2": 1073826626,
+      "a3": null,
+      "f12": -5.977499961853027,
+      "f13": null,
+      "t0": 1074060500,
+      "t1": 1074595977,
+      "t2": 1074185822,
+      "t3": 1074158029
+     },
+     "function": "SpellDiseaseShield_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 2937676
+    },
+    {
+     "address": 2937624,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074020199,
+      "f12": -5.453213214874268
+     },
+     "function": "SpellDiseaseShield_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2937748
+    }
+   ],
+   "phases": [
+    {
+     "address": 2937624,
+     "calls_in_code": "glow:1 particle:2",
+     "function": "SpellDiseaseShield_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.diseaseshield_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellDiseaseTrail": {
+   "calls": [
+    {
+     "address": 2933320,
+     "args": {
+      "a0": 1074068863,
+      "a1": 1074476343,
+      "a2": null,
+      "f12": 0.17954611778259277
+     },
+     "function": "SpellDiseaseTrail_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2933372
+    },
+    {
+     "address": 2933320,
+     "args": {
+      "a0": null,
+      "a1": 1073841991,
+      "a2": 1074743239,
+      "f12": 0.2244083732366562
+     },
+     "function": "SpellDiseaseTrail_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2933408
+    },
+    {
+     "address": 2933320,
+     "args": {
+      "a0": 1074680023,
+      "a1": null,
+      "a2": 1074269142,
+      "f12": -0.8492007255554199
+     },
+     "function": "SpellDiseaseTrail_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2933444
+    }
+   ],
+   "phases": [
+    {
+     "address": 2933320,
+     "calls_in_code": "particle:3",
+     "function": "SpellDiseaseTrail_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_a.diseasetrail_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellDrowsy": {
+   "calls": [
+    {
+     "address": 3204848,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellDrowsy_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3204936
+    },
+    {
+     "address": 3204848,
+     "args": {
+      "a0": 1074301919,
+      "a1": 1074250529,
+      "a2": 1074114444,
+      "f12": -5.856383323669434
+     },
+     "function": "SpellDrowsy_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3204900
+    }
+   ],
+   "phases": [
+    {
+     "address": 3204848,
+     "calls_in_code": "particle:2",
+     "function": "SpellDrowsy_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.drowsy_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellFireFlares": {
+   "calls": [
+    {
+     "address": 3001664,
+     "args": {},
+     "function": "SpellFireFlares_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3001716
+    }
+   ],
+   "phases": [
+    {
+     "address": 3001664,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellFireFlares_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.fireflares_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SpellFireWeapons": {
+   "calls": [
+    {
+     "address": 3028192,
+     "args": {},
+     "function": "SpellFireWeapons_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3028244
+    },
+    {
+     "address": 3029800,
+     "args": {
+      "a0": 1074137667,
+      "a1": null,
+      "a2": 1073809223,
+      "f12": -0.7297626733779907
+     },
+     "function": "SpellFireWeapons_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3029852
+    },
+    {
+     "address": 3029800,
+     "args": {
+      "a0": 1074093282,
+      "a1": 1074574592,
+      "a2": null,
+      "f12": -0.5041183233261108
+     },
+     "function": "SpellFireWeapons_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3029924
+    },
+    {
+     "address": 3029800,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": -8.84466552734375
+     },
+     "function": "SpellFireWeapons_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3029888
+    }
+   ],
+   "phases": [
+    {
+     "address": 3028192,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellFireWeapons_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.fireweapons_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3029800,
+     "calls_in_code": "particle:3",
+     "function": "SpellFireWeapons_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.fireweapons_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellFrostArmor": {
+   "calls": [
+    {
+     "address": 3243292,
+     "args": {
+      "a0": 1074611563,
+      "a1": null,
+      "a2": 1074542143,
+      "a3": 1074385569,
+      "f12": 4.827739238739014,
+      "f13": -3.508659601211548,
+      "f14": -3.0381648540496826,
+      "f15": null,
+      "f16": -0.31440478563308716,
+      "f17": -1.311362385749817,
+      "f18": -5.263422012329102,
+      "f19": -4.879310607910156,
+      "sp+0x0": -1.7071746587753296,
+      "sp+0x10": 1.4010523557662964,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "SpellFrostArmor_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3243344
+    },
+    {
+     "address": 3243712,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellFrostArmor_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3243764
+    },
+    {
+     "address": 3243712,
+     "args": {
+      "a0": 1074308858,
+      "a1": 1074682020,
+      "a2": 1074060816,
+      "f12": null
+     },
+     "function": "SpellFrostArmor_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3243800
+    },
+    {
+     "address": 3244644,
+     "args": {
+      "a0": null,
+      "a1": 1073956588
+     },
+     "function": "SpellFrostArmor_onHit",
+     "meaning": {
+      "a0": "id",
+      "a1": "position*"
+     },
+     "primitive": "fx_spawn",
+     "site": 3244696
+    }
+   ],
+   "phases": [
+    {
+     "address": 3243292,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellFrostArmor_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.frostarmor_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3243712,
+     "calls_in_code": "particle:2",
+     "function": "SpellFrostArmor_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.frostarmor_spell_run",
+     "phase": "run"
+    },
+    {
+     "address": 3244644,
+     "calls_in_code": "fx_spawn:1",
+     "function": "SpellFrostArmor_onHit",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_c.frostarmor_on_hit",
+     "phase": "event"
+    }
+   ]
+  },
+  "SpellGiantGrowth": {
+   "calls": [
+    {
+     "address": 3182800,
+     "args": {},
+     "function": "SpellGiantGrowth_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3182852
+    },
+    {
+     "address": 3184248,
+     "args": {
+      "a0": 1074347371,
+      "a1": null,
+      "a2": null,
+      "f12": -3.9632585048675537
+     },
+     "function": "SpellGiantGrowth_emitParticles",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3184300
+    },
+    {
+     "address": 3182800,
+     "args": {},
+     "function": "SpellGiantGrowth_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3182888
+    }
+   ],
+   "phases": [
+    {
+     "address": 3182800,
+     "calls_in_code": "lightLink:1 particleGroup:1",
+     "function": "SpellGiantGrowth_ctor",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_b.giantgrowth_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3184248,
+     "calls_in_code": "particle:1",
+     "function": "SpellGiantGrowth_emitParticles",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.giantgrowth_emit",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellHarmTouch": {
+   "calls": [
+    {
+     "address": 2960572,
+     "args": {
+      "a0": 1074740050,
+      "a1": null,
+      "a2": 1074682773,
+      "f12": -7.168188095092773
+     },
+     "function": "SpellHarmTouch_applyToHit",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2960660
+    },
+    {
+     "address": 2960572,
+     "args": {
+      "a0": null,
+      "a1": 1073786929,
+      "a2": 1073918475,
+      "f12": null
+     },
+     "function": "SpellHarmTouch_applyToHit",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2960696
+    },
+    {
+     "address": 2960572,
+     "args": {
+      "a0": 1074056422,
+      "a1": 1073933219,
+      "a2": 1073800759,
+      "a3": 1073944873,
+      "f12": -4.412506580352783,
+      "f13": null,
+      "f14": -7.050444602966309,
+      "f15": null,
+      "f16": 5.75809907913208,
+      "f17": 2.6844642162323,
+      "f18": null,
+      "f19": 3.8538527488708496,
+      "sp+0x0": null,
+      "sp+0x10": -5.533405303955078,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "SpellHarmTouch_applyToHit",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 2960624
+    }
+   ],
+   "phases": [
+    {
+     "address": 2960572,
+     "calls_in_code": "LightEffect:1 particle:2",
+     "function": "SpellHarmTouch_applyToHit",
+     "generators": [
+      "SHARED(LightEffect)",
+      "spell"
+     ],
+     "model": "ref_skills_b.harmtouch_apply_to_hit",
+     "phase": "event"
+    }
+   ]
+  },
+  "SpellHealing": {
+   "calls": [
+    {
+     "address": 3051208,
+     "args": {},
+     "function": "SpellHealing_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3051260
+    },
+    {
+     "address": 3051704,
+     "args": {
+      "a0": null,
+      "a1": 1074533750,
+      "a2": 1074624630,
+      "f12": -4.79400634765625
+     },
+     "function": "SpellHealing_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3051756
+    }
+   ],
+   "phases": [
+    {
+     "address": 3051208,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellHealing_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.healing_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3051704,
+     "calls_in_code": "particle:1",
+     "function": "SpellHealing_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_b.healing_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellHolyShield": {
+   "calls": [
+    {
+     "address": 3048188,
+     "args": {},
+     "function": "SpellHolyShield_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3048240
+    },
+    {
+     "address": 3048756,
+     "args": {
+      "a0": 1073907324,
+      "a1": 1074740771,
+      "a2": null,
+      "a3": 1073813626,
+      "f12": 4.823580741882324,
+      "f13": null,
+      "f14": -4.562240123748779,
+      "f15": 1.873671054840088,
+      "f16": null,
+      "f17": null,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": -8.151677131652832,
+      "sp+0x18": 3.893732786178589,
+      "sp+0x8": null
+     },
+     "function": "SpellHolyShield_absorb",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3048808
+    },
+    {
+     "address": 3048756,
+     "args": {
+      "a0": 1074524236,
+      "a1": 1074169246,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellHolyShield_absorb",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3048844
+    }
+   ],
+   "phases": [
+    {
+     "address": 3048188,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellHolyShield_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.holyshield_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3048756,
+     "calls_in_code": "LightEffect:1 particle:1",
+     "function": "SpellHolyShield_absorb",
+     "generators": [
+      "SHARED(LightEffect)",
+      "spell"
+     ],
+     "model": "ref_skills_b.holyshield_absorb",
+     "phase": "event"
+    }
+   ]
+  },
+  "SpellHornOmenEffect": {
+   "calls": [
+    {
+     "address": 3130740,
+     "args": {},
+     "function": "SpellHornOmenEffect_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3130792
+    },
+    {
+     "address": 3131012,
+     "args": {
+      "a0": 10556000,
+      "a1": null,
+      "a2": null,
+      "f12": 1.3046875
+     },
+     "function": "SpellHornOmenEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3131064
+    },
+    {
+     "address": 3131012,
+     "args": {
+      "a0": 10556000,
+      "a1": 1074318267,
+      "a2": null,
+      "f12": 1.3046875
+     },
+     "function": "SpellHornOmenEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3131100
+    }
+   ],
+   "phases": [
+    {
+     "address": 3130740,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellHornOmenEffect_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_fx_skills.hornomen_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3131012,
+     "calls_in_code": "particle:2",
+     "function": "SpellHornOmenEffect_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_fx_skills.hornomen_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellLightningWeapons": {
+   "calls": [
+    {
+     "address": 3024088,
+     "args": {
+      "a0": null,
+      "a1": 1073859155,
+      "a2": null,
+      "a3": 1074541365,
+      "f12": -4.4343132972717285,
+      "f13": -6.607170581817627,
+      "f14": -2.830692768096924,
+      "f15": -0.5780966281890869,
+      "f16": -1.2464590072631836,
+      "f17": null,
+      "f18": 0.6227555871009827,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": 3.0721821784973145,
+      "sp+0x18": null,
+      "sp+0x8": 3.749750852584839
+     },
+     "function": "SpellLightningWeapons_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3024140
+    },
+    {
+     "address": 3025604,
+     "args": {},
+     "function": "SpellLightningWeapons_run",
+     "meaning": {},
+     "primitive": "modelParticlesLight",
+     "site": 3025656
+    }
+   ],
+   "phases": [
+    {
+     "address": 3024088,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellLightningWeapons_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.weaponbuff_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3025604,
+     "calls_in_code": "modelParticlesLight:1",
+     "function": "SpellLightningWeapons_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.weaponbuff_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellPlanarSteelEffect": {
+   "calls": [
+    {
+     "address": 3127080,
+     "args": {},
+     "function": "SpellPlanarSteelEffect_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3127132
+    },
+    {
+     "address": 3127732,
+     "args": {
+      "a0": 10557008,
+      "a1": 1074493721,
+      "a2": null,
+      "f12": 1.4296875
+     },
+     "function": "SpellPlanarSteelEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3127964
+    },
+    {
+     "address": 3127732,
+     "args": {
+      "a0": 10557680,
+      "a1": null,
+      "a2": null,
+      "f12": 1.4140625
+     },
+     "function": "SpellPlanarSteelEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3127928
+    },
+    {
+     "address": 3127732,
+     "args": {
+      "a0": 10556672,
+      "a1": 1074389123,
+      "a2": null,
+      "f12": 1.3671875
+     },
+     "function": "SpellPlanarSteelEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3127820
+    },
+    {
+     "address": 3127732,
+     "args": {
+      "a0": 10557008,
+      "a1": null,
+      "a2": 1074643276,
+      "f12": 1.3828125
+     },
+     "function": "SpellPlanarSteelEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3127856
+    },
+    {
+     "address": 3127732,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1073767448,
+      "a3": null,
+      "f12": 1.3359375,
+      "f13": 2768.0,
+      "t0": null,
+      "t1": null,
+      "t2": 1997,
+      "t3": 2052
+     },
+     "function": "SpellPlanarSteelEffect_run",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3127784
+    },
+    {
+     "address": 3127732,
+     "args": {
+      "a0": 10557344,
+      "a1": null,
+      "a2": null,
+      "f12": 1.3984375
+     },
+     "function": "SpellPlanarSteelEffect_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3127892
+    }
+   ],
+   "phases": [
+    {
+     "address": 3127080,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellPlanarSteelEffect_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_fx_skills.planarsteel_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3127732,
+     "calls_in_code": "glow:1 particle:5",
+     "function": "SpellPlanarSteelEffect_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_fx_skills.planarsteel_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellPlanarWind": {
+   "calls": [
+    {
+     "address": 3186864,
+     "args": {
+      "a0": 1074040583,
+      "a1": null,
+      "a2": null,
+      "f12": -4.982880115509033
+     },
+     "function": "SpellPlanarWind_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3186916
+    },
+    {
+     "address": 3186864,
+     "args": {
+      "a0": null,
+      "a1": 1074374042,
+      "a2": 1073779879,
+      "f12": -3.777329683303833
+     },
+     "function": "SpellPlanarWind_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3186988
+    },
+    {
+     "address": 3186864,
+     "args": {
+      "a0": 1073805040,
+      "a1": 1074777814,
+      "a2": 1074384441,
+      "f12": null
+     },
+     "function": "SpellPlanarWind_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3186952
+    },
+    {
+     "address": 3185932,
+     "args": {},
+     "function": "SpellPlanarWind_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3185984
+    }
+   ],
+   "phases": [
+    {
+     "address": 3185932,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellPlanarWind_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.planarwind_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3186864,
+     "calls_in_code": "particle:3",
+     "function": "SpellPlanarWind_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_b.planarwind_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellPoisonWeapons": {
+   "calls": [
+    {
+     "address": 3235668,
+     "args": {
+      "a0": null,
+      "a1": 1074375535,
+      "a2": 1073968626,
+      "a3": 1074782640,
+      "f12": 4.6205949783325195,
+      "f13": 4.916303634643555,
+      "f14": -5.681920051574707,
+      "f15": -1.7416247129440308,
+      "f16": null,
+      "f17": null,
+      "f18": null,
+      "f19": -1.465105414390564,
+      "sp+0x0": 7.032197952270508,
+      "sp+0x10": null,
+      "sp+0x18": null,
+      "sp+0x8": 3.463585615158081
+     },
+     "function": "SpellPoisonWeapons_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3235720
+    }
+   ],
+   "phases": [
+    {
+     "address": 3235668,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellPoisonWeapons_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_a.weaponbuff_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SpellRaiseArmy": {
+   "calls": [
+    {
+     "address": 3226012,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1073757092,
+      "f12": null
+     },
+     "function": "SpellRaiseArmy_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3226064
+    }
+   ],
+   "phases": [
+    {
+     "address": 3226012,
+     "calls_in_code": "particle:1",
+     "function": "SpellRaiseArmy_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.raisearmy_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellResurrect": {
+   "calls": [
+    {
+     "address": 3222320,
+     "args": {},
+     "function": "SpellResurrect_run",
+     "meaning": {},
+     "primitive": "modelVerts",
+     "site": 3222408
+    },
+    {
+     "address": 3223368,
+     "args": {
+      "a0": 1074173500,
+      "a1": 2107,
+      "a2": 2162,
+      "a3": 2217,
+      "f12": 1.4453125,
+      "f13": 2992.0,
+      "t0": 1073851487,
+      "t1": 1074184432,
+      "t2": 2272,
+      "t3": 2327
+     },
+     "function": "SpellResurrect_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3223420
+    },
+    {
+     "address": 3221428,
+     "args": {},
+     "function": "SpellResurrect_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3221480
+    },
+    {
+     "address": 3223796,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "a3": 1074682867,
+      "f12": null,
+      "f13": -3.9846291542053223,
+      "f14": 3.5249056816101074,
+      "f15": null,
+      "f16": -3.7584776878356934,
+      "f17": 8.400081634521484,
+      "f18": 2.346386194229126,
+      "f19": 1.563716173171997,
+      "sp+0x0": null,
+      "sp+0x10": -2.0500731468200684,
+      "sp+0x18": 6.138664245605469,
+      "sp+0x8": -7.823498725891113
+     },
+     "function": "SpellResurrect_onOwnerDeath",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3223848
+    },
+    {
+     "address": 3222320,
+     "args": {},
+     "function": "SpellResurrect_run",
+     "meaning": {},
+     "primitive": "modelVerts",
+     "site": 3222372
+    }
+   ],
+   "phases": [
+    {
+     "address": 3221428,
+     "calls_in_code": "lightLink:1",
+     "function": "SpellResurrect_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_b.resurrect_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3222320,
+     "calls_in_code": "modelVerts:2",
+     "function": "SpellResurrect_run",
+     "generators": [],
+     "model": "ref_skills_b.resurrect_run",
+     "phase": "run"
+    },
+    {
+     "address": 3223368,
+     "calls_in_code": "glow:1",
+     "function": "SpellResurrect_draw",
+     "generators": [],
+     "model": "ref_fx_skills.resurrect_draw",
+     "phase": "draw"
+    },
+    {
+     "address": 3223796,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellResurrect_onOwnerDeath",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_b.resurrect_on_owner_death",
+     "phase": "event"
+    }
+   ]
+  },
+  "SpellRetribution": {
+   "calls": [
+    {
+     "address": 3228808,
+     "args": {},
+     "function": "SpellRetribution_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3228896
+    },
+    {
+     "address": 3228808,
+     "args": {},
+     "function": "SpellRetribution_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3228860
+    },
+    {
+     "address": 3229208,
+     "args": {},
+     "function": "SpellRetribution_run",
+     "meaning": {},
+     "primitive": "modelVerts",
+     "site": 3229260
+    }
+   ],
+   "phases": [
+    {
+     "address": 3228808,
+     "calls_in_code": "lightLink:1 particleGroup:1",
+     "function": "SpellRetribution_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_c.retribution_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3229208,
+     "calls_in_code": "modelVerts:1",
+     "function": "SpellRetribution_run",
+     "generators": [],
+     "model": "ref_skills_c.retribution_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellRoar": {
+   "calls": [
+    {
+     "address": 3146712,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074068687,
+      "f12": null
+     },
+     "function": "SpellRoar_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3146800
+    },
+    {
+     "address": 3146712,
+     "args": {
+      "a0": null,
+      "a1": 1074028151,
+      "a2": 1074499957,
+      "f12": -0.5183275938034058
+     },
+     "function": "SpellRoar_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3146872
+    },
+    {
+     "address": 3146712,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "f12": 2.890094757080078
+     },
+     "function": "SpellRoar_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3146908
+    },
+    {
+     "address": 3146712,
+     "args": {
+      "a0": null,
+      "a1": 1073928651,
+      "a2": 1073743603,
+      "f12": 4.700844764709473
+     },
+     "function": "SpellRoar_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3146764
+    },
+    {
+     "address": 3146712,
+     "args": {
+      "a0": 1074438321,
+      "a1": 1073849659,
+      "a2": 1074377599,
+      "f12": 1.832654595375061
+     },
+     "function": "SpellRoar_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3146836
+    }
+   ],
+   "phases": [
+    {
+     "address": 3146712,
+     "calls_in_code": "particle:5",
+     "function": "SpellRoar_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.roar_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellRoot": {
+   "calls": [
+    {
+     "address": 3041480,
+     "args": {},
+     "function": "SpellRoot_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3041532
+    },
+    {
+     "address": 3041692,
+     "args": {
+      "a0": 1074209935,
+      "a1": 1074066353,
+      "a2": null,
+      "f12": 4.5139899253845215
+     },
+     "function": "SpellRoot_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3041780
+    },
+    {
+     "address": 3041692,
+     "args": {
+      "a0": 1074241140,
+      "a1": null,
+      "a2": null,
+      "f12": -0.3721543252468109
+     },
+     "function": "SpellRoot_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3041816
+    },
+    {
+     "address": 3041692,
+     "args": {
+      "a0": 1073757521,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellRoot_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3041744
+    }
+   ],
+   "phases": [
+    {
+     "address": 3041480,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellRoot_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.root_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3041692,
+     "calls_in_code": "particle:3",
+     "function": "SpellRoot_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_a.root_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellSecondaryUndeadShield": {
+   "calls": [
+    {
+     "address": 3060080,
+     "args": {
+      "a0": 1074674213,
+      "a1": 1073761733,
+      "a2": 1074195757,
+      "f12": 0.02372295968234539
+     },
+     "function": "SpellSecondaryUndeadShield_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3060132
+    },
+    {
+     "address": 3059792,
+     "args": {},
+     "function": "SpellSecondaryUndeadShield_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3059844
+    }
+   ],
+   "phases": [
+    {
+     "address": 3059792,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellSecondaryUndeadShield_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.secondary_shield_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3060080,
+     "calls_in_code": "particle:1",
+     "function": "SpellSecondaryUndeadShield_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.secondary_shield_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellShadowStep": {
+   "calls": [
+    {
+     "address": 3216952,
+     "args": {
+      "a0": 1074388468,
+      "a1": null,
+      "a2": 1074448751,
+      "a3": 1073890695,
+      "f12": 6.550948143005371,
+      "f13": null,
+      "f14": null,
+      "f15": 5.118846416473389,
+      "f16": null,
+      "f17": null,
+      "f18": 0.9673597812652588,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": -1.7803114652633667,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "SpellShadowStep_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3217004
+    },
+    {
+     "address": 3216952,
+     "args": {
+      "a0": 1074007935,
+      "a1": null,
+      "a2": 1074487551,
+      "f12": null
+     },
+     "function": "SpellShadowStep_ctor",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3217040
+    }
+   ],
+   "phases": [
+    {
+     "address": 3216952,
+     "calls_in_code": "LightEffect:1 particle:1",
+     "function": "SpellShadowStep_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)",
+      "spell"
+     ],
+     "model": "ref_skills_b.shadowstep_spell_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "SpellShieldBash": {
+   "calls": [
+    {
+     "address": 3124864,
+     "args": {
+      "a0": null,
+      "a1": 1074658431,
+      "a2": null,
+      "a3": 1074754934,
+      "f12": -1.4777110815048218,
+      "f13": null,
+      "f14": 7.899739742279053,
+      "f15": -8.585956573486328,
+      "f16": null,
+      "f17": -3.2159948348999023,
+      "f18": 7.653540134429932,
+      "f19": 2.2328736782073975,
+      "sp+0x0": -2.4234955310821533,
+      "sp+0x10": -3.130918025970459,
+      "sp+0x18": null,
+      "sp+0x8": null
+     },
+     "function": "SpellShieldBash_run",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3124916
+    },
+    {
+     "address": 3126428,
+     "args": {
+      "a0": 1074422196,
+      "a1": null,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellShieldBash_windupFx",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3126480
+    }
+   ],
+   "phases": [
+    {
+     "address": 3124864,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellShieldBash_run",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)",
+      "spell"
+     ],
+     "model": "ref_skills_a.shieldbash_run",
+     "phase": "run"
+    },
+    {
+     "address": 3126428,
+     "calls_in_code": "particle:1",
+     "function": "SpellShieldBash_windupFx",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_a.shieldbash_windup_fx",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellSpiritShield": {
+   "calls": [
+    {
+     "address": 3231756,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": null,
+      "a3": 1074127515,
+      "f12": null,
+      "f13": -4.449865341186523,
+      "f14": -1.3642375469207764,
+      "f15": null,
+      "f16": -2.390352964401245,
+      "f17": null,
+      "f18": null,
+      "f19": null,
+      "sp+0x0": null,
+      "sp+0x10": null,
+      "sp+0x18": -3.3883068561553955,
+      "sp+0x8": -1.6393412351608276
+     },
+     "function": "SpellSpiritShield_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3231808
+    },
+    {
+     "address": 3232668,
+     "args": {
+      "a0": 1074788479,
+      "a1": null,
+      "a2": 1074574412,
+      "f12": null
+     },
+     "function": "SpellSpiritShield_dissolveParticles",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3232720
+    },
+    {
+     "address": 3233296,
+     "args": {
+      "a0": 1074206615,
+      "a1": 1074541563,
+      "a2": 1074730422,
+      "f12": null
+     },
+     "function": "SpellSpiritShield_reformParticles",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3233348
+    }
+   ],
+   "phases": [
+    {
+     "address": 3231756,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellSpiritShield_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.spiritshield_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3232668,
+     "calls_in_code": "particle:1",
+     "function": "SpellSpiritShield_dissolveParticles",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c._spiritshield_particles",
+     "phase": "run"
+    },
+    {
+     "address": 3233296,
+     "calls_in_code": "particle:1",
+     "function": "SpellSpiritShield_reformParticles",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c._spiritshield_particles",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellSummonArrows": {
+   "calls": [
+    {
+     "address": 3143804,
+     "args": {},
+     "function": "SpellSummonArrows_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3143856
+    },
+    {
+     "address": 3144404,
+     "args": {
+      "a0": null,
+      "a1": 1074326323,
+      "a2": 1074670719,
+      "f12": -2.793581485748291
+     },
+     "function": "SpellSummonArrows_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3144456
+    }
+   ],
+   "phases": [
+    {
+     "address": 3143804,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellSummonArrows_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_c._summon_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3144404,
+     "calls_in_code": "particle:1",
+     "function": "SpellSummonArrows_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.summonarrows_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellSummonAxe": {
+   "calls": [
+    {
+     "address": 3141084,
+     "args": {
+      "a0": 1073868396,
+      "a1": 1074035052,
+      "a2": 1073961669,
+      "f12": 7.6805195808410645
+     },
+     "function": "SpellSummonAxe_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3141136
+    },
+    {
+     "address": 3140488,
+     "args": {},
+     "function": "SpellSummonAxe_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3140540
+    }
+   ],
+   "phases": [
+    {
+     "address": 3140488,
+     "calls_in_code": "particleGroup:1",
+     "function": "SpellSummonAxe_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_c._summon_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3141084,
+     "calls_in_code": "particle:1",
+     "function": "SpellSummonAxe_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.summonaxe_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellSummonBadger": {
+   "calls": [
+    {
+     "address": 3215412,
+     "args": {
+      "a0": 1074432017,
+      "a1": 2382,
+      "a2": 2437,
+      "a3": 2492,
+      "f12": 1.4765625,
+      "f13": null,
+      "t0": 1074181031,
+      "t1": 1073965082,
+      "t2": 1074283990,
+      "t3": 2547
+     },
+     "function": "SpellSummonBadger_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 3215464
+    },
+    {
+     "address": 3214544,
+     "args": {
+      "a0": 1074342691,
+      "a1": 1074063337,
+      "a2": 1074496698,
+      "f12": null
+     },
+     "function": "SpellSummonBadger_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3214596
+    }
+   ],
+   "phases": [
+    {
+     "address": 3214544,
+     "calls_in_code": "particle:1",
+     "function": "SpellSummonBadger_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.summonbadger_spell_run",
+     "phase": "run"
+    },
+    {
+     "address": 3215412,
+     "calls_in_code": "glow:1",
+     "function": "SpellSummonBadger_draw",
+     "generators": [],
+     "model": "ref_fx_skills.badger_draw",
+     "phase": "draw"
+    }
+   ]
+  },
+  "SpellTagarsInsects": {
+   "calls": [
+    {
+     "address": 3197896,
+     "args": {
+      "a0": null,
+      "a1": 1074195934,
+      "a2": 1074040433,
+      "f12": null
+     },
+     "function": "SpellTagarsInsects_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3197948
+    },
+    {
+     "address": 3200344,
+     "args": {
+      "a0": null,
+      "a1": 1074297681,
+      "a2": 1074526394,
+      "f12": -6.528257369995117
+     },
+     "function": "SpellTagarsInsects_tickVictims",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3200396
+    },
+    {
+     "address": 3197896,
+     "args": {
+      "a0": null,
+      "a1": 1074643370,
+      "a2": null,
+      "f12": null
+     },
+     "function": "SpellTagarsInsects_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3198020
+    },
+    {
+     "address": 3197896,
+     "args": {
+      "a0": 1073771520,
+      "a1": 1074645272,
+      "a2": null,
+      "f12": 1.7215425968170166
+     },
+     "function": "SpellTagarsInsects_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3197984
+    }
+   ],
+   "phases": [
+    {
+     "address": 3197896,
+     "calls_in_code": "particle:3",
+     "function": "SpellTagarsInsects_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_arena_monsters.tagar_spell_run",
+     "phase": "run"
+    },
+    {
+     "address": 3200344,
+     "calls_in_code": "particle:1",
+     "function": "SpellTagarsInsects_tickVictims",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_arena_monsters.tagar_tick_victims",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellUndeadShield": {
+   "calls": [
+    {
+     "address": 3056856,
+     "args": {},
+     "function": "SpellUndeadShield_ctor",
+     "meaning": {},
+     "primitive": "particleGroup",
+     "site": 3056944
+    },
+    {
+     "address": 3056856,
+     "args": {},
+     "function": "SpellUndeadShield_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 3056908
+    },
+    {
+     "address": 3057484,
+     "args": {
+      "a0": null,
+      "a1": null,
+      "a2": 1074088178,
+      "f12": -2.0257489681243896
+     },
+     "function": "SpellUndeadShield_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3057536
+    }
+   ],
+   "phases": [
+    {
+     "address": 3056856,
+     "calls_in_code": "lightLink:1 particleGroup:1",
+     "function": "SpellUndeadShield_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_a.undeadshield_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3057484,
+     "calls_in_code": "particle:1",
+     "function": "SpellUndeadShield_run",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_a.undeadshield_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellUnspokenWord": {
+   "calls": [
+    {
+     "address": 3134312,
+     "args": {
+      "a0": 1074125985,
+      "a1": 1074596929,
+      "a2": null,
+      "a3": null,
+      "f12": 2.985529661178589,
+      "t0": null,
+      "t1": null,
+      "t2": 1073792873
+     },
+     "function": "SpellUnspokenWord_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3134400
+    },
+    {
+     "address": 3134312,
+     "args": {
+      "a0": null,
+      "a1": 1074481696,
+      "a2": null,
+      "a3": 1074351518,
+      "f12": null,
+      "t0": 1074390209,
+      "t1": null,
+      "t2": 1074400198
+     },
+     "function": "SpellUnspokenWord_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3134364
+    },
+    {
+     "address": 3134932,
+     "args": {
+      "a0": 1074278313,
+      "a1": 1074780506,
+      "a2": null,
+      "f12": 2.183654308319092
+     },
+     "function": "SpellUnspokenWord_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3134984
+    },
+    {
+     "address": 3134932,
+     "args": {
+      "a0": 1074338992,
+      "a1": 1074357001,
+      "a2": null,
+      "f12": 2.664612054824829
+     },
+     "function": "SpellUnspokenWord_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3135020
+    }
+   ],
+   "phases": [
+    {
+     "address": 3134312,
+     "calls_in_code": "trail:2",
+     "function": "SpellUnspokenWord_ctor",
+     "generators": [
+      "SHARED"
+     ],
+     "model": "ref_skills_c.unspokenword_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3134932,
+     "calls_in_code": "particle:2",
+     "function": "SpellUnspokenWord_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.unspokenword_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellWaveOfFlame": {
+   "calls": [
+    {
+     "address": 3239936,
+     "args": {
+      "a0": 1073935332,
+      "a1": 1074624254,
+      "a2": null,
+      "f12": -3.0190255641937256
+     },
+     "function": "SpellWaveOfFlame_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3240060
+    },
+    {
+     "address": 3239184,
+     "args": {
+      "a0": 1074523111,
+      "a1": null,
+      "a2": null,
+      "a3": 1074695564,
+      "f12": null,
+      "f13": -2.585073232650757,
+      "f14": null,
+      "f15": null,
+      "f16": null,
+      "f17": -0.2812530994415283,
+      "f18": -2.7469401359558105,
+      "f19": -8.116127014160156,
+      "sp+0x0": null,
+      "sp+0x10": 5.296995639801025,
+      "sp+0x18": 7.438808917999268,
+      "sp+0x8": 5.944332122802734
+     },
+     "function": "SpellWaveOfFlame_ctor",
+     "meaning": {
+      "a0": "block",
+      "a1": "position*",
+      "a2": "follow",
+      "a3": "flag",
+      "f12": "r0",
+      "f13": "g0",
+      "f14": "b0",
+      "f15": "a0",
+      "f16": "r1",
+      "f17": "g1",
+      "f18": "b1",
+      "f19": "a1",
+      "sp+0x0": "radius0",
+      "sp+0x10": "floor",
+      "sp+0x18": "seconds",
+      "sp+0x8": "radius1"
+     },
+     "primitive": "LightEffect",
+     "site": 3239236
+    },
+    {
+     "address": 3239936,
+     "args": {
+      "a0": null,
+      "a1": 1074608125,
+      "a2": 1073798965,
+      "f12": null
+     },
+     "function": "SpellWaveOfFlame_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3240024
+    },
+    {
+     "address": 3239936,
+     "args": {
+      "a0": null,
+      "a1": 1074278262,
+      "a2": 1074762529,
+      "f12": -4.730462551116943
+     },
+     "function": "SpellWaveOfFlame_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 3239988
+    }
+   ],
+   "phases": [
+    {
+     "address": 3239184,
+     "calls_in_code": "LightEffect:1",
+     "function": "SpellWaveOfFlame_ctor",
+     "generators": [
+      "SHARED",
+      "SHARED(LightEffect)"
+     ],
+     "model": "ref_skills_c.waveofflame_spell_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 3239936,
+     "calls_in_code": "particle:3",
+     "function": "SpellWaveOfFlame_run",
+     "generators": [
+      "spell"
+     ],
+     "model": "ref_skills_c.waveofflame_spell_run",
+     "phase": "run"
+    }
+   ]
+  },
+  "SpellWizardBeam": {
+   "calls": [
+    {
+     "address": 3085608,
+     "args": {
+      "a0": null,
+      "a1": 1074040931,
+      "a2": 1074480954,
+      "a3": 1074731429,
+      "f12": null,
+      "t0": null,
+      "t1": null,
+      "t2": 1073867804
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085732
+    },
+    {
+     "address": 3085608,
+     "args": {
+      "a0": 1073742981,
+      "a1": null,
+      "a2": 1074645974,
+      "a3": null,
+      "f12": 4.9002461433410645,
+      "t0": 1074007178,
+      "t1": null,
+      "t2": null
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085768
+    },
+    {
+     "address": 3085608,
+     "args": {
+      "a0": 1073747088,
+      "a1": 1073983604,
+      "a2": 1073945961,
+      "a3": 1074379351,
+      "f12": -2.195675849914551,
+      "t0": 1073751966,
+      "t1": null,
+      "t2": 1074308899
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085804
+    },
+    {
+     "address": 3085608,
+     "args": {
+      "a0": 1074428051,
+      "a1": null,
+      "a2": null,
+      "a3": 1074477837,
+      "f12": -4.8625078201293945,
+      "t0": 1074735377,
+      "t1": 1074106206,
+      "t2": 1074624937
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085840
+    },
+    {
+     "address": 3085608,
+     "args": {
+      "a0": 1074132672,
+      "a1": 1074652420,
+      "a2": null,
+      "a3": 1073901659,
+      "f12": null,
+      "t0": 1073864174,
+      "t1": null,
+      "t2": 1074783297
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085696
+    },
+    {
+     "address": 3085608,
+     "args": {
+      "a0": 1074749250,
+      "a1": 1074172232,
+      "a2": null,
+      "a3": 1074754838,
+      "f12": -8.047191619873047,
+      "t0": 1074544101,
+      "t1": 1074285787,
+      "t2": 1073941936
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085876
+    },
+    {
+     "address": 3085608,
+     "args": {
+      "a0": 1073771746,
+      "a1": 1074112332,
+      "a2": 1074199374,
+      "a3": 1074351270,
+      "f12": -4.1447248458862305,
+      "t0": null,
+      "t1": 1074173512,
+      "t2": 1074074296
+     },
+     "function": "SpellWizardBeam_ctor",
+     "meaning": {
+      "a0": "row",
+      "a1": "width",
+      "a2": "flags",
+      "a3": "r",
+      "f12": "lifetime",
+      "t0": "g",
+      "t1": "b",
+      "t2": "a"
+     },
+     "primitive": "trail",
+     "site": 3085660
+    }
+   ],
+   "phases": [
+    {
+     "address": 3085608,
+     "calls_in_code": "trail:7",
+     "function": "SpellWizardBeam_ctor",
+     "generators": [
+      "SHARED",
+      "spell"
+     ],
+     "model": "ref_skills_a.wizardbeam_ctor",
+     "phase": "cast"
+    }
+   ]
+  },
+  "StaticFire": {
+   "calls": [
+    {
+     "address": 2909672,
+     "args": {
+      "a0": 1073906336,
+      "a1": 2602,
+      "a2": 2657,
+      "a3": 2712,
+      "f12": 1.4921875,
+      "f13": null,
+      "t0": 2767,
+      "t1": 1074484304,
+      "t2": 2822,
+      "t3": 2877
+     },
+     "function": "StaticFire_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 2909724
+    },
+    {
+     "address": 2909672,
+     "args": {
+      "a0": 1074502836,
+      "a1": 1074181884,
+      "a2": 1074199286,
+      "a3": 1073970247,
+      "f12": 1.5078125,
+      "f13": -1.0224144458770752,
+      "t0": null,
+      "t1": 1074583068,
+      "t2": null,
+      "t3": 2932
+     },
+     "function": "StaticFire_draw",
+     "meaning": {
+      "a0": "position*",
+      "a1": "r",
+      "a2": "g",
+      "a3": "b",
+      "f12": "bias",
+      "f13": "size",
+      "t0": "alpha",
+      "t1": "texture",
+      "t2": "angle",
+      "t3": "flags"
+     },
+     "primitive": "glow",
+     "site": 2909760
+    },
+    {
+     "address": 2906460,
+     "args": {
+      "a0": 10558352,
+      "a1": null,
+      "a2": 1074376105,
+      "f12": 1.5234375
+     },
+     "function": "StaticFire_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2906512
+    },
+    {
+     "address": 2905336,
+     "args": {},
+     "function": "StaticFire_ctor2",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2905388
+    },
+    {
+     "address": 2906460,
+     "args": {
+      "a0": 10558688,
+      "a1": null,
+      "a2": null,
+      "f12": 1.5390625
+     },
+     "function": "StaticFire_run",
+     "meaning": {
+      "a0": "definition",
+      "a1": "position*",
+      "a2": "velocity*",
+      "f12": "backdate"
+     },
+     "primitive": "particle",
+     "site": 2906548
+    },
+    {
+     "address": 2904640,
+     "args": {},
+     "function": "StaticFire_ctor",
+     "meaning": {},
+     "primitive": "lightLink",
+     "site": 2904692
+    }
+   ],
+   "phases": [
+    {
+     "address": 2904640,
+     "calls_in_code": "lightLink:1",
+     "function": "StaticFire_ctor",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.staticfire_ctor",
+     "phase": "cast"
+    },
+    {
+     "address": 2905336,
+     "calls_in_code": "lightLink:1",
+     "function": "StaticFire_ctor2",
+     "generators": [
+      "own"
+     ],
+     "model": "ref_fx_skills.staticfire_ctor2",
+     "phase": "cast"
+    },
+    {
+     "address": 2906460,
+     "calls_in_code": "particle:2",
+     "function": "StaticFire_run",
+     "generators": [
+      "SHARED",
+      "own"
+     ],
+     "model": "ref_fx_skills.staticfire_run",
+     "phase": "run"
+    },
+    {
+     "address": 2909672,
+     "calls_in_code": "glow:2",
+     "function": "StaticFire_draw",
+     "generators": [],
+     "model": "ref_fx_skills.staticfire_draw",
+     "phase": "draw"
+    }
+   ]
+  }
+ },
+ "executable_sha256": "b75bbf31f076eb039e5cf9af16d24a0a6ce4a2e60d9f7d166e862147d3f718e7",
+ "light_records": {
+  "SpellPlanarSteelEffect_ctor": {
+   "colour": [
+    3867,
+    3922,
+    3977,
+    4032,
+    4087,
+    4142,
+    4197,
+    4252
+   ],
+   "extra": 0.5546875,
+   "radius": 126.9296875
+  },
+  "StaticFire_ctor": {
+   "colour": [
+    2987,
+    3042,
+    3097,
+    3152,
+    3207,
+    3262,
+    3317,
+    3372
+   ],
+   "extra": 0.5234375,
+   "falloff": 0.00017621528240852058,
+   "radius": 119.7109375
+  },
+  "StaticFire_ctor2": {
+   "colour": [
+    3427,
+    3482,
+    3537,
+    3592,
+    3647,
+    3702,
+    3757,
+    3812
+   ],
+   "extra": 0.5390625,
+   "falloff": 0.00018142361659556627,
+   "radius": 123.3203125
+  }
+ },
+ "particle_definitions": [
+  10551632,
+  10551968,
+  10552304,
+  10552640,
+  10552976,
+  10553312,
+  10554320,
+  10554656,
+  10554992,
+  10555328,
+  10555664,
+  10556000,
+  10556672,
+  10557008,
+  10557344,
+  10557680,
+  10558352,
+  10558688,
+  1073745592,
+  1073749590,
+  1073753442,
+  1073753642,
+  1073757521,
+  1073766718,
+  1073771520,
+  1073805040,
+  1073835526,
+  1073837177,
+  1073837675,
+  1073840035,
+  1073850834,
+  1073855216,
+  1073857397,
+  1073863786,
+  1073868396,
+  1073878593,
+  1073887288,
+  1073890652,
+  1073935332,
+  1073943267,
+  1073951137,
+  1073963370,
+  1074004360,
+  1074007935,
+  1074032317,
+  1074040583,
+  1074043745,
+  1074054113,
+  1074062117,
+  1074068863,
+  1074069744,
+  1074087190,
+  1074093282,
+  1074128272,
+  1074137667,
+  1074150300,
+  1074179265,
+  1074187588,
+  1074189854,
+  1074206615,
+  1074209935,
+  1074230253,
+  1074241140,
+  1074278313,
+  1074301919,
+  1074307338,
+  1074307557,
+  1074308858,
+  1074311415,
+  1074317426,
+  1074334269,
+  1074338992,
+  1074342691,
+  1074347371,
+  1074368322,
+  1074372812,
+  1074382309,
+  1074399237,
+  1074404376,
+  1074411815,
+  1074422196,
+  1074431077,
+  1074438321,
+  1074444945,
+  1074446990,
+  1074447782,
+  1074500580,
+  1074519704,
+  1074524236,
+  1074531453,
+  1074532940,
+  1074582354,
+  1074586938,
+  1074611995,
+  1074618054,
+  1074621584,
+  1074622193,
+  1074634770,
+  1074653948,
+  1074674213,
+  1074680023,
+  1074686902,
+  1074705773,
+  1074709197,
+  1074740050,
+  1074756689,
+  1074760551,
+  1074773723,
+  1074788479
+ ],
+ "range": [
+  2899156,
+  3276800
+ ]
+}

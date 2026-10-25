@@ -1,0 +1,22 @@
+{
+  "commit": "13fafa465d5dad7acaeb1ee8becd30c4c8e4788b",
+  "sha256": {
+    "docs/level-flow.md": "db46102cadc7a41f704068601c6d710caee7f6d64796d99c11e54babcfd13526",
+    "tools/ref_levels.py": "a50cf1abf22140893fc97c570267c897312a240a9c3d6333e4b82a992484aec3",
+    "tools/test_ref_levels.py": "60ac5f147453833d920abe975beed0fdb4db4c44626a4cc9c03d3a92a6a2f8d7",
+    "tools/difftest_levels.py": "b72b78040c6d7a5bfd0cd472a962be578641d5f634956d4dc9611a683926e584",
+    "tools/difftest_levels_r3.py": "4dd6714d911bb13f3cf8875c6d0d2124cdbdb3e6e1b7adee833ab2928d0bf5c4",
+    "tools/difftest_levels_r4.py": "c43eb793baba8945af9e3657f39e1df2bbbfff3d56fbc78cb38bc36c43603e39",
+    "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/world_info.py": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+  },
+  "water_adapter": {
+    "commit": "23699af22ffa7af237e27165e0285fb692607fd8",
+    "sha256": {
+      "native/include/champions/creature_water.hpp": "58611ad2b4c7a5748afdd6aebfe7252bf6ddc2260d943c489609a47a77f743cc",
+      "native/src/creature_water.cpp": "c512a7ce63f8ccb89879295c8d88b1ececa2fc6d6ed8a8367f6b3faa578f7412"
+    }
+  }
+}

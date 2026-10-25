@@ -1,0 +1,10 @@
+# Standalone RTA shared Skill foundation; individual abilities remain unsupported.
+add_library(champions-skills-a "${CHAMPIONS_SIMULATION_ROOT}/src/skills_a.cpp")
+target_include_directories(champions-skills-a PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-skills-a PUBLIC champions-creature-hp champions-items)
+if(MSVC)
+    target_compile_options(champions-skills-a PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-skills-a PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-skills-a)

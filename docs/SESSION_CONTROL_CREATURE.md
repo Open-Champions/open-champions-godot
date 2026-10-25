@@ -12,6 +12,10 @@ This is an authored control policy, `rta-session-control-creature-v1`, around an
 original movement body. It is not original `Player_move`, a playable Champions
 game or evidence of original-console network compatibility.
 
+The optional [recovery test](SESSION_RECOVERY.md) adds explicit health/mana
+recovery after movement and the health test, with its own 256-ready-tick cap.
+Recovery remains disabled in the legacy policies described here.
+
 ## Input, ownership and execution
 
 The controller still owns exactly one actor in an actual one-peer network-mode
@@ -119,3 +123,6 @@ time allowance for the larger workload, not a performance improvement claim.
 Final target-platform CI remains a separate gate and must identify the tested
 head and actual artifacts. No broader execution claim is implied by the
 generated corpus or local visual checks.
+
+The optional [facing test](SESSION_FACING.md) composes the existing turning
+adapter before movement, with its own explicit 256-ready-tick policy.

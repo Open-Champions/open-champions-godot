@@ -1,0 +1,12 @@
+{
+  "commit": "7efd3cec7677c199159bd2d72b3c5dbd79bd4711",
+  "policy": "rta-quests-v1",
+  "lines": 11324,
+  "sha256": {
+    "docs/quests.md": "0af07de2690e3ce4e666db80b32e4d4876202465f169c751bbe949a7c7e61ff8",
+    "tools/ref_quests.py": "d01f950111e237bde13809743b4ff5d8ca407f5d625eab4c468efee47f5ff087",
+    "tools/test_ref_quests.py": "c8557000a4b1adf259431e03cd5c75b60a0f02151ac6fc969a3f8a050abcdd92",
+    "tools/difftest_quests.py": "d8a4c2a55a841d4491f751190246e7d23f70e6459f7618cb044b3a05d464bb42",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839"
+  }
+}

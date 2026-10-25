@@ -181,12 +181,59 @@ class TraceTests(unittest.TestCase):
             c.validate(trace,COMMIT)
         self.reject()
 
+    def test_diagnostic_tick_field_values_and_context(self):
+        peer = next(t for t in self.traces if t["platform"] == "macos-x64")
+        peer["records"][3]["joints"][2]["position"][0] = 99
+        with self.assertRaises(ValueError) as error:
+            c.compare(self.traces, COMMIT)
+        message = str(error.exception)
+        for expected in ("suite=animation/records", "record index=3", "tick=4.25",
+                         "field=joints[2].position[0]", "linux-x64=0", "macos-x64=99",
+                         "preceding matching state", "record index=0", "record index=2"):
+            self.assertIn(expected, message)
+
+    def test_diagnostic_discrete_and_skinning_fields(self):
+        for skin in (False, True):
+            traces = copy.deepcopy(self.traces)
+            peer = next(t for t in traces if t["platform"] == "macos-x64")
+            if skin:
+                peer["skinning_records"][2]["positions"][1][2] = 99
+                field, suite = "positions[1][2]", "animation/skinning_records"
+            else:
+                peer["records"][0]["joints"][0]["drives_joint"] = False
+                field, suite = "joints[0].drives_joint", "animation/records"
+            with self.assertRaises(ValueError) as error:
+                c.compare(traces, COMMIT)
+            self.assertIn("field=" + field, str(error.exception))
+            self.assertIn("suite=" + suite, str(error.exception))
+
+    def test_earliest_record_across_peers(self):
+        by_platform = {t["platform"]: t for t in self.traces}
+        by_platform["macos-arm64"]["records"][3]["joints"][2]["position"][0] = 99
+        by_platform["windows-x64"]["records"][1]["joints"][2]["position"][0] = 42
+        with self.assertRaises(ValueError) as error:
+            c.compare(self.traces, COMMIT)
+        self.assertIn("record index=1", str(error.exception))
+        self.assertIn("windows-x64=42", str(error.exception))
+
+    def test_numeric_tick_representation_preserves_equality(self):
+        self.traces[0]["records"][0]["tick"] = 0.0
+        self.assertEqual(c.compare(self.traces, COMMIT), 36248)
+
+    def test_cancelled_producer_is_incomplete(self):
+        argv = ["--trace-dir", "unused", "--source-commit", COMMIT]
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            for result in ("cancelled", "skipped", "failure"):
+                self.assertEqual(c.main(argv + ["--native-result", result]), 2)
+            self.assertIn("INCOMPLETE:", output.getvalue())
+            self.assertNotIn("MISMATCH:", output.getvalue())
+
     def test_cli_five_files_and_failure_exit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             argv = ["--trace-dir", directory, "--source-commit", COMMIT]
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(c.main(argv), 1)
+                self.assertEqual(c.main(argv), 2)
                 for trace in self.traces: (root/(trace["platform"]+".json")).write_text(json.dumps(trace))
                 self.assertEqual(c.main(argv), 0)
                 (root/"extra.json").write_text('{}')

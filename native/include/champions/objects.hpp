@@ -11,6 +11,10 @@
 #include <tuple>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::objects {
 using Vec3 = std::array<Raw, 3>;
 using Bytes = std::vector<std::uint8_t>;
@@ -202,6 +206,8 @@ struct HandleCellInfo {
 // caller-selected core FPU context are outside WorldSnapshot (traces record the
 // FPU configuration).
 class World {
+  friend struct rta::detail::CheckpointAccess;
+  void checkpoint(rta::detail::Checkpoint &);
   std::shared_ptr<bool> lifetime_ = std::make_shared<bool>(true);
   std::vector<std::unique_ptr<GameObject>> storage_;
   std::map<const rta::Object *, GameObject *> owned_objects_;
@@ -221,6 +227,12 @@ class World {
   void leave_run_list(GameObject &);
 
 public:
+  // Adds to `referred` each candidate that any list head, pool node or object
+  // head of this World (iterators this World retains excluded) still points
+  // at. A host that retains finished iterators uses it to release those
+  // nothing refers to any more.
+  void collect_link_references(const std::set<const Link *> &candidates,
+                               std::set<const Link *> &referred) const;
   Pool pool;
   HandlePool handles;
   SharedRandom shared;
@@ -268,6 +280,10 @@ public:
                         Props stale_props = {});
   GameObject *new_object(std::uint32_t, const Vec3 &,
                          std::shared_ptr<ClassDef> = {}, Props = {});
+  // The script binder owns its Obj instances. Register one already linked
+  // through this World so spatial queries can validate its grid node.
+  void register_external(GameObject &);
+  void unregister_external(GameObject &);
   void destroy(GameObject &, std::int64_t flags = 3);
   void delete_object(GameObject &);
   void flush_delete_list();
@@ -315,6 +331,12 @@ public:
       const std::function<bool(const std::optional<std::string> &)>
           &save_filter = {},
       const std::function<void(GameObject &, const Bytes &)> &load_state = {});
+  // Small read-only isolation projection, including live retained generations
+  // that are absent from the current address registry.
+  std::vector<std::pair<std::uint64_t, std::uint32_t>>
+  live_retained_identities() const;
+  // Preserve snapshot reference refusals without copying history or values.
+  void validate_snapshot_references() const;
   WorldSnapshot snapshot() const;
 };
 } // namespace champions::simulation::rta::objects

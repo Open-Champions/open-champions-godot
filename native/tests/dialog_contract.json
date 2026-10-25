@@ -1,0 +1,18 @@
+{
+  "commit": "334578d310179760daff20ea6098353a54958df8",
+  "policy": "rta-dialog-v1",
+  "seeds": [
+    20973,
+    7
+  ],
+  "lines": 184925,
+  "sha256": {
+    "docs/dialog.md": "e888ece1b0861346903a068f6742cb305219ceb7c823bbcc7309186b05ce0446",
+    "tools/ref_dialog.py": "fc6c8f8d2c667b5ece9b90893e9497d5d609160f8fceb5999ad70653a5a5502d",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/test_ref_dialog.py": "10c87663e16fd339fd02a100e762c68181c4e1813120c0637c3bbf7ff4fcd5ed",
+    "tools/difftest_dialog.py": "88d166b643eac0b656cf94ba0526f23c0b9399b9d9f568624bfe806836ce24d0",
+    "tools/dialog_census.py": "1e2d94caafee0dd8e8a0995733e98e81f50491d01efac5cef077f85601fa0666"
+  },
+  "vectors_sha256": "fc26c5b43bf53285464f8cd00d818f0b8e26fa34cbc76a0d70b866533f0a5279"
+}

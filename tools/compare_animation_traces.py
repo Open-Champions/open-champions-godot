@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 import re
 import sys
+from trace_diagnostics import IncompleteTrace, require_producer, structured_diagnostic
 
 PLATFORMS = frozenset({"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"})
 FIXTURE = "rta-skinning-authored-v3"
@@ -158,16 +159,46 @@ def validate(trace, expected_commit):
     require(first["joints"] == repeated["joints"], "backward/repeated query changed pose")
 
 
+def peer_diagnostic(by_platform):
+    reference = by_platform["linux-x64"]
+    for suite in ("records", "skinning_records"):
+        divergences = []
+        for platform in sorted(PLATFORMS - {"linux-x64"}):
+            left, right = reference.get(suite), by_platform[platform].get(suite)
+            if isinstance(left, list) and isinstance(right, list):
+                detail = structured_diagnostic("animation/" + suite, left, right,
+                                               ("linux-x64", platform), with_index=True)
+                if detail:
+                    index, message = detail
+                    divergences.append((index, platform, message))
+        if divergences:
+            return min(divergences)[2]
+    return None
+
+
 def compare(traces, expected_commit):
     require(isinstance(expected_commit, str) and re.fullmatch(r"[0-9a-f]{40}", expected_commit), "source commit must be a full lowercase SHA1")
-    require(len(traces) == len(PLATFORMS), "exactly five platform traces are required")
     by_platform = {}
     for trace in traces:
-        validate(trace, expected_commit)
+        require(isinstance(trace, dict) and isinstance(trace.get("platform"), str)
+                and trace["platform"] in PLATFORMS, "unexpected platform")
         platform = trace["platform"]
         require(platform not in by_platform, f"duplicate platform: {platform}")
         by_platform[platform] = trace
-    require(set(by_platform) == PLATFORMS, "missing platform")
+    missing = PLATFORMS - by_platform.keys()
+    if missing:
+        raise IncompleteTrace("missing platform: " + ", ".join(sorted(missing)))
+    # Keep every independent validation gate. On failure, attach the first peer
+    # difference too, including discrete fields or shape differences.
+    try:
+        for platform in sorted(PLATFORMS):
+            validate(by_platform[platform], expected_commit)
+    except ValueError as error:
+        detail = peer_diagnostic(by_platform)
+        raise ValueError(str(error) + ("\n" + detail if detail else "")) from error
+    detail = peer_diagnostic(by_platform)
+    if detail:
+        raise ValueError(detail)
     reference = by_platform["linux-x64"]
     compared = 0
     for platform in sorted(PLATFORMS - {"linux-x64"}):
@@ -209,17 +240,23 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--trace-dir", required=True, type=Path)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--native-result", default="success",
+                        choices=("success", "failure", "cancelled", "skipped"))
     args = parser.parse_args(argv)
     try:
-        require(args.trace_dir.is_dir(), "trace directory is missing")
+        require_producer(args.native_result)
+        if not args.trace_dir.is_dir():
+            raise IncompleteTrace("trace directory is missing")
         paths = sorted(args.trace_dir.rglob("*.json"))
-        require(len(paths) == 5, "trace directory must contain exactly five JSON files")
         count = compare([load_trace(p) for p in paths], args.source_commit)
         print(f"PASS: all five platforms, 17 pose samples + 7 skinning cases each, {count} double components compared; "
               f"absolute tolerance {ABS_TOL:g} + relative tolerance {REL_TOL:g}. Not bit-exact runtime proof.")
         return 0
+    except IncompleteTrace as error:
+        print(f"INCOMPLETE: {error}", file=sys.stderr)
+        return 2
     except (ValueError, OSError, RecursionError) as error:
-        print(f"Animation trace comparison failed: {error}", file=sys.stderr)
+        print(f"MISMATCH: Animation trace comparison failed: {error}", file=sys.stderr)
         return 1
 
 

@@ -1,0 +1,373 @@
+# hud-r3 synthetic vectors from ref_hud_dynamic.py and ref_ui_composite.py
+# research t3/research-ui 1ed740a2aed879eedad9fdc8a9ee0cceed8ad402
+minimap_params	0	1	0x3f666666	0x00000000	0x00000000	0x43a00000	0x43600000
+minimap_params	0	4	0x3f666666	0x00000000	0x00000000	0x43a00000	0x43600000
+minimap_params	0	0	0x3f666666	0x00000000	0x00000000	0x43a00000	0x43600000
+minimap_extra	0	0x41800000	0x40c00000
+minimap_params	1	1	0x3f333333	0x43480000	0xc2f00000	0x42f00000	0x42c80000
+minimap_params	1	4	0x3f333333	0xc3700000	0x430c0000	0x42f00000	0x42c80000
+minimap_params	1	0	0x3f333333	0x43480000	0xc2f00000	0x42f00000	0x42c80000
+minimap_extra	1	0x41200000	0x40a00000
+minimap_params	2	1	0x00000000	0x43340000	0xc2f00000	0x00000000	0x00000000
+minimap_params	2	4	0x00000000	0xc3700000	0x430c0000	0x00000000	0x00000000
+minimap_params	2	0	0x00000000	0x43340000	0xc2f00000	0x00000000	0x00000000
+minimap_extra	2	0x41200000	0x40a00000
+minimap_approach	0x3f800000	0x3f800000	0x3f800000
+minimap_approach	0x00000000	0x3ba3d70a	0x3aa3d70a
+minimap_approach	0x00000000	0x3c000000	0x3b000000
+minimap_approach	0x41200000	0x00000000	0x40f00000
+minimap_approach	0x3f000000	0x40400000	0x3f900000
+minimap_zoom	0x3f666666	0x40000000	0x3fe66666
+minimap_blip	-1	-	-	-
+minimap_blip	0	182	47	58
+minimap_blip	1	0	191	0
+minimap_blip	2	180	178	0
+minimap_blip	3	29	32	161
+minimap_blip	4	-	-	-
+minimap_drawn	0	0	0
+minimap_drawn	0	32	1
+minimap_drawn	1	0	1
+minimap_drawn	-1	0	0
+minimap_drawn	10	32	1
+flying_life	0	30
+flying_life	1	180
+flying_life	2	180
+flying_life	-1	180
+flying_life	7	180
+flying_drift	0x00000000	-30
+flying_drift	0x0000001d	-1
+flying_drift	0x0000001e	0
+flying_drift	0x0000003b	29
+flying_drift	0x0000003c	-30
+flying_drift	0x0000005a	0
+flying_drift	0xffffffff	-15
+flying_step	30	0	29	125	0
+flying_step	30	1	28	122	0
+flying_step	30	2	27	119	0
+flying_step	30	3	26	116	0
+flying_step	30	4	25	113	0
+flying_step	30	5	24	110	0
+flying_step	30	6	23	107	0
+flying_step	30	7	22	104	0
+flying_step	30	8	21	101	0
+flying_step	30	9	20	98	0
+flying_step	30	10	19	95	0
+flying_step	30	11	18	92	0
+flying_step	30	12	17	89	0
+flying_step	30	13	16	86	0
+flying_step	30	14	15	83	0
+flying_step	30	15	14	80	0
+flying_step	30	16	13	77	0
+flying_step	30	17	12	74	0
+flying_step	30	18	11	71	0
+flying_step	30	19	10	68	0
+flying_step	30	20	9	65	0
+flying_step	30	21	8	62	0
+flying_step	30	22	7	59	0
+flying_step	30	23	6	56	0
+flying_step	30	24	5	53	0
+flying_step	30	25	4	50	0
+flying_step	30	26	3	47	0
+flying_step	30	27	2	44	0
+flying_step	30	28	1	41	0
+flying_step	30	29	0	38	1
+flying_step	180	0	179	128	0
+flying_step	180	1	178	128	0
+flying_step	180	2	177	128	0
+flying_step	180	3	176	128	0
+flying_step	180	4	175	128	0
+flying_step	180	5	174	128	0
+flying_step	180	6	173	128	0
+flying_step	180	7	172	128	0
+flying_step	180	8	171	128	0
+flying_step	180	9	170	128	0
+flying_step	180	10	169	128	0
+flying_step	180	11	168	128	0
+flying_step	180	12	167	128	0
+flying_step	180	13	166	128	0
+flying_step	180	14	165	128	0
+flying_step	180	15	164	128	0
+flying_step	180	16	163	128	0
+flying_step	180	17	162	128	0
+flying_step	180	18	161	128	0
+flying_step	180	19	160	128	0
+flying_step	180	20	159	128	0
+flying_step	180	21	158	128	0
+flying_step	180	22	157	128	0
+flying_step	180	23	156	128	0
+flying_step	180	24	155	128	0
+flying_step	180	25	154	128	0
+flying_step	180	26	153	128	0
+flying_step	180	27	152	128	0
+flying_step	180	28	151	128	0
+flying_step	180	29	150	128	0
+flying_step	180	30	149	128	0
+flying_step	180	31	148	128	0
+flying_step	180	32	147	128	0
+flying_step	180	33	146	128	0
+flying_step	180	34	145	128	0
+flying_step	180	35	144	128	0
+flying_step	180	36	143	128	0
+flying_step	180	37	142	128	0
+flying_step	180	38	141	128	0
+flying_step	180	39	140	128	0
+flying_step	180	40	139	128	0
+flying_step	180	41	138	128	0
+flying_step	180	42	137	128	0
+flying_step	180	43	136	128	0
+flying_step	180	44	135	128	0
+flying_step	180	45	134	128	0
+flying_step	180	46	133	128	0
+flying_step	180	47	132	128	0
+flying_step	180	48	131	128	0
+flying_step	180	49	130	128	0
+flying_step	180	50	129	128	0
+flying_step	180	51	128	128	0
+flying_step	180	52	127	128	0
+flying_step	180	53	126	128	0
+flying_step	180	54	125	128	0
+flying_step	180	55	124	128	0
+flying_step	180	56	123	128	0
+flying_step	180	57	122	128	0
+flying_step	180	58	121	128	0
+flying_step	180	59	120	128	0
+flying_step	180	60	119	128	0
+flying_step	180	61	118	128	0
+flying_step	180	62	117	128	0
+flying_step	180	63	116	128	0
+flying_step	180	64	115	128	0
+flying_step	180	65	114	128	0
+flying_step	180	66	113	128	0
+flying_step	180	67	112	128	0
+flying_step	180	68	111	128	0
+flying_step	180	69	110	128	0
+flying_step	180	70	109	128	0
+flying_step	180	71	108	128	0
+flying_step	180	72	107	128	0
+flying_step	180	73	106	128	0
+flying_step	180	74	105	128	0
+flying_step	180	75	104	128	0
+flying_step	180	76	103	128	0
+flying_step	180	77	102	128	0
+flying_step	180	78	101	128	0
+flying_step	180	79	100	128	0
+flying_step	180	80	99	128	0
+flying_step	180	81	98	128	0
+flying_step	180	82	97	128	0
+flying_step	180	83	96	128	0
+flying_step	180	84	95	128	0
+flying_step	180	85	94	128	0
+flying_step	180	86	93	128	0
+flying_step	180	87	92	128	0
+flying_step	180	88	91	128	0
+flying_step	180	89	90	128	0
+flying_step	180	90	89	128	0
+flying_step	180	91	88	128	0
+flying_step	180	92	87	128	0
+flying_step	180	93	86	128	0
+flying_step	180	94	85	128	0
+flying_step	180	95	84	128	0
+flying_step	180	96	83	128	0
+flying_step	180	97	82	128	0
+flying_step	180	98	81	128	0
+flying_step	180	99	80	128	0
+flying_step	180	100	79	128	0
+flying_step	180	101	78	128	0
+flying_step	180	102	77	128	0
+flying_step	180	103	76	128	0
+flying_step	180	104	75	128	0
+flying_step	180	105	74	128	0
+flying_step	180	106	73	128	0
+flying_step	180	107	72	128	0
+flying_step	180	108	71	128	0
+flying_step	180	109	70	128	0
+flying_step	180	110	69	128	0
+flying_step	180	111	68	128	0
+flying_step	180	112	67	128	0
+flying_step	180	113	66	128	0
+flying_step	180	114	65	128	0
+flying_step	180	115	64	128	0
+flying_step	180	116	63	128	0
+flying_step	180	117	62	128	0
+flying_step	180	118	61	128	0
+flying_step	180	119	60	128	0
+flying_step	180	120	59	128	0
+flying_step	180	121	58	128	0
+flying_step	180	122	57	128	0
+flying_step	180	123	56	128	0
+flying_step	180	124	55	128	0
+flying_step	180	125	54	128	0
+flying_step	180	126	53	128	0
+flying_step	180	127	52	128	0
+flying_step	180	128	51	128	0
+flying_step	180	129	50	128	0
+flying_step	180	130	49	128	0
+flying_step	180	131	48	128	0
+flying_step	180	132	47	128	0
+flying_step	180	133	46	128	0
+flying_step	180	134	45	128	0
+flying_step	180	135	44	128	0
+flying_step	180	136	43	128	0
+flying_step	180	137	42	128	0
+flying_step	180	138	41	128	0
+flying_step	180	139	40	128	0
+flying_step	180	140	39	128	0
+flying_step	180	141	38	128	0
+flying_step	180	142	37	128	0
+flying_step	180	143	36	128	0
+flying_step	180	144	35	128	0
+flying_step	180	145	34	128	0
+flying_step	180	146	33	128	0
+flying_step	180	147	32	128	0
+flying_step	180	148	31	128	0
+flying_step	180	149	30	128	0
+flying_step	180	150	29	125	0
+flying_step	180	151	28	122	0
+flying_step	180	152	27	119	0
+flying_step	180	153	26	116	0
+flying_step	180	154	25	113	0
+flying_step	180	155	24	110	0
+flying_step	180	156	23	107	0
+flying_step	180	157	22	104	0
+flying_step	180	158	21	101	0
+flying_step	180	159	20	98	0
+flying_step	180	160	19	95	0
+flying_step	180	161	18	92	0
+flying_step	180	162	17	89	0
+flying_step	180	163	16	86	0
+flying_step	180	164	15	83	0
+flying_step	180	165	14	80	0
+flying_step	180	166	13	77	0
+flying_step	180	167	12	74	0
+flying_step	180	168	11	71	0
+flying_step	180	169	10	68	0
+flying_step	180	170	9	65	0
+flying_step	180	171	8	62	0
+flying_step	180	172	7	59	0
+flying_step	180	173	6	56	0
+flying_step	180	174	5	53	0
+flying_step	180	175	4	50	0
+flying_step	180	176	3	47	0
+flying_step	180	177	2	44	0
+flying_step	180	178	1	41	0
+flying_step	180	179	0	38	1
+flying_step	5	alpha2	4	0	0
+flying_style	1	1	64	0x40602060	1	0x42700000
+flying_style	1	0	64	0x40602060	1	0x42700000
+flying_style	2	0	64	0x40406e40	1	0x41400000
+flying_style	2	1	64	0x40008080	0	0x00000000
+flying_style	0	0	64	0x40323c3c	0	0x00000000
+flying_style	0	1	64	0x40008080	0	0x00000000
+flying_style	3	1	64	0x40008080	0	0x00000000
+flying_z	0x40400000	0x42700000	0x43070000
+flying_screen	0x00000005	0xfffffffc	0x43000000	0x42800000	0x40000000	0x00000165	0x000000fc
+flying_screen	0x00000009	0x00000000	0x00000000	0x00000000	0x3f800000	0x00000149	0x000000e0
+mat4_xyz	0x3f800000	0x40000000	0x40400000	0x40800000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0xbde977c8	0x3e20c38f	0xc0b8273d	0xc15107ac	0x00000000	0x00000000
+compass_anchor	0x3f800000	0x40000000	0x40400000	0x40800000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x00000000	0x3f800000	0x00000000	0x40000000	0xc14107ac	0x00000000	0x40000000
+compass_label	65	394	131	-100	500	18	0x632f6159
+help_alpha	-1	128	0x80464646
+help_alpha	0	128	0x80464646
+help_alpha	12	8	0x08464646
+help_alpha	13	0	0x00464646
+help_alpha	20	0	0x00464646
+help_alpha	100	0	0x00464646
+help_box	0	0	299	139	324	139	76	76
+help_box	40	10	294	179	319	179	116	116
+help_box	21	-4	302	160	327	160	97	97
+help_box	100	50	274	239	299	239	176	176
+notice_box	0	10	0	160	100	36	130	256	0	448	21	135	145	160	145	26	94	268	86	34	102	302	188
+notice_box	1	0	320	480	100	356	130	256	0	448	21	455	135	480	135	346	94	268	76	354	102	622	178
+notice_box	-1	21	-320	-160	100	-284	130	256	0	448	21	-185	156	-160	156	-294	94	268	97	-286	102	-18	199
+message_box	0	0	-1	-28	0x00000140	0x000000c0	520	6
+message_box	10	5	7	0	0x00000145	0x000000dc	10	7
+message_box	0	-4	-1	8	0x0000013c	0x000000e4	520	6
+medal	1	1	1	1	1	0
+medal	0	0	1	0	1	0
+medal	0	1	0	1	0	1	-	-	0x00000140	0x000000c0	520	6	320	220
+medal	0	1	1	1	0	1	MedalRound	MedalRoundPickNet	0x00000140	0x000000c0	520	6	320	220
+medal	0	1	1	1	1	1	MedalRound	MedalRoundPick	0x00000140	0x000000c0	520	6	320	220
+medal	0	1	1	0	0	1	MedalRound	MedalRoundPick	0x00000140	0x000000c0	520	6	320	220
+net_cam	0	1	1	0	0	1	0
+net_cam	1	0	0	1	5	1	0
+net_cam	1	0	1	0	0	2	1
+net_cam	1	0	1	1	0	0	0
+net_cam	1	1	0	1	1	0	1
+net_pad	0	0
+net_pad	1	88
+net_pad	3	264
+net_cam_text	320	352	320	372	0x804d4d4d
+arena_active	0x00000000	1
+arena_active	0x3f800000	1
+arena_active	0x40000000	0
+arena_active	0x40400000	0
+arena_step	0x00000000	0	1
+arena_step	0x00000000	1	1
+arena_step	0x00000000	2	1
+arena_step	0x00000000	3	1
+arena_step	0x00000000	4	1
+arena_step	0x3f800000	0	1
+arena_step	0x3f800000	1	1
+arena_step	0x3f800000	2	1
+arena_step	0x3f800000	3	1
+arena_step	0x3f800000	4	1
+arena_step	0x40000000	0	0
+arena_step	0x40000000	1	0
+arena_step	0x40000000	2	0
+arena_step	0x40000000	3	0
+arena_step	0x40000000	4	0
+arena_step	0x3f000000	0	1
+arena_step	0x3f000000	1	1
+arena_step	0x3f000000	2	1
+arena_step	0x3f000000	3	1
+arena_step	0x3f000000	4	1
+arena_pulse	0	128	2000
+arena_pulse	1	112	1800
+arena_pulse	2	96	1600
+arena_pulse	3	80	1400
+arena_pulse	4	64	1200
+bust_fade	0x00000000	0	0x3dacf3df
+bust_fade	0x00000000	1	0x00000000
+bust_fade	0x3f800000	1	0x3f6a6184
+bust_fade	0x3f800000	0	0x3f800000
+bust_fade	0x3f000000	0	0x3f159e7b
+bust_fade	0x3f000000	1	0x3ed4c308
+bust_alpha	0x00000000	0	0
+bust_alpha	0x3f800000	110	128
+bust_alpha	0x3f000000	55	64
+bust_meter	0	4	32	0	bar_yellow00.tex	519
+bust_meter	2	4	32	2	bar_yellow01.tex	535
+bust_meter	4	4	10	7	bar_yellow03.tex	529
+bust_meter	1	3	9	8	bar_yellow00.tex	522
+dimx	0	0	-3
+dimx	0	1	-1
+dimx	0	2	-3
+dimx	0	3	-1
+dimx	1	0	1
+dimx	1	1	3
+dimx	1	2	1
+dimx	1	3	3
+dimx	2	0	-3
+dimx	2	1	-1
+dimx	2	2	-3
+dimx	2	3	-1
+dimx	3	0	1
+dimx	3	1	3
+dimx	3	2	1
+dimx	3	3	3
+dither5	0	0	0	0
+dither5	128	1	0	15
+dither5	255	2	3	31
+dither5	3	3	1	0
+dither5	7	0	1	1
+scale_rgb	0x80aabbcc	0x3f800000	0x80aabbcc
+scale_rgb	0x80404040	0x3f000000	0x80202020
+scale_rgb	0x00ffffff	0x00000000	0x00000000
+present	128	0	255	0x3f000000	0x00ff0099	0x3f199999
+present	0	0	0	0x00000000	0x00000000	0x3e4ccccc
+present	255	255	255	0x3f800000	0x00ffffff	0x3f7fffff
+present_step	0	4
+present_step	123	127
+present_step	124	128
+present_step	132	128
+present_step	133	129
+present_step	200	196

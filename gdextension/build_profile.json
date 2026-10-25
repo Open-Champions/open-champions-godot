@@ -1,1 +1,1 @@
-{"enabled_classes": ["RefCounted", "FileAccess", "HashingContext", "OS", "ArrayMesh"]}
+{"enabled_classes": ["RefCounted", "FileAccess", "DirAccess", "HashingContext", "OS", "ArrayMesh", "AudioStreamGeneratorPlayback"]}

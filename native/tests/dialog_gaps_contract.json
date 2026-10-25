@@ -1,0 +1,18 @@
+{
+  "commit": "79a2e4a041192eb303e7d066be064c8618896c05",
+  "policy": "rta-dialog-gaps-v1",
+  "seeds": [
+    20973,
+    7
+  ],
+  "lines": 6293,
+  "sha256": {
+    "docs/spec/dialog-gaps.md": "e93452521298532c36b9174816f29686f952768dc940096957586a2dc0e12f1e",
+    "tools/ref_dialog_gaps.py": "e024fe0fe484e492f604229d41c1ca945e4e5aeba310c222e2b2507e2a810a9f",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/test_ref_dialog_gaps.py": "a6272131209bbefbeda618bf238c18176f2a162acc828815f22d3a2d8575add8",
+    "tools/difftest_dialog_gaps.py": "73dd29d0b4d54b850a4b56e9408bb4a9deb49ad45188251e1a9e696a742cf7db",
+    "tools/dialog_gaps_census.py": "f1e5cbb210bd5d3ef4c7b6cb38edd95a778e85435fe4fb4a51ee2dbae5fb23dc"
+  },
+  "vectors_sha256": "fc9199d5ee337c12577ea85ed0e635817835a86b9e4e9f36bb1c40b6483999be"
+}

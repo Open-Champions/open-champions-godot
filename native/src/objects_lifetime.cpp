@@ -1,8 +1,10 @@
+#include "champions/detail/checkpoint.hpp"
 // Authored port of ref_objects.py at 0dd02ce416389dd440540119727d946636507703,
 // SHA256 541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2.
 // See that commit's docs/spec/object-system.md; no original code or data
 // included.
 #include "objects_internal.hpp"
+#include <set>
 
 namespace champions::simulation::rta::objects {
 using namespace detail;
@@ -143,6 +145,33 @@ GameObject &World::checked_object(rta::Object *object) const {
     throw ObjectError("list refers to an object outside this World");
   return *found->second;
 }
+void World::register_external(GameObject &object) {
+  owned_objects_[&object] = &object;
+}
+void World::unregister_external(GameObject &object) {
+  if (!owned_objects_.count(&object)) return;
+  // Remove every paired world-list node before the binder releases the
+  // object's embedded list heads. Restart at the head after each removal:
+  // both partners may be in this same list. An active iterator is detached
+  // and invalidated instead of throwing during external-owner teardown.
+  for (auto &head : object.heads)
+    while (auto *node = head.next) {
+      if (node->kind == LinkKind::Node) {
+        handles.remove_ref(node);
+      } else {
+        HandlePool::unlink(node);
+        node->prev = node->next = nullptr;
+      }
+    }
+  for (std::size_t slot = 0; slot < names.objs.size(); ++slot)
+    if (names.objs[slot] == &object) {
+      names.objs[slot] = nullptr;
+      --names.count;
+    }
+  if (auto it = objects.find(object.addr); it != objects.end() && it->second == &object)
+    objects.erase(it);
+  owned_objects_.erase(&object);
+}
 World::World(CallbackPolicy policy) : callback_policy(policy) {}
 World::~World() {
   *lifetime_ = false;
@@ -271,10 +300,8 @@ void World::walk_list(Cell &head, std::uint32_t mask,
   completed_iterators_.insert(id);
   prune_iterators();
 }
-void World::prune_iterators() {
-  std::set<const Link *> referred, candidates;
-  for (const auto &entry : iterators_)
-    candidates.insert(entry.second.get());
+void World::collect_link_references(const std::set<const Link *> &candidates,
+                                    std::set<const Link *> &referred) const {
   auto add_refs = [&](const Link &n) {
     for (const auto *ref : {n.next, n.prev, n.partner})
       if (ref && candidates.count(ref))
@@ -282,10 +309,11 @@ void World::prune_iterators() {
   };
   for (auto *n : handles.nodes())
     add_refs(*n);
-  for (const auto &e : iterators_)
-    add_refs(*e.second);
   for (const auto &e : storage_)
     for (const auto &c : e->heads)
+      add_refs(c);
+  for (const auto &e : objects)
+    for (const auto &c : e.second->heads)
       add_refs(c);
   for (const auto &e : extra_cells_)
     add_refs(*e.second);
@@ -301,6 +329,16 @@ void World::prune_iterators() {
   add_refs(always_draw);
   add_refs(delete_list);
   add_refs(run_active);
+}
+void World::prune_iterators() {
+  std::set<const Link *> referred, candidates;
+  for (const auto &entry : iterators_)
+    candidates.insert(entry.second.get());
+  collect_link_references(candidates, referred);
+  for (const auto &e : iterators_)
+    for (const auto *ref : {e.second->next, e.second->prev, e.second->partner})
+      if (ref && candidates.count(ref))
+        referred.insert(ref);
   for (auto i = completed_iterators_.begin();
        i != completed_iterators_.end();) {
     auto found = iterators_.find(*i);
@@ -479,6 +517,65 @@ World::handle_object_identity(const rta::Object *object) const {
     return {};
   return std::make_pair(found->second->serial, found->second->addr);
 }
+std::vector<std::pair<std::uint64_t, std::uint32_t>>
+World::live_retained_identities() const {
+  std::vector<std::pair<std::uint64_t, std::uint32_t>> out;
+  for (const auto &entry : storage_)
+    if (entry->alive)
+      out.emplace_back(entry->serial, entry->addr);
+  return out;
+}
+void World::validate_snapshot_references() const {
+  std::set<const Link *> links;
+  auto add = [&](const Cell &cell) { links.insert(&cell); };
+  add(run_active);
+  add(off_grid);
+  add(always_draw);
+  add(delete_list);
+  for (const auto &cell : grid)
+    add(cell);
+  for (const auto &cell : grid_b)
+    add(cell);
+  for (const auto &cell : run15)
+    add(cell);
+  for (const auto &cell : run60)
+    add(cell);
+  for (const auto &entry : extra_cells_)
+    add(*entry.second);
+  for (const auto *node : handles.nodes())
+    links.insert(node);
+  for (const auto &entry : storage_)
+    for (const auto &head : entry->heads)
+      add(head);
+  std::set<const Link *> iterators;
+  for (const auto &entry : iterators_) {
+    iterators.insert(entry.second.get());
+    if (!completed_iterators_.count(entry.first))
+      links.insert(entry.second.get());
+  }
+  std::vector<const Link *> pending(links.begin(), links.end());
+  for (std::size_t i = 0; i < pending.size(); ++i)
+    for (const auto *p :
+         {pending[i]->next, pending[i]->prev, pending[i]->partner})
+      if (iterators.count(p) && links.insert(p).second)
+        pending.push_back(p);
+  if (handles.free && !links.count(handles.free))
+    throw ObjectError("snapshot refers to a foreign link");
+  auto object = [&](const rta::Object *p) {
+    if (p && !owned_objects_.count(p))
+      throw ObjectError("snapshot refers to a foreign object");
+  };
+  for (const auto *link : links) {
+    for (const auto *p : {link->next, link->prev, link->partner})
+      if (p && !links.count(p))
+        throw ObjectError("snapshot refers to a foreign link");
+    object(link->object_ref().object);
+  }
+  for (const auto &entry : objects)
+    object(entry.second);
+  for (const auto *entry : names.objs)
+    object(entry);
+}
 WorldSnapshot World::snapshot() const {
   WorldSnapshot out;
   out.pool = pool;
@@ -616,5 +713,109 @@ WorldSnapshot World::snapshot() const {
   out.callbacks = {bool(on_run), bool(on_destroy), bool(is_frozen),
                    bool(res_find), bool(end_of_tick)};
   return out;
+}
+void World::checkpoint(rta::detail::Checkpoint &a) {
+  using A = rta::detail::Checkpoint;
+  A::require(storage_.size() == 1 && objects.size() == 1,
+             "checkpoint requires closed singleton World");
+  auto &o = *storage_[0];
+  a.fields(o.flags, o.pos, o.radius, o.height, o.vz, o.angle, o.seed);
+  a.fields(shared.state, cursor15, cursor60, frame, menu_lockout,
+           menu_lockout_hold, warmup_frames, start_rank, tasks.cursor,
+           iterator_serial_, pool_free_count);
+  for (auto &p : pads)
+    a.fields(p.held, p.pressed, p.edge2);
+  A::require(frame >= 0 &&
+                 (a.play_continuation
+                      ? (frame <= 0x7ffffffd &&
+                         iterator_serial_ <= UINT64_C(0x7fffffffffffffff))
+                      : (frame <= 2000 && iterator_serial_ <= MAX_WORK)),
+             "checkpoint World counters");
+  auto view = snapshot();
+  std::map<std::uint64_t, Link *> refs;
+  for (const auto &c : handle_cells())
+    refs.emplace(c.identity, const_cast<Cell *>(c.cell));
+  for (auto *n : handles.nodes())
+    refs.emplace(HandlePool::NODE_BASE + HandlePool::NODE_SIZE * n->index, n);
+  // Finished iterators retained by stale node references are value state too.
+  // Their constructors touch a fresh empty cell only; the checked graph below
+  // subsequently replaces every link without invoking gameplay callbacks.
+  if (a.reading) {
+    iterators_.clear();
+    completed_iterators_.clear();
+  } else
+    for (const auto &e : iterators_)
+      refs.emplace(UINT64_C(0x8000000000000000) | e.first, e.second.get());
+  auto count = a.count(view.links.size());
+  std::vector<LinkSnapshot> links(count);
+  if (!a.reading)
+    links = std::move(view.links);
+  std::uint64_t previous = 0;
+  for (auto &v : links) {
+    a.fields(v.id, v.next, v.prev, v.partner, v.object, v.kind, v.tag,
+             v.object_raw);
+    A::require(v.id > previous && !v.object_raw &&
+                   (v.object == 0 || v.object == o.serial),
+               "checkpoint link identity");
+    previous = v.id;
+    if (a.reading && v.kind == LinkKind::Iterator) {
+      auto id = v.id & UINT64_C(0x7fffffffffffffff);
+      A::require((v.id >> 63) && id && id <= iterator_serial_ && !v.prev,
+                 "checkpoint idle iterator");
+      auto it = std::make_unique<Iterator>(off_grid, v.tag);
+      refs.emplace(v.id, it.get());
+      iterators_.emplace(id, std::move(it));
+      completed_iterators_.insert(id);
+    }
+    auto found = refs.find(v.id);
+    A::require(found != refs.end() && found->second->kind == v.kind,
+               "checkpoint unknown link");
+  }
+  A::require(count == refs.size(), "checkpoint missing graph links");
+  auto resolve = [&](std::uint64_t id) -> Link * {
+    if (!id)
+      return nullptr;
+    auto i = refs.find(id);
+    A::require(i != refs.end(), "checkpoint dangling link");
+    return i->second;
+  };
+  auto free = view.handle_free;
+  a.value(free);
+  if (a.reading) {
+    for (const auto &v : links) {
+      auto *p = refs.at(v.id);
+      p->next = resolve(v.next);
+      p->prev = resolve(v.prev);
+      p->partner = resolve(v.partner);
+      p->obj = v.object ? &o : nullptr;
+      p->object_raw = 0;
+      p->tag = v.kind == LinkKind::Iterator ? 0 : v.tag;
+    }
+    handles.free = resolve(free);
+    // Next chains are acyclic and contain no list heads. Completed iterators
+    // may retain stale prev/partner fields; do not invent reciprocal rules.
+    std::map<Link *, unsigned> colour;
+    for (const auto &entry : refs) {
+      std::vector<Link *> chain;
+      auto *p = entry.second;
+      while (p && colour[p] == 0) {
+        colour[p] = 1;
+        chain.push_back(p);
+        A::require(!p->next || p->next->kind != LinkKind::Cell,
+                   "checkpoint next points to head");
+        p = p->next;
+      }
+      A::require(!p || colour[p] == 2, "checkpoint next-chain cycle");
+      for (auto *link : chain)
+        colour[link] = 2;
+    }
+
+    // All links point to known owned storage. Validate free-list termination
+    // before any simulation can traverse it.
+    std::set<Link *> seen;
+    for (auto *p = handles.free; p; p = p->next)
+      A::require(p->kind == LinkKind::Node && seen.insert(p).second,
+                 "checkpoint free-list cycle");
+  }
 }
 } // namespace champions::simulation::rta::objects

@@ -1,0 +1,25 @@
+# PS2 memory-card slot and options images (docs/PS2_SAVE_IMPORT.md). Port of the
+# pinned research reader at t3/research-saves 8d43286. No Godot dependency.
+include_guard(GLOBAL)
+set(CHAMPIONS_PS2_SAVE_ROOT "${CMAKE_CURRENT_LIST_DIR}")
+# The native build defines the profile registry; the Godot extension build does not.
+if(NOT TARGET champions-game-profiles)
+    add_library(champions-game-profiles "${CHAMPIONS_PS2_SAVE_ROOT}/src/game_profile.cpp")
+    target_include_directories(champions-game-profiles PUBLIC "${CHAMPIONS_PS2_SAVE_ROOT}/include")
+    set_target_properties(champions-game-profiles PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+add_library(champions-ps2-save "${CHAMPIONS_PS2_SAVE_ROOT}/src/ps2_save.cpp")
+target_include_directories(champions-ps2-save PUBLIC "${CHAMPIONS_PS2_SAVE_ROOT}/include")
+target_link_libraries(champions-ps2-save PUBLIC champions-script-builtins champions-items champions-core
+    champions-game-profiles)
+set_target_properties(champions-ps2-save PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(champions-ps2-save PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(champions-ps2-save PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+if(BUILD_TESTING)
+    add_executable(champions-ps2-save-tests "${CHAMPIONS_PS2_SAVE_ROOT}/tests/ps2_save_tests.cpp")
+    target_link_libraries(champions-ps2-save-tests PRIVATE champions-ps2-save)
+    add_test(NAME ps2-save COMMAND champions-ps2-save-tests)
+endif()

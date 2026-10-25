@@ -1,0 +1,17 @@
+{
+  "research_commit": "ecf9742",
+  "policy": "rta-item-drops-v1",
+  "seed": 20973,
+  "cases": 400,
+  "one_shared_draw_cases": 264,
+  "files": {
+    "docs/spec/item-drops.md": "25ddb30f1904c61d1054dcfeaf7a7197df234d87f55c1147b50c04ca944ec187",
+    "docs/spec/items-gaps.md": "45be1683799b972d49ca1e30c1d30c28eba9c979c37c8f924a23dabf0c2179cd",
+    "tools/ref_item_drops.py": "e6cbe5c5baf088450f4af3e0d255914e920ced8a7adf05f31b3977476676fe61",
+    "tools/difftest_item_drops.py": "ae87cc86ab93426a4a692bad87ea9ad8ccd58c655af66d1571381883eacc5118",
+    "tools/test_ref_item_drops.py": "4eff1f943a485ef34656701db187b6d17f1a3d78e05630efef72d58a205a14a5",
+    "tools/ref_script_items.py": "34d35c696497b63c6edc1d7f69193df005e8a74dd1e1b65165a2534f1145f281",
+    "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+  }
+}

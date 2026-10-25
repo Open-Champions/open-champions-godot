@@ -375,6 +375,59 @@ void bounds() {
   check(piece.data().elements[0].z == 0,
         "bad piece leaves unrelated element unchanged");
 }
+void sight_rays() {
+  // Authored analogue of ref_world.py's room: the heightfield has a wall
+  // from sample x=10. No disc data or arena level geometry is embedded.
+  W::LevelData d;
+  d.tg_x0 = d.tg_y0 = -1;
+  d.tg_w = d.tg_h = 2;
+  d.grid = {{0}, {0}, {0}, {0}};
+  W::HeightField h;
+  h.x0 = h.y0 = -20;
+  h.w = h.h = 40;
+  h.lo = 0;
+  h.hi = 40;
+  h.samples.reserve(1600);
+  for (int y = -20; y < 20; ++y)
+    for (int x = -20; x < 20; ++x)
+      h.samples.push_back(x >= 10 ? 640 : (y == -10 ? 2 : 0));
+  d.heightfields.push_back(std::move(h));
+  d.elements.push_back(W::make_element(0, -88, -88, 84, 84, 0, 4,
+                                       0, 0, 0, 32767, 0));
+  W::Level level(d);
+  check(W::terrain_raycast(level, R::ONE, {0, 0, f(5)}, {f(60), 0, 0}, 0) ==
+            0x3f3bbbbbu,
+        "disc-style sight ray hits the synthetic wall at the reference parameter");
+  check(W::terrain_raycast(level, R::ONE, {0, 0, f(5)}, {f(30), 0, 0}, 0) ==
+            0xbf800000u,
+        "sight ray with insufficient reach returns the clear-line answer");
+  check(W::terrain_raycast(level, R::ONE, {f(2), f(2), f(30)},
+                           {0, 0, f(-1)}, 0) == f(30),
+        "vertical downward ray uses the documented distance branch");
+  check(W::terrain_raycast(level, R::ONE, {0, 0, f(5)},
+                           {0, f(-60), 0}, 0) == 0xbf800000u &&
+            W::terrain_raycast(level, R::ONE, {0, 0, f(5)},
+                               {0, f(-60), 0}, 3) != 0xbf800000u,
+        "ray flags promote the marked sample only when requested");
+  // Independent ref_world.py results on this authored room, away from its
+  // unused negative-X ledge. These include angled and sloped sight lines.
+  struct RayCase { W::Vec3 origin, direction; R::Raw flags, expected; };
+  const RayCase cases[] = {
+      {{0, 0, f(5)}, {f(80), 0, 0}, 0, 0x3f0cccccu},
+      {{f(10), 0, f(5)}, {f(50), 0, 0}, 0, 0x3f23d70au},
+      {{0, 0, f(20)}, {f(100), 0, 0}, 0, 0x3ee147adu},
+      {{0, 0, f(50)}, {f(100), 0, 0}, 0, 0xbf800000u},
+      {{0, 0, f(5)}, {f(60), f(10), 0}, 0, 0x3f392dd3u},
+      {{0, 0, f(5)}, {f(60), f(-10), 0}, 0, 0x3f392dd3u},
+      {{0, 0, f(5)}, {f(60), 0, f(20)}, 0, 0x3f3bbbbbu},
+      {{0, 0, f(5)}, {f(60), 0, f(-20)}, 0, 0x3e888888u},
+      {{0, 0, f(5)}, {0, f(-60), 0}, 3, 0x3f3bbbbbu},
+  };
+  for (const auto &ray : cases)
+    check(W::terrain_raycast(level, R::ONE, ray.origin, ray.direction,
+                             ray.flags) == ray.expected,
+          "terrain ray matches the independent synthetic reference bitwise");
+}
 } // namespace
 int main() {
   try {
@@ -385,6 +438,7 @@ int main() {
     empty_ranges_and_signed_masks();
     piece_mask_and_nested_budget();
     bounds();
+    sight_rays();
     std::cout << checks << " world query checks passed\n";
     return 0;
   } catch (const std::exception &e) {

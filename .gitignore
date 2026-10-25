@@ -30,3 +30,16 @@ __pycache__/
 
 # Regenerated exact vector text is published as deterministic gzip fixtures.
 /native/tests/vectors/*.tsv
+/local/
+
+# Exact-vector corpora over 5 MB are generated locally (native/tests/vectors/README.md).
+/native/tests/vectors/arena_monsters.tsv
+/native/tests/vectors/script_builtins.tsv.gz
+/native/tests/vectors/player.tsv.gz
+/native/tests/vectors/monsters_1.tsv.gz
+/native/tests/vectors/skills_a.tsv.gz
+/native/tests/vectors/skills_b.tsv.gz
+/native/tests/vectors/skills_c.tsv.gz
+/native/tests/vectors/session_facing.tsv.gz
+/native/tests/vectors/combat_runtime_2.txt.gz
+/native/tests/dialog_vectors.tsv

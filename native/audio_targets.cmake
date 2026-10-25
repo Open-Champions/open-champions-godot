@@ -1,0 +1,21 @@
+add_library(champions-native-audio src/audio/native_audio.cpp src/audio/music_volume.cpp)
+target_include_directories(champions-native-audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set_target_properties(champions-native-audio PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(champions-native-audio PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-native-audio PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+if(BUILD_TESTING)
+    add_executable(champions-native-audio-tests tests/native_audio_tests.cpp)
+    target_link_libraries(champions-native-audio-tests PRIVATE champions-native-audio)
+    add_test(NAME native-audio COMMAND champions-native-audio-tests)
+    add_executable(champions-music-volume-tests tests/music_volume_tests.cpp)
+    target_link_libraries(champions-music-volume-tests PRIVATE champions-native-audio)
+    add_test(NAME music-volume-host COMMAND champions-music-volume-tests)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME music-volume-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_music_volume_vectors.py"
+        "$<TARGET_FILE:champions-music-volume-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/music_volume.txt.gz")
+endif()

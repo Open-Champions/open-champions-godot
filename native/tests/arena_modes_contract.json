@@ -1,0 +1,12 @@
+{
+  "research": "t3/research-arena",
+  "commit": "17810bb0f9a3474fbeae9e86d339cb72ccd0f154",
+  "sha256": {
+    "docs/arena-modes.md": "1dafe8b50e9d604ac387a87fe9d3c94490b6026f3eda4501cfd72da607c07a58",
+    "tools/ref_arena_modes.py": "839f500b3e77b4e830b43d4f131177b43a54542a52335c181edc30f455a06cbe",
+    "tools/test_ref_arena_modes.py": "e15df52033d91b4c5acc7eabc91b2d2c5a3f16d5fc010bb75695d809bd7e555b",
+    "tools/difftest_arena_modes.py": "1d9d226a1d674841ee3eb4fcd0fcc28d8d2e98476105fa5d16b60763bd572de8",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "docs/issues/claims-audit.md": "a734087616c3a2853e5496092b82cedd2052b7352bd042282e44300f80cad30f"
+  }
+}

@@ -69,7 +69,16 @@ Raw frost_armor_on_hit(World &w, Spell &spell, Raw damage, Obj *attacker) {
   if (!attacker)
     return factor;
   const auto roll = w.draw_shared() % 100;
-  if (!(std::int64_t(roll) < w.stat_for(spell.skill, 2, level, spell.owner, 0)))
+  const auto chance = w.stat_for(spell.skill, 2, level, spell.owner, 0);
+  // A carrier that is its own attacker (the burn tick, research-combat-ctors-2
+  // fire-touch.md section 3) strikes back at itself through damage_apply
+  // again while the roll is below the chance. With a chance of 100 or more
+  // every roll is, and the original recurses until its stack runs out.
+  if (attacker == spell.owner && !(chance < 100))
+    throw Unsupported("Frost Armor on a carrier that hits itself with a strike-back "
+                      "chance of 100 or more re-enters damage_apply without end "
+                      "(fire-touch.md section 3)");
+  if (!(std::int64_t(roll) < chance))
     return factor;
   const auto amount = s16(ftoi(fsub(damage, factor)));
   Descriptor desc = EMPTY_DESC;

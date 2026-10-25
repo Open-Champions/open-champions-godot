@@ -2,8 +2,10 @@
 // 2f937fca823488bc97b9680fde9d957c3fa9907a, SHA256
 // 2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5.
 // Strip/transform contract: docs/formats/world.md; program scope and two-sided
-// presentation: docs/spec/render-pipeline.md at abf07ea. No original assets or
-// executable instructions are included. Binary64 here is never gameplay state.
+// presentation: docs/spec/render-pipeline.md at abf07ea. Water tiles and
+// moving pieces: docs/formats/world.md and docs/level-flow.md sections 11-12 on
+// research t3/research-levels 36036da. No original assets or executable
+// instructions are included. Binary64 here is never gameplay state.
 #include "champions/world_geometry.hpp"
 #include <algorithm>
 #include <cmath>
@@ -78,7 +80,8 @@ void validate_limits(const Limits &l) {
   CAP(max_render_triangles);
 #undef CAP
 }
-void header(const Reader &r, Geometry &g, std::size_t size, const Limits &l) {
+void header(const Reader &r, Geometry &g, std::size_t size, const Limits &l,
+            const Policy &policy) {
   r.span(0, 0x84);
   for (std::size_t i = 0; i < 33; ++i)
     g.header_words[i] = r.u32(i * 4);
@@ -113,7 +116,8 @@ void header(const Reader &r, Geometry &g, std::size_t size, const Limits &l) {
   require(u(0x50) <= 10000, "invalid WORLD piece count");
   if (u(0x50))
     r.span(u(0x54), Offset(u(0x50)) * 0x1c);
-  supported(u(0x50) == 0, "moving WORLD pieces are unsupported");
+  supported(policy.moving_pieces || u(0x50) == 0,
+            "moving WORLD pieces are unsupported");
   const auto lo = std::int64_t(signed32(u(0x58))),
              hi = std::int64_t(signed32(u(0x5c)));
   require(lo <= hi && hi - lo < 20000, "invalid WORLD texture cell range");
@@ -311,24 +315,33 @@ Packet packet(const Reader &r, std::uint32_t offset, std::uint32_t qwc,
   require(!out.batches.empty(), "WORLD packet has no geometry batches");
   return out;
 }
-std::array<double, 4> matrix(const Chunk &c) {
-  if (c.flags & 1) {
-    const auto code = std::uint16_t(c.rotation[0]) & 7;
+} // namespace
+std::array<double, 4> chunk_matrix(std::uint32_t flags,
+                                   const std::array<std::int16_t, 3> &rotation) {
+  if (flags & 1) {
+    const auto code = std::uint16_t(rotation[0]) & 7;
     const double x = (code & 1) ? -1 : 1, y = (code & 2) ? -1 : 1;
     return (code & 4) ? std::array<double, 4>{0, y, x, 0}
                       : std::array<double, 4>{x, 0, 0, y};
   }
-  const double co = c.rotation[0] / 32767.0, si = c.rotation[1] / 32767.0;
-  return (c.flags & 0x40) ? std::array<double, 4>{co, si, si, -co}
-                          : std::array<double, 4>{co, -si, si, co};
+  const double co = rotation[0] / 32767.0, si = rotation[1] / 32767.0;
+  return (flags & 0x40) ? std::array<double, 4>{co, si, si, -co}
+                        : std::array<double, 4>{co, -si, si, co};
 }
-} // namespace
-Geometry decode(const std::vector<std::uint8_t> &bytes, Limits limits) {
+bool WaterTile::cell(unsigned row, unsigned column) const {
+  if (row > 31 || column > 31)
+    throw Error("WORLD water mask cell outside 32 x 32");
+  const auto at = (row / 16) * 64 + column * 2;
+  const auto half = std::uint32_t(mask[at]) | (std::uint32_t(mask[at + 1]) << 8);
+  return (half >> (15 - row % 16)) & 1;
+}
+Geometry decode(const std::vector<std::uint8_t> &bytes, Limits limits,
+                Policy policy) {
   validate_limits(limits);
   budget(bytes.size(), limits.max_input_bytes, "WORLD input budget exceeded");
   Reader r(bytes);
   Geometry out;
-  header(r, out, bytes.size(), limits);
+  header(r, out, bytes.size(), limits, policy);
   Limits left = limits;
   const auto n = out.header_words[0], co = out.header_words[0x24 / 4];
   out.chunks.reserve(n);
@@ -350,11 +363,26 @@ Geometry decode(const std::vector<std::uint8_t> &bytes, Limits limits) {
     }
     c.cell = r.i16(p + 0x34);
     r.span(c.data_offset, 1);
-    supported(!(c.flags & 0x80), "WORLD water is unsupported");
-    supported(!(c.flags & 0x20), "moving WORLD chunk is unsupported");
+    supported(policy.water || !(c.flags & 0x80), "WORLD water is unsupported");
+    supported(policy.moving_pieces || !(c.flags & 0x20),
+              "moving WORLD chunk is unsupported");
     const auto kind = c.flags & NOT_MESH;
     require(!kind || !(kind & (kind - 1)), "conflicting WORLD chunk kinds");
-    if (kind == 0x800) {
+    if (kind == 0x80) {
+      r.span(c.data_offset, 0x90);
+      WaterTile w;
+      w.chunk = i;
+      for (std::size_t j = 0; j < 4; ++j) {
+        w.neighbours[j] = r.i16(Offset(c.data_offset) + j * 2);
+        require(w.neighbours[j] >= -1 && std::uint32_t(w.neighbours[j] + 1) <= n,
+                "WORLD water neighbour outside chunk table");
+      }
+      w.runtime_grid = r.u32(Offset(c.data_offset) + 8);
+      for (std::size_t j = 0; j < 128; ++j)
+        w.mask[j] = r.u8(Offset(c.data_offset) + 0x10 + j);
+      w.second_set = (c.flags & 0x1000) != 0;
+      out.water.push_back(w);
+    } else if (kind == 0x800) {
       r.span(c.data_offset, 0xb0);
       ++out.omitted_models;
     } else if (kind == 0x4000) {
@@ -365,6 +393,28 @@ Geometry decode(const std::vector<std::uint8_t> &bytes, Limits limits) {
       ++out.omitted_lights;
     }
     out.chunks.push_back(std::move(c));
+  }
+  const auto piece_count = out.header_words[0x50 / 4],
+             piece_table = out.header_words[0x54 / 4];
+  out.pieces.reserve(piece_count);
+  for (std::uint32_t i = 0; i < piece_count; ++i) {
+    const Offset p = Offset(piece_table) + Offset(i) * 0x1c;
+    MovingPiece m;
+    m.first_chunk = r.i32(p);
+    m.count = r.i16(p + 4);
+    m.runtime_flags = r.u16(p + 6);
+    for (std::size_t j = 0; j < 3; ++j)
+      m.rest_translation[j] = r.i32(p + 8 + j * 4);
+    m.rest_cosine = r.i16(p + 0x14);
+    m.rest_sine = r.i16(p + 0x16);
+    m.element = r.i16(p + 0x18);
+    m.unknown_1a = r.i16(p + 0x1a);
+    // A count <= 0 names no chunk (world_movePiece then writes nothing).
+    if (m.count > 0)
+      require(m.first_chunk >= 0 &&
+                  std::uint64_t(m.first_chunk) + std::uint64_t(m.count) <= n,
+              "WORLD moving piece chunks outside chunk table");
+    out.pieces.push_back(m);
   }
   std::map<std::pair<std::uint32_t, std::uint32_t>, std::size_t> cache;
   for (auto &c : out.chunks) {
@@ -380,7 +430,7 @@ Geometry decode(const std::vector<std::uint8_t> &bytes, Limits limits) {
     }
     c.packet_index = found->second;
     const auto &p = out.packets[*c.packet_index];
-    const auto m = matrix(c);
+    const auto m = chunk_matrix(c.flags, c.rotation);
     c.world_vertices.reserve(p.batches.size());
     for (const auto &b : p.batches) {
       charge(b.positions.size(), left.max_transformed_vertices);

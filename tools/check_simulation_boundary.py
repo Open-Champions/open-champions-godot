@@ -40,17 +40,37 @@ def simulation_paths(root):
     paths += [root / "native/include/champions/terrain_file.hpp", root / "native/src/terrain_file.cpp"]
     paths += [root / "native/include/champions/session_control.hpp", root / "native/src/session_control.cpp"]
     paths += [root / "native/src/creature_movement.cpp", root / "native/include/champions/creature_movement.hpp"]
+    paths += [root / "native/src/creature_water.cpp", root / "native/include/champions/creature_water.hpp"]
     paths += [root / "native/src/animation_clock.cpp", root / "native/include/champions/animation_clock.hpp"]
     paths += [root / "native/src/animation_decoder.cpp", root / "native/include/champions/animation_decoder.hpp"]
-    if len(paths) != 56 or not all(path.is_file() for path in paths):
-        raise ValueError("expected thirty simulation sources, twenty-four public headers and two internal headers")
+    paths += [root / "native/src/animation_runtime.cpp", root / "native/include/champions/animation_runtime.hpp"]
+    paths += [root / "native/src/native_save.cpp", root / "native/include/champions/native_save.hpp",
+              root / "native/include/champions/detail/checkpoint.hpp",
+              root / "native/include/champions/detail/checkpoint_fields.hpp"]
+    for stem in ("player", "session_recovery"):
+        paths += [root / "native/src" / (stem + ".cpp"),
+                  root / "native/include/champions" / (stem + ".hpp")]
+    paths.append(root / "native/include/champions/detail/skill_kernel.hpp")
+    paths.append(root / "native/include/champions/session_anim_cache.hpp")
+    paths += [root / "native/include/champions/control_anim_cache.hpp",
+              root / "native/src/control_anim_cache.cpp",
+              root / "native/include/champions/detail/checkpoint_control_anim_cache.hpp"]
+    paths.append(root / "native/include/champions/play_session.hpp")
+    paths += [root / "native/src/level_play.cpp", root / "native/include/champions/level_play.hpp"]
+    paths += [root / "native/src/combat_play.cpp", root / "native/include/champions/combat_play.hpp"]
+    paths += [root / "native/src/play_animation.cpp", root / "native/include/champions/play_animation.hpp"]
+    if len(paths) != 80 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 80 simulation sources and headers")
     return paths
 
 
 def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
-    allowed.update({"objects_internal.hpp", "world_queries_internal.hpp"})
+    allowed.update({"champions/creature_anim/dispatch.hpp", "champions/session_level_flow.hpp", "champions/level_flow_water_adapter.hpp", "champions/combat_runtime.hpp", "champions/session_combat_runtime_adapter.hpp", "objects_internal.hpp", "world_queries_internal.hpp",
+                    "champions/detail/checkpoint.hpp", "champions/detail/checkpoint_fields.hpp",
+                    "champions/detail/skill_kernel.hpp",
+                    "champions/detail/checkpoint_control_anim_cache.hpp"})
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "exception", "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "set", "stdexcept", "string",

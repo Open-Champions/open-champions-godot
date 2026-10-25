@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::combat_creature {
 // Authored composition, not an object allocator or a shared object-World pool.
 enum class Projection { CreatureFields, None };
@@ -110,6 +114,9 @@ struct Snapshot {
   ModelSnapshot model;
 };
 class Adapter {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
+
 public:
   using HandleCallback =
       std::function<void(Adapter &, const std::vector<std::uint32_t> &)>;

@@ -1,4 +1,5 @@
 #include "champions/combat_creature.hpp"
+#include "champions/detail/checkpoint_fields.hpp"
 #include <algorithm>
 #include <array>
 #include <exception>
@@ -631,5 +632,49 @@ Snapshot Adapter::snapshot() const {
   for (const auto &b : m.callbacks)
     n.callbacks.emplace_back(b.first, bool(b.second));
   return out;
+}
+void Adapter::checkpoint(detail::Checkpoint &a) {
+  auto &s = *state_;
+  detail::Checkpoint::require(!s.depth && s.callbacks.empty() &&
+                                  s.entries.size() == 1,
+                              "checkpoint requires idle single-record adapter");
+  auto &o = s.entries[0]->object;
+  detail::Checkpoint::require(!o.owner && !o.status_source &&
+                                  !o.last_attacker && o.spells.empty(),
+                              "checkpoint foreign combat identity");
+  // All mutable fields of the closed base HP record; other combat fields are
+  // constructor defaults and are outside this Controller's mutation surface.
+  a.fields(o.flags, o.pos, o.cflags, o.hp, o.status);
+  auto &w = s.world;
+  a.value(w.frame);
+  a.history(w.events);
+  a.value(w.seed.state);
+  a.history(w.seed.draws);
+  a.value(w.cosmetic.state);
+  a.history(w.cosmetic.draws);
+  detail::CheckpointAccess::run(s.model.mem, a);
+  a.history(s.model.writes, s.model.calls, s.model.events);
+  detail::CheckpointAccess::history(s.model, a);
+  a.value(s.model.draws);
+  const auto address = s.entries[0]->binding.address;
+  detail::Checkpoint::require(
+      s.model.mem.load(address + 0xc, 4) == o.flags &&
+          s.model.mem.load(address + 0x228, 4) == o.hp &&
+          s.model.mem.load(address + 0xa8, 8) == o.cflags &&
+          s.model.mem.load(creature_hp::G_SIM_FRAME, 4) ==
+              std::uint64_t(w.frame),
+      "checkpoint combat projection mismatch");
+  for (unsigned i = 0; i < 3; ++i)
+    detail::Checkpoint::require(s.model.mem.load(address + 0x10 + 4 * i, 4) ==
+                                    o.pos.at(i),
+                                "checkpoint position projection mismatch");
+  for (unsigned i = 0; i < 5; ++i)
+    detail::Checkpoint::require(s.model.mem.load(address + 0x340 + 4 * i, 4) ==
+                                    o.status.at(i),
+                                "checkpoint status projection mismatch");
+
+  detail::Checkpoint::require(o.flags <= UINT32_MAX && o.pos.size() == 3 &&
+                                  o.status.size() == 5,
+                              "checkpoint combat field shape");
 }
 } // namespace champions::simulation::rta::combat_creature

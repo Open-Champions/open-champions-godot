@@ -1,0 +1,17 @@
+{
+  "commit": "2502e2bfac58203ac0174fccd7e0953b36d06439",
+  "sha256": {
+    "docs/spec/rendered-creature-animation.md": "ec303b56dbd2019070edada2050fb401a454525948a017079458dc5f9d045abd",
+    "docs/spec/research-anim-handoff.md": "192189db8e4339411ac5e7b41c7f8d368acb7afe8f534a1532ce0c7b2a0ddd82",
+    "docs/spec/animation.md": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab",
+    "docs/spec/monsters-1.md": "4c70c678d0f2d0060f330054b157778e2b3535fed56e9fca456ce2bedbe76348",
+    "tools/ref_anim.py": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_monsters_1.py": "33a76a127c66ffd0b4c8c91c014d250c91c567cd168c2bc8870d5abae647c4d0",
+    "tools/ref_creature_animation.py": "3d55ce6558f398fa287ca09d977a75795a65107365a0e0c6a0485e414e658344",
+    "tools/test_ref_anim.py": "ebcd168d85c8e483a765a56951319ba2d1974c9db7f7d707654a753ce4dfe8d9",
+    "tools/test_ref_creature_animation.py": "d848bc4670a92e6299e9aad28e9a9dbcf3bb9b3da5952361727614649ce96cd3",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16"
+  }
+}

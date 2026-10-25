@@ -11,6 +11,9 @@ reference evidence; Norrath remains unverified. Neither title selection certifie
 that an archive contains supported game assets. The [texture preview](TEXTURE_PREVIEW.md)
 now covers limited RTA 32-bit, plain 4-bit and 8-bit lump formats. The [static model viewer](MODEL_PREVIEW.md) supports a bounded rest-pose subset. The
 [animation joint viewer](ANIMATION_VIEWER.md) displays manually sampled RTA clips.
+The [UI art gallery](UI_FRAMES.md#round-two-runtime-ui-art-gallery-and-measurement-tool)
+lists flag-based RTA texture candidates and saves manual frame measurements locally.
+It is reachable from the archive browser; it does not reconstruct a composed HUD.
 Other texture layouts, materials, animation playback, audio,
 scripts and gameplay remain unimplemented.
 
@@ -109,6 +112,9 @@ exported application and the UI before claiming support on another platform.
 
 ## Verified desktop packages
 
+For current Windows artifact inspection, double-click instructions and the
+optional Mac-to-Windows cross-export route, see [Windows packages](WINDOWS_PACKAGE.md).
+
 The Godot workflow exports and runs a standalone application on each of its five
 hosts, then uploads a ZIP with its complete export, licenses, build information
 and SHA-256 checksum. Mac jobs build Universal 2 binaries and execute them on
@@ -167,3 +173,156 @@ separate milestones in the [roadmap](ROADMAP.md).
 
 For the later 32-bit, plain 4-bit and 8-bit texture additions, including real private
 Mac rendering checks and current platform evidence, see [texture previews](TEXTURE_PREVIEW.md).
+
+
+## Local verification — 2026-10-13
+
+Verified on this Apple Silicon Mac from clean `main` revision
+`103aac54670b7f57669157df2750d1648f310434` in `codex/godot-health`.
+`HEAD`, local `main` and `origin/main` matched before the run; this is a
+verification of that revision, not a claim about later remote changes. No build,
+Godot import cache or extension binaries existed in this worktree.
+
+Host: arm64, macOS 27.2 (26B5101f), Apple Clang 21.0.0, CMake 4.4.4,
+Python 3.12.3 (CMake selected Python 3.14.8). Dependencies were freshly fetched
+into ignored `work/`: the pinned godot-cpp commit and official Godot
+`4.5.2.stable.official.6ce3de25a`. Runtime and matching export-template SHA-512
+checks passed against the pins in the workflow and packaging helper.
+
+- Release-optimized host debug binding: built successfully.
+- Fresh bounded headless editor import: normal exit and both expected caches.
+- Real editor-runtime browser smoke: 283 checks, zero failures, PASS.
+- Real editor-runtime movement/health smoke: 70 checks, zero failures,
+  `SESSION_SANDBOX_SMOKE_PASS`.
+- Default movement/health scene: normal headless launch and exit after 120 frames.
+- Universal 2 debug and release bindings: built successfully; both contain
+  `arm64` and `x86_64`.
+- Documented packaging helper: exported the release app, verified executable and
+  extension architectures, and ran the actual exported app on arm64. Independent
+  exported browser and sandbox tests passed 283 and 70 checks respectively,
+  with zero failures. Normal exported default-scene headless launch also passed.
+- Native Release configure/build and the full `ctest -j 3` run: 100/100 cases
+  passed in 1085.19 seconds; no failures, timeouts or reruns.
+- Python tooling suite: 613 tests, OK, 343 skipped. Its mocked platform/package
+  tests are not execution evidence for other operating systems.
+
+Package: `build/desktop-package/OpenChampions-macos-universal.zip` (ignored),
+SHA-256 `f5eaa2b06ee2dfd6bf7b3b6797babca4d1bec35019d35ac2604b44d5ae38aab3`.
+Full local outputs are retained in `work/verification/commands.jsonl` and numbered
+logs, `build/desktop-package/*smoke.log`, and `build/native/Testing/Temporary/`.
+No reproducible client/build breakage was found, so only this dated evidence note
+was added; no simulation, binding, scene or build-script implementation changed.
+No private game inputs were used.
+
+This establishes headless build/import/test/export execution on this arm64 host.
+Graphics, keyboard/file-picker interaction, Intel execution, other operating
+systems, clean-machine installation, signing/notarization, original-game
+playability, Norrath behavior and cross-architecture state-trace equivalence
+were not verified by this run. Universal binary inspection alone is not Intel
+runtime evidence.
+
+### Executed verification commands and results
+
+Commands below ran from the worktree root and are listed in completion order
+(some independent build/download/test operations overlapped). Each command's
+exit status and elapsed seconds were captured, including two operator mistakes
+in an additional exported launch: an incorrect app basename (exit 127), then
+malformed shell quoting (exit 1). Reading `build-info.json` established the actual
+spaced app name; the correctly quoted launch passed. Neither failure was a
+repository defect.
+
+```sh
+# 1: PASS, exit 0, 0.06 s
+git status --porcelain --untracked-files=all; git rev-parse HEAD main origin/main; test ! -e build; test ! -e godot/.godot; test ! -e godot/bin
+
+# 2: PASS, exit 0, 0.97 s
+git clone --branch godot-4.5-stable --depth 1 --recurse-submodules https://github.com/godotengine/godot-cpp.git work/deps/godot-cpp
+
+# 3: PASS, exit 0, 1.91 s
+mkdir -p work/runtime && curl --fail --location --retry 2 https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_macos.universal.zip -o work/runtime/Godot_v4.5.2-stable_macos.universal.zip
+
+# 4: PASS, exit 0, 0.09 s
+git -C work/deps/godot-cpp checkout e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77
+
+# 5: PASS, exit 0, 4.25 s
+python3 -c 'import hashlib,pathlib; p=pathlib.Path("work/runtime/Godot_v4.5.2-stable_macos.universal.zip"); h=hashlib.sha512(p.read_bytes()).hexdigest(); print(h); assert h=="0b309feb20b5d6169abbb3a01563dbec0779c2172308c91f0183d0b141b15b5a6a072b388ae2dfc762f7c04da8ae2da9e1e7475d23bc3d24b1824aded2b5d7c0"' && ditto -xk work/runtime/Godot_v4.5.2-stable_macos.universal.zip work/runtime && work/runtime/Godot.app/Contents/MacOS/Godot --version
+
+# 6: PASS, exit 0, 1.59 s
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+
+# 7: PASS, exit 0, 0.13 s
+uname -m; sw_vers; cmake --version; python3 --version; xcrun clang++ --version
+
+# 8: PASS, exit 0, 2.42 s
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+
+# 9: PASS, exit 0, 28.72 s
+cmake --build build/godot-extension --config Release --parallel 4
+
+# 10: PASS, exit 0, 10.04 s
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+
+# 11: PASS, exit 0, 0.03 s
+test -f godot/.godot/extension_list.cfg && test -f godot/.godot/global_script_class_cache.cfg
+
+# 12: PASS, exit 0, 0.9 s
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+
+# 13: PASS, exit 0, 1.66 s
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd
+
+# 14: PASS, exit 0, 1.59 s
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120
+
+# 15: PASS, exit 0, 1.65 s
+cmake -S gdextension -B build/mac-template_debug -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+
+# 16: PASS, exit 0, 27.81 s
+python3 -m unittest discover -s tools -p 'test_*.py'
+
+# 17: PASS, exit 0, 12.33 s
+curl --fail --location --retry 2 https://github.com/godotengine/godot/releases/download/4.5.2-stable/Godot_v4.5.2-stable_export_templates.tpz -o work/runtime/Godot_v4.5.2-stable_export_templates.tpz
+
+# 18: PASS, exit 0, 72.28 s
+cmake --build build/native -j 4
+
+# 19: PASS, exit 0, 57.8 s
+cmake --build build/mac-template_debug --config Release --parallel 4
+
+# 20: PASS, exit 0, 1.11 s
+cmake -S gdextension -B build/mac-template_release -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+
+# 21: PASS, exit 0, 1.79 s
+python3 -c 'import hashlib,pathlib; from tools.desktop_package import TEMPLATE_SHA512; p=pathlib.Path("work/runtime/Godot_v4.5.2-stable_export_templates.tpz"); h=hashlib.sha512(p.read_bytes()).hexdigest(); print(h); assert h==TEMPLATE_SHA512'
+
+# 22: PASS, exit 0, 47.16 s
+cmake --build build/mac-template_release --config Release --parallel 4
+
+# 23: PASS, exit 0, 0.09 s
+lipo -archs godot/bin/champions_archive.macos.template_debug.dylib && lipo -archs godot/bin/champions_archive.macos.template_release.dylib
+
+# 24: PASS, exit 0, 25.23 s
+python3 tools/desktop_package.py --platform macos-universal --godot work/runtime/Godot.app/Contents/MacOS/Godot --templates work/runtime/Godot_v4.5.2-stable_export_templates.tpz --output-dir build/desktop-package --source-commit "$(git rev-parse HEAD)"
+
+# 25: FAIL, exit 127, 0.01 s
+build/desktop-package/OpenChampions-macos-universal/OpenChampions.app/Contents/MacOS/OpenChampions --headless --quit-after 120
+
+# 26: PASS, exit 0, 0.07 s
+cat build/desktop-package/exported-smoke.log build/desktop-package/exported-sandbox-smoke.log; cat build/desktop-package/OpenChampions-macos-universal.zip.sha256; git diff --exit-code -- native/ gdextension/ godot/; git status --short
+
+# 27: PASS, exit 0, 0.04 s
+python3 -c 'import json,pathlib; p=pathlib.Path("build/desktop-package/OpenChampions-macos-universal/build-info.json"); d=json.loads(p.read_text()); print(d["exported_executable"]); print(d["architectures"]); print(d["extension"])'
+
+# 28: FAIL, exit 1, 0.01 s
+\build/desktop-package/OpenChampions-macos-universal/Open Champions.app/Contents/MacOS/Open Champions' --headless --quit-after 120
+
+# 29: PASS, exit 0, 1.8 s
+"build/desktop-package/OpenChampions-macos-universal/Open Champions.app/Contents/MacOS/Open Champions" --headless --quit-after 120
+
+# 30: PASS, exit 0, 0.17 s
+git diff --check && git diff --stat && git diff --exit-code -- native/ gdextension/ godot/ && git status --short
+
+# 31: PASS, exit 0, 1085.22 s
+ctest --test-dir build/native --output-on-failure -j 3
+
+```

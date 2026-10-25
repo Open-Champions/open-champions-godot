@@ -1,0 +1,75 @@
+{
+  "compressed_sha256": "35699c500fb2acebffec017502b3131dbd3885fc4e611a780a57af6b1ddeda03",
+  "count": 528,
+  "expected_trace_sha256": "7d8f0b9ad4e938d145ac212b1dadbc0595189dad454a502205319b284827f1ab",
+  "generator_sha256": "4bd169b0d7c647c275f6143422796b6ec9155eee74fc376057df0dc3f88f85ac",
+  "helpers": {
+    "combat_snapshot": {
+      "path": "tools/generate_combat_creature_vectors.py",
+      "sha256": "a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd"
+    },
+    "generate_player_vectors": "58dcef968b9c89b3f80f7064f021df63dc43be813709750ef81abcf7a14625b9",
+    "generate_session_control_creature_vectors": "dc9c191e290eef1a12b0bbae7785e5209155e929217d2817e659104b2024d5c1",
+    "generate_session_recovery_vectors": "8275dd1537d5011c90a72615e957b3c275e11c5d641f28aef929613c0cc1ce1e",
+    "generate_session_turn_vectors": "a1ef9d149aee0066504e9f3a9d8d5b2e50a70cad0ee49f8bdcfb5509bb51a8be",
+    "session_control": {
+      "path": "tools/generate_session_control_vectors.py",
+      "sha256": "5f1c66378e6af01ba29c8479a21c945504d916f0370b65a72af9856b6ace10b5"
+    },
+    "session_creature": {
+      "path": "tools/generate_session_creature_vectors.py",
+      "sha256": "561310e62d8dc7ccf7488193298fa33f0c7703cbc0ff495dbca22ba0825d152d"
+    },
+    "session_hp": {
+      "path": "tools/generate_session_hp_vectors.py",
+      "sha256": "8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8"
+    },
+    "session_objects": {
+      "path": "tools/generate_session_objects_vectors.py",
+      "sha256": "05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4"
+    },
+    "session_terrain": {
+      "path": "tools/generate_session_terrain_vectors.py",
+      "sha256": "dfffb7ad22bacf5d62b2c3ed30617af6fcd3298982724fa5ced0ae9be01b527b"
+    },
+    "world_queries": {
+      "path": "tools/generate_world_queries_vectors.py",
+      "sha256": "293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf"
+    }
+  },
+  "policy": "rta-session-facing-v1",
+  "references": {
+    "combat": {
+      "commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+      "path": "tools/ref_combat.py",
+      "sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    },
+    "netwire": {
+      "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+      "path": "tools/ref_netwire.py",
+      "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+  },
+  "specification": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "session-facing",
+  "vector_sha256": "6210f678b2003a1a5a24f84434a5f1fa011672c4e7e00664f1e744efceeb3497"
+}

@@ -48,6 +48,9 @@ struct Event {
 // identity, collision service, shared RNG or original player controls are
 // inferred.
 class Model {
+  friend struct detail::CheckpointAccess;
+  void checkpoint_history(detail::Checkpoint &);
+  std::size_t writes_prefix_ = 0, calls_prefix_ = 0, events_prefix_ = 0;
   Limits limits_;
   std::unique_ptr<Memory> owned_memory_;
   std::size_t depth_ = 0;
@@ -64,6 +67,9 @@ public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   Memory &mem;
   std::map<std::string, Callback> callbacks;
+  // Optional owner dispatch for inherited movement in a derived contract.
+  // Receives the original object and arguments before virtual this adjustment.
+  std::function<Value(Address, std::uint32_t, std::vector<Value>)> virtual_dispatch;
   // Only Creature.v6/v10/v11 are supported external base-body overrides.
   std::set<std::string> external;
   std::vector<Write> writes;

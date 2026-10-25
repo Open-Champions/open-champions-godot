@@ -1,0 +1,22 @@
+{
+  "schema": "rta-script-commands-v1",
+  "reference_commit": "9649e6b",
+  "reference_file": "tools/ref_script_compose.py",
+  "reference_sha256": "a73b7539a5dff90d013d0fab2644558f02a5dce9c6341a2171ef82ea4383798c",
+  "pins": {
+    "tools/ref_script_compose.py": "a73b7539a5dff90d013d0fab2644558f02a5dce9c6341a2171ef82ea4383798c",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2",
+    "tools/ref_amx.py": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f",
+    "docs/script.md": "572e4f5722797b8009f0e628fbc7f27fb117956a6d040c06e03f9fc21a70e6f6"
+  },
+  "generator_sha256": "aa20a2db77e021ef50e6713eeb7eb1ce975d8a8a08c9c675ea6759dbffe911a9",
+  "commands": 191,
+  "documented": 81,
+  "partly_documented": 70,
+  "unknown": 40,
+  "published_calls": 5660,
+  "commands_used": 122,
+  "commands_never": 69
+}

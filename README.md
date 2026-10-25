@@ -52,7 +52,10 @@ remain separate work. The optional [Session animation adapter](docs/SESSION_ANIM
 connects owned clock state and signed events to explicitly authored ready tasks
 and existing health operations. The standalone [raw32 decoder](docs/ANIMATION_DECODER.md)
 adds owned clip/track/cache lifetime and original joint decoding under exact
-Python replay. It remains separate from Session and scene playback. Viewer extension is paused.
+Python replay. The standalone [cache-bearing animation runtime](docs/ANIMATION_RUNTIME.md)
+connects lifecycle, timing and decoding through one stable track-cell registry,
+including stale owners and failure prefixes. Session, scene, pose, sound and
+animation-generated root motion remain separate work. Viewer extension is paused.
 
 The controllable scene can load bounded [static WORLD ground](docs/WORLD_GEOMETRY.md) from your own RTA files, with collision and display kept separate. Water, moving pieces and unsupported starting positions refuse safely. This remains a movement and health test.
 

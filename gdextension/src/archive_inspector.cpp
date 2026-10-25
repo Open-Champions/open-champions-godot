@@ -1,9 +1,18 @@
 #include "session_controller.hpp"
+#include "fx_bridge.hpp"
+#include "native_audio_bridge.hpp"
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
+#include "champions/ui_font.hpp"
+#include "champions/ui_font_page.hpp"
+#include "champions/ui_art_shape.hpp"
+#include "champions/texture_upscale.hpp"
+#include "champions/inventory_icons.hpp"
+#include "champions/inventory_icon_assoc.hpp"
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
 #include "champions/skinning.hpp"
+#include "champions/arena_executable.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -23,6 +32,9 @@
 #include <string>
 #include <utility>
 
+void register_ui_layout_service();
+void register_level_lights_service();
+void register_ps2_save_import();
 namespace {
 using namespace godot;
 constexpr std::uint64_t max_file_bytes = 64ULL * 1024 * 1024;
@@ -80,12 +92,13 @@ struct ArchiveInput {
     bool gob;
 };
 
-ArchiveInput read_archive(const String &path) {
+ArchiveInput read_archive(const String &path, bool allow_texture = false) {
     if (path.is_empty()) throw champions::FormatError("Choose a .GOB or .LMP file first.");
     const auto encoded = path.utf8();
     const std::string filename(encoded.get_data(), static_cast<std::size_t>(encoded.length()));
     const bool gob = champions::hasExtension(filename, ".gob");
-    if (!gob && !champions::hasExtension(filename, ".lmp")) {
+    if (!gob && !champions::hasExtension(filename, ".lmp") &&
+        !(allow_texture && (champions::hasExtension(filename, ".tex") || champions::hasExtension(filename, ".etex") || champions::hasExtension(filename, ".fnt")))) {
         throw champions::FormatError("Unsupported file type. Choose a .GOB or .LMP archive.");
     }
     const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
@@ -156,11 +169,20 @@ std::array<SelectedInput,Count> read_selected_entries(const String &path,
     for(auto row:row_indices) {
         if(row<0 || row>=static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
     }
-    auto input=read_archive(path);
+    auto input=read_archive(path, true);
     if(expected_fingerprint.is_empty() || fingerprint(input.data)!=expected_fingerprint) {
         throw champions::FormatError("The archive changed since it was opened. Reopen it before previewing an entry.");
     }
     const champions::Bytes bytes{input.data.ptr(),static_cast<std::size_t>(input.data.size())};
+    const auto extension = path.get_extension().to_lower();
+    if (extension == "tex" || extension == "etex" || extension == "fnt") {
+        std::array<SelectedInput,Count> loose{};
+        for (std::size_t i=0; i<Count; ++i) {
+            if (row_indices[i] != 0) throw champions::FormatError("Loose inputs have only row zero.");
+            loose[i] = {input, bytes, path.get_file().utf8().get_data(), bytes, false};
+        }
+        return loose;
+    }
     std::array<SelectedInput,Count> selected{};
     std::array<bool,Count> found{};
     for(auto &entry:selected) entry.archive=input;
@@ -263,16 +285,324 @@ class ChampionsArchiveInspector : public RefCounted {
 protected:
     static void _bind_methods() {
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
+        ClassDB::bind_method(D_METHOD("inspect_ui_font", "path", "row_index", "profile", "archive_fingerprint"), &ChampionsArchiveInspector::inspect_ui_font);
+        ClassDB::bind_method(D_METHOD("read_fnt_entry", "path", "row_index", "profile", "archive_fingerprint"), &ChampionsArchiveInspector::read_fnt_entry);
+        ClassDB::bind_method(D_METHOD("shape_ui_art", "width", "height", "rgba", "field_rows", "crop"), &ChampionsArchiveInspector::shape_ui_art);
+        ClassDB::bind_method(D_METHOD("inspect_ui_candidates", "path", "profile"), &ChampionsArchiveInspector::inspect_ui_candidates);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
+        ClassDB::bind_method(D_METHOD("decode_inventory_icon", "sector_payload", "profile", "display_alpha"),
+                            &ChampionsArchiveInspector::decode_inventory_icon, DEFVAL(false));
+        ClassDB::bind_method(D_METHOD("lookup_inventory_icon", "index_bytes", "picture_name", "profile"),
+                            &ChampionsArchiveInspector::lookup_inventory_icon);
+        ClassDB::bind_method(D_METHOD("inventory_icon_grid_placement", "width", "height", "panel_x", "column", "row_y", "profile"),
+                            &ChampionsArchiveInspector::inventory_icon_grid_placement);
+        ClassDB::bind_method(D_METHOD("texture_fidelity", "width", "height", "source", "output_width", "output_height", "output", "factor"),
+                            &ChampionsArchiveInspector::texture_fidelity);
+        ClassDB::bind_method(D_METHOD("inspect_texture_upscaled", "path", "row_index", "profile", "archive_fingerprint", "filter", "factor", "opaque_rgb"),
+                            &ChampionsArchiveInspector::inspect_texture_upscaled, DEFVAL(false));
         ClassDB::bind_method(D_METHOD("inspect_model", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_model);
         ClassDB::bind_method(D_METHOD("sample_animation", "path", "row_index", "profile", "archive_fingerprint", "tick"),
                             &ChampionsArchiveInspector::sample_animation);
         ClassDB::bind_method(D_METHOD("sample_skinned_model", "path", "model_row_index", "animation_row_index", "profile", "archive_fingerprint", "tick"),
                             &ChampionsArchiveInspector::sample_skinned_model);
+        ClassDB::bind_method(D_METHOD("sample_skinned_resources", "model_bytes", "animation_bytes", "tick"),
+                            &ChampionsArchiveInspector::sample_skinned_resources);
+        ClassDB::bind_method(D_METHOD("read_player_resource", "path", "row_index", "archive_fingerprint", "expected_name"),
+                            &ChampionsArchiveInspector::read_player_resource);
+        ClassDB::bind_method(D_METHOD("player_model_resources", "executable_bytes", "model_index"),
+                            &ChampionsArchiveInspector::player_model_resources);
     }
 public:
+    Dictionary player_model_resources(const PackedByteArray &executable_bytes,
+            int64_t model_index) const {
+        Dictionary failure;
+        failure["ok"] = false;
+        failure["error"] = String();
+        try {
+            // Player_ctor's 12 model definitions, research-player-model
+            // 7f13899 docs/spec/player-model-resources.md. The table strings
+            // themselves remain in the owner's executable at run time.
+            constexpr std::array<std::uint32_t, 12> definitions{{
+                0x4ecc58, 0x4ec8d0, 0x4ee188, 0x4ede00,
+                0x4eda78, 0x4ed6f0, 0x4ee898, 0x4ee510,
+                0x4ecfe0, 0x4ed368, 0x4eec20, 0x4eefa8}};
+            constexpr std::array<const char *, 12> body_codes{{
+                "bm", "bf", "wem", "wef", "hem", "hef",
+                "em", "ef", "dem", "def", "vm", "im"}};
+            constexpr std::array<int, 12> classes{{0, 0, 3, 3, 1, 1, 4, 4, 2, 2, 5, 6}};
+            if (model_index < 0 || model_index >= static_cast<int64_t>(definitions.size()))
+                throw champions::FormatError("Player model index is outside the traced 0..11 table.");
+            if (executable_bytes.is_empty() || executable_bytes.size() > 16 * 1024 * 1024)
+                throw champions::FormatError("Owner executable is missing or exceeds the 16 MiB limit.");
+            champions::simulation::rta::arena_modes::Executable exe;
+            if (!exe.load(std::vector<std::uint8_t>(executable_bytes.ptr(),
+                    executable_bytes.ptr() + executable_bytes.size())))
+                throw champions::FormatError("Owner executable could not be mapped as RTA ELF32.");
+            const auto index = static_cast<std::size_t>(model_index);
+            const auto table = definitions[index];
+            const auto animation_lump = exe.string(exe.word(table));
+            if (!champions::hasExtension(animation_lump, ".lmp"))
+                throw champions::FormatError("Player animation definition does not name an LMP.");
+            Array slots;
+            for (std::uint32_t slot = 1; slot <= 111; ++slot) {
+                const auto name = exe.string(exe.word(table + slot * 8));
+                if (!champions::hasExtension(name, ".anm") &&
+                    !champions::hasExtension(name, ".vag"))
+                    throw champions::FormatError("Player animation slot names an unsupported resource.");
+                slots.push_back(String::utf8(name.c_str()));
+            }
+            if (exe.word(table + 112 * 8) != 0)
+                throw champions::FormatError("Player animation definition has no traced terminator.");
+            Dictionary result;
+            result["ok"] = true;
+            result["body_code"] = String(body_codes[index]);
+            result["class_index"] = classes[index];
+            result["animation_lump"] = String::utf8(animation_lump.c_str());
+            result["clip_slots_1_to_111"] = slots;
+            return result;
+        } catch (const std::exception &error) {
+            failure["error"] = String::utf8(error.what());
+        }
+        return failure;
+    }
+
+    // Copy a selected player resource from the same fingerprinted snapshot used
+    // to validate its row. The caller never reopens saved offsets after listing.
+    Dictionary read_player_resource(const String &path, int64_t row_index,
+            const String &archive_fingerprint, const String &expected_name) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["bytes"] = PackedByteArray();
+        result["error"] = String();
+        try {
+            const auto selected = read_selected(path, row_index, archive_fingerprint);
+            const std::string expected = expected_name.utf8().get_data();
+            if (selected.name != expected ||
+                (!champions::hasExtension(expected, ".vif") &&
+                 !champions::hasExtension(expected, ".anm") &&
+                 !champions::hasExtension(expected, ".tex")))
+                throw champions::FormatError("The selected player resource name changed or is unsupported.");
+            if (selected.bytes.size == 0 || selected.bytes.size > 16 * 1024 * 1024)
+                throw champions::FormatError("The selected player resource size is invalid.");
+            PackedByteArray bytes;
+            if (bytes.resize(static_cast<int64_t>(selected.bytes.size)) != OK)
+                throw std::bad_alloc();
+            std::copy(selected.bytes.data, selected.bytes.data + selected.bytes.size, bytes.ptrw());
+            result["bytes"] = bytes;
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to read the selected player resource.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        }
+        return result;
+    }
+
+    // The player constructor fetches its body from SELECT and its clip from a
+    // class-specific LMP. Keep both source archives outside the project and
+    // pass only bounded, read-only entry bytes to the existing native decoder.
+    Dictionary sample_skinned_resources(const PackedByteArray &model_bytes,
+            const PackedByteArray &animation_bytes, double tick) const {
+        Dictionary failure;
+        failure["ok"] = false;
+        failure["error"] = String();
+        try {
+            if (model_bytes.is_empty() || animation_bytes.is_empty() ||
+                model_bytes.size() > 16 * 1024 * 1024 || animation_bytes.size() > 16 * 1024 * 1024)
+                throw champions::FormatError("Player model or clip entry is empty or exceeds the 16 MiB limit.");
+            if (!std::isfinite(tick) || tick < 0)
+                throw champions::FormatError("Choose a finite animation tick at or above zero.");
+            const champions::Bytes model_input{model_bytes.ptr(), static_cast<std::size_t>(model_bytes.size())};
+            const champions::Bytes animation_input{animation_bytes.ptr(), static_cast<std::size_t>(animation_bytes.size())};
+            const auto model = champions::decodeRtaModel(model_input);
+            if (model.attachment_slot != -1)
+                throw champions::FormatError("The body model unexpectedly requires a parent attachment.");
+            const auto animation = champions::decodeRtaAnimationKeys(animation_input);
+            if (animation.skeleton.joint_mask != 0)
+                throw champions::FormatError("The selected player clip is partial-body.");
+            const auto pose = champions::sampleRtaAnimationPose(animation, tick);
+            const auto transforms = champions::buildRtaAnimationTransforms(animation.skeleton, pose);
+            const auto skinned = champions::skinRtaModelPositions(model, transforms);
+            const auto skinned_normals = champions::skinRtaModelNormals(model, transforms);
+            Array meshes;
+            std::size_t corners = 0;
+            for (std::size_t i = 0; i < skinned.meshes.size(); ++i) {
+                const auto &mesh = skinned.meshes[i];
+                const auto &normal_mesh = skinned_normals.meshes[i];
+                PackedVector3Array positions, normals;
+                if (positions.resize(static_cast<int64_t>(mesh.positions.size())) != OK ||
+                    normals.resize(static_cast<int64_t>(normal_mesh.normals.size())) != OK) throw std::bad_alloc();
+                for (std::size_t corner = 0; corner < mesh.positions.size(); ++corner) {
+                    const auto &point = mesh.positions[corner];
+                    const auto &normal = normal_mesh.normals[corner];
+                    const Vector3 p(point[0], point[1], point[2]);
+                    const Vector3 n(normal[0], normal[1], normal[2]);
+                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+                        !std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.z))
+                        throw champions::FormatError("Player pose contains nonfinite positions or normals.");
+                    positions.set(static_cast<int64_t>(corner), p);
+                    normals.set(static_cast<int64_t>(corner), n);
+                }
+                Dictionary item;
+                item["index"] = static_cast<int64_t>(mesh.index);
+                item["visible_by_default"] = model.meshes[i].visible_by_default;
+                item["positions"] = positions;
+                item["normals"] = normals;
+                meshes.push_back(item);
+                corners += mesh.positions.size();
+            }
+            Dictionary result;
+            result["ok"] = true;
+            result["pairing_verified"] = false;
+            result["duration_ticks"] = static_cast<int64_t>(animation.skeleton.duration_ticks);
+            result["tick"] = pose.tick;
+            result["meshes"] = meshes;
+            result["triangle_count"] = static_cast<int64_t>(corners / 3);
+            return result;
+        } catch (const std::bad_alloc &) {
+            failure["error"] = "Not enough memory to sample the player model.";
+        } catch (const std::exception &error) {
+            failure["error"] = String::utf8(error.what());
+        }
+        return failure;
+    }
+    // The scene supplies a picture filename and HDR bytes; caller controls
+    // the per-frame streaming cache and slices DAT using the returned sector
+    // range before passing that payload to decode_inventory_icon.
+    Dictionary lookup_inventory_icon(const PackedByteArray &index_bytes, const String &picture_name,
+                                     const String &profile) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Inventory icons are supported only for Return to Arms.");
+            const auto index = champions::inventory_icons::parse_index(
+                index_bytes.ptr(), static_cast<std::size_t>(index_bytes.size()));
+            const auto encoded = picture_name.utf8();
+            const auto *entry = champions::inventory_icons::find_entry(
+                index, std::string(encoded.get_data(), encoded.length()));
+            result["found"] = entry != nullptr;
+            if (entry) {
+                result["number"] = static_cast<int64_t>(entry->number);
+                result["first_sector"] = static_cast<int64_t>(entry->first_sector);
+                result["sectors"] = static_cast<int64_t>(entry->sectors);
+                result["width"] = static_cast<int64_t>(entry->width);
+                result["height"] = static_cast<int64_t>(entry->height);
+            }
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to read the inventory icon index.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The inventory icon index could not be read.";
+        }
+        return result;
+    }
+
+    Dictionary inventory_icon_grid_placement(int32_t width, int32_t height, int32_t panel_x,
+                                             int32_t column, float row_y, const String &profile) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Inventory icons are supported only for Return to Arms.");
+            const auto p = champions::inventory_icons::grid_placement(width,height,panel_x,column,row_y);
+            result["columns"] = p.columns; result["rows"] = p.rows;
+            result["footprint_width"] = p.footprint_width;
+            result["footprint_height"] = p.footprint_height;
+            result["x"] = p.x; result["y"] = p.y;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The inventory icon could not be placed.";
+        }
+        return result;
+    }
+
+    // Caller supplies an explicitly selected PICCACHE.DAT sector payload. The
+    // item-to-entry lookup and HDR index are separate contracts.
+    Dictionary decode_inventory_icon(const PackedByteArray &sector_payload, const String &profile,
+                                     bool display_alpha = false) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Inventory icons are supported only for Return to Arms.");
+            const auto picture = champions::inventory_icons::decode(
+                sector_payload.ptr(), static_cast<std::size_t>(sector_payload.size()));
+            const auto pixels = display_alpha ? champions::inventory_icons::display_rgba(picture.rgba) : picture.rgba;
+            PackedByteArray rgba;
+            if (rgba.resize(static_cast<int64_t>(pixels.size())) != OK) throw std::bad_alloc();
+            std::copy(pixels.begin(), pixels.end(), rgba.ptrw());
+            result["width"] = static_cast<int64_t>(picture.width);
+            result["height"] = static_cast<int64_t>(picture.height);
+            result["flags"] = static_cast<int64_t>(picture.flags);
+            result["rgba"] = rgba;
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to decode this inventory icon.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The inventory icon could not be decoded.";
+        }
+        return result;
+    }
+
+    // Metadata only: flag 0x0040 is a candidate signal, never a frame identity.
+    // Refused decodes stay discoverable; pixels are decoded only on selection.
+    Dictionary inspect_ui_candidates(const String &path, const String &profile) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["rows"] = Array();
+        try {
+            if (profile != "rta") throw champions::FormatError("UI candidates are supported only for Return to Arms.");
+            const auto input = read_archive(path, true);
+            const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
+            Array rows;
+            auto add = [&](std::size_t index, const std::string &name, const std::string &parent, champions::Bytes payload) {
+                if (champions::hasExtension(name, ".fnt")) {
+                    Dictionary row;
+                    row["row_index"] = static_cast<int64_t>(index);
+                    row["name"] = String::utf8(champions::escapeTsv(name).c_str());
+                    row["parent"] = String::utf8(champions::escapeTsv(parent).c_str());
+                    row["kind"] = "font";
+                    row["width"] = int64_t(0); row["height"] = int64_t(0);
+                    row["flags"] = int64_t(0); row["psm"] = int64_t(0);
+                    rows.push_back(row);
+                    return;
+                }
+                if ((!champions::hasExtension(name, ".tex") && !champions::hasExtension(name, ".etex")) || payload.size < 0x80) return;
+                const auto header = champions::readRtaTextureHeader(payload);
+                if (!header.isUiCandidate()) return;
+                Dictionary row;
+                row["row_index"] = static_cast<int64_t>(index);
+                row["name"] = String::utf8(champions::escapeTsv(name).c_str());
+                row["parent"] = String::utf8(champions::escapeTsv(parent).c_str());
+                row["width"] = static_cast<int64_t>(header.width);
+                row["height"] = static_cast<int64_t>(header.height);
+                row["flags"] = static_cast<int64_t>(header.flags);
+                row["psm"] = static_cast<int64_t>(header.psm);
+                rows.push_back(row);
+            };
+            const auto extension = path.get_extension().to_lower();
+            if (extension == "tex" || extension == "etex" || extension == "fnt") add(0, path.get_file().utf8().get_data(), "", bytes);
+            else walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &parent,
+                        const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
+                add(index, entry.name, parent, champions::payload(container, entry));
+            });
+            result["fingerprint"] = fingerprint(input.data);
+            result["rows"] = rows;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "UI candidates could not be inspected.";
+        }
+        return result;
+    }
+
     Dictionary inspect_archive(const String &path) const {
         Dictionary result;
         result["ok"] = false;
@@ -337,6 +667,158 @@ public:
             result["error"] = String::utf8(error.what());
         } catch (...) {
             result["error"] = "The texture could not be previewed.";
+        }
+        return result;
+    }
+
+    Dictionary read_fnt_entry(const String &path, int64_t row, const String &profile, const String &hash) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Font data is RTA-only.");
+            const auto selected = read_selected(path, row, hash);
+            if (!champions::hasExtension(selected.name, ".fnt"))
+                throw champions::FormatError("Select an explicit FNT entry.");
+            PackedByteArray bytes;
+            if (bytes.resize(static_cast<int64_t>(selected.bytes.size)) != OK) throw std::bad_alloc();
+            if (selected.bytes.size)
+                std::copy(selected.bytes.data, selected.bytes.data + selected.bytes.size, bytes.ptrw());
+            result["bytes"] = bytes;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "Font entry could not be read.";
+        }
+        return result;
+    }
+
+    Dictionary inspect_ui_font(const String &path, int64_t row, const String &profile, const String &hash) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Font data is RTA-only.");
+            const auto selected = read_selected(path,row,hash);
+            if (!champions::hasExtension(selected.name,".fnt")) throw champions::FormatError("Select an explicit FNT entry.");
+            const auto font = champions::readRtaUiFont(selected.bytes);
+            Array glyphs, kerns;
+            for (const auto &g:font.glyphs) { Array values; for (auto v:g) values.push_back(int64_t(v)); glyphs.push_back(values); }
+            for (const auto &k:font.kerns) { Array values; for (auto v:k) values.push_back(int64_t(v)); kerns.push_back(values); }
+            result["glyphs"] = glyphs; result["kerns"] = kerns;
+            result["glyph_offset"] = int64_t(font.glyph_offset);
+            result["kerning_offset"] = int64_t(font.kerning_offset);
+            result["texture_offset"] = int64_t(font.texture_offset);
+            auto page = texture_status("unavailable", "Embedded texture unsupported.");
+            auto publish = [&](const champions::Texture32 &texture) {
+                PackedByteArray pixels;
+                if (pixels.resize(static_cast<int64_t>(texture.rgba.size())) != OK) throw std::bad_alloc();
+                std::copy(texture.rgba.begin(),texture.rgba.end(),pixels.ptrw());
+                page["width"] = int64_t(texture.width); page["height"] = int64_t(texture.height);
+                page["flags"] = int64_t(texture.flags); page["rgba"] = pixels; page["ok"] = true;
+                page["status"] = "ready"; page["error"] = String();
+            };
+            try {
+                publish(champions::decodeFontPage({font.texture.data(),font.texture.size()}).image);
+            } catch (const std::exception &font_error) {
+                try {
+                    publish(champions::decodeRtaTexture({font.texture.data(),font.texture.size()}));
+                } catch (const std::bad_alloc &) {
+                    throw;
+                } catch (const std::exception &) {
+                    page["error"] = String::utf8(font_error.what());
+                }
+            }
+            result["page"] = page;
+            result["ok"] = true; // Metadata success does not depend on texture support.
+        } catch (const std::exception &error) { result["error"] = String::utf8(error.what()); }
+        catch (...) { result["error"] = "Font inspection failed."; }
+        return result;
+    }
+
+    Dictionary shape_ui_art(int64_t width, int64_t height, const PackedByteArray &rgba, int64_t rows, const Array &crop) const {
+        Dictionary result; result["ok"] = false;
+        try {
+            if (width<1 || width>1024 || height<1 || height>1024 || rows<0 || rows>height)
+                throw champions::FormatError("Explicit shape dimensions/rows outside supported domain.");
+            if (rgba.size()!=width*height*4) throw champions::FormatError("Shape requires exact RGBA8 bytes.");
+            std::optional<champions::UiArtCrop> region;
+            if (!crop.is_empty()) {
+                if (crop.size()!=4) throw champions::FormatError("Crop needs four integers.");
+                std::array<uint32_t,4> values{};
+                for (int i=0;i<4;++i) {
+                    if (crop[i].get_type()!=Variant::INT) throw champions::FormatError("Crop needs integer coordinates.");
+                    const int64_t v=crop[i];
+                    if (v<0 || v>2048) throw champions::FormatError("Crop value outside supported domain.");
+                    values[i]=static_cast<uint32_t>(v);
+                }
+                region=champions::UiArtCrop{values[0],values[1],values[2],values[3]};
+            }
+            champions::Texture32 page{static_cast<uint32_t>(width),static_cast<uint32_t>(height),0,{}};
+            page.rgba.assign(rgba.ptr(),rgba.ptr()+rgba.size());
+            const auto shaped=champions::shapeRtaUiArt(page,static_cast<uint32_t>(rows),region);
+            PackedByteArray pixels;
+            if (pixels.resize(static_cast<int64_t>(shaped.rgba.size()))!=OK) throw std::bad_alloc();
+            std::copy(shaped.rgba.begin(),shaped.rgba.end(),pixels.ptrw());
+            result["width"]=int64_t(shaped.width); result["height"]=int64_t(shaped.height);
+            result["rgba"]=pixels; result["ok"]=true;
+        } catch (const std::exception &error) { result["error"]=String::utf8(error.what()); }
+        catch (...) { result["error"]="Shape preview failed."; }
+        return result;
+    }
+
+    Dictionary texture_fidelity(int64_t width, int64_t height, const PackedByteArray &source,
+                                int64_t output_width, int64_t output_height, const PackedByteArray &output, int64_t factor) const {
+        Dictionary result;
+        result["accepted"] = false;
+        try {
+            if(width<1 || width>1024 || height<1 || height>1024 || output_width<1 || output_width>4096 ||
+               output_height<1 || output_height>4096 || factor<2 || factor>4 ||
+               source.size()!=width*height*4 || output.size()!=output_width*output_height*4)
+                throw champions::FormatError("Invalid bounded fidelity input.");
+            champions::Texture32 a{uint32_t(width),uint32_t(height),0,std::vector<uint8_t>(source.ptr(),source.ptr()+source.size())};
+            champions::Texture32 b{uint32_t(output_width),uint32_t(output_height),0,std::vector<uint8_t>(output.ptr(),output.ptr()+output.size())};
+            const auto m=champions::measureTextureFidelity(a,b,unsigned(factor));
+            result["accepted"]=m.accepted();
+            result["aspect_preserved"]=m.aspect_preserved;
+            result["error_numerator"]=int64_t(m.error_numerator);
+            result["error_denominator"]=int64_t(m.error_denominator);
+            result["max_error_numerator"]=int64_t(m.max_error_numerator);
+            result["new_palette_pixels"]=int64_t(m.new_palette_pixels);
+            result["flat_region_changes"]=int64_t(m.flat_region_changes);
+            result["hard_alpha_changes"]=int64_t(m.hard_alpha_changes);
+        } catch(const std::exception &error) { result["error"]=String::utf8(error.what()); }
+        return result;
+    }
+
+    Dictionary inspect_texture_upscaled(const String &path, int64_t row_index, const String &profile,
+                                        const String &archive_fingerprint, const String &filter, int64_t factor, bool opaque_rgb) const {
+        auto result = inspect_texture(path, row_index, profile, archive_fingerprint);
+        if (!bool(result["ok"])) return result;
+        try {
+            if (factor < 2 || factor > 4) throw champions::FormatError("Upscaling factor must be 2, 3 or 4.");
+            champions::TextureFilter mode;
+            if (filter == "nearest") mode = champions::TextureFilter::Nearest;
+            else if (filter == "pixel-art") mode = champions::TextureFilter::PixelArt;
+            else if (filter == "bicubic") mode = champions::TextureFilter::Bicubic;
+            else throw champions::FormatError("Unknown texture filter.");
+            const PackedByteArray original = result["rgba"];
+            champions::Texture32 source{static_cast<uint32_t>(int64_t(result["width"])),
+                static_cast<uint32_t>(int64_t(result["height"])), static_cast<uint16_t>(int64_t(result["flags"])),
+                std::vector<uint8_t>(original.ptr(), original.ptr() + original.size())};
+            if (opaque_rgb) for (std::size_t i = 3; i < source.rgba.size(); i += 4) source.rgba[i] = 255;
+            const auto scaled = champions::upscaleTexture(source, static_cast<unsigned>(factor), mode);
+            PackedByteArray pixels;
+            if (pixels.resize(static_cast<int64_t>(scaled.rgba.size())) != OK) throw std::bad_alloc();
+            std::copy(scaled.rgba.begin(), scaled.rgba.end(), pixels.ptrw());
+            PackedByteArray measured_source = original;
+            if(opaque_rgb) for(int64_t i=3;i<measured_source.size();i+=4) measured_source.set(i,255);
+            result["fidelity"] = texture_fidelity(source.width,source.height,measured_source,scaled.width,scaled.height,pixels,factor);
+            result["upscaled_rgba"] = pixels;
+            result["upscaled_width"] = int64_t(scaled.width);
+            result["upscaled_height"] = int64_t(scaled.height);
+        } catch (const std::exception &error) {
+            result["ok"] = false;
+            result["error"] = String::utf8(error.what());
         }
         return result;
     }
@@ -433,12 +915,15 @@ public:
             const auto pose=champions::sampleRtaAnimationPose(animation,tick);
             const auto transforms=champions::buildRtaAnimationTransforms(animation.skeleton,pose);
             const auto skinned=champions::skinRtaModelPositions(model,transforms);
+            const auto skinned_normals=champions::skinRtaModelNormals(model,transforms);
             Array meshes;
             std::size_t corners=0;
             for(std::size_t i=0;i<skinned.meshes.size();++i) {
                 const auto &mesh=skinned.meshes[i];
-                PackedVector3Array positions;
-                if(positions.resize(static_cast<int64_t>(mesh.positions.size()))!=OK) throw std::bad_alloc();
+                const auto &normal_mesh=skinned_normals.meshes[i];
+                PackedVector3Array positions, normals;
+                if(positions.resize(static_cast<int64_t>(mesh.positions.size()))!=OK ||
+                   normals.resize(static_cast<int64_t>(normal_mesh.normals.size()))!=OK) throw std::bad_alloc();
                 for(std::size_t corner=0;corner<mesh.positions.size();++corner) {
                     const auto &point=mesh.positions[corner];
                     const Vector3 converted(point[0],point[1],point[2]);
@@ -446,16 +931,23 @@ public:
                         throw champions::FormatError("Skinned position exceeds the viewer's numeric range.");
                     }
                     positions.set(static_cast<int64_t>(corner),converted);
+                    const auto &normal=normal_mesh.normals[corner];
+                    const Vector3 converted_normal(normal[0],normal[1],normal[2]);
+                    if(!std::isfinite(converted_normal.x) || !std::isfinite(converted_normal.y) || !std::isfinite(converted_normal.z)) {
+                        throw champions::FormatError("Skinned normal exceeds the viewer's numeric range.");
+                    }
+                    normals.set(static_cast<int64_t>(corner),converted_normal);
                 }
                 Dictionary item;
                 item["index"]=static_cast<int64_t>(mesh.index);
                 item["visible_by_default"]=model.meshes[i].visible_by_default;
-                item["positions"]=positions; // Native Z-up, owned position-only result.
+                item["positions"]=positions; // Native Z-up.
+                item["normals"]=normals; // Blended skin 3x3, same corner order, not unit length.
                 meshes.push_back(item);
                 corners+=mesh.positions.size();
             }
             // No name, lump membership, joint count, or successful arithmetic
-            // proves semantic pairing. No normals, materials or textures are returned.
+            // proves semantic pairing. Materials and textures are not returned.
             Dictionary result;
             result["ok"]=true;
             result["error"]=String();
@@ -561,6 +1053,11 @@ void initialize(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(ChampionsArchiveInspector);
         GDREGISTER_CLASS(ChampionsSessionController);
+        register_ui_layout_service();
+        register_level_lights_service();
+        register_ps2_save_import();
+        GDREGISTER_CLASS(ChampionsFxBridge);
+        GDREGISTER_CLASS(ChampionsNativeAudio);
     }
 }
 void terminate(ModuleInitializationLevel) {}

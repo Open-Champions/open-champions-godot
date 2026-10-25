@@ -394,6 +394,7 @@ HandleObjectRef RawHandles::remove(std::uint32_t a) {
   }
   return s.world->handles.remove_ref(n);
 }
+void RawHandles::validate() const { state_->validate(false); }
 Snapshot RawHandles::snapshot() const {
   auto &s = *state_;
   s.validate(false);

@@ -65,6 +65,23 @@ func flat_world(special := false) -> PackedByteArray:
 		data.encode_u16(0x114, 1)
 	return data
 
+# Two authored, disjoint flat elements sharing a height field. The second is
+# inside the same query grid but outside the first element's bounds.
+func flat_world_pair() -> PackedByteArray:
+	var data := flat_world()
+	var field := data.slice(0x100, 0x100 + 0x14 + 129 * 129 * 2)
+	data.resize(0x10000 + field.size())
+	for i in field.size(): data[0x10000 + i] = field[i]
+	data.encode_u32(0xcc, 0x10000)
+	var element := data.slice(0xc0, 0xe4)
+	for i in element.size(): data[0xe4 + i] = element[i]
+	data.encode_u16(0xe4, 132)
+	data.encode_u16(0xe8, 156)
+	data.encode_u32(0x1c, 2)
+	data.encode_u16(0x8412, 1)
+	data.encode_u16(0x8414, 0xffff)
+	return data
+
 # Return only weak references after each local owner has gone out of scope.
 # This proves actual resource destruction before process/renderer shutdown.
 func terrain_resource_lifetimes(path: String) -> Array:
@@ -89,6 +106,84 @@ func run(scene) -> bool:
 		return false
 	# Let the newly attached scene complete its initial viewport/input frame.
 	await scene.get_tree().process_frame
+	# Real binding and real UI callbacks, authored Unicode file paths only.
+	scene.reset_session()
+	for mask in [17, 0, 4, 16]:
+		scene.controller.advance(mask)
+	var checkpoint: Dictionary = scene.controller.get_observation()
+	check(scene.save_format.get_selected_id() == 0, "scene keeps replay as the default save format")
+	var save_path := DIRECTORY.path_join("Save 测试.ocnsave")
+	files.append(save_path)
+	check(scene.save_session_file(save_path), "native save writes user-selected Unicode path")
+	var saved_bytes := FileAccess.get_file_as_bytes(save_path)
+	check(saved_bytes.slice(0, 8) == PackedByteArray([79, 67, 78, 83, 65, 86, 69, 0]) and saved_bytes.decode_u32(8) == 1, "file preserves replay v1 bytes")
+	var snapshot_path := DIRECTORY.path_join("Snapshot 测试.ocnsave")
+	files.append(snapshot_path)
+	scene.save_format.select(1)
+	scene.save_dialog.file_selected.emit(snapshot_path)
+	check(FileAccess.file_exists(snapshot_path), "real save picker callback writes selected snapshot format to Unicode path")
+	check(scene.controller.get_observation() == checkpoint, "snapshot save action does not mutate native state")
+	var snapshot_bytes := FileAccess.get_file_as_bytes(snapshot_path)
+	check(snapshot_bytes.slice(0, 8) == PackedByteArray([79, 67, 78, 83, 78, 65, 80, 0]) and snapshot_bytes.decode_u32(8) == 3, "indexed direct snapshot has distinct magic and version")
+	var snapshot_before_write := snapshot_bytes.duplicate()
+	check(scene.save_session_file(snapshot_path) and FileAccess.get_file_as_bytes(snapshot_path) == snapshot_before_write, "snapshot UI overwrite preserves exact bytes")
+	var snapshot_blocker := write_file("Snapshot 测试.ocnsave.ocnsave.tmp", PackedByteArray([7]))
+	check(not scene.save_session_file(snapshot_path) and FileAccess.get_file_as_bytes(snapshot_path) == snapshot_before_write and FileAccess.get_file_as_bytes(snapshot_blocker) == PackedByteArray([7]), "snapshot UI temporary collision preserves both files")
+	DirAccess.remove_absolute(snapshot_blocker)
+	check(not scene.save_session_file(DIRECTORY.path_join("missing/snapshot.ocnsave")) and scene.controller.get_observation() == checkpoint, "snapshot UI write failure preserves native state")
+	scene.save_format.select(0)
+	scene.save_dialog.file_selected.emit(save_path)
+	check(FileAccess.get_file_as_bytes(save_path) == saved_bytes, "switching back through save picker preserves unchanged replay v1 bytes")
+	scene.controller.advance(8)
+	check(scene.load_session_file(snapshot_path), "real scene load action accepts direct snapshot")
+	var snapshot_observation: Dictionary = scene.controller.get_observation()
+	var checkpoint_authority: Dictionary = checkpoint.duplicate()
+	check(snapshot_observation.get("save_history_pending", false), "binding retains deferred save records after load")
+	check(scene.status_label.text.contains("Historical save data not yet checked"), "scene displays deferred validation state")
+	for presentation_field in ["terrain_name", "terrain_note", "terrain_mode", "save_history_pending"]:
+		snapshot_observation.erase(presentation_field)
+		checkpoint_authority.erase(presentation_field)
+	check(snapshot_observation == checkpoint_authority, "direct snapshot binding restores pending state")
+	var baseline = ClassDB.instantiate("ChampionsSessionController")
+	var save_prepared: Dictionary = baseline.prepare_save_file(save_path)
+	check(save_prepared.get("ok", false), "fresh owner prepares checkpoint")
+	if save_prepared.get("ok", false):
+		baseline.commit_terrain_file(save_prepared.token)
+	for mask in [0, 17, 0, 4, 16]:
+		var resumed = scene.controller.advance(mask)
+		var reference = baseline.advance(mask)
+		check(resumed.get("save_history_pending", false), "binding continues without historical reads")
+		resumed.erase("save_history_pending")
+		reference.erase("save_history_pending")
+		check(resumed == reference, "indexed pending movement/health continuation matches replay owner")
+	check(scene.controller.get_observation().get("save_history_pending", false), "binding retains deferred records through continuation")
+	# Return baseline to the same checkpoint for the original replay checks.
+	save_prepared = baseline.prepare_save_file(save_path)
+	if save_prepared.get("ok", false):
+		baseline.commit_terrain_file(save_prepared.token)
+	scene.controller.advance(8)
+	check(scene.load_session_file(save_path), "scene loads and publishes prepared checkpoint")
+	for field in ["position_raw", "hp_raw", "vz_raw", "frame", "submissions", "ready_ticks", "damage_events", "paused", "stopped", "failed"]:
+		check(scene.raw_observation[field] == checkpoint[field], "checkpoint restores " + field)
+	for mask in [0, 17, 0, 4, 4, 16, 0]:
+		check(scene.controller.advance(mask) == baseline.advance(mask), "delayed movement and health continuation matches independent load")
+	baseline = null
+	var before_load: Dictionary = scene.controller.get_observation()
+	var ground_before: Node3D = scene.terrain_root
+	var broken := write_file("broken.ocnsave", PackedByteArray([1, 2, 3]))
+	check(not scene.load_session_file(broken) and scene.controller.get_observation() == before_load and scene.terrain_root == ground_before, "invalid save preserves authority and visible ground")
+	check(not scene.save_session_file(DIRECTORY.path_join("missing/scene.ocnsave")) and scene.controller.get_observation() == before_load, "write failure preserves authority")
+	check(scene.save_session_file(save_path), "existing save can be atomically replaced")
+	var blocker := write_file("Save 测试.ocnsave.ocnsave.tmp", PackedByteArray([9]))
+	var before_write := FileAccess.get_file_as_bytes(save_path)
+	check(not scene.save_session_file(save_path) and FileAccess.get_file_as_bytes(save_path) == before_write and FileAccess.get_file_as_bytes(blocker) == PackedByteArray([9]), "temporary collision preserves existing files")
+	DirAccess.remove_absolute(blocker)
+	scene.save_dialog.popup_centered()
+	check(not scene.handle_input_event(key(KEY_D)), "save picker blocks movement")
+	scene.save_dialog.hide()
+	scene.load_dialog.popup_centered()
+	check(not scene.handle_input_event(key(KEY_ESCAPE)), "load picker blocks pause toggle")
+	scene.load_dialog.hide()
 	scene.reset_session()
 	Input.parse_input_event(key(KEY_W))
 	Input.flush_buffered_events()
@@ -174,6 +269,24 @@ func run(scene) -> bool:
 	check(scene.load_terrain_file(floor_path), "authored coherent flat WORLD loads through real decoder and candidate swap")
 	check(scene.raw_observation.submissions == 0 and scene.raw_observation.hp_raw == 0x42c80000 and scene.terrain_root.get_child_count() == 1, "successful terrain replacement starts clean authority and nonempty ground")
 	check(scene.raw_observation.get("movement_policy", "") == "dry_creature" and scene.raw_observation.get("ready_tick_limit", 0) == 512, "terrain replacement retains active creature policy and bounded run")
+	var pair_path := write_file("Two plain elements.WORLD", flat_world_pair())
+	check(scene.load_terrain_file(pair_path) and scene.controller.get_play_capabilities().terrain_elements == 2 and scene.terrain_root.get_child_count() == 2,
+		"two documented flat terrain elements load and display")
+	var pair_save := DIRECTORY.path_join("Two plain elements.ocplay")
+	var pair_saved: Dictionary = scene.controller.save_file(pair_save)
+	var pair_reload: Dictionary = scene.controller.prepare_save_file(pair_save) if pair_saved.get("ok", false) else {}
+	check(pair_saved.get("ok", false) and pair_reload.get("ok", false) and pair_reload.get("terrain", {}).get("surfaces", []).size() == 2,
+		"multi-element collision preview prepares from a native continuation")
+	if pair_reload.get("ok", false): scene.controller.cancel_terrain_file(pair_reload.token)
+	var hole := flat_world_pair()
+	hole.encode_u16(0x8416, 0)
+	hole.encode_u16(0x8418, 0xffff)
+	hole.encode_u32(0x8404, 6)
+	var hole_path := write_file("Missing element coverage.WORLD", hole)
+	var hole_result: Dictionary = scene.controller.prepare_terrain_file(hole_path)
+	check(not hole_result.get("ok", false) and "partial surface coverage" in str(hole_result.get("error", "")),
+		"multi-element preview refuses a collision-grid hole")
+	check(scene.load_terrain_file(floor_path), "single-element fixture returns after multi-element save probe")
 	scene.handle_input_event(key(KEY_D))
 	scene.advance_step()
 	scene.advance_step()
@@ -208,9 +321,14 @@ func run(scene) -> bool:
 	check(world_ready.position_raw[0] == 0x3f7fffff and world_ready.hp_raw == 0x42c40000, "same WORLD bytes supply actual ready movement and health")
 	scene.set_paused(true)
 	var preserve: Dictionary = scene.controller.get_observation()
-	for flag in [0x80, 0x20]:
-		var unsupported := write_file("blocked%d.WORLD" % flag, WorldGeometryFixture.world(flat_world(), flag))
-		check(not scene.load_terrain_file(unsupported) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh and scene.paused, "water or moving geometry refuses without replacing paused scene")
+	# A WORLD whose only chunk is a water tile has no visible static ground.
+	var water_only := write_file("blocked128.WORLD", WorldGeometryFixture.world(flat_world(), 0x80))
+	check(not scene.load_terrain_file(water_only) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh and scene.paused, "a water-only WORLD refuses without replacing paused scene")
+	# A moving-piece chunk decodes as geometry at its rest pose; prepare and
+	# cancel so the paused scene is not replaced.
+	var moving_chunk := write_file("moving32.WORLD", WorldGeometryFixture.world(flat_world(), 0x20))
+	var moving_prepared: Dictionary = scene.controller.prepare_terrain_file(moving_chunk)
+	check(moving_prepared.get("ok", false) and scene.controller.cancel_terrain_file(moving_prepared.token) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh, "a moving-piece chunk prepares as static ground without replacing the scene")
 	var no_floor := flat_world()
 	for cell in range(4):
 		no_floor.encode_u32(0x8400 + cell * 4, 2)
@@ -249,6 +367,11 @@ func run(scene) -> bool:
 	scene.advance_step()
 	var reset_ready: Dictionary = scene.advance_step()
 	check(reset_ready.position_raw == PackedInt64Array([0, 0x3f7fffff, 0]) and reset_ready.hp_raw == 0x42c40000, "reset on loaded terrain still runs original creature movement and shared health")
+	var supplied_checkpoint: Dictionary = scene.controller.get_observation()
+	check(scene.save_session_file(save_path), "supplied terrain checkpoint saves")
+	check(scene.load_session_file(save_path), "supplied collision terrain restores through scene")
+	check(scene.raw_observation.position_raw == supplied_checkpoint.position_raw and scene.raw_observation.hp_raw == supplied_checkpoint.hp_raw and scene.raw_observation.ready_ticks == supplied_checkpoint.ready_ticks, "supplied terrain load retains current movement and health")
+	check(scene.raw_observation.terrain_mode == "practice" and scene.raw_observation.terrain_name == "Restored collision ground", "load labels collision illustration rather than claiming source geometry")
 	scene.release_controls()
 	for path in files:
 		DirAccess.remove_absolute(path)

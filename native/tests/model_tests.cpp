@@ -733,6 +733,18 @@ void ancillaryTests() {
                 std::array<std::int8_t, 3>{-107, -106, -105},
         "mesh bounds, nonauthoritative triangle hint and signed hull "
         "coordinates retained");
+  const auto hull = champions::rtaModelHull({f.bytes.data(), f.bytes.size()}, 0);
+  check(hull == m.meshes[0].hull_points,
+        "runtime hull binding agrees with decoded signed mesh points");
+  auto no_hull = f.bytes;
+  no_hull[0x25] = 0;
+  bool hull_refused = false;
+  try {
+    (void)champions::rtaModelHull({no_hull.data(), no_hull.size()}, 0);
+  } catch (const champions::FormatError &) {
+    hull_refused = true;
+  }
+  check(hull_refused, "runtime hull binding refuses a missing table");
   auto bad = f.bytes;
   put(bad, 0x24, (sample - 16) / 16, 1);
   reject(bad, "attach table must retain all16 records before sample table");

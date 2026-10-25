@@ -93,6 +93,22 @@ void tests() {
     bad=t;bad.joints[0].skin={std::numeric_limits<double>::max()/4,0,0,std::numeric_limits<double>::max(),0,1,0,0,0,0,1,0};
     reject(m,bad,"finite transformed translation sum overflow rejected");
     m=model({{0,1,0,0},{0,255,0,0},2});reject(m,bad,"even zero-weight referenced transform arithmetic must remain finite");
+    m=model();
+    m.meshes[0].corners[0].normal={1,0,0};
+    m.meshes[0].corners[1].normal={0,1,0};
+    m.meshes[0].corners[2].normal={0,0,1};
+    auto normals=champions::skinRtaModelNormals(m,t);
+    check(normals.meshes.size()==1&&normals.meshes[0].index==7&&normals.meshes[0].normals.size()==3,"normal output keeps mesh index and corner order");
+    near(normals.meshes[0].normals[0],{0,1,0},"a stored normal rotates by the skin 3x3 and ignores translation");
+    near(normals.meshes[0].normals[2],{0,0,1},"the Z column of that rotation leaves a Z normal");
+    m.meshes[0].corners[0].skin={{0,1,0,0},{85,170,0,0},2};
+    normals=champions::skinRtaModelNormals(m,t);
+    near(normals.meshes[0].normals[0],{170.0/255.0,85.0/255.0,0},"two influences blend the rotated normals by weight/255");
+    m=model();m.meshes[0].corners[0].normal[0]=std::numeric_limits<float>::quiet_NaN();
+    bool normal_refused=false;
+    try{(void)champions::skinRtaModelNormals(m,t);}catch(const champions::FormatError&){normal_refused=true;}
+    check(normal_refused,"a nonfinite stored normal is rejected");
+    check(champions::skinRtaModelPositions(m,t).meshes[0].positions.size()==3,"position skinning still ignores normal metadata");
     m=model();m.meshes[0].corners.resize(600000,m.meshes[0].corners[0]);
     check(champions::skinRtaModelPositions(m,t).meshes[0].positions.size()==600000,"exact200000 triangle budget accepted");
     m.meshes.push_back({2,true,0,std::vector<champions::ModelCorner>(3,m.meshes[0].corners[0])});

@@ -1,0 +1,12 @@
+[configuration]
+entry_symbol = "champions_creature_animation_init"
+compatibility_minimum = "4.5"
+reloadable = false
+
+[libraries]
+macos.debug = "res://creature_anim/bin/libchampions-creature-animation.template_debug.dylib"
+macos.release = "res://creature_anim/bin/libchampions-creature-animation.template_release.dylib"
+linux.debug.x86_64 = "res://creature_anim/bin/libchampions-creature-animation.template_debug.so"
+linux.release.x86_64 = "res://creature_anim/bin/libchampions-creature-animation.template_release.so"
+windows.debug.x86_64 = "res://creature_anim/bin/champions-creature-animation.template_debug.dll"
+windows.release.x86_64 = "res://creature_anim/bin/champions-creature-animation.template_release.dll"

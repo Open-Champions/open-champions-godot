@@ -92,6 +92,27 @@ struct RtaModel {
 // Rejects unsupported forms with FormatError. Limits:16MiB input,64
 // meshes,32768 packets,200000 triangles.
 RtaModel decodeRtaModel(Bytes bytes);
+// model_getHullPoints 0x179320: the byte at +0x25 selects a table in
+// 16-byte units; each mesh owns eight signed xyz points (24 bytes).
+// The caller retains the .vif bytes. A missing or truncated hull refuses.
+inline std::array<std::array<std::int8_t, 3>, 8>
+rtaModelHull(Bytes bytes, unsigned mesh) {
+  if (!bytes.data || bytes.size < 0x28 || mesh >= 64)
+    throw FormatError("invalid model hull input");
+  const auto table = bytes.data[0x25];
+  if (!table)
+    throw FormatError("model has no hull table");
+  const std::size_t at = std::size_t(table) * 16 + std::size_t(mesh) * 24;
+  if (at > bytes.size || 24 > bytes.size - at)
+    throw FormatError("model hull entry is truncated");
+  std::array<std::array<std::int8_t, 3>, 8> points{};
+  for (unsigned point = 0; point < 8; ++point)
+    for (unsigned axis = 0; axis < 3; ++axis) {
+      const int byte = bytes.data[at + point * 3 + axis];
+      points[point][axis] = std::int8_t(byte < 128 ? byte : byte - 256);
+    }
+  return points;
+}
 // Default (-1) or exactly one variant bit (0..31). Hide wins a show/hide
 // conflict. All 64 mask bits are preserved; part_mask is never applied here.
 // Throws FormatError for invalid selection or a variant without a table.

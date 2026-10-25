@@ -7,7 +7,10 @@
 #include "champions/creature_movement.hpp"
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
+#include "champions/play_session.hpp"
 #include "champions/raw_handles.hpp"
+#include "champions/session_anim_cache.hpp"
+#include "champions/session_recovery.hpp"
 #include "champions/world_queries.hpp"
 #include <functional>
 #include <map>
@@ -15,6 +18,14 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
+namespace champions::simulation::rta::session_control {
+class Controller;
+struct Observation;
+} // namespace champions::simulation::rta::session_control
 namespace champions::simulation::rta::session {
 // Experimental composition of the pinned module contracts. Task/native names
 // are supplied by the caller, never inferred original engine commands.
@@ -252,6 +263,23 @@ struct TurningSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+struct RecoverySnapshot {
+  HpBinding binding;
+  session_recovery::Initial initial;
+  std::string policy = session_recovery::POLICY, phase = "idle",
+              publication_error;
+  std::string memory_owner = "hp.adapter.model.mem";
+  std::size_t depth = 0, calls_this_tick = 0;
+  std::vector<player::Write> writes;
+  std::vector<player::Call> calls;
+  std::vector<player::Event> events;
+  std::uint64_t draws = 0;
+  player::Address R0 = 0;
+  player::Tick::Policy callback_policy = player::Tick::Policy::RequireHandlers;
+  std::vector<ObjectBindingSnapshot> callbacks;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 using AnimationClipId = std::uint64_t;
 inline constexpr std::size_t MAX_ANIMATION_CLIPS = 64,
                              MAX_ANIMATION_BINDINGS = 16,
@@ -307,13 +335,33 @@ struct AnimationSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+struct AnimationCacheBindingSnapshot {
+  HpBinding binding;
+  animation_runtime::StateId state = 0;
+  std::size_t calls_this_tick = 0;
+  bool advanced_this_tick = false;
+  std::optional<std::int32_t> last_event;
+  std::optional<AnimationCacheDecoded> last_decoded;
+};
+struct AnimationCacheSnapshot {
+  AnimationCacheLimits limits;
+  animation_runtime::Snapshot runtime;
+  std::vector<AnimationCacheBindingSnapshot> bindings;
+  std::string policy = ANIMATION_CACHE_POLICY, phase = "idle";
+  std::size_t depth = 0, calls_this_tick = 0;
+  std::vector<AnimationCacheOperation> operations;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 struct Snapshot {
   Config config;
   std::optional<HpSnapshot> hp;
   std::optional<TerrainSnapshot> terrain;
   std::optional<CreatureMovementSnapshot> creature_movement;
   std::optional<AnimationSnapshot> animation;
+  std::optional<AnimationCacheSnapshot> animation_cache;
   std::optional<TurningSnapshot> turning;
+  std::optional<RecoverySnapshot> recovery;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -336,7 +384,17 @@ struct Snapshot {
   std::vector<std::uint32_t> draws;
   std::vector<Event> events;
 };
+// Callback-free scalar display projection. Histories remain owned and intact.
+struct ActorObservation {
+  world_queries::Vec3 position{};
+  Raw vz = 0, radius = 0, hp = 0;
+  std::uint32_t facing = 0;
+  std::int64_t frame = 0;
+};
 class Session {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
+
 public:
   using Task = std::function<void(Session &)>;
   using MessageHandler =
@@ -384,6 +442,12 @@ public:
   // Original scalar turning over the same HP Memory, without terrain, a mover
   // or a virtual table. Setup freezes on submit. Initial raw fields are
   // explicit.
+  // Closed recovery over the existing HP Memory. Setup freezes on submit.
+  // The initial health must match the authoritative base HP at binding.
+  void enable_recovery(HpId, const session_recovery::Initial &);
+  // Once per ready tick in an explicit task after runObjects. Base HP imports
+  // to record HP, health then mana execute, completed record HP publishes back.
+  void recover_player(HpId);
   void enable_turning(TurnLimits limits = {});
   HpId bind_turner(HpId, TurnInitial);
   // Once per binding per actual post-runObjects ready tick (priority > 10).
@@ -412,6 +476,32 @@ public:
   std::int32_t advance_animation(HpId, Raw speed = ONE);
   void set_animation_event(AnimationClipId, std::size_t slot,
                            animation_clock::Event);
+  // Separately selected cache policy; mutually exclusive with enable_animation.
+  // Owns exactly one Runtime. Setup freezes on first submit. All execution is
+  // explicit post-runObjects ready work (priority > 10), never a render getter.
+  void enable_animation_cache(std::size_t slots = 2,
+                              AnimationCacheLimits limits = {});
+  animation_runtime::ClipId
+  add_animation_cache_clip(const std::vector<std::uint8_t> &,
+                           const std::string &name = {});
+  animation_runtime::ClipId
+  add_animation_cache_clip(const animation_runtime::Clip &);
+  animation_runtime::StateId bind_animation_cache(HpId,
+                                                  std::int32_t capacity = 8);
+  animation_runtime::TrackId start_animation_cache(HpId,
+                                                   animation_runtime::ClipId,
+                                                   Raw blend_in = ZERO,
+                                                   std::uint32_t flags = 0);
+  void stop_animation_cache(HpId, animation_runtime::ClipId,
+                            Raw blend_out = ZERO);
+  std::int32_t advance_animation_cache(HpId, Raw speed = ONE);
+  void set_animation_cache_event(animation_runtime::ClipId, std::size_t,
+                                 animation_decoder::Event);
+  // Selected cell must be in this binding's live range. Decode and sample every
+  // declared joint at that cell's current raw32 time; returned values are
+  // owned.
+  AnimationCacheDecoded decode_animation_cache(HpId,
+                                               animation_runtime::TrackId);
   // Write.address is a relative record offset; projected/managed spans refuse.
   void seed_hp_backing(HpId, const std::vector<creature_hp::Write> &);
   // offset must be 0x4c,0x2e4,0x360. Target backhead must already be
@@ -456,8 +546,17 @@ public:
   netwire::Machine network() const;
   bool failed() const noexcept;
   Snapshot snapshot() const;
+  ActorObservation observe_actor(HpId) const;
 
 private:
+  friend class session_control::Controller;
+  play_session::Retained play_retained() const;
+  void retire_play_history();
+  // Closed Controller projection: no histories, callbacks or mutable aliases.
+  session_control::Observation control_observation(std::uint64_t actor_serial,
+                                                   HpId) const;
+  animation_runtime::TrackId control_animation_track(HpId) const;
+  std::size_t control_animation_operations() const;
   struct State;
   std::unique_ptr<State> state_;
   void ready_tick();

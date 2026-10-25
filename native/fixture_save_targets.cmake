@@ -1,0 +1,27 @@
+# Review fixes: fixture continuation v1 (combat / level fixtures, docs/NATIVE_SAVE.md)
+# and the exact per-machine EffectWorld snapshot it carries. Included after the
+# combat, effects and level-flow targets. No Godot dependency.
+include_guard(GLOBAL)
+set(CHAMPIONS_FIXTURE_SAVE_ROOT "${CMAKE_CURRENT_LIST_DIR}")
+add_library(champions-fx-world-save "${CHAMPIONS_FIXTURE_SAVE_ROOT}/src/fx/world_save.cpp")
+target_include_directories(champions-fx-world-save PUBLIC "${CHAMPIONS_FIXTURE_SAVE_ROOT}/include")
+target_link_libraries(champions-fx-world-save PUBLIC champions-fx-sim)
+add_library(champions-play-fixture-save "${CHAMPIONS_FIXTURE_SAVE_ROOT}/src/play_fixture_save.cpp")
+target_include_directories(champions-play-fixture-save PUBLIC "${CHAMPIONS_FIXTURE_SAVE_ROOT}/include")
+target_link_libraries(champions-play-fixture-save PUBLIC champions-combat-play-effects champions-level-play
+    champions-native-save)
+foreach(target champions-fx-world-save champions-play-fixture-save)
+    set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+endforeach()
+if(BUILD_TESTING)
+    add_executable(champions-fixture-save-tests "${CHAMPIONS_FIXTURE_SAVE_ROOT}/tests/play_fixture_save_tests.cpp")
+    target_include_directories(champions-fixture-save-tests PRIVATE "${CHAMPIONS_FIXTURE_SAVE_ROOT}/src")
+    target_link_libraries(champions-fixture-save-tests PRIVATE champions-play-fixture-save champions-fx-world-save)
+    add_test(NAME fixture-save COMMAND champions-fixture-save-tests
+        "${CHAMPIONS_FIXTURE_SAVE_ROOT}/tests/fixtures/fx_skill_recipes_synthetic.json")
+endif()

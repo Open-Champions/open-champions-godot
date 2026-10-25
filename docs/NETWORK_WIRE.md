@@ -68,7 +68,9 @@ are excluded from finite Python vector comparisons. The research source is
 unchanged.
 
 This establishes parity with the RTA wire model within the stated bounds.
-Socket transport, actual engine task/message handlers, live peer interoperability,
-console compatibility and Norrath behavior require separate evidence. The
-library is not yet connected to a playable scene. Remaining model-format coverage
-follows the five gameplay ports.
+The [lockstep session](NETPLAY.md) drives this model for 2–4 peers through an
+in-process loopback. Internet datagrams, the lobby and rendezvous are still
+open. Socket transport, actual engine task/message handlers, live peer
+interoperability, console compatibility and Norrath behavior require separate
+evidence. The library is not yet connected to a playable scene. Remaining
+model-format coverage follows the five gameplay ports.

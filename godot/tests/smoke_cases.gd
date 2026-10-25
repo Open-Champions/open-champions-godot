@@ -189,6 +189,9 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	check(pixels.size() == 64 and pixels[3] == 0 and pixels[7] == 127 and pixels[11] == 255 and pixels[15] == 255, "stored alpha scales and clamps")
 	var duplicate: Dictionary = inspector.inspect_texture(path, 3, "rta", digest)
 	check(duplicate.get("ok", false) and duplicate["rgba"][0] == 222, "duplicate texture names resolve by original row index")
+	var player_texture: Dictionary = inspector.read_player_resource(path, 3, digest, "same.tex")
+	check(player_texture.get("ok", false) and player_texture.get("bytes", PackedByteArray()) == other,
+		"player texture copy retains the validated duplicate row")
 	var direct := write_file("texture-direct.LMP", child)
 	var direct_listing: Dictionary = inspector.inspect_archive(direct)
 	check(inspector.inspect_texture(direct, 1, "rta", direct_listing.get("fingerprint", "")).get("ok", false), "direct LMP texture")
@@ -238,6 +241,8 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	changed[changed.size() - 1] ^= 1
 	write_file("textures.GOB", changed)
 	texture_rejected(inspector, path, 2, "rta", digest, "changed archive fingerprint rejected")
+	check(not inspector.read_player_resource(path, 3, digest, "same.tex").get("ok", false),
+		"changed texture archive refuses a saved player row")
 	browser._preview_selected()
 	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty() and "changed" in browser.preview_info.text, "stale file failure clears previously displayed texture")
 	browser.open_archive(direct)
@@ -881,6 +886,15 @@ func skinning_cases(inspector: RefCounted) -> void:
 	var path := write_file("skinning.GOB", gob(child))
 	var listing: Dictionary = inspector.inspect_archive(path)
 	var digest: String = listing.get("fingerprint", "")
+	var player_body: Dictionary = inspector.read_player_resource(path, 2, digest, "shape.vif")
+	var player_clip: Dictionary = inspector.read_player_resource(path, 4, digest, "motion.anm")
+	check(player_body.get("ok", false), "player body is copied from a validated row: " + str(player_body.get("error", "")))
+	check(player_clip.get("ok", false), "player clip is copied from a validated row: " + str(player_clip.get("error", "")))
+	check(player_body.get("bytes", PackedByteArray()) == payloads[1]
+		and player_clip.get("bytes", PackedByteArray()) == payloads[3],
+		"selected player resources retain the fixture bytes")
+	check(not inspector.read_player_resource(path, 4, digest, "other.anm").get("ok", false),
+		"player clip row must retain its selected name")
 	var rigid: Dictionary = inspector.sample_skinned_model(path, 2, 4, "rta", digest, 1.5)
 	check(rigid.get("ok", false) and rigid.get("duration_ticks", -1) == 8 and rigid.get("tick", -1) == 1.5
 		and rigid.get("triangle_count", -1) == 2 and rigid.get("model_name", "") == "shape.vif"
@@ -897,8 +911,14 @@ func skinning_cases(inspector: RefCounted) -> void:
 		"rigid sampled corners independently anchor rotation, translation and native Z-up order")
 	check(skin_positions_equal(skin_positions(rigid, 1), PackedVector3Array([Vector3(2.5,102,3),Vector3(2.5,104,3),Vector3(1.5,102,5)])),
 		"default-hidden mesh keeps distinct translated source corners")
-	check(rigid_meshes[0].keys().size() == 3 and not rigid_meshes[0].has("normals") and not rigid_meshes[0].has("uv_texels") and not rigid.has("texture"),
-		"position-only bridge omits misleading rest normals, UV and material data")
+	var posed_normal := Vector3(114.0 / 127.0, 0, 57.0 / 127.0)
+	var rigid_normals: PackedVector3Array = rigid_meshes[0].get("normals", PackedVector3Array())
+	check(rigid_meshes[0].keys().size() == 4 and rigid_normals.size() == 3
+		and rigid_normals[0].is_equal_approx(posed_normal)
+		and rigid_normals[1].is_equal_approx(posed_normal)
+		and rigid_normals[2].is_equal_approx(posed_normal)
+		and not rigid_meshes[0].has("uv_texels") and not rigid.has("texture"),
+		"skinned sample returns the joint rotation of the stored normal and still omits UV and material data")
 	var weighted: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 1.5)
 	var expected := PackedVector3Array([Vector3(-31.0/255,892.0/255,574.0/255),Vector3(735.0/255,690.0/255,555.0/255),Vector3(45.0/255,210.0/255,65.0/255)])
 	check(weighted.get("ok", false) and weighted.get("triangle_count", -1) == 1 and skin_positions_equal(skin_positions(weighted), expected),
@@ -964,10 +984,14 @@ func skinning_cases(inspector: RefCounted) -> void:
 	replacements[3] = fixture.animation(512)
 	write_file("skinning.GOB",gob(archives.lmp(names,replacements)))
 	skinning_rejected(inspector,path,2,4,"rta",digest,0,"changing only selected animation at same path invalidates shared archive fingerprint")
+	check(not inspector.read_player_resource(path, 4, digest, "motion.anm").get("ok", false),
+		"changed clip archive refuses a saved player row and fingerprint")
 	replacements = payloads.duplicate()
 	replacements[1] = fixture.model()
 	write_file("skinning.GOB",gob(archives.lmp(names,replacements)))
 	skinning_rejected(inspector,path,2,4,"rta",digest,0,"changing only selected model at same path invalidates shared archive fingerprint")
+	check(not inspector.read_player_resource(path, 2, digest, "shape.vif").get("ok", false),
+		"changed body archive refuses a saved player row and fingerprint")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	skinning_rejected(inspector,path,2,4,"rta",digest,0,"missing archive yields fully cleared skinning failure")
 	check(skin_positions_equal(skin_positions(rigid), PackedVector3Array([Vector3(2.5,2,3),Vector3(2.5,4,3),Vector3(1.5,2,5)])),

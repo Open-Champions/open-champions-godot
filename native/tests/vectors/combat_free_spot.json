@@ -1,0 +1,13 @@
+{
+  "schema": "combat-free-spot-v1",
+  "research_commit": "13fafa465d5dad7acaeb1ee8becd30c4c8e4788b",
+  "references": {
+    "docs/level-flow.md": "db46102cadc7a41f704068601c6d710caee7f6d64796d99c11e54babcfd13526",
+    "docs/objects.md": "9b23931068b93dc69be2e2eca93fe688f8e7acbd6ee9ab143b1dfef9b6513dd8",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+  },
+  "vector_sha256": "ecb6e34439b984611ab2bd91b47d94792f21f54db87980c9c022f4836a49d308",
+  "content_sha256": "dc0676d7295ebdf0723ee4dd9a4611595a652a3b58850e6e7f6deefc79600676",
+  "cases": 11
+}

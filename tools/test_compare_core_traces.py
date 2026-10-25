@@ -19,6 +19,10 @@ from simulation_contracts import (SESSION_TURN_REFERENCE, SESSION_TURN_REFERENCE
                                   SESSION_TURN_SPECIFICATION, SESSION_TURN_ORDERING,
                                   SESSION_TURN_HELPERS, SESSION_TURN_GENERATOR,
                                   SESSION_TURN_PROTOCOL)
+from simulation_contracts import (ANIMATION_RUNTIME_REFERENCE, ANIMATION_RUNTIME_REFERENCES,
+                                  ANIMATION_RUNTIME_SPECIFICATION, ANIMATION_RUNTIME_GENERATOR,
+                                  ANIMATION_RUNTIME_PROTOCOL)
+from simulation_contracts import SESSION_ANIM_CACHE_IDENTITY
 from core_trace_contract import expected_trace
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
@@ -62,6 +66,8 @@ class CoreArtifacts(unittest.TestCase):
             vector_hash = hashlib.sha256(vectors).hexdigest()
             (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            if suite == "session-anim-cache":
+                source.update(SESSION_ANIM_CACHE_IDENTITY)
             if suite == "session-turn":
                 source.update(references=SESSION_TURN_REFERENCES,
                               composition_policy="rta-session-turn-v1",
@@ -76,6 +82,12 @@ class CoreArtifacts(unittest.TestCase):
                               specification_evidence=CREATURE_TURN_SPECIFICATION,
                               helpers={}, generator_sha256=CREATURE_TURN_GENERATOR,
                               input_protocol=CREATURE_TURN_PROTOCOL)
+            if suite == "animation-runtime":
+                source.update(references=ANIMATION_RUNTIME_REFERENCES,
+                              composition_policy="rta-animation-runtime-v1",
+                              specification_evidence=ANIMATION_RUNTIME_SPECIFICATION,
+                              helpers={}, generator_sha256=ANIMATION_RUNTIME_GENERATOR,
+                              input_protocol=ANIMATION_RUNTIME_PROTOCOL)
             if suite == "animation-decoder":
                 source.update(references=ANIMATION_DECODER_REFERENCES,
                               composition_policy="rta-animation-decoder-v1",
@@ -220,7 +232,7 @@ class CoreArtifacts(unittest.TestCase):
             report_path.write_text(json.dumps(report))
 
     def test_decoder_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 39)
         self.assertEqual(CONTRACTS["animation-decoder"],
                          ("animation_decoder", ANIMATION_DECODER_REFERENCE))
         for platform in PLATFORMS:
@@ -331,7 +343,7 @@ class CoreArtifacts(unittest.TestCase):
             report_path.write_text(json.dumps(report))
 
     def test_session_animation_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 39)
         self.assertEqual(CONTRACTS["session-animation"],
                          ("session_animation", SESSION_ANIMATION_REFERENCE))
         for platform in PLATFORMS:
@@ -418,7 +430,7 @@ class CoreArtifacts(unittest.TestCase):
                     expected_trace("session-animation", [row])
 
     def test_animation_clock_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 39)
         self.assertEqual(len(PLATFORMS), 5)
         self.assertEqual(CONTRACTS["animation-clock"],
                          ("animation_clock", ANIMATION_CLOCK_REFERENCE))
@@ -646,7 +658,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 39)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):
@@ -1075,6 +1087,45 @@ class CoreArtifacts(unittest.TestCase):
         report["trace_sha256"] = hashlib.sha256(data).hexdigest()
         path.write_text(json.dumps(report))
         with self.assertRaisesRegex(ValueError, "reference expectation"): self.check()
+
+    def test_peer_diagnostic_locates_nested_state(self):
+        data = b"events\t0\t0;[]\tok\t[[],[[],[9]],[],[]]\n"
+        folder = self.traces / "macos-x64"
+        (folder / "session-animation.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+        path = folder / "session-animation.json"
+        report = json.loads(path.read_text())
+        report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+        path.write_text(json.dumps(report))
+        with self.assertRaises(ValueError) as error:
+            self.check()
+        message = str(error.exception)
+        for expected in ("suite=session-animation", "record index=0", "field=state[1][1][0]",
+                         "linux-x64=1", "macos-x64=9", "preceding matching state", "<none>"):
+            self.assertIn(expected, message)
+
+    def test_missing_payload_is_incomplete(self):
+        from trace_diagnostics import IncompleteTrace
+        (self.traces / "macos-x64/arithmetic.tsv.gz").unlink()
+        with self.assertRaisesRegex(IncompleteTrace, "missing required core trace payload"):
+            self.check()
+
+    def test_core_cli_status_codes(self):
+        from compare_core_traces import main
+        import contextlib
+        import io
+        argv = ["--trace-dir", str(self.traces), "--manifests", str(self.manifests),
+                "--source-commit", "commit"]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertEqual(main(argv), 0)
+            self.edit("source_commit", "wrong")
+            self.assertEqual(main(argv), 1)
+            self.assertIn("MISMATCH:", output.getvalue())
+            self.edit("source_commit", "commit")
+            (self.traces / "macos-x64/arithmetic.json").unlink()
+            self.assertEqual(main(argv), 2)
+            self.assertIn("INCOMPLETE:", output.getvalue())
+            for result in ("cancelled", "skipped", "failure"):
+                self.assertEqual(main(argv + ["--native-result", result]), 2)
 
     def test_identical_wrong_results_on_every_host(self):
         for platform in PLATFORMS:

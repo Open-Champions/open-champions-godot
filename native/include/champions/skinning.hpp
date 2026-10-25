@@ -24,4 +24,18 @@ struct RtaSkinnedPositions {
 // original-renderer equivalence, playback or Norrath compatibility is established.
 RtaSkinnedPositions skinRtaModelPositions(const RtaModel& model,
                                         const RtaAnimationTransforms& transforms);
+struct RtaSkinnedMeshNormals {
+    std::uint32_t index;
+    std::vector<std::array<double,3>> normals; // Same corner order as positions.
+};
+struct RtaSkinnedNormals {
+    std::vector<RtaSkinnedMeshNormals> meshes;
+};
+// Rotates each stored normal (decoder s8/127) by the blended skin 3x3:
+// n' = sum (weight/255 * R_j * n). Same validation and limits as positions,
+// and stored normals must be finite. Translation is not applied and the
+// result is not renormalized; a zero sum stays zero. The environment pass
+// normalizes in camera space (render-pipeline section 9).
+RtaSkinnedNormals skinRtaModelNormals(const RtaModel& model,
+                                      const RtaAnimationTransforms& transforms);
 } // namespace champions

@@ -125,6 +125,9 @@ public:
   Object *remove(Link *node);
   HandleObjectRef remove_ref(Link *node);
   void clear(Cell &head);
+  // Like clear, but links of kind Iterator stay in the list: a World teardown
+  // drops its node references without disturbing retained iterators.
+  void clear_nodes(Cell &head);
   std::size_t count_free() const;
   static std::vector<Object *> items(const Cell &head);
 };

@@ -75,7 +75,7 @@ std::pair<std::string, std::string> scenario(const std::string &op,
   const auto bytes = unhex(parts[1]);
   const G::Limits cap;
   try {
-    const auto result = G::decode(bytes, cap);
+    const auto result = G::decode(bytes, cap, G::STATIC_ONLY);
     return {"ok", sequence({limits(cap), geometry(result)})};
   } catch (const G::ResourceLimit &) {
     throw;
