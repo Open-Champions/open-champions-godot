@@ -9,6 +9,7 @@
 #include "champions/session_control.hpp"
 #include "champions/terrain_file.hpp"
 #include <cctype>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -59,7 +60,7 @@ R::Raw raw_of(float f) {
 int main(int argc, char **argv) {
   std::string root, level_name = "valor";
   unsigned ticks = 600, attack_every = 30;
-  bool walk = false, near_boar = false, weak = false, near_weakest = false;
+  bool walk = false, near_boar = false, weak = false, near_weakest = false, ai_check = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--game" && i + 1 < argc) root = argv[++i];
@@ -70,6 +71,7 @@ int main(int argc, char **argv) {
     else if (a == "--near") near_boar = true;
     else if (a == "--weak") weak = true;
     else if (a == "--near-weakest") near_weakest = true;
+    else if (a == "--ai-check") ai_check = true;
     else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk] [--near (DIAGNOSTIC: start 40 units from a boar)] [--near-weakest (DIAGNOSTIC: like --near, at the boar with the lowest hit points)] [--weak (DIAGNOSTIC: set HP 1.0 on boars within 400 units to exercise the death path)]\n"; return 2; }
   }
   if (root.empty() || !fs::is_directory(root)) { std::cerr << "need --game DIR\n"; return 2; }
@@ -180,6 +182,65 @@ int main(int argc, char **argv) {
       fight.place_player(spot, 0);
       start.position = spot;
     }
+  }
+  if (ai_check) {
+    // Counts only. Move the diagnostic player near a real level boar after
+    // 120 ticks, without writing enemy state, target, stats or animation.
+    // This proves native integration, not an unassisted campaign route.
+    const auto initial = fight.enemies();
+    const auto selected = std::min_element(initial.begin(),initial.end(),[](const auto &a,const auto &b) {
+      return R::lt(a.hp,b.hp);
+    });
+    std::map<CF::Address, R::Vec3> positions;
+    for (const auto &e : initial) positions[e.address] = e.position;
+    std::set<CF::Address> wander, chase, attack, moved, reaction, retreat;
+    unsigned near_ticks = 0, active_ticks = 0, target_ticks = 0, visible_ticks = 0;
+    std::size_t inert = 0, no_target = 0, player_enemies = 0;
+    const auto player_address = CF::Address(fight.world().read(R::combat_runtime::PLAYERS + 0x43d8));
+    for (const auto &e : initial) {
+      inert += fight.world().read(e.address + 0x231,1) != 0;
+      no_target += (fight.world().read(e.address + 0xa8,8) & UINT64_C(0x4000000)) != 0;
+      if (player_address) player_enemies += fight.world().enemy(e.address,player_address) != 0;
+    }
+    bool placed = false;
+    for (unsigned t = 0; t < ticks && !fight.failed(); ++t) {
+      if (t == 120 && !initial.empty()) {
+        auto spot = selected->position;
+        spot[0] = R::sub(spot[0], R::from_int(40));
+        placed = fight.place_player(spot, 0).empty();
+      }
+      fight.tick(0);
+      if (placed && !initial.empty() && player_address) {
+        const auto a = selected->address;
+        const auto p = fight.player().position;
+        const R::Vec3 enemy_pos{R::Raw(fight.world().read(a + 0x10)),R::Raw(fight.world().read(a + 0x14)),R::Raw(fight.world().read(a + 0x18))};
+        const auto dx = R::sub(p[0],enemy_pos[0]), dy = R::sub(p[1],enemy_pos[1]), dz = R::sub(p[2],enemy_pos[2]);
+        near_ticks += R::lt(R::add(R::add(R::mul(dx,dx),R::mul(dy,dy)),R::mul(dz,dz)),R::from_int(250000));
+        active_ticks += (fight.world().read(a + 0xa8,8) >> 63) != 0;
+        target_ticks += fight.world().target(a + 0x234) != 0;
+        visible_ticks += fight.world().can_see(a,player_address,0,0x7fff,0,0,R::from_int(300)) != 0;
+      }
+      for (const auto &e : fight.enemies()) {
+        if (e.state == 1) wander.insert(e.address);
+        if (e.state == 3) chase.insert(e.address);
+        if (e.state >= 6 && e.state <= 10) attack.insert(e.address);
+        if (e.state == 18) reaction.insert(e.address);
+        if (e.state == 16) retreat.insert(e.address);
+        if (e.position[0] != positions[e.address][0] || e.position[1] != positions[e.address][1]) moved.insert(e.address);
+      }
+    }
+    const auto &n = fight.counts();
+    std::cout << "AI_CHECK diagnostic_placement=" << placed << " boars=" << initial.size()
+              << " ticks=" << n.ticks << " wandered=" << wander.size() << " chased=" << chase.size()
+              << " attacked=" << attack.size() << " moved=" << moved.size()
+              << " reactions=" << reaction.size() << " retreats=" << retreat.size()
+              << " state_changes=" << n.boar_state_changes << " attack_entries=" << n.boar_attack_entries
+              << " hit_events=" << n.boar_hit_events << " failed=" << fight.failed() << "\n";
+    std::cout << "AI_INPUTS inert=" << inert << " no_target=" << no_target << " player_enemies=" << player_enemies
+              << " near_ticks=" << near_ticks << " active_ticks=" << active_ticks << " target_ticks=" << target_ticks
+              << " visible_ticks=" << visible_ticks << "\n";
+    for (const auto &kv : fight.refusals()) std::cout << "refusal count=" << kv.second << ": " << kv.first << "\n";
+    return !fight.failed() && placed && !chase.empty() && !attack.empty() ? 0 : 1;
   }
   if (std::getenv("FIGHT_DEBUG")) {
     auto &w = fight.world();

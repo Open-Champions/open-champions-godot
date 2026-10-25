@@ -2735,6 +2735,9 @@ Dictionary ChampionsSessionController::fight_observation() const {
   counts["xp_gained"] = int64_t(n.xp_gained);
   counts["levels_gained"] = int64_t(n.levels_gained);
   counts["factory_runs_skipped"] = int64_t(n.factory_runs_skipped);
+  counts["boar_state_changes"] = int64_t(n.boar_state_changes);
+  counts["boar_attack_entries"] = int64_t(n.boar_attack_entries);
+  counts["boar_hit_events"] = int64_t(n.boar_hit_events);
   out["fight_counts"] = counts;
   Dictionary refusals;
   for (const auto &entry : fight_->refusals()) refusals[String::utf8(entry.first.c_str())] = int64_t(entry.second);

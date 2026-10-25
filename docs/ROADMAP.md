@@ -185,6 +185,11 @@ repository's `names.tsv` and `symbols/`. Modern Clang probes are not continued.
 Each milestone needs an executable result and recorded evidence. A blank window,
 placeholder character or accepted archive table is not a completed game feature.
 
+The shared-World [WarBoar AI](WARBOAR_AI.md) adds the researched sight,
+acquisition/leash, wander/chase, attack-event and reaction/retreat decisions.
+Normal-route outgoing player damage, live trajectory parity, runtime path
+search and script-driven group activation retain explicit refusals.
+
 ## Deterministic behavior and game differences
 
 Specify integer widths/overflow, conversion rules, floating-point expectations,

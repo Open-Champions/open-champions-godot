@@ -66,8 +66,6 @@ struct Fight::Impl {
   std::string player_lump;
   // actors
   std::map<Address, creature_anim::StateId> states;
-  std::map<Address, bool> stopped;
-  std::map<Address, Raw> step_events;
   std::map<Address, bool> adopted;
   std::vector<Address> adopt_order;
   std::map<std::uint32_t, Raw> hide_masks;
@@ -227,6 +225,13 @@ struct Fight::Impl {
   // ---- services ----------------------------------------------------------
   C::Services build_services() {
     C::Services base;
+    base.damage_permitted = [this](Address victim, Address attacker) {
+      if (victim == player && player && actors && actors->find(attacker)) {
+        refuse("WarBoar outgoing player damage: normal-route min/max/rating and victim equipment are not established; damage dispatch refused before shared RNG or HP writes");
+        return false;
+      }
+      return true;
+    };
     base.dialog_is_open = [this] { return dialog_open ? dialog_open() : false; };
     // No gate travel in this session's World (the level script owns gates).
     base.jumpgate_travel_state = [] { return Raw(0); };
@@ -291,6 +296,10 @@ struct Fight::Impl {
       auto s = state_of(a);
       if (s) load_cells(a, s);
       const Raw events = advance(a, speed);
+      // The existing Full fixture supplies XY only. This class uses the real
+      // native clip advance's yaw too, before Creature_stepAnim's slow scale.
+      if (actors && actors->find(a))
+        world->write(a + 0xc4, 2, std::uint16_t(bundle.animation_motion(a).yaw));
       if (s) store_cells(a, s);
       return events;
     };
@@ -330,6 +339,7 @@ struct Fight::Impl {
       if (!clip) throw campaign_actors::Unsupported("anim_push: idle clip resource unavailable");
       anim->anim_push(state, clip, 1);
       states[addr] = state;
+      store_cells(addr, state);
     };
     s.set_def_entry_params = [this](std::uint32_t, const campaign_actors::EventParams &p) {
       // creature_setDefEntryParams 0x118378: four (mask, time) event slots of
@@ -349,40 +359,44 @@ struct Fight::Impl {
       (void)addr;
       refuse("Creature_init step 2: model_getBounds height/draw byte not ported");
     };
-    s.handle_clear = [this, W](std::uint32_t head) { W().clear_handle(head); };
-    s.handle_link = [this, W](std::uint32_t head, std::uint32_t target) { W().relink(head, target); };
-    s.process_damage = [this, W](std::uint32_t a) { W().process_damage(a); };
-    s.creature_run = [this, W](std::uint32_t a) { stopped[a] = W().creature_run(a); };
-    s.tick_input = [this, W](std::uint32_t a) {
-      campaign_actors::TickInput in;
-      // Creature_updateActive, then Creature_stepAnim(1.0) in the original
-      // order; the events are this tick's (animation_step below is the same
-      // call already made).
-      if (stopped[a] || !W().creature_update_active(a)) return in;
-      in.active = true;
-      step_events[a] = W().creature_step_anim(a, ONE);
-      if (auto st = state_of(a)) store_cells(a, st);
-      const auto events = step_events[a];
-      in.hit_event = events & 1;
-      in.next_event = events & 2;
-      in.animation_over = !(read(a + 0x11a, 2) & 8);
-      // Slot 25's `force` argument is not documented for WarBoar, so the
-      // sight call is refused (state 0 then refuses) rather than guessed.
-      in.sight_refused = true;
-      in.away_home = W().creature_away_from_home(a);
-      // LABEL: the state-0 entry age is Unknown. The research gives
-      // +0xf4 = entry + 180 (monsters-2.md WarBoar) but not what sets +0xf4 or
-      // the entry age in the constructor. The frame the class registered on
-      // the 60-frame list (0, "as asked" in the round-1 report) stands in; it
-      // is used only to decide when state 0 refuses (campaign_actors
-      // tick_boar), never to produce a state-1 transition.
-      in.state_entry_frame = registered_frame[a];
-      return in;
-    };
-    s.animation_step = [](std::uint32_t) {}; // done in tick_input, in order
+    s.handle_clear = [W](std::uint32_t head) { W().clear_handle(head); };
+    s.handle_link = [W](std::uint32_t head, std::uint32_t target) { W().relink(head, target); };
+    s.process_damage = [W](std::uint32_t a) { W().process_damage(a); };
+    s.creature_run = [W](std::uint32_t a) { return W().creature_run(a); };
+    s.update_active = [W](std::uint32_t a) { return W().creature_update_active(a); };
+    s.animation_step = [W](std::uint32_t a) { return W().creature_step_anim(a, ONE); };
     s.knockback = [W](std::uint32_t a) { W().apply_knockback(a, 0x3e4ccccc); };
     s.pick_target = [W](std::uint32_t a) { W().pick_target(a); };
-    s.hit_all_in_arc = [W](std::uint32_t a, std::uint32_t flags) {
+    s.can_see_target = [W](Address a, Raw force) { return W().creature_can_see_target(a, force); };
+    s.target_in_arc = [W](Address a, Raw f, Raw arc, Raw near, Raw far) {
+      const auto target = W().target(a + 0x234);
+      return target && W().can_see(a, target, f, arc, 0, near, far, 0);
+    };
+    s.enemy_in_cone = [W](Address a, Raw f, Raw arc, Raw near, Raw far) {
+      return W().find_enemy_in_cone(a, f, arc, near, far) != 0;
+    };
+    s.away_from_home = [W](Address a) { return W().creature_away_from_home(a); };
+    s.clear_path = [W](Address a) { W().creature_clear_path(a); };
+    s.pick_wander_dest = [W](Address a) { W().creature_pick_wander_dest(a); };
+    // A missing path service refuses the affected move, retaining its exact
+    // mutation prefix. Keep sensing/reactions running so an actor can still
+    // attack or recover on a later tick; never substitute a straight-line path.
+    s.move_to_dest = [this, W](Address a) {
+      try { W().creature_move_to_dest(a); }
+      catch (const C::Unsupported &e) { refuse(std::string("WarBoar wander: ") + e.what()); }
+    };
+    s.move_to_target = [this, W](Address a) {
+      try { W().creature_move_to_target(a); }
+      catch (const C::Unsupported &e) { refuse(std::string("WarBoar chase: ") + e.what()); }
+    };
+    s.flee_from_target = [this, W](Address a, Raw kind) {
+      try { W().creature_flee_from_target(a, kind); }
+      catch (const C::Unsupported &e) { refuse(std::string("WarBoar retreat: ") + e.what()); }
+    };
+    s.turn_to_target = [W](Address a) { W().creature_turn_to_target(a); };
+    s.move_zero = [W](Address a) { W().move_creature(a, {}); };
+    s.hit_all_in_arc = [this, W](std::uint32_t a, std::uint32_t flags) {
+      counts.boar_hit_events += 1;
       C::Arc arc;
       arc.facing = Raw(W().read(a + 0x38, 2));
       arc.angle = 3000;
@@ -395,8 +409,24 @@ struct Fight::Impl {
       W().hit_all_in_arc(a, arc);
     };
     s.filter_state = [W](std::uint32_t a, std::uint32_t state) {
-      return W().creature_filter_state(a, state);
+      return W().creature_filter_state_result(a, state);
     };
+    s.animation_start = [this, W](Address a, const campaign_actors::AnimationRequest &r) {
+      const auto state = state_of(a);
+      if (!state) throw campaign_actors::Unsupported("WarBoar animation state is not bound");
+      const auto token = actors->definition_entry(campaign_actors::Kind::WarBoar,
+                                                 (r.definition_offset - 4) / 8);
+      const auto clip = clip_for(token);
+      if (!clip) throw campaign_actors::Unsupported("WarBoar animation clip unavailable");
+      anim->set_sim_frame(Raw(W().read(C::FRAME)));
+      if (r.blend_out) anim->anim_start_blend_in_out(r.blend_in, r.blend_out, state, clip, r.flags);
+      else anim->anim_start(r.blend_in, state, clip, r.flags);
+      if (r.sync) anim->anim_sync_to_sim_frame(state);
+      store_cells(a, state);
+      counts.boar_state_changes += 1;
+      if (r.blend_out && (r.flags & 8)) counts.boar_attack_entries += 1;
+    };
+    s.dead_update = [W](Address a, Raw events) { W().dead_update(a, events, 0, 0x41f00000); };
     s.death_animation = [this](std::uint32_t) {
       refuse("WarBoar_setState(0x14): death-animation clip choice from the own draw not documented");
     };
@@ -410,7 +440,6 @@ struct Fight::Impl {
     };
     return s;
   }
-  std::map<Address, std::int64_t> registered_frame;
 
   void build_boar(const script_commands::Host::CreatureRequest &request) {
     if (!actors) throw campaign_actors::Unsupported("boar runtime is not installed");
@@ -418,9 +447,6 @@ struct Fight::Impl {
                                     : campaign_actors::Kind::WarBoar;
     // Rank: the record carries no boss rank in this host (Creature_ctor's
     // bossRank is 0 for an unnamed creature); death loot refuses otherwise.
-    // LABEL: entry age of state 0 is Unknown (see tick_input); 0 is the
-    // registration frame stand-in, not a documented value.
-    registered_frame[request.address] = 0;
     actors->adopt(kind, *request.object, request.angle, std::int64_t(0));
     counts.actors_built += 1;
   }
@@ -548,7 +574,11 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
     : p_(std::make_unique<Impl>(std::move(authority), std::move(exe), bundle, std::move(dialog_open))) {
   auto &p = *p_;
   p.bundle.bind_animation(*p.anim, [impl = p_.get()](Address, Raw clip) { return impl->clip_for(clip); });
-  p.world = std::make_unique<C::World>(p.authority, p.build_services(), 0, C::Composition::Full);
+  // The campaign host supplies live player positions to updateActive. Focus
+  // mode 0 instead retains the fixture's spawn-time focus after diagnostic
+  // placement or ordinary movement, leaving distant level creatures asleep.
+  // Mode 1 is the existing per-player visibility-input path, not an AI radius.
+  p.world = std::make_unique<C::World>(p.authority, p.build_services(), 1, C::Composition::Full);
   p.adapter = std::make_unique<C::SessionAdapter>(*p.world);
   p.adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
   p.adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
@@ -597,11 +627,14 @@ std::string Fight::player_animation_lump(const arena_modes::Executable &exe, uns
 std::string Fight::start(const PlayerStart &start) {
   auto &p = *p_;
   if (p.started) return "fight already started";
+  p.refuse("WarBoar live event spacing/root trajectory parity: no normal-route capture; only native clip advancement is executed");
+  p.refuse("WarBoar script/event-driven group activation: Unknown; no pack activation is synthesized");
   try {
     // Documented WarBoar vtable (handoff round 2, monsters-2.md): the Creature
     // base slots with run (slot 4) and setState (slot 27) overridden; slot 2
     // is the inherited Creature_takeDamage 0x116638.
-    p.world->define_creature_table(0x517cf0, {{4, 0x2ba3a0}, {27, 0x2bac60}});
+    p.world->define_creature_table(0x517cf0, {{4, 0x2ba3a0}, {11, 0x2bac58}, {27, 0x2bac60}});
+    p.world->set_class_body(0x2bac58, [](Address, const std::vector<std::uint64_t> &) {});
     p.world->set_class_body(0x2bac60, [impl = p_.get()](Address self, const std::vector<std::uint64_t> &args) {
       auto &q = *impl;
       const auto state = args.empty() ? 0u : std::uint32_t(args[0]);

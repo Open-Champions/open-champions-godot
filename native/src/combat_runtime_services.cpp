@@ -490,6 +490,8 @@ void World::State::install_services() {
                          "Creature_setEffectTimer",
                          "obj_addToAlwaysDraw",
                          "path_blockNodes",
+                         "path_requestToPoint", "path_requestType1",
+                         "path_requestType2", "path_requestType3",
                          "StaticFire_typeinfo",
                          "sound_playSample",
                          "trail_create",
@@ -804,6 +806,9 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "path_blockNodes")
     throw Unsupported("path_blockNodes: a path-grid service is not supplied");
+  if (n == "path_requestToPoint" || n == "path_requestType1" ||
+      n == "path_requestType2" || n == "path_requestType3")
+    throw Unsupported(n + ": a runtime path-search service is not supplied");
   if (n == "obj_stopRunning") {
     auto obj=ar(0);
     if (head(obj+4).next) handles.remove(head(obj+4).next);
