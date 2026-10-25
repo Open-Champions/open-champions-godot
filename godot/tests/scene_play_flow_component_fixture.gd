@@ -8,6 +8,10 @@ var configured: Array = []
 var clears := 0
 var suspended := false
 var observations: Array = []
+# The HUD's art_ready listener reads the same presentation fields as the real
+# art component. This lifecycle spy supplies no retail art.
+var loaded: Dictionary = {}
+var catalogue: Dictionary = {}
 func configure(first, second = null) -> void:
 	configured = [first, second]
 func show_library() -> void:
