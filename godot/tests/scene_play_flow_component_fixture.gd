@@ -8,6 +8,9 @@ var configured: Array = []
 var clears := 0
 var suspended := false
 var observations: Array = []
+# Empty authored art data satisfies the HUD listener during lifecycle tests.
+var loaded: Dictionary = {}
+var catalogue: Dictionary = {}
 func configure(first, second = null) -> void:
 	configured = [first, second]
 func show_library() -> void:
