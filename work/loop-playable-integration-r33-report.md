@@ -25,11 +25,17 @@ All four were full `git merge --no-ff` in the requested order, each committed im
 
 ## Gates and evidence
 
-Candidate runtime revision: `264150c3`. Native Release and four universal extension/library builds are running. Full CTest is **PENDING**, to run as `ctest --test-dir build/native --output-on-failure -j 3`; result and exact count/time will be recorded in a separate commit. This committed pending record is intentional recovery evidence, not a passing gate.
+Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-only descendants). Full CTest is DONE: 250/251 parallel in 2300.12 s; netplay timeout passed alone in 162.98 s, as recorded below. Full CTest was not rerun during recovery.
+
+- Recovery native Release build: PASS, `cmake --build build/native -j 4` (resume-native-build.log).
+- Focused Blood1 actor gate: **1/1 PASS**, 0.02 s, `ctest --test-dir build/native --output-on-failure -R '^blood1-actors$'`. Exercises Kobold variants/WarWraith, 320 original-backed targeted frames, call order/height/turn/hit/completion and explicit refusals. No fixture regenerated or weakened.
+- Native AI probe: PASS, 78 boars, 600 ticks, 3 moved/wandered, 2 chased, 2 attacked, 35 state changes, 13 attack entries, 14 hit events, 0 failures. Diagnostic placement only.
+- Native death probe: PASS, 78 actors, 600 ticks, dead/zero HP retained, countdowns zero, phase 1/fade 128, 239 native death-clip steps, record retention and reload refusal passed. Diagnostic hit only.
+- Recovery evidence: ignored `work/playable-wave33/resume-{native-build,blood1-actors,boar-ai,death-probe}.log`. Universal rebuilds and remaining Godot/private/journey gates pending fresh recovery execution.
 
 ## Full scripted journey
 
-Pending headless/rendered execution; compare against wave 32's 53/54 steps without relaxing acceptance.
+Pending fresh headless/rendered execution; compare against wave 32's 53/54 steps without relaxing acceptance. Native AI/death diagnostic probes above pass; those do not establish the full journey.
 
 ## Exact command families
 
