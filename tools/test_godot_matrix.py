@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import godot_isolation
 import godot_log
 import godot_matrix
 
@@ -27,6 +28,9 @@ class LogTests(unittest.TestCase):
             'Condition "!is_inside_tree()" is true. Returning: Transform3D()',
             'Parameter "m" is null.',
             "Index p_surface = 0 is out of bounds (surfaces.size() = 0).",
+            '   <C++ Error>   Parameter "m" is null.',
+            '\tERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()',
+            '  [00:00:01.123] ERROR: Index p_surface = 0 is out of bounds (surfaces.size() = 0).',
             "[00:01] \x1b[31;1mSCRIPT ERROR:\x1b[0m Invalid call",
         ):
             with self.subTest(message=message):
@@ -40,6 +44,24 @@ class LogTests(unittest.TestCase):
             '{"ok":false,"error":"unsupported format"}\n'
             'WARNING: test warning\nWARNING: ObjectDB instances leaked at exit\n'
             'SCENE_PLAY_FLOW_PASS checks=65 failures=0\n'), [])
+
+    def test_quoted_diagnostics_refusals_and_paths_are_not_diagnostics(self):
+        for message in (
+            'WARNING: fixture deliberately rejects ERROR: input',
+            '{"ok":false,"error":"unsupported token ERROR: in input"}',
+            '{"error":"SCRIPT ERROR: rejected input"}',
+            '"ERROR: quoted diagnostic"',
+            "'SCRIPT ERROR: quoted diagnostic'",
+            'example: <C++ Error> Condition "x" is true',
+            'res://tests/ERROR: fixture.gd',
+            '/tmp/USER ERROR: example/output.log',
+            'C:\\fixtures\\ERROR: sample.txt',
+            'PASS Parameter "m" is null.',
+            'payload Index p_surface = 0 is out of bounds',
+            '[not a timestamp] ERROR: payload',
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(godot_log.error_lines(message), [])
 
     def test_allow_list_is_full_line_and_does_not_hide_nearby_errors(self):
         exception = ((re.compile(r"ERROR: synthetic benign diagnostic"), "test-only evidence"),)
@@ -94,6 +116,47 @@ class RunnerTests(unittest.TestCase):
         results = json.loads((self.root / "results.json").read_text())
         self.assertEqual([row["status"] for row in results], ["FAIL", "PASS"])
         self.assertIn("synthetic log regression", results[0]["error"])
+
+    def test_isolation_across_cases_invocations_and_nested_drivers(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "project.godot").write_text('config_version=5\n[application]\nconfig/name="fixture"\n')
+        args = argparse.Namespace(godot=Path(sys.executable), out=self.root / "logs", captures=False,
+                                  project=source, case=["archive_smoke", "scene_play_flow_smoke",
+                                                        "creature_animation"], timeout=2)
+        seen = []
+        staged_paths = []
+        def command(command, log, timeout):
+            staged = Path(command[command.index("--project" if "--project" in command else "--path") + 1])
+            staged_paths.append(staged)
+            if "--user-dir-name" in command:
+                name = command[command.index("--user-dir-name") + 1]
+                godot_isolation.configure_user_dir(staged, name)
+            text = (staged / "override.cfg").read_text()
+            name = json.loads(text.split("config/custom_user_dir_name=")[1].splitlines()[0])
+            self.assertNotIn(name, seen)
+            seen.append(name)
+            user = godot_isolation.data_home() / name
+            self.assertFalse(user.exists())
+            user.mkdir(parents=True)
+            self.assertFalse((user / "missing-save.json").exists())
+            (user / "fixed-fixture").write_text("previous case must never see this")
+        with patch.object(godot_matrix, "run_logged", side_effect=command):
+            for _ in range(2):
+                self.assertEqual(godot_matrix.matrix(args), 0)
+        self.assertEqual(len(seen), 6)
+        self.assertTrue(all(not path.exists() for path in staged_paths))
+        self.assertTrue(all(not (godot_isolation.data_home() / name).exists() for name in seen))
+        self.assertFalse((source / "override.cfg").exists())
+
+    def test_user_data_cleanup_on_failure(self):
+        with self.assertRaisesRegex(ValueError, "failed engine"):
+            with godot_isolation.isolated_project() as (project, name, user):
+                user.mkdir(parents=True)
+                (user / "fixture").write_text("synthetic")
+                raise ValueError("failed engine")
+        self.assertFalse(user.exists())
+        self.assertFalse(project.exists())
 
     def test_existing_log_cli_rejects_errors(self):
         self.log.parent.mkdir()

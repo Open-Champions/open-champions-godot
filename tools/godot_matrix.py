@@ -9,6 +9,7 @@ import sys
 import time
 
 from godot_log import require_clean_log
+from godot_isolation import isolated_project, configure_user_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +100,14 @@ def matrix(args):
         started = time.monotonic()
         row = {"case": name, "log": str(output / f"{name}.log")}
         try:
-            run_logged(cases[name], row["log"], args.timeout)
+            with isolated_project(project if cases[name][0] == godot else None) as (staged, user_name, _):
+                command = list(cases[name])
+                if command[0] == godot:
+                    command[command.index("--path") + 1] = staged
+                    configure_user_dir(staged, user_name)
+                else:
+                    command += ["--project", staged, "--user-dir-name", user_name]
+                run_logged(command, row["log"], args.timeout)
             row["status"] = "PASS"
         except (ValueError, OSError) as error:
             row.update(status="FAIL", error=str(error))

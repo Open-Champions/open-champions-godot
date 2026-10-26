@@ -4,12 +4,16 @@ import re
 
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# Only a diagnostic envelope may precede a marker: horizontal indentation,
+# an optional [minutes:seconds] / [hours:minutes:seconds.millis] timestamp,
+# and ANSI SGR colour codes (stripped below). Never search inside payloads.
 ERROR = re.compile(
-    r"\b(?:SCRIPT ERROR|USER ERROR|ERROR|Parse Error|Compile Error|Shader Error):"
+    r"^[ \t]*(?:\[\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?\][ \t]*)?(?:"
+    r"(?:SCRIPT ERROR|USER ERROR|ERROR|Parse Error|Compile Error|Shader Error):"
     r"|<C\+\+ Error>"
     r'|\bCondition "[^"\n]+" is true'
     r'|\bParameter "[^"\n]+" is null'
-    r"|\bIndex .+ out of bounds"
+    r"|\bIndex .+ out of bounds)"
 )
 
 # No errors are currently proven benign. Entries must be (compiled full-line
@@ -23,7 +27,7 @@ def error_lines(output):
     found = []
     for number, raw in enumerate(output.splitlines(), 1):
         line = ANSI_ESCAPE.sub("", raw)
-        if ERROR.search(line) and not any(pattern.fullmatch(line) for pattern, _ in ALLOW_LIST):
+        if ERROR.match(line) and not any(pattern.fullmatch(line) for pattern, _ in ALLOW_LIST):
             found.append((number, line))
     return found
 
