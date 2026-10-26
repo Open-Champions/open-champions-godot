@@ -16,3 +16,13 @@ separates historical gates from this revision's validation.
 
 Gates: pending Release build, focused native tests, full CTest, dialog Godot tests,
 and FULL_TRACE comparison. Existing integration/journey limits remain unchanged.
+
+Checkpoint: Release configure and build (`cmake --build build/native -j 4`)
+passed. Existing ignored test-only level-flow -O0 workaround retained exactly
+as documented in docs/PLAY_DIALOG.md; product libraries stay Release.
+Focused CTest (dialog, dialog_gaps, script-commands, strings-exact,
+ui-text-gaps-exact, frontend-exact): 6/6 passed, 1.69 s.
+Release Godot extension rebuild (-j 4): passed.
+
+Gate checkpoint: pending full CTest (`ctest --test-dir build/native
+--output-on-failure -j 3`). This checkpoint is committed before starting it.
