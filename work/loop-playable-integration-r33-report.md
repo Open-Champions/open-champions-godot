@@ -35,6 +35,8 @@ Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-on
 
 - Recovery Godot dev matrix: **61/61 exit 0**, comprising the inherited 54 plus seven loading/identity/combat/death cases. Full synthetic combat: **2,641 checks, 0 failures**. `FULL_SAVE_LOAD`: **300/300**, identical continued/uninterrupted presentation hashes. `FULL_TRACE`: **36,402 bytes**, SHA-256 **`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**, unchanged. Evidence: `resume-godot-matrix.out`, `guard-matrix/godot-results.json`, `godot-combined-full-combat.log`. This is synthetic/fixture coverage; full journey remains pending.
 
+- Recovery private sweep `w33-on`: **111/111 tried, loaded, played; 230 checks, 0 failures, 0 top-level refusal kinds**. Four 60-tick slices; private disc read-only. Internal unsupported-service counters remain separate. Counts-only summaries: ignored `work/private/w33-on-s{0,28,56,84}.json`; log `resume-sweep-w33-on.out`. Full journey remains pending.
+
 ## Full scripted journey
 
 Pending fresh headless/rendered execution; compare against wave 32's 53/54 steps without relaxing acceptance. Native AI/death diagnostic probes above pass; those do not establish the full journey.
