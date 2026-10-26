@@ -255,15 +255,18 @@ void World::State::schedule(Address a, unsigned period) {
 }
 Address World::State::alloc_fixture(unsigned n) {
   auto a = fixture_next;
-  fixture_next += (n + 15) & ~15u;
-  if (fixture_next >= 0x100000)
+  if (!n || n > 0x100000u - a ||
+      ((std::uint64_t(n) + 15) & ~UINT64_C(15)) >= 0x100000u - a)
     throw Error("fixture allocation exhausted");
+  fixture_next += (n + 15) & ~15u;
+  fixture_extents.emplace(a, n);
   return a;
 }
 Address World::State::construct(Address a, const Vec3 &pos, Kind kind) {
   // GameObject_ctor on a fresh block (ref_objects World.construct): heads,
   // bound fields, grid link at the front, then ONE shared draw.
   auto extent = Pool::CLASSES[pool.class_of(a)][0];
+  prop_model_pointers.erase(a);
   forget_heads(a, a + extent);
   for (unsigned k = 0; k < extent; ++k)
     mem.poke(a + k, 1, 0);
@@ -707,6 +710,8 @@ void World::State::tick() {
   }
   w(0x403a08, 1, n);
   run_objects();
+  if (services.death_task)
+    services.death_task();
   // Authored ordering (audit C3-6): gold-run.md has hud_tickGold run from
   // hud_run, a run task, so its order against the object runs is not pinned;
   // it is placed after them here. hud_flush_gold is never called, and the
@@ -722,7 +727,9 @@ void World::State::tick() {
       w(PADS + k * PAD_SIZE + 0x10, 0);
     }
   alive();
-  if (u(NUM_PLAYERS) && !u(0x4f8420))
+  if (services.check_all_dead)
+    services.check_all_dead();
+  else if (u(NUM_PLAYERS) && !u(0x4f8420))
     throw Unsupported("party wipe: deathTask");
 }
 void World::State::domain() const {

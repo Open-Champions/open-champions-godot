@@ -1,7 +1,9 @@
 add_library(champions-combat-runtime
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_world.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_horsemen.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_services.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_queries.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_terrain.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_damage.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_player.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_api.cpp"
@@ -21,7 +23,7 @@ add_library(champions-combat-runtime
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_round5.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_potions.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_round6.cpp")
-target_link_libraries(champions-combat-runtime PUBLIC champions-arena-monsters champions-combat-ctors champions-creature-movement champions-combat champions-player)
+target_link_libraries(champions-combat-runtime PUBLIC champions-arena-monsters champions-combat-ctors champions-creature-movement champions-combat champions-player champions-world-queries)
 if(MSVC)
     target_compile_options(champions-combat-runtime PRIVATE /W4 /utf-8 /fp:strict)
 else()

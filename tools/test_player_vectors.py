@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare complete native observations to independently pinned Python results."""
 import argparse
+from array import array
 import gzip
 import hashlib
 import json
@@ -43,6 +44,44 @@ MEMORY_SHA256 = "d0d742a0e1d3acc00f31aa937098d7b765e9341bea227b7ecbe901d8904ca15
 EXPECTED_COUNT = 274304
 EXPECTED_SHA256 = "b67371c3c22347948cf589d89a6bba66e66fb7ba39a57ef92d08c9bc62a67515"
 
+DECODER = json.JSONDecoder()
+
+
+def split_record(line):
+    # The hash-pinned corpus is compact ASCII JSON. Decode only its input
+    # fields, leaving the much larger expected observation unparsed. Offsets
+    # in this ASCII text are also byte offsets in the original fixture.
+    text = line.decode('ascii')
+    assert text.startswith('[') and text.endswith(']\n'), 'record framing'
+    label, at = DECODER.raw_decode(text, 1)
+    assert text[at] == ',', 'label separator'
+    config, at = DECODER.raw_decode(text, at + 1)
+    assert text[at] == ',', 'configuration separator'
+    start = at + 1
+    _, end = DECODER.raw_decode(text, start)
+    assert text[end] == ',', 'input separator'
+    return label, config, text[start:end], end + 1
+
+
+def compare_observations(actuals, vectors, offsets):
+    observed = 0
+    for i, line in enumerate(vectors):
+        actual_line = actuals.readline()
+        assert actual_line, 'missing observation'
+        # Identical JSON bytes imply the original value equality. If the
+        # formatting differs, retain that same semantic comparison and its
+        # diagnostics rather than rejecting equivalent JSON representations.
+        if actual_line.rstrip(b'\r\n') != line[offsets[i]:-2]:
+            actual = json.loads(actual_line.decode('utf-8'))
+            label, config, inputs, expected = json.loads(line)
+            if actual != expected:
+                raise AssertionError(f'row {i} {label} config={config} full state mismatch: ' +
+                                     str(first_difference(actual, expected)))
+        observed += 1
+    assert not actuals.readline(), 'extra observation'
+    return observed
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
     a=p.parse_args();manifest=json.loads(a.vectors.with_suffix('').with_suffix('.json').read_text())
@@ -54,6 +93,7 @@ def main():
     assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
     with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
         input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
+        expected_offsets=array('I')
         memory_count=0;memory_digest=hashlib.sha256()
         utility_count=0;utility_digest=hashlib.sha256()
         tick_count=0;tick_digest=hashlib.sha256()
@@ -63,7 +103,8 @@ def main():
         with gzip.open(a.vectors,'rb') as vectors,input_path.open('w') as f:
             for line in vectors:
                 digest.update(line);expanded+=len(line)
-                label,config,inputs,_=json.loads(line)
+                label,config,inputs,offset=split_record(line)
+                expected_offsets.append(offset)
                 if not label.startswith('generic_'):
                     memory_digest.update(line);memory_count+=1
                 if not label.startswith(('memory_', 'generic_')):
@@ -88,7 +129,7 @@ def main():
                     previous_digest.update(line);previous_count+=1
                 if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     legacy_digest.update(line);legacy_count+=1
-                f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
+                f.write(str(config)+';'+inputs+'\n')
                 count+=1
         assert count==manifest['count'] and count,'row count'
         assert memory_count==MEMORY_COUNT and memory_digest.hexdigest()==MEMORY_SHA256,'unchanged Memory vectors'
@@ -107,16 +148,8 @@ def main():
         with input_path.open() as src,output_path.open('w') as dest:
             result=subprocess.run([a.native],stdin=src,stdout=dest,stderr=subprocess.PIPE,text=True,timeout=180)
         assert result.returncode==0,result.stderr
-        observed=0
-        with output_path.open() as actuals,gzip.open(a.vectors,'rt') as vectors:
-            for i,line in enumerate(vectors):
-                actual_line=actuals.readline();assert actual_line,'missing observation'
-                actual=json.loads(actual_line);label,config,inputs,expected=json.loads(line)
-                if actual!=expected:
-                    raise AssertionError(f'row {i} {label} config={config} full state mismatch: '+
-                                         str(first_difference(actual,expected)))
-                observed+=1
-            assert not actuals.readline(),'extra observation'
+        with output_path.open('rb') as actuals,gzip.open(a.vectors,'rb') as vectors:
+            observed=compare_observations(actuals,vectors,expected_offsets)
         assert observed==count,'missing observations'
     # Input transport is strict and generic, and expected columns aren't sent.
     for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[95,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n','0;[[],[],[[20,10,0,0]]]\n','0;[[],[],[[21,12,0,0]]]\n','0;[[],[],[[20,0,0]]]\n','0;[[],[],[[22,4,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0,-1]]]\n'):

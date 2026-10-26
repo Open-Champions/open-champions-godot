@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -59,6 +60,27 @@ enum class menu_sound { move, select, back };
 const char *menu_sound_resource(menu_sound);
 
 namespace layout {
+// Card cache supplied by a caller, never synthesized by the front end. These
+// offsets and formatter submissions are the bounded Observed/Executed subset
+// of research-save-screen 9c2b941 (r2 fix audit PASS).
+struct CardRow {
+  int index = 0, y = 0;
+  std::size_t metadata_offset = 0, header_offset = 0;
+  bool populated = false;
+  bool new_save = false;
+  std::string number, date, clock;
+};
+struct CardPreview {
+  int header_index = 0;
+  std::size_t header_offset = 0;
+  std::uint32_t play_seconds = 0;
+  std::uint16_t player_count = 0;
+  std::uint8_t difficulty_index = 0;
+};
+std::vector<CardRow> visible_card_rows(const std::vector<std::uint8_t> &metadata,
+                                       const std::vector<std::uint8_t> &headers,
+                                       int count, int scroll_base, bool saving);
+CardPreview card_preview(const std::vector<std::uint8_t> &headers, int count, int header_index);
 // Colours the research documents (tint words of the executed calls).
 inline constexpr std::uint32_t LIST_BACKING_TINT = 0x80808080; // style-2 backing frame
 inline constexpr std::uint32_t LIST_CURSOR_TINT = 0x300000ff;  // style-0 selected-row frame

@@ -8,9 +8,12 @@ const RealText = preload("res://real_data/real_text.gd")
 const RealPlayer = preload("res://real_data/real_player.gd")
 const TextHud = preload("res://ui/text_hud.gd")
 const FightEnemies = preload("res://real_data/real_fight_enemies.gd")
+const MissionMenuView = preload("res://ui/mission_menu_view.gd")
 var real: Node
 var real_player: RefCounted
 var fight_enemies: RefCounted
+var death_fade: Control
+var _death_close_requests := 0
 var imported_appearance: Array = []
 var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
@@ -24,18 +27,26 @@ var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
 var real_exit_choice: OptionButton
+var mission_menu_panel
+var gate_destination_choice: OptionButton
+var _gate_menu_was_open := false
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
 var last_campaign_carried := false
 var last_campaign_image_restored := false
 var hud_art_counts: Dictionary = {}
+var hud_extras_counts: Dictionary = {}
 var hud_font_loaded := false
 const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
 var npc_dialog: Control
+var hub_services: RefCounted
 var restoring_real_level := false
 # Talk to an NPC: E (use), Up / Down (choice), Enter or Space (confirm).
 const TALK_KEYS := {KEY_E: "use", KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40}
+const MISSION_KEYS := {KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_RIGHT: 0x8000,
+	KEY_LEFT: 0x2000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40,
+	KEY_ESCAPE: 0x20, KEY_BACKSPACE: 0x20}
 
 func _ready() -> void:
 	super._ready()
@@ -49,6 +60,8 @@ func _ready() -> void:
 		text_hud = TextHud.new()
 		text_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 		viewport.add_child(text_hud)
+		death_fade = load("res://ui/death_fade.gd").new()
+		viewport.add_child(death_fade)
 	real_folder = FileDialog.new()
 	real_folder.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	real_folder.access = FileDialog.ACCESS_FILESYSTEM
@@ -93,6 +106,7 @@ func _ready() -> void:
 	npc_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
 	npc_dialog.configure(controller)
 	npc_dialog.audio_owner = self
+	npc_dialog.connect("shop_requested", _open_script_shop)
 	if viewport != null: viewport.add_child(npc_dialog)
 	else: add_child(npc_dialog)
 	# The help box takes input until confirmation; keep it visible above a
@@ -106,7 +120,18 @@ func _ready() -> void:
 	real_exit_choice = OptionButton.new()
 	real_exit_choice.add_item("No level exit loaded", -1)
 	menu.add_child(real_exit_choice)
-	_add_action("real_exit", "Use selected level action", activate_selected_exit)
+	_add_action("real_exit", "Run selected script diagnostic", activate_selected_exit)
+	gate_destination_choice = OptionButton.new()
+	gate_destination_choice.add_item("Gate destinations", -1)
+	menu.add_child(gate_destination_choice)
+	_add_action("real_gate_confirm", "Confirm gate destination", confirm_gate_destination)
+	mission_menu_panel = MissionMenuView.new()
+	mission_menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mission_menu_panel.visible = false
+	if viewport != null: viewport.add_child(mission_menu_panel)
+	else: add_child(mission_menu_panel)
+	hub_services = preload("res://ui/hub_services.gd").new()
+	hub_services.configure(self, menu)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -117,10 +142,16 @@ func _ready() -> void:
 
 func _update_menu() -> void:
 	super._update_menu()
+	if actions.has("real_gate_confirm") and controller != null:
+		var gate: Dictionary = controller.script_gate_status()
+		actions.real_gate_confirm.visible = real != null and real.current >= 0
+		actions.real_gate_confirm.disabled = not gate.get("menu_open", false) or \
+			gate.get("destinations", []).is_empty() or not str(gate.get("refusal", "")).is_empty()
+		actions.real_gate_confirm.tooltip_text = str(gate.get("refusal", ""))
 	if mode_label != null and play_mode and real != null and real.current >= 0:
-		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
+		mode_label.text = "Play mode · walk-in Triggers; physical use and gate travel require live object and campaign state."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoars. The player is unarmed (starting equipment refused_unknown). Bodies use rest poses. Minotaur construction is refused: Creature_init bounds are unbound. Enemy damage, held-part physics and loot pickup remain refused."
+			mode_label.text = "Play mode · WASD moves · J attack / combo · K hold guard · U guard move · L heavy request · 1/2 ability slots. WarBoar sight, chase, attacks and hit reactions are active. Bodies use rest poses.\nUnarmed stand-in: guard needs equipment; heavy and abilities need learned records (refused_unknown). Minotaur construction refuses unbound Creature_init bounds. Enemy damage, held-part physics, path searches, ground loot, Gold, physical use and gate travel remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -145,9 +176,18 @@ func open_game_folder(path: String) -> bool:
 	real_font_choice.disabled = found.is_empty()
 	hud_art_counts = real.load_hud_art()
 	hud_font_loaded = play_hud != null and play_hud.set_font(real.hud_font_bytes())
+	hud_extras_counts = {"loaded": 0, "refused": 0}
+	var hud_lmp: String = real.files.get("hud.lmp", "")
+	if play_hud != null and not hud_lmp.is_empty():
+		var extra: Dictionary = load("res://ui/original_art/hud_extras_art.gd").load_green(inspector, hud_lmp)
+		hud_extras_counts = {"loaded": int(extra.loaded), "refused": int(extra.refused)}
+		play_hud.set_extras_art(extra.images)
+		play_hud.configure_gold(0)
 	# The string tables and help chime from the folder, for the level script.
 	text_sources = RealText.install(real, controller)
 	if text_hud != null: text_hud.configure(real, controller, inspector)
+	if mission_menu_panel != null:
+		mission_menu_panel.configure(real, controller, inspector, real.hud_font_bytes())
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	if npc_dialog != null:
 		npc_dialog.set_font(real.dialog_font())
@@ -320,7 +360,7 @@ func save_session_file(path: String) -> bool:
 			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
 		status_label.text = "Save refused: level association could not be written."
 		return false
-	status_label.text = "Saved level, player, quests and position. Active world objects are not saved."
+	status_label.text = "Saved level, player, quests and position. World-object and in-flight script continuation refused."
 	return true
 
 func _write_companion(path: String, bytes: PackedByteArray) -> bool:
@@ -412,7 +452,7 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; shared-World player could not be restored: " + str(put.get("error", "unknown"))
 			return false
 		_observe(controller.get_observation())
-	status_label.text = "Loaded level, player, quests and position. Active world objects are not saved."
+	status_label.text = "Loaded level, player, quests and position. Active world objects are not saved; scripts restart from level data."
 	return true
 
 func _prepare_native_save(path: String) -> Dictionary:
@@ -475,10 +515,31 @@ func _refresh_exit_targets() -> void:
 	real_exit_choice.add_item("Level exits and portals", -1)
 	for target in controller.script_exit_targets():
 		var kind: String = str(target.get("kind", "unknown"))
-		var suffix := " · script action" if target.get("script_action", false) else " · arrival/prompt only"
+		var suffix := " · walk-in" if target.get("walk_in", false) else \
+			(" · walk-in refused" if target.has("walk_in_refusal") else \
+			(" · E/use" if target.get("physical_use", false) else \
+			(" · script action" if target.get("script_action", false) else " · arrival/prompt only")))
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
+	_refresh_gate_destinations()
+
+func _refresh_gate_destinations() -> void:
+	if gate_destination_choice == null or controller == null: return
+	gate_destination_choice.clear()
+	gate_destination_choice.add_item("Gate destinations", -1)
+	for destination in controller.script_gate_status().get("destinations", []):
+		gate_destination_choice.add_item(str(destination))
+
+func confirm_gate_destination() -> Dictionary:
+	if gate_destination_choice == null or gate_destination_choice.selected <= 0:
+		return {"ok": false, "error": "Choose a discovered gate destination."}
+	var name: String = gate_destination_choice.get_item_text(gate_destination_choice.selected)
+	var result: Dictionary = controller.script_gate_confirm(name)
+	if not result.get("ok", false): status_label.text = str(result.get("error", "Gate travel refused."))
+	return result
 
 func activate_selected_exit() -> Dictionary:
+	# Indexed script execution is a diagnostic; it is never the physical
+	# Player_interact path and does not establish proximity or use eligibility.
 	var out := {"ok": false, "error": "Select a documented level script action."}
 	if controller == null or real_exit_choice == null: return out
 	var index: int = real_exit_choice.get_selected_id()
@@ -487,6 +548,26 @@ func activate_selected_exit() -> Dictionary:
 	if not out.get("ok", false): status_label.text = "Level action refused: " + str(out.get("error", "unknown"))
 	if out.get("queued", false): _queue_level_change()
 	return out
+
+func _refresh_mission_menu() -> void:
+	if mission_menu_panel == null or controller == null: return
+	var state: Dictionary = controller.script_mission_menu_state()
+	mission_menu_panel.visible = bool(state.get("ok", false) and state.get("open", false) and mission_menu_panel.assets_valid)
+	if mission_menu_panel.visible:
+		if status_label.text.begins_with("Mission art refused:"):
+			status_label.text = ""
+		mission_menu_panel.present(state)
+	elif state.get("open", false) and not mission_menu_panel.assets_valid:
+		status_label.text = "Mission art refused: " + mission_menu_panel.last_error
+
+func _process(_delta: float) -> void:
+	super._process(_delta)
+	if mission_menu_panel == null or not mission_menu_panel.visible or controller == null: return
+	var state: Dictionary = controller.script_mission_menu_state()
+	# State 6 reads an external fade value that this client cannot supply yet.
+	if int(state.get("state", -1)) in [0, 1, 4, 5]:
+		controller.script_mission_menu_tick(0, 0)
+		_refresh_mission_menu()
 
 func _queue_level_change() -> void:
 	if _level_change_queued or _level_change_loading: return
@@ -500,10 +581,6 @@ func _apply_level_change() -> bool:
 	if not pending.get("queued", false): return false
 	var requested: String = str(pending.get("name", ""))
 	if requested == _refused_level_request: return false
-	if pending.get("post_action_pending", false):
-		_refused_level_request = requested
-		status_label.text = "Level change refused: a pending post action cannot be carried."
-		return false
 	# level_flow::split_request uses the first underscore for a subname. The
 	# resource lookup takes the base; no guessed destination is substituted.
 	var base: String = requested.get_slice("_", 0).to_lower()
@@ -531,13 +608,29 @@ func _apply_level_change() -> bool:
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
-	# The offline help box owns confirmation while it holds the session. A
-	# simultaneous dialog or game-menu handler must not consume that key.
+	if controller != null and mission_menu_panel != null and not mission_menu_panel.assets_valid:
+		var refused_menu: Dictionary = controller.script_mission_menu_state()
+		if refused_menu.get("open", false) and event is InputEventKey:
+			status_label.text = "Mission art refused: " + mission_menu_panel.last_error
+			return true
+	# The offline help box owns confirmation while it holds the session.
 	if controller != null and controller.text_hud().get("help_open", false) and event is InputEventKey:
+		return true
+	if mission_menu_panel != null and mission_menu_panel.visible and controller != null and event is InputEventKey:
+		if event.pressed and not event.echo:
+			var mission_key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+			if MISSION_KEYS.has(mission_key):
+				var menu_state: Dictionary = controller.script_mission_menu_state()
+				if int(menu_state.get("state", -1)) == 2:
+					menu_state = controller.script_mission_menu_tick(int(MISSION_KEYS[mission_key]), 0)
+					if int(menu_state.get("state", -1)) == 5:
+						status_label.text = "Mission transition refused: external fade completion is unavailable."
+				_refresh_mission_menu()
+			return true
 		return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
-		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
+		if TALK_KEYS.has(key) and controller.script_level_request().get("ok", false):
 			var open: bool = controller.dialog_status().get("open", false)
 			if TALK_KEYS[key] is String:
 				if not open: controller.dialog_use()
@@ -559,7 +652,17 @@ func start_play() -> void:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	if real == null: return
+	var close_requests := int(result.get("fight_close_menus_requests", 0))
+	if close_requests > _death_close_requests and game_menus != null and game_menus.open:
+		game_menus.close_menu()
+	_death_close_requests = close_requests
+	if death_fade != null:
+		death_fade.observe(result)
+		# HUD/menu Controls are added later as a level is configured. Preserve
+		# the fade's final overlay order when those children change.
+		viewport.move_child(death_fade, viewport.get_child_count() - 1)
 	if not _level_change_loading and controller != null:
+		_refresh_mission_menu()
 		var pending: Dictionary = controller.script_level_request()
 		if pending.get("queued", false) and str(pending.get("name", "")) != _refused_level_request:
 			_queue_level_change()
@@ -574,6 +677,14 @@ func _observe(result: Dictionary) -> void:
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
 	_present_npc_dialog()
+	if hub_services != null: hub_services.refresh()
+	var gate: Dictionary = controller.script_gate_status()
+	if gate.get("menu_open", false) and not _gate_menu_was_open: _refresh_gate_destinations()
+	_gate_menu_was_open = bool(gate.get("menu_open", false))
+	if gate.get("menu_open", false):
+		status_label.text = "Gate open · choose a discovered destination in the menu."
+	elif int(controller.script_use_status().get("uses", 0)) > 0 and not controller.dialog_status().get("open", false):
+		status_label.text = "Nearby level action used."
 	if real.world == null: return
 	real.world.observe(raw_observation)
 	var extra: String = real.world.label()
@@ -592,6 +703,14 @@ func _present_npc_dialog() -> void:
 		status_label.text = "Talking is blocked: the menu lock is held (offline the inventory's close frees it). \"Leave stalled dialog\" frees it."
 	elif not str(talk.get("last_use", "")).is_empty():
 		status_label.text = "Use: " + str(talk.last_use)
+
+func _open_script_shop(slot: int) -> void:
+	if slot != 0 or game_menus == null:
+		status_label.text = "Shop refused: no supported local player slot."
+		return
+	var result: Dictionary = game_menus.open_vendor_shop()
+	if not result.get("ok", false):
+		status_label.text = str(result.get("error", "Shop refused."))
 
 func leave_stalled_dialog() -> void:
 	if controller == null: return

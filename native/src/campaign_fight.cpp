@@ -4,7 +4,9 @@
 #include "champions/combat_ctors.hpp"
 #include "champions/campaign_rewards.hpp"
 #include "champions/player_state.hpp"
+#include "champions/player_name_format.hpp"
 #include "champions/script_items.hpp"
+#include "champions/script_effects.hpp"
 #include "champions/creature_anim/runtime.hpp"
 #include "champions/model.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
@@ -17,7 +19,7 @@ namespace C = combat_runtime;
 namespace {
 // The pad mapping the Full composition fixture uses for the client (combat_play):
 // the attack button mask. A host choice, not a recorded original word.
-constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
+constexpr Raw ATTACK_MASK = ATTACK, BLOCK_MASK = GUARD, SWAP_MASK = GUARD_MOVE;
 // Player_ctor's 12 model definitions (research-player-model 7f13899,
 // docs/spec/player-model-resources.md): word 0 names the animation LMP, words
 // 1..111 (8 bytes apart) name the slot entries.
@@ -89,6 +91,8 @@ struct Fight::Impl {
   std::shared_ptr<Dispatch> dispatch = std::make_shared<Dispatch>();
   std::unique_ptr<C::World> world;
   std::unique_ptr<C::SessionAdapter> adapter;
+  std::unique_ptr<player_death_flow::Flow> death;
+  std::string death_error;
   script_commands::Host *host = nullptr;
   std::unique_ptr<campaign_actors::Runtime> actors;
   arena_monsters::Model *creatures = nullptr;
@@ -102,6 +106,7 @@ struct Fight::Impl {
   std::map<Raw, creature_anim::ClipId> token_clip;
   std::map<creature_anim::ClipId, Raw> clip_token;
   std::string player_lump;
+  Address format_scratch = 0;
   // actors
   std::map<Address, creature_anim::StateId> states;
   std::map<Address, bool> adopted;
@@ -111,7 +116,10 @@ struct Fight::Impl {
   Address player = 0, player_handle = 0;
   creature_anim::StateId player_state = 0;
   bool player_ok = false;
-  bool attack_was_held = false;
+  MovePad move_pad;
+  std::string move_refusal;
+  Raw death_clip = 0;
+  std::size_t death_animation_steps = 0;
   std::uint32_t gold_start = 0;
   std::size_t base_events = 0;
   // rewards of a kill (campaign_rewards)
@@ -129,6 +137,7 @@ struct Fight::Impl {
       : authority(std::move(a)), exe(std::move(e)), bundle(b), dialog_open(std::move(d)) {}
 
   void refuse(const std::string &label) { refusals[label] += 1; }
+  void refuse_move(const std::string &label) { move_refusal = label; refuse(label); }
   Raw read(Address a, unsigned n = 4) const { return Raw(world->read(a, n)); }
 
   // ---- resources ---------------------------------------------------------
@@ -270,6 +279,24 @@ struct Fight::Impl {
       }
       return true;
     };
+    base.death_task = [this] {
+      if (death && death_error.empty()) {
+        try { death->task_step(); }
+        catch (const C::Unsupported &e) {
+          death_error = e.what();
+          refuse(death_error);
+        }
+      }
+    };
+    base.check_all_dead = [this] {
+      if (death && death_error.empty()) {
+        try { death->check_all_dead(); }
+        catch (const C::Unsupported &e) {
+          death_error = e.what();
+          refuse(death_error);
+        }
+      }
+    };
     base.dialog_is_open = [this] { return dialog_open ? dialog_open() : false; };
     // No gate travel in this session's World (the level script owns gates).
     base.jumpgate_travel_state = [] { return Raw(0); };
@@ -309,6 +336,20 @@ struct Fight::Impl {
       if (q.entry.empty() || !player_entry(q.entry)) return 0;
       return player_token(q.entry);
     };
+    base.format_name = [this](Address format, std::optional<Raw> value) -> Raw {
+      if (!format_scratch) throw C::Unsupported("player name format: scratch storage not bound");
+      std::string text;
+      for (unsigned i = 0; i < 64; ++i) {
+        const auto c = read(format + i, 1);
+        if (!c) break;
+        text += char(c);
+      }
+      const auto name = player::format_name(text, value
+          ? std::optional<std::int32_t>{std::int32_t(*value)} : std::optional<std::int32_t>{});
+      for (std::size_t i = 0; i <= name.size(); ++i)
+        world->write(format_scratch + Address(i), 1, i < name.size() ? std::uint8_t(name[i]) : 0);
+      return format_scratch;
+    };
     base.is_class = [](Address, const std::string &) { return false; };
     base.loot_generate = [this](const C::LootDrop &d) { roll_loot(d); };
     base.spawn_named_item = [](const Vec3 &, Raw) -> void {
@@ -324,9 +365,13 @@ struct Fight::Impl {
     auto start = services.animation_start;
     auto advance = services.animation_advance;
     services.animation_start = [this, start](Address a, Raw clip, Raw flags, Raw blend, Raw out) {
+      if (a == player && flags == 0x206 && !clip)
+        throw C::Unsupported("player death animation: model/weapon-class clip unavailable");
       if (!clip) return; // res_find returned null: anim_start ignores a null clip
       start(a, clip, flags, blend, out);
+      if (a == player && flags == 0x206) death_clip = clip;
       if (auto s = state_of(a)) store_cells(a, s);
+      if (a == player) counts.player_animation_starts += 1;
     };
     services.animation_advance = [this, advance](Address a, Raw speed) -> Raw {
       auto s = state_of(a);
@@ -336,7 +381,9 @@ struct Fight::Impl {
       // native clip advance's yaw too, before Creature_stepAnim's slow scale.
       if (actors && actors->find(a))
         world->write(a + 0xc4, 2, std::uint16_t(bundle.animation_motion(a).yaw));
+      if (a == player && read(a + 0x58c) == 4) ++death_animation_steps;
       if (s) store_cells(a, s);
+      if (a == player) counts.player_animation_advances += 1;
       return events;
     };
     return services;
@@ -646,6 +693,9 @@ struct Fight::Impl {
       world->write(def + 8 * slot + 4, 4, player_entry(name) ? player_token(name) : 0);
       scratch += Address((name.size() + 16) & ~std::size_t(15));
     }
+    // Reuse the end of this host-owned string area, after all definition names.
+    // Each Player sprintf result is consumed immediately by res_find/sound.
+    format_scratch = scratch;
     // The strings the player tick names by executable address.
     for (const auto &range : NAME_RANGES)
       for (std::uint32_t a = range.first; a < range.second; ++a) {
@@ -700,6 +750,7 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
   p.adapter = std::make_unique<C::SessionAdapter>(*p.world);
   p.adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
   p.adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
+  p.adapter->bind_button(0, C::World::Button::Swap, SWAP_MASK);
   p.bundle.set_local_slot(0);
   p.dispatch->run = [impl = p_.get()](Address a) -> bool {
     auto &q = *impl;
@@ -799,6 +850,53 @@ std::string Fight::start(const PlayerStart &start) {
     }
   }();
   p.started = true;
+  player_death_flow::Services death_services;
+  death_services.frozen = [&p] {
+    if (p.read(0x4f6708) || p.read(0x506048))
+      throw C::Unsupported("death flow: offline controller-out/warm-up freeze unsupported; task-name freeze service is not bound");
+    return p.read(0x41b4f4) != 0;
+  };
+  death_services.close_menus = [&p] {
+    ++p.counts.close_menu_requests;
+  };
+  death_services.clear_fade = [&p] {
+    if (!p.host) throw C::Unsupported("death flow: script HUD host unavailable");
+    p.host->set_fade_level(0);
+  };
+  death_services.step_fade = [&p](Raw delta) {
+    if (!p.host) throw C::Unsupported("death flow: script HUD host unavailable");
+    script_effects::Effects effects(p.host->variables().memory);
+    effects.discarded.insert("ui_drawRect"); // renderer consumes the native fade observation
+    return effects.step_fade(delta);
+  };
+  death_services.find_act = [&p, level = start.level_name] {
+    if (!p.exe) throw C::Unsupported("death flow: save_findAct executable unavailable");
+    const auto count = std::int32_t(p.exe->word(0x4f8e7c));
+    if (count < 0 || count > 64) throw C::Unsupported("death flow: invalid act table count");
+    for (int act = 0; act < count; ++act) {
+      const auto list = p.exe->word(0x4f8e48 + 4 * act);
+      const auto rows = std::int32_t(p.exe->word(0x4f8e10 + 4 * act));
+      if (rows < 0 || rows > 256) throw C::Unsupported("death flow: invalid act row count");
+      for (int row = 0; row < rows; ++row) {
+        const auto name = p.exe->word(list + 8 * row);
+        if (name && p.exe->string(name) == level) return act;
+      }
+    }
+    return -1;
+  };
+  death_services.reload_checkpoint = [] {
+    throw C::Unsupported("save_reload refused: no valid in-memory checkpoint (complete saved player records, level, pose, quests and gates); populated world/decal restore and camera load unsupported; invalid-buffer behavior Unknown");
+  };
+  death_services.request_current_level = [] {
+    throw C::Unsupported("same-level restart refused: death level-loader/object restoration is not bound; current records must be retained and HP restored only with a valid level request");
+  };
+  p.death = std::make_unique<player_death_flow::Flow>(
+      player_death_flow::Memory{
+          [&p](Address address, unsigned size) { return p.world->read(address, size); },
+          [&p](Address address, unsigned size, std::uint64_t value) { p.world->write(address, size, value); }},
+      std::move(death_services));
+  p.death->level_enter(p.player_ok ? 1 : 0);
+  p.world->write(0x4f85b0, 4, 1);
   if (!player_error.empty()) p.refuse(player_error);
   return player_error;
 }
@@ -817,14 +915,37 @@ void Fight::tick(std::uint32_t command) {
       // +-0.70710677 per axis (authored host choice, not an original value).
       const Raw unit = (x && y) ? Raw(0x3f3504f3) : ONE;
       auto value = [&](int v) { return v > 0 ? unit : v < 0 ? (unit | 0x80000000u) : Raw(0); };
-      const bool held = (command & session_control::DAMAGE) != 0;
+      const auto moves = p.move_pad.update(command);
+      if (moves.requests & ~MOVEMENT) p.move_refusal.clear();
       C::SessionAdapter::PadInput in;
       in.stick_x = value(x);
       in.stick_y = value(y);
-      in.held = held ? ATTACK_MASK : 0;
-      in.pressed = (held && !p.attack_was_held) ? ATTACK_MASK : 0;
-      if (in.pressed) p.counts.attack_edges += 1;
-      p.attack_was_held = held;
+      in.held = moves.held;
+      in.pressed = moves.pressed;
+      if (in.pressed & ATTACK_MASK) p.counts.attack_edges += 1;
+      if (moves.requests & HEAVY)
+        p.refuse_move("heavy_attack: refused_unknown (old inline ability 0x25 requires a usable learned record and documented mana cost; not a universal attack button)");
+      // Player_run reads the two selected ability records (+0x4a84/+0x4a85)
+      // before the action switch. Their campaign handoff is not bound. Do not
+      // borrow a fixture skill or conflate an old-inline id with a Skill id.
+      if (moves.requests & ABILITY1)
+        p.refuse_move("ability_slot_1: refused_unknown (selected learned record, rank, cost and campaign Skill binding are not established)");
+      if (moves.requests & ABILITY2)
+        p.refuse_move("ability_slot_2: refused_unknown (selected learned record, rank, cost and campaign Skill binding are not established)");
+      if (moves.requests & GUARD) {
+        const auto two = p.read(PLAYERS + 0x43f8);
+        if ((two && p.read(p.read(two) + 0x1e, 1) == 4) ||
+            (!two && !p.read(PLAYERS + 0x43f0) && !p.read(PLAYERS + 0x43fc)))
+          p.refuse_move("guard: unavailable (Player_canBlock requires equipped weapon or shield; unarmed stand-in cannot guard)");
+        if (p.read(0x44fe08) & 0x10000000)
+          p.refuse_move("guard: unavailable (level veto 0x10000000)");
+      }
+      if (moves.requests & GUARD_MOVE) {
+        if (p.read(0x44fe08) & 0x10000000)
+          p.refuse_move("guard_move: unavailable (level veto 0x10000000)");
+        else if (!(moves.held & GUARD) || !p.read(p.player + 0x47f, 1))
+          p.refuse_move("guard_move: unavailable (hold an established guard before pressing swap; no universal dodge)");
+      }
       p.adapter->pad_input(0, in);
       // net_getCamFlag offline is "the camera is not in follow mode"
       // (docs/spec/movement-camera.md 7.1, `mode != 1`). Mode 1 holds except
@@ -838,6 +959,10 @@ void Fight::tick(std::uint32_t command) {
     p.adapter->ready_tick(frame);
     p.counts.ticks += 1;
     for (const auto &event : p.world->events()) {
+      if (event.name == "player_dead") {
+        ++p.counts.player_deaths;
+        ++p.counts.close_menu_requests; // Player_processDamage closes local menus immediately
+      }
       if (event.name == "damage_apply" && event.args.size() >= 2 && event.args[1] == p.player &&
           p.player)
         p.counts.player_hits += 1;
@@ -854,6 +979,12 @@ void Fight::tick(std::uint32_t command) {
     p.refuse(std::string("World tick stopped: ") + e.what());
   }
 }
+void Fight::release_input() {
+  auto &p = *p_;
+  p.move_pad = MovePad{};
+  if (p.player_ok && !p.failed) p.adapter->pad_input(0, {});
+}
+
 // DIAGNOSTIC ONLY: unchecked write (no terrain or bounds test); see the header.
 std::string Fight::place_player(const Vec3 &position, Raw facing) {
   auto &p = *p_;
@@ -866,6 +997,8 @@ std::string Fight::place_player(const Vec3 &position, Raw facing) {
 std::string Fight::restore_health(Raw hp) {
   auto &p = *p_;
   if (!p.player_ok) return "no player";
+  if ((p.read(p.player + 12) & 8) || p.read(p.player + 0x58c) == 4)
+    return "dead player cannot be healed in place: player_respawn/object replacement is required";
   p.world->write(p.player + 0x228, 4, hp);
   p.world->write(PLAYERS + 0xac, 4, hp);
   return {};
@@ -881,10 +1014,15 @@ PlayerView Fight::player() const {
   v.present = true;
   v.position = {p.read(p.player + 0x10), p.read(p.player + 0x14), p.read(p.player + 0x18)};
   v.facing = p.read(p.player + 0x38, 2);
-  v.hp = p.read(p.player + 0x228);
+  v.hp = p.read(PLAYERS + 0xac);
   v.max_hp = p.read(PLAYERS + 0xb0);
   v.action_state = std::int32_t(p.read(p.player + 0x58c));
   v.weapon_class = std::int8_t(p.read(PLAYERS + 0x4a86, 1));
+  v.combo_step = std::int8_t(p.read(p.player + 0x460, 1));
+  v.attack_variant = std::int8_t(p.read(p.player + 0x461, 1));
+  v.attack_kind = std::int32_t(p.read(p.player + 0x44c));
+  v.blocking = p.read(p.player + 0x47f, 1) != 0;
+  v.move_refusal = p.move_refusal;
   v.gold = p.read(PLAYERS + 0xe4);
   v.level = std::int8_t(p.read(PLAYERS + 0x59, 1));
   v.experience = std::int32_t(p.read(PLAYERS + 0x5c));
@@ -937,4 +1075,43 @@ const std::map<std::string, std::size_t> &Fight::refusals() const {
   return merged;
 }
 combat_runtime::World &Fight::world() { return *p_->world; }
+const player_death_flow::Flow &Fight::death_flow() const {
+  if (!p_->death) throw C::Unsupported("death flow: fight not started");
+  return *p_->death;
+}
+const std::string &Fight::death_error() const { return p_->death_error; }
+DeathView Fight::death_view() const {
+  const auto &p = *p_;
+  DeathView out;
+  if (!p.death) return out;
+  out.running = p.death->running();
+  out.phase = p.death->phase();
+  out.wipe_countdown = unsigned(p.read(player_death_flow::WIPE_COUNTDOWN, 2));
+  out.dead_countdown = unsigned(p.read(player_death_flow::DEAD_COUNTDOWNS, 2));
+  out.fade = p.host ? p.host->fade_level() : 0;
+  out.refusal = p.death_error;
+  out.animation_started = p.death_clip != 0;
+  out.animation_steps = p.death_animation_steps;
+  if (p.death_clip && p.player_state) {
+    const auto track = p.anim->anim_find_track(p.player_state, p.token_clip.at(p.death_clip));
+    if (track) {
+      out.animation_time = p.anim->track(track).time;
+      out.animation_flags = p.anim->track(track).flags;
+    }
+  }
+  return out;
+}
+std::string Fight::diagnostic_lethal_hit() {
+  auto &p = *p_;
+  if (!p.player_ok || p.failed || p.read(p.player + 0x58c) == 4)
+    return "diagnostic lethal hit requires a living shared-World Player";
+  for (const auto &enemy : enemies()) {
+    if (enemy.dead || !lt(0, enemy.hp)) continue;
+    // The call queues damage; Player_run owns the HP change, ward check,
+    // death clip/state and alive rebuild on its next ready tick.
+    p.world->take_damage(p.player, enemy.address, 1, p.read(PLAYERS + 0xb0));
+    return {};
+  }
+  return "diagnostic lethal hit requires a live campaign enemy";
+}
 } // namespace champions::simulation::rta::campaign_fight

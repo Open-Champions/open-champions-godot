@@ -1682,9 +1682,19 @@ amx::Cell Variables::inventory_dispatch(const std::string &name,amx::Machine &m)
   if(name=="onePlayerHasItem") {
     const auto slot=arg(0);
     if(slot<amx::s32(memory.word(NUM_PLAYERS))) {
-      auto player=player_object(slot);
-      if(player && !(flags(memory,player)&0x8)) {
-        auto item=text(1);return amx::s32(inventory_word("inventory_countItemByName",{item,std::uint32_t(slot)}));
+      // This branch reads only the player's object flag word. In the shared
+      // combat World the player is an Actor registered by WorldAuthority,
+      // rather than a GameObject in the script World's typed object map.
+      const auto player=memory.word(player_record(slot)+0x43d8);
+      if(player) {
+        if (authority_) {
+          if (!authority_->find(player)) throw amx::HostFault("unknown object identity");
+        } else {
+          (void)obj_at(player); // preserve the standalone registry check
+        }
+        if (!(memory.word(player+0xc)&0x8)) {
+          auto item=text(1);return amx::s32(inventory_word("inventory_countItemByName",{item,std::uint32_t(slot)}));
+        }
       }
     }
     return 0;

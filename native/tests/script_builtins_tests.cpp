@@ -1325,6 +1325,25 @@ void api_tests() {
     iv.inventory_service={};iv.quest_set("Reentered",5);return 9u;
   };
   require(iv.dispatch("countQuestItems",im)==9 && iv.quest_get("Reentered")==5,"inventory callback replacement and helper reentry");
+  auto shared_authority=std::make_shared<champions::simulation::rta::WorldAuthority>();
+  champions::simulation::rta::Object shared_player;
+  shared_player.id=0x2000;
+  shared_authority->register_object(shared_player);
+  b::Variables shared_inventory(shared_authority);
+  shared_inventory.inventory_service=[&](const std::string &service,const std::vector<b::Variables::InventoryValue> &) -> b::Variables::InventoryResult {
+    require(service=="inventory_countItemByName","onePlayerHasItem counts from inventory");
+    return 9u;
+  };
+  im.set_cell(3004,0);im.set_cell(3008,0);
+  shared_inventory.memory.word(0x4d8ae0,1);
+  shared_inventory.memory.word(shared_inventory.player_record(0)+0x43d8,shared_player.id);
+  shared_inventory.memory.word(shared_player.id+0xc,0);
+  require(shared_inventory.dispatch("onePlayerHasItem",im)==9,"shared player object flags are readable without a script GameObject identity");
+  shared_inventory.memory.word(shared_player.id+0xc,8);
+  require(shared_inventory.dispatch("onePlayerHasItem",im)==0,"dead shared player is excluded before inventory lookup");
+  shared_authority->unregister_object(shared_player);
+  refused=false;try {shared_inventory.dispatch("onePlayerHasItem",im);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"stale shared player identity still refuses inventory lookup");
   iv.inventory_service={};im.set_cell(3004,0);im.set_cell(3008,0);
   iv.memory.byte(0x4f7148,0);iv.memory.word(iv.player_record(0)+0x130,1);
   iv.memory.word(iv.player_record(0)+0x1330,1);iv.memory.word(iv.player_record(0)+0x4434,0xabcdef01);

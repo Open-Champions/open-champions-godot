@@ -402,6 +402,9 @@ public:
   // Records a refused optional input (the host carries on without it).
   void count_refusal(const std::string &reason) { counts_.build_refusals[reason] += 1; }
   const std::vector<Spawn> &spawns() const { return spawns_; }
+  // Script trigger(portal, 0) reaches virtual slot 3 on the named object.
+  // The target method and visual result are unverified; count the request only.
+  std::uint64_t portal_trigger_requests() const { return portal_trigger_requests_; }
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }
   champions::rta::fx::sim::EffectWorld &effects() { return *effects_; }
@@ -539,8 +542,8 @@ private:
   enum class Build : std::uint8_t { NotBuilt, Built, Stubbed };
   Build build(const level_flow::Record &, const level_factory::Outcome &,
               std::uint32_t address, const std::vector<std::string> &props);
-  // The Horsemen rider rows (constructor 0x271c70, mounted 1) and the Nightmare row
-  // (0x270968), research docs/spec/horsemen-mount.md sections 1.1 and 2.2.
+  // Mounted and on-foot Horsemen rows (constructor 0x271c70, mounted 1 or 0)
+  // and the Nightmare row (0x270968), horsemen-mount.md sections 1-2.
   Build build_mounted(const level_flow::Record &, const level_factory::Outcome &,
                       std::uint32_t address, const std::vector<std::string> &props);
   // True when the last build_mounted made every shared-seed draw its record owes.
@@ -572,6 +575,9 @@ private:
   Cell *target_cell(std::uint32_t creature, bool create);
   void mark_built(std::uint32_t);
 
+  // Linked target cells must outlive Variables teardown, which unregisters
+  // external objects and unlinks their paired handle nodes.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   std::shared_ptr<WorldAuthority> authority_;
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
@@ -588,8 +594,6 @@ private:
   std::optional<std::uint8_t> chime_group_;
   std::uint64_t ui_pulse_starts_ = 0;
   ui_text_gaps::Ramps ui_ramps_;
-  // Host-owned handle cells for creature +0x234 words linked by link_target.
-  std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   // Rider +0x3c8 and mount +0x3c8 are separate host handle-list heads.
   std::map<std::uint32_t, std::unique_ptr<Cell>> mounted_cells_;
   std::uint32_t music_channel_ = 0;
@@ -630,6 +634,7 @@ private:
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;
+  std::uint64_t portal_trigger_requests_ = 0;
   bool level_started_ = false;
   bool waiting_ = false;
   bool faulted_ = false;

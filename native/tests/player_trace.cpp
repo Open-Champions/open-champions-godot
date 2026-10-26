@@ -501,6 +501,8 @@ std::string execute(unsigned config, const std::string &line) {
   return sequence({initial, sequence(steps)});
 }
 int main() {
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(nullptr);
   try {
     for (std::string line; std::getline(std::cin, line);) {
       if (line.size() > 65536)

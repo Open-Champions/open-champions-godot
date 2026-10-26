@@ -841,15 +841,65 @@ bool GateTravel::confirm(const std::string &s, const std::string &current,
 bool GateTravel::tick(Pending &p) {
   if (!ticks || request_written)
     return false;
-  ++ticks;
-  if (ticks == 181) {
+  // State 5 tests the counter on entry. Entry 180 advances to 181 without
+  // copying; the next invocation writes the request (0x27e1a8-0x27e218).
+  if (ticks >= 181) {
     p.request(destination);
     request_written = true;
     return true;
   }
+  ++ticks;
   return false;
 }
 void GateTravel::arrived() { *this = {}; }
+GateArrival portal_arrival(bool travelling, bool fixed_destination,
+                           unsigned players, const Vec3 &portal,
+                           std::uint32_t &shared_seed, int previous_rank,
+                           const FindSpot &spot) {
+  count(players);
+  GateArrival out;
+  out.rank = previous_rank;
+  out.seed = shared_seed;
+  if (!travelling || fixed_destination) return out;
+  if (!spot) throw Error("portal arrival requires a free-spot search");
+  out.rank = 3;
+  for (unsigned slot = 0; slot < players; ++slot) {
+    out.positions.push_back(spot(portal, from_int(36), from_int(24), true));
+    // The free-spot callback may draw from this same seed before facing.
+    shared_seed = shared_seed * 0x19660du + 0x3c6ef35fu;
+    out.facing.push_back(std::uint16_t(shared_seed >> 16));
+  }
+  out.seed = shared_seed;
+  return out;
+}
+bool use_query_contains_centre(const Vec3 &player, const Vec3 &candidate) {
+  ScopedFpu scope(Fpu{});
+  const auto xy = from_int(48), z = from_int(60);
+  return le(sub(player[0], xy), candidate[0]) &&
+         le(candidate[0], add(player[0], xy)) &&
+         le(sub(player[1], xy), candidate[1]) &&
+         le(candidate[1], add(player[1], xy)) &&
+         le(player[2], candidate[2]) &&
+         le(candidate[2], add(player[2], z));
+}
+std::optional<std::size_t> nearest_use_candidate(
+    const Vec3 &player, const std::vector<UseCandidate> &query_results) {
+  ScopedFpu scope(Fpu{});
+  std::optional<std::size_t> selected;
+  Raw best = from_int(10000000);
+  for (const auto &candidate : query_results) {
+    if (!(candidate.flags & 0x100000u)) continue;
+    const auto dx = sub(candidate.position[0], player[0]);
+    const auto dy = sub(candidate.position[1], player[1]);
+    const auto dz = sub(candidate.position[2], player[2]);
+    const auto distance = add(add(mul(dx, dx), mul(dy, dy)), mul(dz, dz));
+    if (lt(distance, best)) {
+      best = distance;
+      selected = candidate.record;
+    }
+  }
+  return selected;
+}
 Trigger::Trigger(Raw x, Raw y, std::int32_t w, std::int32_t h, std::string t)
     : script(std::move(t)) {
   ScopedFpu scope(Fpu{});
@@ -864,17 +914,50 @@ bool Trigger::contains(const Vec3 &p) const {
 }
 TriggerEvent Trigger::run(const std::vector<TriggerPlayer> &players,
                           bool recall) {
-  if (recall)
+  return run_exact(players, recall, nullptr, {}, {});
+}
+TriggerEvent Trigger::run_exact(
+    const std::vector<TriggerPlayer> &players, bool recall,
+    const TriggerParams *linked, const std::function<void(bool)> &linked_actions,
+    const std::function<int(const std::string &, unsigned)> &script_run) {
+  // Trigger_run decrements every nonzero signed delay, including -1.
+  if (delay) {
+    delay = std::int32_t(std::uint32_t(delay) - 1u);
     return {};
+  }
+  slot = -1;
   std::optional<unsigned> first;
   for (auto &p : players)
     if (contains(p.position) && (!first || p.slot < *first))
       first = p.slot;
+  if (first && recall) return {};
+  if (first) slot = std::int32_t(*first);
   bool now = bool(first);
   if (now == inside)
     return {};
+  bool selected = now;
+  if (linked) {
+    if (linked->on_only) selected = true;
+    if (linked->off_only) selected = false;
+    if (linked_actions) linked_actions(selected);
+  }
+  const auto name = selected ? script : "not" + script;
+  const unsigned active = first && selected ? *first : 0;
+  const int result = script_run ? script_run(name, active) : 1;
   inside = now;
-  return {now ? script : "not" + script, first};
+  if (linked && (linked->on_only || linked->off_only)) {
+    if (linked->timeout) {
+      if (delay != -1)
+        delay = std::int32_t(std::uint32_t(linked->timeout) * 4u);
+      inside = false;
+    } else if (linked->need_script_hit && !result) {
+      inside = false;
+    } else {
+      delay = -1;
+      inside = false;
+    }
+  }
+  return {name, selected ? std::optional<unsigned>(active) : std::nullopt};
 }
 TriggerState Trigger::save() const { return {delay, inside}; }
 void Trigger::restore(TriggerState state) {

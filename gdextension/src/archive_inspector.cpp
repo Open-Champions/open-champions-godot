@@ -309,6 +309,8 @@ protected:
                             &ChampionsArchiveInspector::sample_skinned_model);
         ClassDB::bind_method(D_METHOD("sample_skinned_resources", "model_bytes", "animation_bytes", "tick"),
                             &ChampionsArchiveInspector::sample_skinned_resources);
+        ClassDB::bind_method(D_METHOD("read_player_resource", "path", "row_index", "archive_fingerprint", "expected_name"),
+                            &ChampionsArchiveInspector::read_player_resource);
         ClassDB::bind_method(D_METHOD("player_model_resources", "executable_bytes", "model_index"),
                             &ChampionsArchiveInspector::player_model_resources);
     }
@@ -364,6 +366,38 @@ public:
             failure["error"] = String::utf8(error.what());
         }
         return failure;
+    }
+
+    // Copy a selected player resource from the same fingerprinted snapshot used
+    // to validate its row. The caller never reopens saved offsets after listing.
+    Dictionary read_player_resource(const String &path, int64_t row_index,
+            const String &archive_fingerprint, const String &expected_name) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["bytes"] = PackedByteArray();
+        result["error"] = String();
+        try {
+            const auto selected = read_selected(path, row_index, archive_fingerprint);
+            const std::string expected = expected_name.utf8().get_data();
+            if (selected.name != expected ||
+                (!champions::hasExtension(expected, ".vif") &&
+                 !champions::hasExtension(expected, ".anm") &&
+                 !champions::hasExtension(expected, ".tex")))
+                throw champions::FormatError("The selected player resource name changed or is unsupported.");
+            if (selected.bytes.size == 0 || selected.bytes.size > 16 * 1024 * 1024)
+                throw champions::FormatError("The selected player resource size is invalid.");
+            PackedByteArray bytes;
+            if (bytes.resize(static_cast<int64_t>(selected.bytes.size)) != OK)
+                throw std::bad_alloc();
+            std::copy(selected.bytes.data, selected.bytes.data + selected.bytes.size, bytes.ptrw());
+            result["bytes"] = bytes;
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to read the selected player resource.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        }
+        return result;
     }
 
     // The player constructor fetches its body from SELECT and its clip from a

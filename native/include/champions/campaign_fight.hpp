@@ -1,6 +1,8 @@
 #pragma once
 #include "champions/arena_executable.hpp"
+#include "champions/campaign_moves.hpp"
 #include "champions/combat_runtime.hpp"
+#include "champions/player_death_flow.hpp"
 #include "champions/player_services.hpp"
 #include "champions/script_commands.hpp"
 #include <functional>
@@ -35,6 +37,9 @@ struct PlayerView {
   Raw facing = 0, hp = 0, max_hp = 0;
   std::int32_t action_state = 0;
   std::int32_t weapon_class = 0;
+  std::int32_t combo_step = 0, attack_variant = 0, attack_kind = 0;
+  bool blocking = false;
+  std::string move_refusal;
   std::uint32_t gold = 0;
   // Experience record (shared bytes): earned level +0x59, experience +0x5c,
   // skill points +0xe8, stat points +0xec, current/maximum mana +0xc0/+0xc4.
@@ -60,6 +65,8 @@ struct Counts {
   std::size_t attack_edges = 0;      // J presses fed to the player's pad
   std::size_t player_swings = 0;     // ticks the player was in a melee state
   std::size_t player_hits = 0;       // damage_apply calls with the player as attacker
+  std::size_t player_animation_starts = 0;   // resolved starts through the native engine
+  std::size_t player_animation_advances = 0; // native animation steps (not rendered poses)
   std::size_t damage_events = 0;     // of those, results that dealt damage
   std::size_t deaths = 0;            // enemy death transitions
   std::size_t loot_calls = 0;        // Creature_dropLoot -> loot_generateDrops calls
@@ -70,6 +77,15 @@ struct Counts {
   std::size_t levels_gained = 0;     // level-ups they caused
   std::size_t factory_runs_skipped = 0;
   std::size_t boar_state_changes = 0, boar_attack_entries = 0, boar_hit_events = 0;
+  std::size_t player_deaths = 0;
+  std::size_t close_menu_requests = 0; // local presentation consumes this serial
+};
+struct DeathView {
+  bool running = false, animation_started = false;
+  unsigned phase = 0, wipe_countdown = 0, dead_countdown = 0, fade = 0;
+  std::size_t animation_steps = 0;
+  Raw animation_time = 0, animation_flags = 0;
+  std::string refusal;
 };
 
 void bind_minotaur_boundaries(arena_monsters::Model &, combat_runtime::World &, Counts &,
@@ -103,8 +119,9 @@ public:
   // a label when the player could not be established.
   std::string start(const PlayerStart &);
   // One ready tick of the shared World. `command` holds the session command
-  // bits (POS_X, NEG_X, POS_Y, NEG_Y, DAMAGE-as-J).
+  // movement/attack/guard/swap bits plus heavy and two ability-slot requests.
   void tick(std::uint32_t command);
+  void release_input();
   // DIAGNOSTIC ONLY, not an original routine: put the player at a point so a
   // scripted run can start a fight without path finding through the level.
   // No terrain or bounds check. Updates the grid cell; ground contact settles
@@ -125,6 +142,13 @@ public:
   // Labelled refusals by reason (what was needed, and why it stayed refused).
   const std::map<std::string, std::size_t> &refusals() const;
   combat_runtime::World &world();
+  const player_death_flow::Flow &death_flow() const;
+  const std::string &death_error() const;
+  DeathView death_view() const;
+  // DIAGNOSTIC ONLY: queue a lethal hit from a live level actor through
+  // Player_takeDamage, then let the real Player_run process it. No HP store.
+  // Boar attack AI is unported; this is not evidence of an organic attack.
+  std::string diagnostic_lethal_hit();
 
 private:
   struct Impl;
