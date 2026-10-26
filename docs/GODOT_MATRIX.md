@@ -49,13 +49,12 @@ python3 tools/godot_matrix.py check-log work/archive.log
 Success requires normal exit, completion markers when requested, and a clean
 log. The shared [checker](../tools/godot_log.py) rejects `SCRIPT ERROR:`,
 `ERROR:` (including user errors), parser/compiler/shader error markers, C++
-error annotations and assertion/null/bounds API diagnostics. ANSI color
-SGR colour sequences are removed only for matching. Markers must begin the
+error annotations and assertion/null/bounds API diagnostics. ANSI SGR colour
+sequences are removed only for matching. Markers must begin the
 line after spaces/tabs and an optional numeric `[mm:ss]` or
 `[hh:mm:ss.millis]` timestamp; quoted diagnostics inside warnings, JSON payloads
-and paths do not match. No diagnostic category or scene is exempted;
- the log itself
-is preserved. Ordinary warnings and structured native refusals (`{"ok": false,
+and paths do not match. No diagnostic category or scene is exempted. The log
+itself is preserved. Ordinary warnings and structured native refusals (`{"ok": false,
 "error": "unsupported ..."}`) are not engine errors. Warnings remain visible in
 the preserved log, including Godot's ObjectDB shutdown warnings; `ERROR:`
 resource/RID leak messages fail. A timeout keeps partial

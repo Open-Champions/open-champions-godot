@@ -17,7 +17,11 @@ import godot_matrix
 
 class LogTests(unittest.TestCase):
     def test_script_engine_and_api_diagnostics(self):
+        # Godot 4.5.2 headless probe: push_error and a Nil method call both
+        # emit these diagnostics while the process still exits zero.
         for message in (
+            "ERROR: synthetic diagnostic probe",
+            "SCRIPT ERROR: Invalid call. Nonexistent function 'missing' in base 'Nil'.",
             "SCRIPT ERROR: Invalid access to property 'loaded'",
             "ERROR: Parameter m is null.",
             "USER ERROR: test assertion failed",
@@ -123,7 +127,8 @@ class RunnerTests(unittest.TestCase):
         (source / "project.godot").write_text('config_version=5\n[application]\nconfig/name="fixture"\n')
         args = argparse.Namespace(godot=Path(sys.executable), out=self.root / "logs", captures=False,
                                   project=source, case=["archive_smoke", "scene_play_flow_smoke",
-                                                        "creature_animation"], timeout=2)
+                                                        "creature_animation", "creature_dispatch",
+                                                        "creature_freed_callable"], timeout=2)
         seen = []
         staged_paths = []
         def command(command, log, timeout):
@@ -144,7 +149,7 @@ class RunnerTests(unittest.TestCase):
         with patch.object(godot_matrix, "run_logged", side_effect=command):
             for _ in range(2):
                 self.assertEqual(godot_matrix.matrix(args), 0)
-        self.assertEqual(len(seen), 6)
+        self.assertEqual(len(seen), 10)
         self.assertTrue(all(not path.exists() for path in staged_paths))
         self.assertTrue(all(not (godot_isolation.data_home() / name).exists() for name in seen))
         self.assertFalse((source / "override.cfg").exists())
