@@ -227,6 +227,14 @@ void chest_branch_refusals() {
   check(true, "nontrapped Chest with no action properties has a demonstrable no-op action loop");
 }
 void production_chest_refusals(const std::string &selected = {}) {
+  // Production methods are included above so this fixture observes the real
+  // ordering, without adding a public test-only campaign API. Contracts:
+  // research-pickups 9911a6b docs/pickups.md section 2 (state/offsets,
+  // opening flags 0x204, nine-gold example and run-list transitions);
+  // research-loot-drop 77c2f70 docs/loot-drop.md section 3 (completion 0x80).
+  // Object identity/layout follows build_chest; the owner token, one-tick
+  // clip and starting balance below are authored fixture inputs, not retail
+  // addresses, animation timing or captured player state.
   for (const std::string branch : {"action-use", "action-run", "trap-use", "trap-run"}) {
     if (!selected.empty() && selected != branch) continue;
     auto authority = std::make_shared<R::WorldAuthority>();
