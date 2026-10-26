@@ -31,7 +31,7 @@ Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-on
 - Focused Blood1 actor gate: **1/1 PASS**, 0.02 s, `ctest --test-dir build/native --output-on-failure -R '^blood1-actors$'`. Exercises Kobold variants/WarWraith, 320 original-backed targeted frames, call order/height/turn/hit/completion and explicit refusals. No fixture regenerated or weakened.
 - Native AI probe: PASS, 78 boars, 600 ticks, 3 moved/wandered, 2 chased, 2 attacked, 35 state changes, 13 attack entries, 14 hit events, 0 failures. Diagnostic placement only.
 - Native death probe: PASS, 78 actors, 600 ticks, dead/zero HP retained, countdowns zero, phase 1/fade 128, 239 native death-clip steps, record retention and reload refusal passed. Diagnostic hit only.
-- Recovery evidence: ignored `work/playable-wave33/resume-{native-build,blood1-actors,boar-ai,death-probe}.log`. Universal rebuilds and remaining Godot/private/journey gates pending fresh recovery execution.
+- Recovery evidence: ignored `work/playable-wave33/resume-{native-build,blood1-actors,boar-ai,death-probe}.log`. All four universal extension/library configure/build pairs PASS (8/8 exit 0), Release, arm64;x86_64, parallelism 4; `build-results.json` and `resume-extension-builds.out`. Remaining Godot/private/journey gates pending fresh recovery execution.
 
 ## Full scripted journey
 
