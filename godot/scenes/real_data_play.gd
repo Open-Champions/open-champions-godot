@@ -35,6 +35,7 @@ var _level_change_loading := false
 var _refused_level_request := ""
 var last_campaign_carried := false
 var last_campaign_image_restored := false
+var last_level_script_attached := false
 var hud_art_counts: Dictionary = {}
 var hud_extras_counts: Dictionary = {}
 var hud_font_loaded := false
@@ -211,6 +212,9 @@ func creature_archives() -> PackedStringArray:
 
 func load_real_level(index: int, carry_campaign := false, previous := "", entrance := "", qualified := "") -> bool:
 	if index < 0: return false
+	last_level_script_attached = false
+	last_campaign_carried = false
+	last_campaign_image_restored = false
 	var result: Dictionary = real.load_level(index, previous, entrance, qualified)
 	if not result.ok:
 		status_label.text = "Level refused at %s. %s" % [result.stage, str(result.get("error", ""))]
@@ -484,6 +488,9 @@ func _sync_saved_music() -> bool:
 	return true
 
 func attach_level_script(carry_campaign := false) -> bool:
+	last_level_script_attached = false
+	last_campaign_carried = false
+	last_campaign_image_restored = false
 	if real == null or real.current < 0 or controller == null: return false
 	if not _sync_saved_music():
 		status_label.text = "Level script refused: saved music options could not be loaded."
@@ -505,6 +512,7 @@ func attach_level_script(carry_campaign := false) -> bool:
 	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world, resource_lumps)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
+	last_level_script_attached = bool(result.get("ok", false))
 	if result.get("ok", false): _refused_level_request = ""
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	_refresh_exit_targets()
@@ -513,13 +521,13 @@ func attach_level_script(carry_campaign := false) -> bool:
 func _refresh_exit_targets() -> void:
 	if real_exit_choice == null or controller == null: return
 	real_exit_choice.clear()
-	real_exit_choice.add_item("Level exits and portals", -1)
+	real_exit_choice.add_item("Level triggers, exits and portals", -1)
 	for target in controller.script_exit_targets():
 		var kind: String = str(target.get("kind", "unknown"))
 		var suffix := " · walk-in" if target.get("walk_in", false) else \
 			(" · walk-in refused" if target.has("walk_in_refusal") else \
 			(" · E/use" if target.get("physical_use", false) else \
-			(" · script action" if target.get("script_action", false) else " · arrival/prompt only")))
+			(" · selected-object diagnostic" if target.get("script_action", false) else " · arrival/prompt only")))
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
 	_refresh_gate_destinations()
 
