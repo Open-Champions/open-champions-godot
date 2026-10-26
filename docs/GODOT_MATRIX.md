@@ -25,7 +25,13 @@ with exit 2 before waiting for draw signals or accessing unavailable images.
 A headless run does not validate
 exported apps, images, interactions, private game data or another CPU. Logs and
 `results.json` go under ignored `work/godot-matrix/` (`--out` changes this).
-Each engine's own log also goes there. `--project` selects an explicitly staged
+Each engine's own log also goes there. Each invocation copies the project to
+an automatically removed temporary directory (including its import cache).
+Each case uses a fresh UUID-named custom Godot user directory, removed on exit
+or failure; this includes the generated projects and subprocesses of all three
+creature checks. The editor populates the invocation's private import cache for
+subsequent cases. Isolation is independent of `--out`; source settings and
+application data are untouched. Missing-file negative fixtures start absent. `--project` selects an explicitly staged
 project when a test environment needs one; it defaults to this checkout's `godot/`.
 The runner continues after failures and returns nonzero if any case failed.
 
@@ -44,7 +50,11 @@ Success requires normal exit, completion markers when requested, and a clean
 log. The shared [checker](../tools/godot_log.py) rejects `SCRIPT ERROR:`,
 `ERROR:` (including user errors), parser/compiler/shader error markers, C++
 error annotations and assertion/null/bounds API diagnostics. ANSI color
-sequences are removed only for matching; the log itself
+SGR colour sequences are removed only for matching. Markers must begin the
+line after spaces/tabs and an optional numeric `[mm:ss]` or
+`[hh:mm:ss.millis]` timestamp; quoted diagnostics inside warnings, JSON payloads
+and paths do not match. No diagnostic category or scene is exempted;
+ the log itself
 is preserved. Ordinary warnings and structured native refusals (`{"ok": false,
 "error": "unsupported ..."}`) are not engine errors. Warnings remain visible in
 the preserved log, including Godot's ObjectDB shutdown warnings; `ERROR:`

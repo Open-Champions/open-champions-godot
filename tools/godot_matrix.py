@@ -9,7 +9,7 @@ import sys
 import time
 
 from godot_log import require_clean_log
-from godot_isolation import isolated_project, configure_user_dir
+from godot_isolation import isolated_project, isolated_user_dir, configure_user_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,10 +68,16 @@ def run_logged(command, log, timeout=180, expect=()):
 
 
 def matrix(args):
+    # One private resource/import cache per invocation, one user directory per
+    # case. The editor's imports remain available to later cases in this run.
+    with isolated_project(args.project.resolve()) as (project, _, _user):
+        return matrix_cases(args, project)
+
+
+def matrix_cases(args, project):
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=True)
     godot = args.godot.resolve()
-    project = args.project.resolve()
     cases = {"editor": [godot, "--headless", "--path", project, "--editor",
                          "--quit-after", "120", "--frame-delay", "50"]}
     cases["default_scene"] = [godot, "--headless", "--path", project, "--quit-after", "120"]
@@ -100,14 +106,14 @@ def matrix(args):
         started = time.monotonic()
         row = {"case": name, "log": str(output / f"{name}.log")}
         try:
-            with isolated_project(project if cases[name][0] == godot else None) as (staged, user_name, _):
-                command = list(cases[name])
-                if command[0] == godot:
-                    command[command.index("--path") + 1] = staged
-                    configure_user_dir(staged, user_name)
-                else:
-                    command += ["--project", staged, "--user-dir-name", user_name]
-                run_logged(command, row["log"], args.timeout)
+            if cases[name][0] == godot:
+                with isolated_user_dir() as (user_name, _):
+                    configure_user_dir(project, user_name)
+                    run_logged(cases[name], row["log"], args.timeout)
+            else:
+                with isolated_project() as (staged, user_name, _):
+                    command = list(cases[name]) + ["--project", staged, "--user-dir-name", user_name]
+                    run_logged(command, row["log"], args.timeout)
             row["status"] = "PASS"
         except (ValueError, OSError) as error:
             row.update(status="FAIL", error=str(error))

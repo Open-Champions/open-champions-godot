@@ -3,7 +3,7 @@
 import re
 
 
-ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 # Only a diagnostic envelope may precede a marker: horizontal indentation,
 # an optional [minutes:seconds] / [hours:minutes:seconds.millis] timestamp,
 # and ANSI SGR colour codes (stripped below). Never search inside payloads.
