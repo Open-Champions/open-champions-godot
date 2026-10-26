@@ -31,6 +31,7 @@ inline void run(Check check, std::string &where) {
       {"talk", {{"startDialog", {S_NPC, 0, 0}}}},
       {"again", {{"trigger", {S_NPC, -1}}}},
       {"absent", {{"trigger", {S_ABSENT, 0}}}},
+      {"refuse_then_mutate", {{"trigger", {S_NPC, 123}}, {"setv", {S_PICK, 1}}}},
       {"hidden", {}, 0},
       {"pick_a", {{"setv", {S_PICK, 1}}}},
       {"pick_b", {{"setv", {S_PICK, 2}}, {"showBust", {S_TEXTURE, S_BODY, 1, 10}},
@@ -105,7 +106,8 @@ inline void run(Check check, std::string &where) {
   sc::Host refused;
   check(load(refused, script, objects_ob({npc, unknown})), "scripted: loads mixed targets");
   refused.attach_dialog(level, world.services());
-  refused.run_start();
+  check(refused.run("refuse_then_mutate") == sc::Stop::Refused && refused.campaign().vars().empty(),
+        "scripted: statement trigger stops before a later campaign mutation");
   check(!refused.dialog().is_open() && refused.dialog_counts().triggers.empty() &&
             refused.counts().refused[std::size_t(command_index("trigger"))] == 1,
         "scripted: unknown slot 3 refuses the whole command before any dialog effect");
@@ -118,7 +120,8 @@ inline void run(Check check, std::string &where) {
     auto special_level = level;
     special_level.level = level_name;
     special.attach_dialog(special_level, world.services());
-    special.run_start();
+    check(special.run("refuse_then_mutate") == sc::Stop::Refused && special.campaign().vars().empty(),
+          "override: statement trigger stops before a later campaign mutation");
     check(!special.dialog().is_open() && special.dialog_counts().triggers.empty(),
           "override: unknown level or NPC animation override domain stays refused");
   }
@@ -126,7 +129,8 @@ inline void run(Check check, std::string &where) {
   check(load(cutscene, script, objects), "cutscene: loads authored inputs");
   cutscene.attach_dialog(level, world.services());
   cutscene.variables().memory.byte(0x44fcd0, 1);
-  cutscene.run_start();
+  check(cutscene.run("refuse_then_mutate") == sc::Stop::Refused && cutscene.campaign().vars().empty(),
+        "cutscene: statement trigger stops before a later campaign mutation");
   check(!cutscene.dialog().is_open() && cutscene.dialog_counts().triggers.empty(),
         "override: NPC cutscene mesh path is refused, not replaced with a dialog");
 

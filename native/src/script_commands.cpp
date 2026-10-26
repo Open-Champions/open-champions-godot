@@ -472,6 +472,13 @@ amx::NativeMap Host::command_map() {
       }
       if (callee_unknown(i, machine)) {
         counts_.callee_refusals += 1;
+        // Attached trigger preflight refuses the command itself, even when
+        // the script discards its result. No later entry effects may run.
+        if (dialog_attached_ && std::strcmp(kRows[i].name, "trigger") == 0) {
+          counts_.refused[i] += 1;
+          counts_.stopped[i] += 1;
+          throw RefusedResult("refused trigger");
+        }
         refuse(i, machine);
         return 0;
       }

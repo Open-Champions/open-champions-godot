@@ -39,6 +39,9 @@ Native implementation/tests are in `script_dialog.cpp`, `script_commands.cpp`,
 changes are in `session_controller.cpp`, `real_data_play.gd`,
 `real_data_dialog.gd` and `real_data_scene.gd`. Contract notes: [DIALOG.md](DIALOG.md).
 
+The audit-fix work report is [loop-play-dialog-r2-report.md](../work/loop-play-dialog-r2-report.md).
+This document retains the original integration results below; the work report records fresh gates.
+
 ## Gates
 
 All results are local arm64 macOS with Godot 4.5.2 and the pinned godot-cpp.
