@@ -54,7 +54,10 @@ func _initialize() -> void:
 	after = bridge.get_observation()
 	check(after.tick == before.tick + 1 and after.draw_frame == before.draw_frame + 1,
 		"supplied no-queue tick advances service and draw counters through adapter")
-	check(audio.bank_errors.is_empty() and audio.last_tick == 1,
+	check(audio.bank_errors.is_empty() and audio.last_tick == 1 and
+		after.level_countdown == before.level_countdown - 1 and
+		after.streams[0].queued == before.streams[0].queued and
+		after.streams[2].queued == before.streams[2].queued,
 		"supplied no-queue tick has no bank error")
 	audio.bridge = null
 	audio.free()
