@@ -1,4 +1,12 @@
-STATUS: MORE — NLU-7/NLU-8 fixed; Release build, targeted tests, Godot matrix and sweep pass. Full CTest is running. The requested FULL_TRACE baseline does not match this branch's measured/documented baseline. Earlier results below are historical.
+STATUS: MORE — NLU-9 fixed; current Release/native menu gate passes. Full CTest and Godot gates are running. The requested FULL_TRACE baseline remains to be checked. Earlier results below are historical.
+
+## NLU-9 follow-up (2026-10-26)
+
+- Load now parses the complete companion payload into local staging values before mutating memory or ledger metadata: item definitions and bytes, equipment pointers, page/cursor/drag state, effective state and validity, imported relationship, dependent resources/object fields, and the version-4 sender-half word. Missing or out-of-byte-range tails refuse before the first write. Existing version-1–3 compatibility and NLU-7/NLU-8 domain/sender behavior remain unchanged.
+- Native regressions try both a missing four-byte tail and encoded word 256 after exhausting the saved stats balance and changing the page. They compare complete record/save bytes, page, sender half and ownership, then execute XP, valid restore and stat spending. Both tails also refuse over an actually adopted imported record without losing its relationship, thresholds or supported detached XP/menu operations.
+- Service regressions use the real GDExtension through `godot/tests/menu_smoke.gd`: both tails follow actual sender exhaustion and a page change, preserve complete record/save bytes and readable state, and retain usable XP/restore/stat operations. An authored companion fixture also checks imported ownership and deliberately invalid effective-state metadata: refused tails preserve both, unsupported XP still refuses, and supported menu opening works. Its suffix offsets describe only this authored format, not retail values.
+- Evidence: pinned `t3/research-levelup@576b41c`, `docs/spec/levelup.md:28-65` and `tools/ref_messages.py:1120-1129`. The half byte at `R+0xee` gates stat sending and becomes one on exhaustion. The 255 bound is byte storage; 256 is the first unsupported encoded word, not a gameplay constant. No values, game assets or decoded private content are added.
+- PASS: Release configure/build with `-j 4`; native menu executable **266 checks**. Full CTest (`-j 3`), Release extension build, Godot menu smoke and FULL_TRACE results will be recorded when complete.
 
 ## NLU-7 / NLU-8 follow-up (2026-10-25)
 

@@ -414,6 +414,27 @@ void levelup_vectors() {
   expect(book.stat_points() == 0 && ((book.record_word(0xec) >> 16) & 0xff) == 1,
          "exhaustion selects skills half");
   const auto exhausted = book.save();
+  auto missing_half = menu_saved;
+  missing_half.resize(missing_half.size() - 4u);
+  auto oversized_half = menu_saved;
+  oversized_half[oversized_half.size() - 4u] = 0;
+  oversized_half[oversized_half.size() - 3u] = 1;
+  for (const auto &malformed : {missing_half, oversized_half}) {
+    book.load(exhausted);
+    book.set_page(2);
+    const auto before_refusal = book.save();
+    const auto record_before_refusal = book.record_bytes();
+    reject([&] { book.load(malformed); }, "invalid v4 sender half refuses after exhaustion");
+    expect(book.save() == before_refusal && book.record_bytes() == record_before_refusal &&
+           book.page() == 2 && ((book.record_word(0xec) >> 16) & 0xff) == 1 &&
+           !book.live_record(), "tail refusal preserves exhausted record and ledger metadata");
+    expect(book.give_xp(0) == 0 && book.save() == before_refusal,
+           "tail refusal preserves effective-state validity and usable XP operation");
+    book.load(menu_saved);
+    expect(book.press_stat(gate) && book.stat_points() == 11 &&
+           book.base_stat(3) == saved_stat + 1,
+           "valid restore and stat spend remain usable after tail refusal");
+  }
   book.load(menu_saved);
   expect(book.page() == 5 && ((book.record_word(0xec) >> 16) & 0xff) == 0,
          "restore reopens saved stats half");
@@ -650,6 +671,21 @@ void levelup_vectors() {
   expect(imported.live_record() && imported.save() == before_imported &&
          imported.next_threshold() == 500,
          "domain refusals preserve imported relationship and usable XP state");
+  for (const auto &malformed : {missing_half, oversized_half}) {
+    imported.set_page(2);
+    const auto imported_before = imported.save();
+    const auto imported_record_before = imported.record_bytes();
+    reject([&] { imported.load(malformed); }, "v4 tail refuses over imported record");
+    expect(imported.live_record() && imported.page() == 2 &&
+           imported.save() == imported_before &&
+           imported.record_bytes() == imported_record_before && imported.next_threshold() == 500,
+           "tail refusal retains imported ownership, metadata and readable thresholds");
+    expect(imported.give_xp(0) == 0 && imported.save() == imported_before,
+           "supported detached imported XP operation remains usable");
+    imported.open_level_up();
+    expect(imported.page() == 5 && imported.live_record(),
+           "supported imported menu operation works after tail refusal");
+  }
 }
 } // namespace
 

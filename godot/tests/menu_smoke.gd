@@ -83,6 +83,38 @@ func run() -> void:
 	var kill: Dictionary = service.give_kill_xp(0x42000000, 0x41f00000)
 	check(kill.get("ok", false) and int(kill.award) > 0 and int(kill.experience) == 500 + int(kill.award), "authored solo kill award reaches record")
 	check(not service.spend_skill(0, 1).get("ok", false), "skill sender stays refused")
+	var stats_snapshot: PackedByteArray = service.save_bytes().bytes
+	var missing_half := stats_snapshot.slice(0, stats_snapshot.size() - 4)
+	var oversized_half := stats_snapshot.duplicate()
+	oversized_half.encode_u32(oversized_half.size() - 4, 256)
+	for malformed in [missing_half, oversized_half]:
+		check(service.load_bytes(stats_snapshot).get("ok", false), "restore stat fixture before exhaustion")
+		var points := int(service.state().stat_points)
+		for point in range(points):
+			check(service.press_stat(2, 3, 0x40, 0, 3000).sent, "exhaust current stat points")
+		service.set_page(2)
+		var exhausted_record: PackedByteArray = service.record_bytes()
+		var exhausted_save: PackedByteArray = service.save_bytes().bytes
+		check(int(service.state().stat_points) == 0 and ((int(service.record_word(0xec).value) >> 16) & 0xff) == 1, "exhaustion switches sender half")
+		check(not service.load_bytes(malformed).get("ok", false), "invalid version-4 tail refuses")
+		check(service.record_bytes() == exhausted_record and service.save_bytes().bytes == exhausted_save, "tail refusal preserves full record and ledger metadata")
+		var retained: Dictionary = service.state()
+		check(retained.get("ok", false) and int(retained.page) == 2 and not retained.live_record, "tail refusal preserves page and ownership with readable state")
+		check(service.give_xp(0).get("ok", false) and service.save_bytes().bytes == exhausted_save, "tail refusal preserves effective-state validity and XP operation")
+		check(service.load_bytes(stats_snapshot).get("ok", false) and service.press_stat(2, 3, 0x40, 0, 3000).sent and int(service.state().stat_points) == points - 1, "valid restore and stat spend work after tail refusal")
+	var imported_snapshot := stats_snapshot.duplicate()
+	imported_snapshot.encode_u32(imported_snapshot.size() - 68, 0)
+	imported_snapshot.encode_u32(imported_snapshot.size() - 64, 1)
+	imported_snapshot.encode_u32(imported_snapshot.size() - 60, 0)
+	check(service.load_bytes(imported_snapshot).get("ok", false) and service.state().live_record, "authored companion restores imported relationship")
+	for malformed in [missing_half, oversized_half]:
+		service.set_page(2)
+		var imported_record: PackedByteArray = service.record_bytes()
+		var imported_save: PackedByteArray = service.save_bytes().bytes
+		check(not service.load_bytes(malformed).get("ok", false), "invalid tail refuses over imported relationship")
+		check(service.record_bytes() == imported_record and service.save_bytes().bytes == imported_save and service.state().get("ok", false) and service.state().live_record and int(service.state().page) == 2, "tail refusal retains imported relationship and readable metadata")
+		check(not service.give_xp(0).get("ok", false) and service.save_bytes().bytes == imported_save, "imported effective-state refusal remains intact")
+		check(service.open_level_up().get("ok", false) and int(service.state().page) == 5 and service.state().live_record, "supported imported menu operation works after refusal")
 	var no_hud_level: Dictionary = service.adopt({"level": 1, "acknowledged": 0, "stats": [10, 10, 10, 10]})
 	check(no_hud_level.get("ok", false) and no_hud_level.get("xp_ready", false) and int(no_hud_level.hud_next_xp) == 0, "unacknowledged imported record keeps XP rules without inventing a HUD interval")
 	service.reset()

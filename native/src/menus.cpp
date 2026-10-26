@@ -1079,7 +1079,6 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   const auto level_value = take_s32(bytes, at);
   if (xp_ready_ && (level_value < 1 || level_value > 80))
     throw Refusal("earned level is outside experience table");
-  effective_delta_valid_ = false;
   const auto ack = take_s32(bytes, at);
   const auto exp = take_s32(bytes, at);
   std::int32_t bases[4];
@@ -1093,35 +1092,36 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
     if (counted.n[bag] < 0 || counted.n[bag] > 64)
       throw Refusal("bag count is outside the 64-record bag");
   }
-  for (int bag = 0; bag < BAGS; ++bag)
-    machine_->w32(r + BAG_COUNT + static_cast<std::uint32_t>(bag) * BAG_STRIDE,
-                  static_cast<std::uint32_t>(counted.n[bag]));
+  struct SavedItem {
+    std::uint32_t address, definition;
+    std::size_t offset;
+  };
+  std::vector<SavedItem> saved_items;
   for (int bag = 0; bag < BAGS; ++bag) {
     for (int index = 0; index < counted.n[bag]; ++index) {
       const auto def_index = take_s32(bytes, at);
       const auto addr = cell_of(r, bag, index);
       if (at + ITEM_SIZE > bytes.size())
         throw Refusal("menu save is truncated");
-      for (unsigned b = 0; b < ITEM_SIZE; ++b)
-        machine_->w8(addr + b, bytes[at + b]);
-      at += ITEM_SIZE;
       const auto def = items::decode_definition_index(tables_, def_index);
       if (!def)
         throw Refusal("saved definition index is not in the supplied tables");
-      machine_->w32(addr, def->addr);
+      saved_items.push_back({addr, def->addr, at});
+      at += ITEM_SIZE;
     }
   }
-  for (int slot = 0; slot < EQUIP_SLOTS; ++slot) {
+  std::array<std::uint32_t, EQUIP_SLOTS> saved_equipment{};
+  for (auto &pointer : saved_equipment) {
     const auto index = take_s32(bytes, at);
-    const auto ptr = item_index_to_ptr(index, r, counted);
-    const auto offset = slot < 17 ? 0x43f0 + slot * 4 : 0x4434 + (slot - 17) * 4;
-    machine_->w32(r + static_cast<std::uint32_t>(offset), ptr);
+    pointer = item_index_to_ptr(index, r, counted);
   }
-  set_page(take_s32(bytes, at));
-  cursor_x_ = take_s32(bytes, at);
-  cursor_y_ = take_s32(bytes, at);
-  dragging_ = take_s32(bytes, at);
-  drag_cell_ = item_index_to_ptr(take_s32(bytes, at), r, counted);
+  const auto saved_page = take_s32(bytes, at);
+  if (saved_page < 0 || saved_page > 5)
+    throw Refusal("item panel page is 0..5");
+  const auto saved_cursor_x = take_s32(bytes, at);
+  const auto saved_cursor_y = take_s32(bytes, at);
+  const auto saved_dragging = take_s32(bytes, at);
+  const auto saved_drag_cell = item_index_to_ptr(take_s32(bytes, at), r, counted);
   std::array<std::int32_t, 4> saved_effective{};
   std::array<std::int32_t, 4> saved_delta{};
   bool saved_valid = false, saved_live = false;
@@ -1138,6 +1138,40 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
         saved_valid = false;
     if (saved_live && saved_object != 0) saved_valid = false;
   }
+  std::array<std::uint32_t, 5> saved_dependent{};
+  bool owned_object = false;
+  std::uint32_t armor = 0, bonuses = 0;
+  std::array<std::uint32_t, 5> resistances{};
+  if (version >= 3) {
+    for (auto &value : saved_dependent) value = take_u32(bytes, at);
+    owned_object = take_u32(bytes, at) != 0;
+    armor = take_u32(bytes, at);
+    bonuses = take_u32(bytes, at);
+    for (auto &value : resistances) value = take_u32(bytes, at);
+  }
+  std::uint32_t half = 0;
+  if (version >= 4) {
+    half = take_u32(bytes, at);
+    if (half > 255) throw Refusal("saved level-up half does not fit a byte");
+  }
+  effective_delta_valid_ = false;
+  for (int bag = 0; bag < BAGS; ++bag)
+    machine_->w32(r + BAG_COUNT + static_cast<std::uint32_t>(bag) * BAG_STRIDE,
+                  static_cast<std::uint32_t>(counted.n[bag]));
+  for (const auto &item : saved_items) {
+    for (unsigned byte = 0; byte < ITEM_SIZE; ++byte)
+      machine_->w8(item.address + byte, bytes[item.offset + byte]);
+    machine_->w32(item.address, item.definition);
+  }
+  for (int slot = 0; slot < EQUIP_SLOTS; ++slot) {
+    const auto offset = slot < 17 ? 0x43f0 + slot * 4 : 0x4434 + (slot - 17) * 4;
+    machine_->w32(r + static_cast<std::uint32_t>(offset), saved_equipment[slot]);
+  }
+  set_page(saved_page);
+  cursor_x_ = saved_cursor_x;
+  cursor_y_ = saved_cursor_y;
+  dragging_ = saved_dragging;
+  drag_cell_ = saved_drag_cell;
   machine_->w32(r + 0xe4, static_cast<std::uint32_t>(gold_value));
   machine_->w32(r + 0xe8, static_cast<std::uint32_t>(skills));
   machine_->w8(r + 0xec, static_cast<std::uint32_t>(stats));
@@ -1162,13 +1196,9 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
   if (version >= 3) {
+    std::size_t dependent_index = 0;
     for (const auto offset : {0x50u, 0xc0u, 0xc4u, 0xdcu, 0x124u})
-      machine_->w32(r + offset, take_u32(bytes, at));
-    const bool owned_object = take_u32(bytes, at) != 0;
-    const auto armor = take_u32(bytes, at);
-    const auto bonuses = take_u32(bytes, at);
-    std::array<std::uint32_t, 5> resistances{};
-    for (auto &value : resistances) value = take_u32(bytes, at);
+      machine_->w32(r + offset, saved_dependent[dependent_index++]);
     if (owned_object && saved_object == OBJECT && !saved_live) {
       machine_->w16(saved_object + 0xe4, armor);
       machine_->w32(saved_object + 0x474, bonuses);
@@ -1185,8 +1215,6 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
     }
   }
   if (version >= 4) {
-    const auto half = take_u32(bytes, at);
-    if (half > 255) throw Refusal("saved level-up half does not fit a byte");
     machine_->w8(r + 0xee, half);
   } else if (page() == 5) {
     set_page(0);
