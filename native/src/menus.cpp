@@ -544,6 +544,8 @@ void Ledger::spend_skill(int is_skill, std::uint32_t value) {
 }
 
 void Ledger::set_xp_rules(XpTable table, std::array<ClassFormula, 8> formulas) {
+  if (level() < 1 || level() > 80)
+    throw Refusal("earned level is outside experience table");
   if (table[0] < 0 || table[80] <= table[79])
     throw Refusal("experience table has an invalid boundary");
   for (std::size_t i = 1; i < table.size(); ++i)
@@ -618,6 +620,8 @@ void Ledger::recalc_level_stats() {
 
 int Ledger::give_xp(std::int32_t amount) {
   if (!xp_ready_) throw Refusal("selected executable experience table and class formulas are required");
+  if (level() < 1 || level() > 80)
+    throw Refusal("earned level is outside experience table");
   ensure_recalc_supported();
   auto before = memory_;
   try {
@@ -908,6 +912,8 @@ Frame Ledger::frame(const std::string &screen) {
 }
 
 void Ledger::adopt(const Adopted &c) {
+  if (xp_ready_ && (c.level < 1 || c.level > 80))
+    throw Refusal("earned level is outside experience table");
   if (c.level < 1 || c.level > 127 || c.acknowledged < 0 || c.acknowledged > 127)
     throw Refusal("level does not fit the s8 level bytes");
   if (c.stat_points < 0 || c.stat_points > 255)
@@ -943,6 +949,8 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
                           const std::function<std::uint8_t(std::uint32_t)> &image_byte) {
   if (bytes.size() != 0x4c30u || !image_byte)
     throw Refusal("live player record must be exactly 0x4c30 bytes with an executable reader");
+  if (xp_ready_ && (bytes[0x59] < 1 || bytes[0x59] > 80))
+    throw Refusal("earned level is outside experience table");
   auto word = [&](std::size_t at) {
     return std::uint32_t(bytes[at]) | std::uint32_t(bytes[at + 1]) << 8 |
            std::uint32_t(bytes[at + 2]) << 16 | std::uint32_t(bytes[at + 3]) << 24;
@@ -1003,7 +1011,7 @@ std::vector<std::uint8_t> Ledger::save() const {
   std::vector<std::uint8_t> out;
   const char magic[] = "OCMENU1";
   out.insert(out.end(), magic, magic + 8);
-  put_u32(out, 3);
+  put_u32(out, 4);
   const auto r = record();
   put_s32(out, gold());
   put_s32(out, skill_points());
@@ -1052,6 +1060,7 @@ std::vector<std::uint8_t> Ledger::save() const {
   put_u32(out, owned_object ? machine_->u32(obj + 0x474) : 0u);
   for (std::uint32_t index = 0; index < 5; ++index)
     put_u32(out, owned_object ? machine_->u32(obj + 0x5c + 4u * index) : 0u);
+  put_u32(out, machine_->u8(r + 0xee));
   return out;
 }
 
@@ -1061,14 +1070,16 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
     throw Refusal("menu save magic is not OCMENU1");
   at = 8;
   const auto version = take_u32(bytes, at);
-  if (version != 1 && version != 2 && version != 3)
-    throw Refusal("menu save version is not 1, 2 or 3");
-  effective_delta_valid_ = false;
+  if (version < 1 || version > 4)
+    throw Refusal("menu save version is not 1, 2, 3 or 4");
   const auto r = record();
   const auto gold_value = take_s32(bytes, at);
   const auto skills = take_s32(bytes, at);
   const auto stats = take_s32(bytes, at);
   const auto level_value = take_s32(bytes, at);
+  if (xp_ready_ && (level_value < 1 || level_value > 80))
+    throw Refusal("earned level is outside experience table");
+  effective_delta_valid_ = false;
   const auto ack = take_s32(bytes, at);
   const auto exp = take_s32(bytes, at);
   std::int32_t bases[4];
@@ -1150,7 +1161,7 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
   }
   machine_->w32(r + 0xac, hp);
   machine_->w32(r + 0xb0, max_hp);
-  if (version == 3) {
+  if (version >= 3) {
     for (const auto offset : {0x50u, 0xc0u, 0xc4u, 0xdcu, 0x124u})
       machine_->w32(r + offset, take_u32(bytes, at));
     const bool owned_object = take_u32(bytes, at) != 0;
@@ -1172,6 +1183,13 @@ void Ledger::load(const std::vector<std::uint8_t> &bytes) {
     } catch (const Refusal &) {
       effective_delta_valid_ = false;
     }
+  }
+  if (version >= 4) {
+    const auto half = take_u32(bytes, at);
+    if (half > 255) throw Refusal("saved level-up half does not fit a byte");
+    machine_->w8(r + 0xee, half);
+  } else if (page() == 5) {
+    set_page(0);
   }
 }
 

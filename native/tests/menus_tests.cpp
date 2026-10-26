@@ -407,6 +407,33 @@ void levelup_vectors() {
   expect(book.hud_base_threshold() == 700 && book.hud_next_threshold() == 800,
          "acknowledgement advances the HUD interval to the earned level");
   StatInput gate{2, 3, 3000, 0x40u, 0x40u, 0, 0};
+  const auto menu_saved = book.save();
+  const auto saved_stat = book.base_stat(3);
+  for (int point = 0; point < 12; ++point)
+    expect(book.press_stat(gate), "exhaust points through stat sender");
+  expect(book.stat_points() == 0 && ((book.record_word(0xec) >> 16) & 0xff) == 1,
+         "exhaustion selects skills half");
+  const auto exhausted = book.save();
+  book.load(menu_saved);
+  expect(book.page() == 5 && ((book.record_word(0xec) >> 16) & 0xff) == 0,
+         "restore reopens saved stats half");
+  Ledger fresh_menu;
+  fresh_menu.load(menu_saved);
+  fresh_menu.set_xp_rules(table, formulas);
+  expect(book.press_stat(gate) && fresh_menu.press_stat(gate) &&
+         book.stat_points() == 11 && fresh_menu.stat_points() == 11 &&
+         book.base_stat(3) == saved_stat + 1 && fresh_menu.base_stat(3) == saved_stat + 1,
+         "existing and fresh restores spend restored point identically");
+  fresh_menu.load(exhausted);
+  expect(((fresh_menu.record_word(0xec) >> 16) & 0xff) == 1 && !fresh_menu.press_stat(gate),
+         "saved exhausted skills half remains blocked");
+  auto legacy_menu = menu_saved;
+  legacy_menu.resize(legacy_menu.size() - 4u);
+  legacy_menu[8] = 3;
+  fresh_menu.load(legacy_menu);
+  expect(fresh_menu.page() == 0 && !fresh_menu.press_stat(gate),
+         "legacy snapshot without sender half closes level-up page");
+  book.load(menu_saved);
   auto suppressed = gate;
   suppressed.elapsed = 2999;
   expect(!book.press_stat(suppressed) && book.stat_points() == 12, "timer gate");
@@ -505,7 +532,7 @@ void levelup_vectors() {
   reject([&] { changed_equipment.give_xp(500); },
          "level-up refuses stale effective bonuses after equipment change");
   auto equipped_bytes = changed_equipment.save();
-  const auto suffix = equipped_bytes.size() - 96u;
+  const auto suffix = equipped_bytes.size() - 100u;
   auto put_word = [&](std::size_t at, std::uint32_t value) {
     for (int i = 0; i < 4; ++i)
       equipped_bytes[at + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(value >> (8 * i));
@@ -570,7 +597,7 @@ void levelup_vectors() {
          "fresh restore supports stat spending without refilling resources");
   for (const auto version : {1u, 2u}) {
     auto legacy = saved;
-    legacy.resize(legacy.size() - (version == 1 ? 96u : 52u));
+    legacy.resize(legacy.size() - (version == 1 ? 100u : 56u));
     legacy[8] = static_cast<std::uint8_t>(version);
     Ledger old;
     old.load(legacy);
@@ -581,11 +608,48 @@ void levelup_vectors() {
     expect(old.record_bytes() == before, "legacy reconstruction refusal preserves record");
   }
   auto missing_object = saved;
-  missing_object[missing_object.size() - 32u] = 0;
+  missing_object[missing_object.size() - 36u] = 0;
   Ledger unsupported;
   unsupported.load(missing_object);
   unsupported.set_xp_rules(table, formulas);
   reject([&] { unsupported.give_xp(100); }, "missing object snapshot cannot authorize XP");
+  Ledger domain;
+  domain.set_xp_rules(table, formulas);
+  const auto prior_domain = domain.save();
+  Ledger::Adopted invalid;
+  invalid.level = 81;
+  reject([&] { domain.adopt(invalid); }, "XP rules refuse level-81 adoption");
+  expect(domain.save() == prior_domain, "refused adoption preserves ledger");
+  auto invalid_save = prior_domain;
+  invalid_save[24] = 81;
+  reject([&] { domain.load(invalid_save); }, "XP rules refuse level-81 restoration");
+  expect(domain.save() == prior_domain, "refused restoration preserves ledger");
+  LedgerProbe::record_word(domain, 0x58, 0x00005104u);
+  const auto invalid_record = domain.record_bytes();
+  reject([&] { domain.give_xp(100); }, "out-of-domain XP refuses before mutation");
+  expect(domain.record_bytes() == invalid_record, "out-of-domain XP preserves record");
+  Ledger no_rules;
+  no_rules.adopt(invalid);
+  reject([&] { no_rules.set_xp_rules(table, formulas); }, "invalid earned level refuses XP configuration");
+  expect(!no_rules.has_xp_rules(), "refused configuration leaves rules inactive");
+  invalid.level = 5;
+  no_rules.adopt(invalid);
+  Ledger imported;
+  imported.adopt_record(no_rules.record_bytes(), {}, {},
+                        [](std::uint32_t) -> std::uint8_t { return 0; });
+  imported.set_xp_rules(table, formulas);
+  const auto before_imported = imported.save();
+  invalid.level = 81;
+  reject([&] { imported.adopt(invalid); }, "invalid adoption refuses over imported record");
+  reject([&] { imported.load(invalid_save); }, "invalid restoration refuses over imported record");
+  auto invalid_import = no_rules.record_bytes();
+  invalid_import[0x59] = 81;
+  reject([&] { imported.adopt_record(invalid_import, {}, {},
+                                    [](std::uint32_t) -> std::uint8_t { return 0; }); },
+         "invalid imported earned level refuses");
+  expect(imported.live_record() && imported.save() == before_imported &&
+         imported.next_threshold() == 500,
+         "domain refusals preserve imported relationship and usable XP state");
 }
 } // namespace
 

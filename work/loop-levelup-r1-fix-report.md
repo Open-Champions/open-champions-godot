@@ -1,4 +1,16 @@
-STATUS: MORE — NLU-6 implementation and targeted Release checks pass; full gates pending. Earlier NLU-1 through NLU-5 results below are historical.
+STATUS: MORE — NLU-7/NLU-8 fixed; Release build, targeted tests, Godot matrix and sweep pass. Full CTest is running. The requested FULL_TRACE baseline does not match this branch's measured/documented baseline. Earlier results below are historical.
+
+## NLU-7 / NLU-8 follow-up (2026-10-25)
+
+- NLU-7: companion version 4 saves/restores the actual `R+0xee` sender-half byte. Versions 1–3 remain readable but close a restored level-up page because they lack that byte. Native coverage saves an open stats page, exhausts every point through `press_stat`, restores, inspects the half byte, and compares actual point/stat changes with a fresh-ledger restore. Saved exhausted skills halves stay blocked; a legacy version-3 level-up page closes.
+- NLU-8: native adoption, live-record adoption and companion restoration reject earned levels outside 1–80 before mutation when XP rules are active. Installing XP rules validates the current earned level before enabling them; XP awards validate it before changing XP. Refusal assertions inspect full record/snapshot equality, imported-record ownership, usable threshold/state reads, and refused service adoption/restoration at level 81.
+- Evidence: `research-levelup@576b41c:docs/spec/levelup.md:28` (81-entry table and level domain), `docs/spec/levelup.md:45` (sender gate), `tools/ref_messages.py:1120` (exhaustion switches half), `tools/ref_combat.py:1715` (XP/recalculation order). Companion versioning is authored, not a retail format claim.
+- Files changed for these findings: `native/src/menus.cpp`, `native/tests/menus_tests.cpp`, `godot/tests/menu_smoke.gd`, this report. No push, PR, process-name termination or private-data changes.
+- PASS: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`; `cmake --build build/native -j 4`; `build/native/champions-menus-tests` — **250 checks**. `git diff --check` passes.
+- PASS: `cmake --build build/godot-extension -j 4`; `python3 -u work/levelup-r1/run-godot.py` — **54/54 commands**, **177.77 seconds**, menu smoke **55 checks / zero failures**. This reruns the prior fix-2 Godot gate.
+- PASS: `bash work/levelup-r1/run-slices.sh levelup-r1-fix3 --scripts` — **4/4 slices exit 0**, **111 tried / 111 loaded / 111 played**, **230 checks / zero failures**. Private input was read-only; only aggregate counts are reported. This reruns the prior fix-2 sweep gate.
+- TRACE MISMATCH: matrix full-combat execution measures **31,622 bytes**, SHA-256 `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, matching the historical report and `docs/INTEGRATION.md`, but not the requested **36,402 bytes / `9c7922b2…c659`**. No full requested hash or reproducing command was supplied; trace generation and unrelated combat code remain unchanged.
+- RUNNING: `ctest --test-dir build/native --output-on-failure -j 3`, logged locally in `work/levelup-r1/fix3-ctest.log`. Final figures will replace this entry. This reruns the prior fix-2 full native gate.
 
 ## NLU-6 follow-up (2026-10-25)
 

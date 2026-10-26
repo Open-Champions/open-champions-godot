@@ -60,6 +60,15 @@ func run() -> void:
 		for word in [0, 0x3f800000, 0x3f800000, 0x40000000, 0x40400000, 0]:
 			formulas.append(word)
 	check(service.configure_levelup(thresholds, formulas).get("ok", false), "authored XP rules load")
+	var before_invalid: PackedByteArray = service.record_bytes()
+	var invalid_adopt: Dictionary = service.adopt({"level": 81, "stats": [20, 20, 20, 20]})
+	check(not invalid_adopt.get("ok", false), "level-81 adoption refuses")
+	check(service.record_bytes() == before_invalid and service.state().get("ok", false), "refused adoption preserves record and usable state")
+	var before_invalid_save: PackedByteArray = service.save_bytes().bytes
+	var invalid_save := before_invalid_save.duplicate()
+	invalid_save[24] = 81
+	check(not service.load_bytes(invalid_save).get("ok", false), "level-81 restoration refuses")
+	check(service.save_bytes().bytes == before_invalid_save and service.state().get("ok", false), "refused restoration preserves ledger and usable state")
 	var xp: Dictionary = service.give_xp(500)
 	check(xp.get("ok", false) and int(xp.levels_gained) == 1 and int(xp.level) == 6 and int(xp.experience) == 500, "exact XP threshold")
 	check(int(xp.skill_points) == 5 and int(xp.stat_points) == 6 and int(xp.max_hp) == 0x424c0000 and int(xp.max_mana) == 0x41880000, "level resource and point awards")
