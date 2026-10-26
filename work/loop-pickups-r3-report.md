@@ -174,6 +174,34 @@ this is not an error-free smoke. Logs are in
 `work/pickups/pp2f-completion-godot/` and
 `pp2f-completion-extension.log`.
 
-Fresh headless/rendered playthrough validation is in progress; prior
-`pp2f-final` / `pp2f-playthrough.log` timed out (both exit 124, no results)
-and is not accepted as passing evidence.
+Fresh command (private input paths represented by environment variables):
+`python3 tools/run_loop_playthrough.py --godot "$GODOT_BIN" --game-folder "$RTA_DISC" --out work/pickups/pp2f-completion`:
+**PASS, runner exit 0**. Both headless and rendered variants exit 0,
+write 26 steps, and report `pickup_verified: true`, inventory **10 → 11**,
+a produced real drop, `picked_up: true`, and 20 ticks of ordinary walking.
+Both retain the unchanged journey's nine diagnostic combat retry placements;
+no pickup injection, assertion change or timeout relaxation was made.
+Both `enemy_fight` steps pass with empty `missing_fight_steps`.
+Both save-preflight checks refuse as expected while preserving existing
+files; cold load confirms no lossy save was created. Private input file
+counts remain **994 before / 994 after**.
+
+Rendered output contains 13 screenshots. Inspected
+`work/pickups/pp2f-completion/rendered/05-fight-attempt.png`: client status
+shows one loot item picked up, matching the native inventory observation.
+This establishes the bounded journey, not original ground-item artwork or
+animation parity: `rendered_pickup_verified` remains false. Both journey
+logs contain an ObjectDB-at-exit leak warning and zero script errors.
+Logs/results/screenshots remain ignored under
+`work/pickups/pp2f-completion/`; runner output is
+`work/pickups/pp2f-completion-playthrough.log`.
+
+Earlier `pp2f-final` / `pp2f-playthrough.log` timed out (both exit 124,
+no results) and was not used as passing evidence. Earlier Godot/mutation logs
+were reviewed, but fresh completion runs above supply the final evidence.
+Production source is unchanged from assigned tip `97e21c3e`; the only native
+edit in this completion changes helper assertion wording. No private inputs,
+resource names, decoded contents, runtime images or absolute private paths
+were staged. No full CTest rerun, push, PR or sibling-worktree edit occurred.
+PP2F-1 is addressed with discriminating production-path regressions; no
+requested completion gate remains pending.
