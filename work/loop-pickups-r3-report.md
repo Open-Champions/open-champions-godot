@@ -123,4 +123,57 @@ parity and the unported systems are not claimed.
 
 ## PP2F-1 full CTest (recorded by the orchestrator, 2026-10-26)
 
-Tests committed in `c87f08dc` and `4f61dfca`. The full `ctest --test-dir build/native -j 3 --output-on-failure` run happened while machine load was ~290: **232/242 passed**, 10653.13 s (log `work/pickups/pp2f-full-ctest.log`). Eight failures were timeouts; `session-anim-cache-transport` and `session-facing-exact` were reported Failed. All 10 were rerun at low load with `-j2` (log `work/pickups/pp2f-rerun-failed.log`): **10/10 passed**, 609.18 s. Guard-removal verification and the PP2F-1 playthrough/Godot results are still to be written up by the next job.
+Tests committed in `c87f08dc` and `4f61dfca`. The full `ctest --test-dir build/native -j 3 --output-on-failure` run happened while machine load was ~290: **232/242 passed**, 10653.13 s (log `work/pickups/pp2f-full-ctest.log`). Eight failures were timeouts; `session-anim-cache-transport` and `session-facing-exact` were reported Failed. All 10 were rerun at low load with `-j2` (log `work/pickups/pp2f-rerun-failed.log`): **10/10 passed**, 609.18 s. Full CTest was not rerun during completion; the focused evidence follows.
+
+
+## PP2F-1 production regression completion (2026-10-26)
+
+Reviewed `c87f08dc` / `4f61dfca` against the complete corrective audit.
+The four selected cases (`action-use`, `action-run`, `trap-use`, `trap-run`)
+invoke the included production `Fight::Impl::chest_use` / `chest_run` bodies.
+Each snapshots all authoritative overlay bytes and effective Chest bytes,
+player gold, animation state/tracks, actual World scheduler links, live owner
+identity, loot/drop/inventory/service observations, and then requires the
+specific unsupported-action/trap refusal with all observations unchanged.
+The run cases have an unguarded supported control that really completes at
+animation status 0x80 and leaves the run list. Fixtures trace to
+research-pickups `9911a6b` section 2 and research-loot-drop `77c2f70` section 3;
+owner token, one-tick animation and initial balance remain authored inputs.
+`93c7f5a1` corrects the old helper-only assertion labels so those labels no
+longer claim production ordering or action-loop execution.
+
+Mutation evidence was freshly executed after that commit:
+
+| Production guard | Mutation | Matching cases | Result |
+| --- | --- | --- | --- |
+| chest_use | removed | action-use, trap-use | both exit 1, authoritative bytes changed |
+| chest_use | moved after opening/animation/run-list/count writes, before loot | action-use, trap-use | both exit 1, authoritative bytes changed |
+| chest_run | removed | action-run, trap-run | both exit 1, authoritative bytes changed |
+| chest_run | moved after animation/completion/run-list writes | action-run, trap-run | both exit 1, authoritative bytes changed |
+
+Each variant rebuilt `champions-pickups-tests` with `-j 4`. An initial rapid
+iteration exposed a stale test object (the run-removal case incorrectly
+passed without recompiling the translation unit that includes production).
+The complete matrix above was rerun with that object removed before every
+build, and every build recompiled it. Only that fresh matrix is accepted.
+The finalizer restored production with
+`git checkout -- native/src/campaign_pickups.inc`; the subsequent rebuild
+passes **254 checks**, and focused CTest `-R '^pickups$'` passes **1/1**
+in 0.17 seconds. No mutated production source is committed.
+Logs: `work/pickups/pp2f-completion-mutations.log`, per-case
+`pp2f-completion-{action,trap}-{use,run}-{removed,late}.log`, per-variant build
+logs, `pp2f-completion-restored-build.log`, `pp2f-completion-restored.log`,
+and `pp2f-completion-ctest.log`.
+
+Fresh configuration and extension build (`-j 4`) pass; the extension was
+built with intact guards before mutation testing. The three pickup-related
+Godot smokes all exit 0: script commands PASS, inventory icons PASS, and
+scene play flow **65 checks / 0 failures**. Scene play flow still logs the
+two known fixture `loaded` property errors and an ObjectDB exit warning;
+this is not an error-free smoke. Logs are in
+`work/pickups/pp2f-completion-godot/` and
+`pp2f-completion-extension.log`.
+
+Fresh headless/rendered playthrough validation is in progress; prior
+`pp2f-final` / `pp2f-playthrough.log` timed out (both exit 124, no results)
+and is not accepted as passing evidence.
