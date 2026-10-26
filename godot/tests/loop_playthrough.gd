@@ -483,7 +483,7 @@ func walk_exit_probe() -> bool:
 	var record_before: Dictionary = scene.controller.get_observation()
 	var trigger_status: Dictionary = scene.controller.script_trigger_status()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(scene._apply_level_change())
+	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(await scene._apply_level_change())
 	var record_after: Dictionary = scene.controller.get_observation()
 	var start: Dictionary = scene.controller.get_terrain().get("start", {})
 	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
@@ -1199,7 +1199,7 @@ func run() -> void:
 	var destination_player_before: Dictionary = scene.controller.get_observation()
 	var destination_choice_before: Dictionary = scene.controller.script_story_status()
 	var exit_post_action_pending: bool = destination_request_before.get("post_action_pending", false)
-	var destination_loaded: bool = exit_action and keyed_destination and scene._apply_level_change()
+	var destination_loaded: bool = exit_action and keyed_destination and await scene._apply_level_change()
 	var at_destination: bool = destination_loaded and scene.real.current >= 0 \
 		and str(scene.real.levels[scene.real.current].stem) == expected_destination
 	var destination_state: Dictionary = scene.controller.script_story_status()
@@ -1237,7 +1237,7 @@ func run() -> void:
 	var hub_branch: Dictionary = scene.controller.script_level_request()
 	var completed_in_destination: bool = destination_verified and destination_state.get("mission_1_complete", false)
 	var hub_queued: bool = completed_in_destination and str(hub_branch.get("name", "")) == "hub"
-	var hub_loaded: bool = hub_queued and scene._apply_level_change()
+	var hub_loaded: bool = hub_queued and await scene._apply_level_change()
 	mark("mission_1_completion_hub_return", "returned" if hub_loaded and scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "hub" else "branch_unverified",
 		{"completed_in_destination": completed_in_destination,
 		"hub_queued": hub_queued, "hub_loaded": hub_loaded,
