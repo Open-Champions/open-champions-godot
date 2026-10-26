@@ -254,6 +254,11 @@ func _observe(result: Dictionary) -> void:
 	if result.get("facing_enabled", false) and not result.get("fight_player_ready", false):
 		health_label.text += "\nFacing test · angle %d · velocity %d · mode %d" % [result.facing_raw, result.angular_velocity_raw, result.turn_mode]
 	if result.get("fight_player_ready", false):
+		health_label.text += "\nCombat · state %d · combo step %d · variant %d · guarding %s" % [
+			int(result.get("fight_player_action_state", 2)), int(result.get("fight_player_combo_step", 0)),
+			int(result.get("fight_player_attack_variant", 0)), str(result.get("fight_player_blocking", false))]
+		if not str(result.get("fight_move_refusal", "")).is_empty():
+			health_label.text += "\n" + str(result.fight_move_refusal)
 		health_label.text += "\nStarting equipment: %s · weapon class %d (%s, not campaign evidence)" % [
 			str(result.get("fight_starting_equipment", "unknown")), int(result.get("fight_player_weapon_class", -1)),
 			str(result.get("fight_player_weapon_class_source", "unknown"))]
@@ -493,13 +498,15 @@ func _build_interface() -> void:
 		badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		header.add_child(badge)
 	var titles := VBoxContainer.new()
-	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	titles.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	header.add_child(titles)
 	titles.add_child(_label("OPEN CHAMPIONS", 24, GOLD))
 	titles.add_child(_label("Return to Arms · Creature movement test", 15, MUTED))
 	var health := VBoxContainer.new()
+	health.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(health)
 	health_label = _label("Health 100 / 100", 18)
+	health_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	health.add_child(health_label)
 	health_bar = ProgressBar.new()
 	health_bar.custom_minimum_size = Vector2(190, 14)

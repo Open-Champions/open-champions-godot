@@ -134,7 +134,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · walk-in triggers and level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · WASD moves · J attacks. WarBoar sight, chase, attacks and hit reactions are active.\nBoar-to-player damage, path searches, ground loot, Gold and Minotaurs remain refused."
+			mode_label.text = "Play mode · WASD moves · J attack / combo · K hold guard · U guard move · L heavy request · 1/2 ability slots. WarBoar sight, chase, attacks and hit reactions are active.\nUnarmed stand-in: guard needs equipment; heavy and abilities need learned records (refused_unknown). Boar-to-player damage, path searches, ground loot, Gold and Minotaurs remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):

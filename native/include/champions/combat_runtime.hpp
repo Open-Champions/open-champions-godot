@@ -140,6 +140,10 @@ struct Services {
                      Raw index, Raw scale)>
       sample_point;
   std::function<Raw(const ResourceQuery &)> resource;
+  // Player_run's name formatting call-outs. Return an address of a terminated
+  // string in this World. Optional: the frozen Full fixtures retain their
+  // zero-name stub; a real campaign binds the executable's literal/%d formats.
+  std::function<Raw(Address format, std::optional<Raw> argument)> format_name;
   // Creature_dropLoot / Goblin death call-outs: rtti_typeInfoEquals(typeid(*c),
   // <class>_typeinfo) by the getter's name, loot_generateDrops and
   // loot_spawnNamedItem (the item name is an executable string address).

@@ -409,7 +409,9 @@ Dictionary ChampionsSessionController::probe_full_walk_weight_test() {
 }
 Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
-    if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
+    const auto allowed = !combat_ && !level_ && fight_ && fight_->player_ready()
+        ? rta::campaign_fight::COMMAND_MASK : rta::session_control::COMMAND_MASK;
+    if (mask < 0 || mask > allowed)
       throw std::runtime_error("Unknown control command.");
     const auto before = active_observation().ready_ticks;
     cache_state(active_advance(dialog_gate(static_cast<uint32_t>(mask))), true);
@@ -451,7 +453,9 @@ Dictionary ChampionsSessionController::snap_presentation() {
 Dictionary ChampionsSessionController::advance_time(int64_t usec,
                                                     int64_t mask) {
   try {
-    if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
+    const auto allowed = !combat_ && !level_ && fight_ && fight_->player_ready()
+        ? rta::campaign_fight::COMMAND_MASK : rta::session_control::COMMAND_MASK;
+    if (mask < 0 || mask > allowed)
       throw std::runtime_error("Unknown control command.");
     if (current_.paused || current_.stopped || current_.failed) {
       clock_.reset();
@@ -2093,6 +2097,7 @@ Dictionary ChampionsSessionController::reset_session() {
 }
 Dictionary ChampionsSessionController::set_paused(bool value) {
   try {
+    if (value && fight_) fight_->release_input();
     if (combat_) combat_->set_paused(value); else if (level_) level_->set_paused(value); else control_->set_paused(value);
     snap();
     return observation();
@@ -2102,6 +2107,7 @@ Dictionary ChampionsSessionController::set_paused(bool value) {
 }
 Dictionary ChampionsSessionController::release_input() {
   try {
+    if (fight_) fight_->release_input();
     if (combat_) combat_->release_input(); else if (level_) level_->release_input(); else control_->release_input();
     snap();
     return observation();
@@ -3094,6 +3100,8 @@ Dictionary ChampionsSessionController::fight_observation() const {
   counts["attack_edges"] = int64_t(n.attack_edges);
   counts["player_swings"] = int64_t(n.player_swings);
   counts["player_hits"] = int64_t(n.player_hits);
+  counts["player_animation_starts"] = int64_t(n.player_animation_starts);
+  counts["player_animation_advances"] = int64_t(n.player_animation_advances);
   counts["damage_events"] = int64_t(n.damage_events);
   counts["deaths"] = int64_t(n.deaths);
   counts["loot_calls"] = int64_t(n.loot_calls);
@@ -3134,6 +3142,11 @@ Dictionary ChampionsSessionController::fight_observation() const {
   if (player.present) {
     out["fight_player_action_state"] = int64_t(player.action_state);
     out["fight_player_weapon_class"] = int64_t(player.weapon_class);
+    out["fight_player_combo_step"] = int64_t(player.combo_step);
+    out["fight_player_attack_variant"] = int64_t(player.attack_variant);
+    out["fight_player_attack_kind"] = int64_t(player.attack_kind);
+    out["fight_player_blocking"] = player.blocking;
+    out["fight_move_refusal"] = String::utf8(player.move_refusal.c_str());
     // Host stand-in: the research does not document the route's starting
     // equipment, so the class-5 (unarmed) record is a labelled fallback.
     out["fight_starting_equipment"] = "refused_unknown";
@@ -3191,7 +3204,8 @@ rta::session_control::Observation ChampionsSessionController::active_advance(uin
   // With a fight established the dry scene never receives the J/H diagnostic
   // damage bit (it is the player's attack button); a failed fight leaves the
   // stand-in with movement only.
-  const uint32_t dry_mask = fight_ && fight_->player_ready() ? (fighting ? 0u : (mask & ~uint32_t(rta::session_control::DAMAGE))) : mask;
+  const uint32_t dry_mask = fight_ && fight_->player_ready()
+      ? (fighting ? 0u : (mask & rta::campaign_fight::MOVEMENT)) : mask;
   auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(dry_mask));
   if (fighting && !next.failed && next.ready_ticks>before) fight_->tick(mask);
   if (!combat_ && !level_ && fight_ && fight_->player_ready()) apply_fight(next);

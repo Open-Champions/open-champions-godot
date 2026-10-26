@@ -2,6 +2,7 @@
 #include "champions/campaign_actors.hpp"
 #include "champions/campaign_rewards.hpp"
 #include "champions/player_state.hpp"
+#include "champions/player_name_format.hpp"
 #include "champions/script_items.hpp"
 #include "champions/creature_anim/runtime.hpp"
 #include "champions/model.hpp"
@@ -15,7 +16,7 @@ namespace C = combat_runtime;
 namespace {
 // The pad mapping the Full composition fixture uses for the client (combat_play):
 // the attack button mask. A host choice, not a recorded original word.
-constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
+constexpr Raw ATTACK_MASK = ATTACK, BLOCK_MASK = GUARD, SWAP_MASK = GUARD_MOVE;
 // Player_ctor's 12 model definitions (research-player-model 7f13899,
 // docs/spec/player-model-resources.md): word 0 names the animation LMP, words
 // 1..111 (8 bytes apart) name the slot entries.
@@ -64,6 +65,7 @@ struct Fight::Impl {
   std::map<Raw, creature_anim::ClipId> token_clip;
   std::map<creature_anim::ClipId, Raw> clip_token;
   std::string player_lump;
+  Address format_scratch = 0;
   // actors
   std::map<Address, creature_anim::StateId> states;
   std::map<Address, bool> adopted;
@@ -73,7 +75,8 @@ struct Fight::Impl {
   Address player = 0, player_handle = 0;
   creature_anim::StateId player_state = 0;
   bool player_ok = false;
-  bool attack_was_held = false;
+  MovePad move_pad;
+  std::string move_refusal;
   std::uint32_t gold_start = 0;
   std::size_t base_events = 0;
   // rewards of a kill (campaign_rewards)
@@ -91,6 +94,7 @@ struct Fight::Impl {
       : authority(std::move(a)), exe(std::move(e)), bundle(b), dialog_open(std::move(d)) {}
 
   void refuse(const std::string &label) { refusals[label] += 1; }
+  void refuse_move(const std::string &label) { move_refusal = label; refuse(label); }
   Raw read(Address a, unsigned n = 4) const { return Raw(world->read(a, n)); }
 
   // ---- resources ---------------------------------------------------------
@@ -273,6 +277,20 @@ struct Fight::Impl {
       if (q.entry.empty() || !player_entry(q.entry)) return 0;
       return player_token(q.entry);
     };
+    base.format_name = [this](Address format, std::optional<Raw> value) -> Raw {
+      if (!format_scratch) throw C::Unsupported("player name format: scratch storage not bound");
+      std::string text;
+      for (unsigned i = 0; i < 64; ++i) {
+        const auto c = read(format + i, 1);
+        if (!c) break;
+        text += char(c);
+      }
+      const auto name = player::format_name(text, value
+          ? std::optional<std::int32_t>{std::int32_t(*value)} : std::optional<std::int32_t>{});
+      for (std::size_t i = 0; i <= name.size(); ++i)
+        world->write(format_scratch + Address(i), 1, i < name.size() ? std::uint8_t(name[i]) : 0);
+      return format_scratch;
+    };
     base.is_class = [](Address, const std::string &) { return false; };
     base.loot_generate = [this](const C::LootDrop &d) { roll_loot(d); };
     base.spawn_named_item = [](const Vec3 &, Raw) -> void {
@@ -291,6 +309,7 @@ struct Fight::Impl {
       if (!clip) return; // res_find returned null: anim_start ignores a null clip
       start(a, clip, flags, blend, out);
       if (auto s = state_of(a)) store_cells(a, s);
+      if (a == player) counts.player_animation_starts += 1;
     };
     services.animation_advance = [this, advance](Address a, Raw speed) -> Raw {
       auto s = state_of(a);
@@ -301,6 +320,7 @@ struct Fight::Impl {
       if (actors && actors->find(a))
         world->write(a + 0xc4, 2, std::uint16_t(bundle.animation_motion(a).yaw));
       if (s) store_cells(a, s);
+      if (a == player) counts.player_animation_advances += 1;
       return events;
     };
     return services;
@@ -528,6 +548,9 @@ struct Fight::Impl {
       world->write(def + 8 * slot + 4, 4, player_entry(name) ? player_token(name) : 0);
       scratch += Address((name.size() + 16) & ~std::size_t(15));
     }
+    // Reuse the end of this host-owned string area, after all definition names.
+    // Each Player sprintf result is consumed immediately by res_find/sound.
+    format_scratch = scratch;
     // The strings the player tick names by executable address.
     for (const auto &range : NAME_RANGES)
       for (std::uint32_t a = range.first; a < range.second; ++a) {
@@ -582,6 +605,7 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
   p.adapter = std::make_unique<C::SessionAdapter>(*p.world);
   p.adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
   p.adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
+  p.adapter->bind_button(0, C::World::Button::Swap, SWAP_MASK);
   p.bundle.set_local_slot(0);
   p.dispatch->run = [impl = p_.get()](Address a) -> bool {
     auto &q = *impl;
@@ -691,14 +715,37 @@ void Fight::tick(std::uint32_t command) {
       // +-0.70710677 per axis (authored host choice, not an original value).
       const Raw unit = (x && y) ? Raw(0x3f3504f3) : ONE;
       auto value = [&](int v) { return v > 0 ? unit : v < 0 ? (unit | 0x80000000u) : Raw(0); };
-      const bool held = (command & session_control::DAMAGE) != 0;
+      const auto moves = p.move_pad.update(command);
+      if (moves.requests & ~MOVEMENT) p.move_refusal.clear();
       C::SessionAdapter::PadInput in;
       in.stick_x = value(x);
       in.stick_y = value(y);
-      in.held = held ? ATTACK_MASK : 0;
-      in.pressed = (held && !p.attack_was_held) ? ATTACK_MASK : 0;
-      if (in.pressed) p.counts.attack_edges += 1;
-      p.attack_was_held = held;
+      in.held = moves.held;
+      in.pressed = moves.pressed;
+      if (in.pressed & ATTACK_MASK) p.counts.attack_edges += 1;
+      if (moves.requests & HEAVY)
+        p.refuse_move("heavy_attack: refused_unknown (old inline ability 0x25 requires a usable learned record and documented mana cost; not a universal attack button)");
+      // Player_run reads the two selected ability records (+0x4a84/+0x4a85)
+      // before the action switch. Their campaign handoff is not bound. Do not
+      // borrow a fixture skill or conflate an old-inline id with a Skill id.
+      if (moves.requests & ABILITY1)
+        p.refuse_move("ability_slot_1: refused_unknown (selected learned record, rank, cost and campaign Skill binding are not established)");
+      if (moves.requests & ABILITY2)
+        p.refuse_move("ability_slot_2: refused_unknown (selected learned record, rank, cost and campaign Skill binding are not established)");
+      if (moves.requests & GUARD) {
+        const auto two = p.read(PLAYERS + 0x43f8);
+        if ((two && p.read(p.read(two) + 0x1e, 1) == 4) ||
+            (!two && !p.read(PLAYERS + 0x43f0) && !p.read(PLAYERS + 0x43fc)))
+          p.refuse_move("guard: unavailable (Player_canBlock requires equipped weapon or shield; unarmed stand-in cannot guard)");
+        if (p.read(0x44fe08) & 0x10000000)
+          p.refuse_move("guard: unavailable (level veto 0x10000000)");
+      }
+      if (moves.requests & GUARD_MOVE) {
+        if (p.read(0x44fe08) & 0x10000000)
+          p.refuse_move("guard_move: unavailable (level veto 0x10000000)");
+        else if (!(moves.held & GUARD) || !p.read(p.player + 0x47f, 1))
+          p.refuse_move("guard_move: unavailable (hold an established guard before pressing swap; no universal dodge)");
+      }
       p.adapter->pad_input(0, in);
       // net_getCamFlag offline is "the camera is not in follow mode"
       // (docs/spec/movement-camera.md 7.1, `mode != 1`). Mode 1 holds except
@@ -728,6 +775,12 @@ void Fight::tick(std::uint32_t command) {
     p.refuse(std::string("World tick stopped: ") + e.what());
   }
 }
+void Fight::release_input() {
+  auto &p = *p_;
+  p.move_pad = MovePad{};
+  if (p.player_ok && !p.failed) p.adapter->pad_input(0, {});
+}
+
 // DIAGNOSTIC ONLY: unchecked write (no terrain or bounds test); see the header.
 std::string Fight::place_player(const Vec3 &position, Raw facing) {
   auto &p = *p_;
@@ -759,6 +812,11 @@ PlayerView Fight::player() const {
   v.max_hp = p.read(PLAYERS + 0xb0);
   v.action_state = std::int32_t(p.read(p.player + 0x58c));
   v.weapon_class = std::int8_t(p.read(PLAYERS + 0x4a86, 1));
+  v.combo_step = std::int8_t(p.read(p.player + 0x460, 1));
+  v.attack_variant = std::int8_t(p.read(p.player + 0x461, 1));
+  v.attack_kind = std::int32_t(p.read(p.player + 0x44c));
+  v.blocking = p.read(p.player + 0x47f, 1) != 0;
+  v.move_refusal = p.move_refusal;
   v.gold = p.read(PLAYERS + 0xe4);
   v.level = std::int8_t(p.read(PLAYERS + 0x59, 1));
   v.experience = std::int32_t(p.read(PLAYERS + 0x5c));
