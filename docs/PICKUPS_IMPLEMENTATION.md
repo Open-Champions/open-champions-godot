@@ -65,25 +65,82 @@ is retained as historical evidence. No inventory branch was merged.
 
 ## Verification
 
-Final gate figures are recorded below when execution completes. Logs and
-private runtime artifacts stay under ignored `work/pickups/`.
+Audit repair verification (2026-10-25). Logs and private runtime artifacts stay
+under ignored `work/pickups/verification/pp2-*`, `work/pickups/matrix/`,
+`work/pickups/sweep/` and `work/pickups/pp2-playthrough/`.
 
-- Release native and Godot builds: pending final gate record.
-- Native targeted pickup checks: 136 passed before final full CTest.
+- Release native and Godot extension configure/build: passed (`-j 4`).
+- Native targeted pickup checks: 221 passed; `pickups` and `script-items`
+  CTest regressions: 2/2 passed. Python pickup-runner regressions: 6/6 passed.
 - Runtime starting parser/insertion probe: 7/7 classes passed; equip/stat/skill
   callbacks are recorded boundaries in this probe, matching the research.
-- Full CTest, Godot matrix, 111-level sweep and FULL_TRACE: running.
-- Extended `tools/run_loop_playthrough.py`: pending final run. It follows
+- Full CTest (`ctest --test-dir build/native --output-on-failure -j 3`):
+  242/242 passed, 777.19 seconds; no timeout reruns needed.
+- Godot development matrix (`python3 work/pickups/run-godot.py`): 54/54 passed.
+- 111-level sweep (`bash work/pickups/run-sweep.sh`): 111/111 loaded,
+  zero failures across four slices, with existing bounded service refusals.
+- FULL_TRACE unchanged: 36,402 bytes, SHA-256
+  `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+- Extended `tools/run_loop_playthrough.py`: headless and rendered FAILED
+  (both exit 1). Each produced a drop after nine retry kills and walked 20 ticks
+  toward it, but inventory units stayed 10 -> 10 and pickup remained false. The combat
+  journey therefore remains blocked, not accepted; its post-pickup file and
+  cold-load checks were not exercised. No missing service/value is guessed.
+  It follows
   produced native drop positions using ordinary movement and pressed E, and
   verifies an inventory-quantity increase. It does not force a loot roll,
   teleport to a drop, manufacture an item or claim rendered pickup fidelity.
+  Disc file counts stayed 994 before/after. Rendered run produced 13 screenshots;
+  inspected its save screen and confirmed the explicit inventory/equipment
+  refusal with current session retained. The refused save writes no scene file.
+
+Commands: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`,
+`cmake --build build/native -j 4`,
+`cmake -S gdextension -B build/godot-extension -DCMAKE_BUILD_TYPE=Release`,
+`cmake --build build/godot-extension -j 4`,
+`ctest --test-dir build/native -R 'pickups|script-items' --output-on-failure -j 3`,
+`build/native/champions-pickups-tests`, and
+`python3 -m unittest discover -s tools -p test_run_loop_playthrough.py` all passed.
+The journey command uses `python3 tools/run_loop_playthrough.py --godot` with
+the existing integration runtime, `--game-folder` with the read-only disc, and
+`--out work/pickups/pp2-playthrough`; it failed as described above. Godot's
+`--headless --path godot --script res://tests/loop_playthrough.gd --check-only`
+also passed after updating the refusal-screen back route.
+
+## Corrective audit PP2-1 through PP2-4
+
+- PP2-1 (`9ef0968f`): adopted Chest destruction retires the exact host owner,
+  handle heads, combat view, animation and Chest index together. Identity/class
+  checks and checked insertion protect reuse. The synthetic regression opens,
+  destroys and reuses one pool address as another Chest and a different object.
+- PP2-2 (`dcf8f2cf`): action-bearing or trapped Chest branches throw before
+  opening, dispensing or completion. Tests cover initial states 0/1, empty and
+  nonempty action properties, trapped opening, and the supported no-action subset.
+- PP2-4 (`df421ac9`): Host notification delegates propagate unsupported and
+  faulted script results rather than completing equip/grant. Both outcomes have
+  synthetic script-item regressions; successful callback coverage remains.
+- PP2-3: no new inventory/world save format is invented. Both scene save modes
+  and the scalar player companion preflight authoritative memory before any
+  serialization, file opening, replacement or old-companion deletion. Nonempty
+  bags, equipped pointers, pending Gold floaters, pending age-43 credit balances,
+  opened/destroyed Chests and any produced drop (including picked-up/lost drops)
+  refuse explicitly. The equipment range ends before ability data at `+0x4440`.
+  Evidence: loot-drop `docs/loot-drop.md:280-294`, pickups `docs/pickups.md:71-78`,
+  and existing inventory/equipment field contracts. Native tests cover pickup,
+  equipment-only, changed-world-only, all floater ages before credit and all
+  seven remaining credit ticks. Clean/fully credited scalar state stays allowed.
+  The real journey checks all three save entrypoints against absent files and
+  existing authored sentinels after pickup, including temporary-file absence.
+  A fresh scene must refuse loading the absent output, not claim an inventory
+  roundtrip. Save-dependent journey stages are explicitly unavailable, not
+  reported as successful restores.
 
 ## Refusals and limits
 
 Original live flight/settling visuals, rendered item pickup, source-container
 integration beyond the traced Gold branch, and dropped-item save/reload remain
-unverified. Saving while a generated ground item remains live explicitly
-refuses before writing. Item models, original prompt text, sound presentation
+unverified. Saving with inventory/equipment, changed pickup/Chest world state or
+outstanding Gold explicitly refuses before writing. Item models, original prompt text, sound presentation
 and Chest lid rendering are not claimed as rendered gameplay acceptance.
 
 The trapped Chest explosion and completion action service were not executed by

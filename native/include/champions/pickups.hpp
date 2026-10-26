@@ -8,6 +8,7 @@
 // Runtime names/bytes are borrowed from the user's selected executable/disc.
 namespace champions::simulation::rta::pickups {
 void require_supported_chest(const std::vector<std::string> &props, bool trapped);
+void require_supported_save(const builtins::Memory &, bool changed_world = false);
 struct Grant {
   std::uint32_t descriptor;
   std::int32_t variant;

@@ -2,6 +2,7 @@
 #include "champions/ui_text_gaps.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/pickups.hpp"
 #include "champions/ui_layout.hpp"
 #include "champions/ui_text_layout.hpp"
 #include "champions/terrain_file.hpp"
@@ -774,6 +775,8 @@ Dictionary ChampionsSessionController::save_player_companion(const String &path)
   const String dest = path + String(".player"), temp = dest + String(".tmp");
   bool owns_temporary = false;
   try {
+    if (scripts_) rta::pickups::require_supported_save(scripts_->variables().memory);
+    if (fight_) fight_->require_supported_save();
     if (!player_) {
       if (FileAccess::file_exists(dest) && DirAccess::remove_absolute(dest) != OK)
         throw std::runtime_error("An old player companion could not be removed.");
@@ -2390,10 +2393,8 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
   const String temporary = path + String(".ocnsave.tmp");
   bool owns_temporary = false;
   try {
-    if (fight_)
-      for (const auto &drop : fight_->ground_drops())
-        if (drop.spawned && !drop.picked_up && !drop.lost)
-          throw std::runtime_error("Saving a level with dropped items is refused: dropped-item reload is not implemented.");
+    if (scripts_) rta::pickups::require_supported_save(scripts_->variables().memory);
+    if (fight_) fight_->require_supported_save();
     rta::native_save::Bytes bytes;
     if (level_) {
       bytes = level_->save();

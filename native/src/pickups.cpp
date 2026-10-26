@@ -1,6 +1,23 @@
 #include "champions/pickups.hpp"
 #include <algorithm>
 namespace champions::simulation::rta::pickups {
+void require_supported_save(const builtins::Memory &memory, bool changed_world) {
+  for (unsigned floater = 0; floater < 8; ++floater)
+    if (memory.word(0x86a900 + 0x24 * floater + 0x1c))
+      throw script_items::Refused("Saving refused: pending Gold floaters have no evidenced reload format.");
+  for (int slot = 0; slot < 4; ++slot) {
+    if (memory.word(0x86ace8 + 4 * slot))
+      throw script_items::Refused("Saving refused: pending Gold credits have no evidenced reload format.");
+    for (int bag = 0; bag < script_items::BAGS; ++bag)
+      if (memory.word(script_items::bag_count_at(slot, bag)))
+        throw script_items::Refused("Saving refused: inventory/equipment reload is not implemented.");
+    for (unsigned offset = 0x43f0; offset < 0x4440; offset += 4)
+      if (memory.word(script_items::rec(slot) + offset))
+        throw script_items::Refused("Saving refused: inventory/equipment reload is not implemented.");
+  }
+  if (changed_world)
+    throw script_items::Refused("Saving refused: Chest/dropped-item world reload is not implemented.");
+}
 void require_supported_chest(const std::vector<std::string> &props, bool trapped) {
   if (trapped)
     throw combat_runtime::Unsupported("trapped Chest opening refused: timed explosion service is not evidenced");

@@ -121,6 +121,7 @@ public:
   const Counts &counts() const;
   const std::vector<AwardView> &awards() const;
   const std::vector<GroundDrop> &ground_drops() const;
+  void require_supported_save() const;
   // Labelled refusals by reason (what was needed, and why it stayed refused).
   const std::map<std::string, std::size_t> &refusals() const;
   combat_runtime::World &world();

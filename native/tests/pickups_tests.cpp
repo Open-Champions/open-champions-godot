@@ -223,6 +223,49 @@ void chest_branch_refusals() {
   P::require_supported_chest({"name=fixture", "item=authored"}, false);
   check(true, "nontrapped Chest with no action properties has a demonstrable no-op action loop");
 }
+void save_preflight() {
+  Inventory inventory;
+  auto &memory = inventory.variables.memory;
+  inventory.service.set_record(inventory.item.pack());
+  inventory.service.call("inventory_giveItem", {0u,0u});
+  bool refused = false;
+  try { P::require_supported_save(memory); }
+  catch (const S::Refused &error) { refused = std::string(error.what()).find("inventory/equipment") != std::string::npos; }
+  check(refused, "save after pickup refuses rather than writing a scalar-only fresh-session reload");
+  R::builtins::Memory clean;
+  P::require_supported_save(clean);
+  clean.word(S::rec(3) + 0x443c, 0x1234);
+  refused = false;
+  try { P::require_supported_save(clean); } catch (const S::Refused &) { refused = true; }
+  check(refused, "equipment alone cannot bypass save preflight");
+  clean.word(S::rec(3) + 0x443c, 0);
+  clean.word(S::rec(3) + 0x4440, 0x1234);
+  P::require_supported_save(clean);
+  check(true, "ability data following equipment is not an equipped item pointer");
+  refused = false;
+  try { P::require_supported_save(clean, true); } catch (const S::Refused &) { refused = true; }
+  check(refused, "changed Chest/dropped-item world refuses even without remaining inventory");
+  Ground ground;
+  ground.world.add_gold_floater(0, {0,0,0}, 9);
+  R::builtins::Memory pending(ground.authority->memory);
+  for (unsigned tick = 0; tick < 44; ++tick) {
+    refused = false;
+    try { P::require_supported_save(pending); }
+    catch (const S::Refused &error) { refused = std::string(error.what()).find("pending Gold") != std::string::npos; }
+    check(refused, "save refuses throughout the delayed Gold credit window");
+    ground.world.tick();
+  }
+  check(pending.word(0x86ace8) == 7, "age 43 moves remaining Gold from floater to pending credit");
+  for (unsigned tick = 0; tick < 7; ++tick) {
+    refused = false;
+    try { P::require_supported_save(pending); }
+    catch (const S::Refused &error) { refused = std::string(error.what()).find("pending Gold") != std::string::npos; }
+    check(refused, "save refuses until all delayed Gold has reached the balance");
+    ground.world.tick();
+  }
+  P::require_supported_save(pending);
+  check(pending.word(C::PLAYERS + 0xe4) == 9, "fully credited Gold leaves scalar save preflight supported");
+}
 void allocation_loss() {
   Ground g; const auto a = g.flying();
   while (g.authority->objects->pool.allocate(0x190)) {}
@@ -425,7 +468,7 @@ void item_constructors() {
 int main() {
   try {
     inventory_limits(); equip_callback(); bounds(); flight_and_settle(); adopted_chest_lifetime(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
-    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals();
+    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals(); save_preflight();
     std::cout << "pickup checks " << checks << " passed\n"; return 0;
   } catch(const std::exception &e) { std::cerr << "pickup check " << checks << ": " << e.what() << '\n'; return 1; }
 }

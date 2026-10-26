@@ -842,6 +842,12 @@ std::vector<EnemyView> Fight::enemies() const {
 const Counts &Fight::counts() const { return p_->counts; }
 const std::vector<AwardView> &Fight::awards() const { return p_->awards; }
 const std::vector<GroundDrop> &Fight::ground_drops() const { return p_->ground_drops; }
+void Fight::require_supported_save() const {
+  if (!p_->host) throw C::Unsupported("Saving refused: fight has no authoritative host.");
+  const bool changed_world = p_->counts.chests_opened != 0 || p_->counts.chests_built != p_->chests.size() ||
+      std::any_of(p_->ground_drops.begin(), p_->ground_drops.end(), [](const GroundDrop &drop) { return drop.spawned; });
+  pickups::require_supported_save(p_->host->variables().memory, changed_world);
+}
 const std::map<std::string, std::size_t> &Fight::refusals() const {
   static std::map<std::string, std::size_t> merged;
   merged = p_->refusals;

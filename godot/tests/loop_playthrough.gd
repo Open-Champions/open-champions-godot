@@ -11,6 +11,7 @@ const SETTLE_TICKS := 480 # Authored probe bound, including flight/settle ticks.
 # rendered display. Only counts and generic refusal text leave the game folder.
 # --game-folder=ABS --out=ABS [--rendered]
 const CROSS := 0x40
+const CIRCLE := 0x20
 const DOWN := 0x4000
 const UP := 0x1000
 const RIGHT := 0x2000
@@ -77,6 +78,25 @@ func mark(stage: String, result: String, extra := {}) -> void:
 	for key in extra: row[key] = extra[key]
 	rows.append(row)
 	print("PLAYTHROUGH_STEP " + JSON.stringify(row))
+
+func pickup_save_refused(controller, path: String) -> bool:
+	var intact := true
+	for method in ["save_file", "save_snapshot_file", "save_player_companion"]:
+		var target := path + "." + str(method)
+		var destination := target + ".player" if method == "save_player_companion" else target
+		if FileAccess.file_exists(destination): DirAccess.remove_absolute(destination)
+		var absent: Dictionary = controller.call(method, target)
+		intact = intact and not absent.get("ok", false) and "inventory/equipment" in str(absent.get("error", "")) and not FileAccess.file_exists(destination)
+		var sentinel := "authored save refusal sentinel".to_utf8_buffer()
+		var file := FileAccess.open(destination, FileAccess.WRITE)
+		if file == null: return false
+		file.store_buffer(sentinel)
+		file.close()
+		var existing: Dictionary = controller.call(method, target)
+		intact = intact and not existing.get("ok", false) and FileAccess.get_file_as_bytes(destination) == sentinel
+		intact = intact and not FileAccess.file_exists(target + ".ocnsave.tmp") and not FileAccess.file_exists(target + ".player.tmp")
+		DirAccess.remove_absolute(destination)
+	return intact
 
 func capture(label: String) -> void:
 	if DisplayServer.get_name() == "headless": return
@@ -719,6 +739,8 @@ func run() -> void:
 	# The host's F5 route opens the documented in-game save screen.
 	var native_pause_intact: bool = fe.screen() == "pause" and pause_entries == 5 and not pause_save_entry
 	var save_path := out_dir.path_join("playthrough.ocplay")
+	var pickup_refusal_verified: bool = pickup_passed and pickup_save_refused(scene.controller, save_path)
+	mark("pickup_save_preflight", "refused_as_expected" if pickup_refusal_verified else "refused", {"existing_files_preserved": pickup_refusal_verified})
 	for suffix in ["", ".player", ".menus", ".level", ".campaign"]:
 		if FileAccess.file_exists(save_path + suffix): DirAccess.remove_absolute(save_path + suffix)
 	fe.queue_path("save_session", save_path)
@@ -727,9 +749,11 @@ func run() -> void:
 		{"original_pause_entries": pause_entries})
 	if fe.screen() == "save-game": tap(CROSS)
 	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign")
-	mark("in_game_save", "saved" if saved else "refused", {"screen": fe.screen()})
+	var refused_without_output: bool = pickup_refusal_verified and not saved and not FileAccess.file_exists(save_path) and not FileAccess.file_exists(save_path + ".level") and not FileAccess.file_exists(save_path + ".campaign") and not FileAccess.file_exists(save_path + ".player")
+	mark("in_game_save", "refused_as_expected" if refused_without_output else ("saved" if saved else "refused"), {"screen": fe.screen()})
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)
+	if refused_without_output and fe.screen() == "save-game": tap(CIRCLE)
 	if fe.screen() == "playing": tap(START)
 	if fe.screen() == "pause":
 		for i in range(4): tap(DOWN)
@@ -759,7 +783,7 @@ func run() -> void:
 		and is_equal_approx(float(restored.get("hp", -1.0)), saved_hp) \
 		and scene.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01 \
 		and quests_match
-	mark("load_and_carry", "restored" if carried else "refused",
+	mark("load_and_carry", "unavailable_save_refused" if refused_without_output else ("restored" if carried else "refused"),
 		{"screen": fe.screen(), "load_attempted": load_attempted, "status": scene.status_label.text,
 		"level_index_before": level_before,
 		"level_index_after": scene.real.current, "gold_before": saved_gold,
@@ -848,14 +872,15 @@ func run() -> void:
 		cold.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
-	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded})
+	var cold_refused: bool = refused_without_output and cold_opened and not cold_loaded and not FileAccess.file_exists(save_path)
+	mark("cold_load", "refused_as_expected" if cold_refused else ("restored" if cold_match else "refused"), {"opened": cold_opened, "loaded": cold_loaded, "no_lossy_save_created": cold_refused})
 	# A displayed level with different collision must not be reused for this save.
 	var other_index := 0 if level_before != 0 else 1
 	var other_loaded: bool = cold.load_real_level(other_index)
 	var mismatch: Dictionary = cold.controller.prepare_save_file(save_path, true) if other_loaded else {}
 	var mismatch_refused: bool = other_loaded and not mismatch.get("ok", false) and \
 		"collision differs" in str(mismatch.get("error", ""))
-	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
+	mark("mismatched_display", "unavailable_save_refused" if cold_refused else ("refused_as_expected" if mismatch_refused else "refused"),
 		{"different_level_loaded": other_loaded})
 	cold.queue_free()
 	await process_frame
