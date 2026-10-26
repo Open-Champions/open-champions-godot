@@ -1,4 +1,4 @@
-STATUS: PENDING — M2H-1 implementation and regression validation in progress; pending full CTest.
+STATUS: PENDING — M2H-1 implemented; Release and focused checks pass; pending full CTest.
 
 Work stays on the assigned mission-2 branch. The current integration tip
 `e6ed82e6` was merged locally to reuse its audited campaign lifetime helpers
@@ -14,6 +14,15 @@ research-campaign-combat 328b072 ref_objects/ref_core lifetime and pool reuse.
 Synthetic regressions cover all four classes, real destroy/reallocate/adopt,
 foreign ownership, serial mismatch, stale enumeration and fresh refusal/death state.
 
-Pending: Release build, focused regressions, full CTest (-j 3, timeout retries
-alone), affected Godot checks, headless/rendered journey and final trial merge.
+Verified so far:
+- Release configure/build: PASS (`cmake -S native -B build/native
+  -DCMAKE_BUILD_TYPE=Release`, `cmake --build build/native -j 4`).
+- Mission-2 actor suite: 512 checks PASS (formerly 457); existing 16 ticks /
+  162 call expectations remain unchanged.
+- Focused CTest: 7/7 PASS in 36.50 seconds (mission-2, campaign actors,
+  adoption, Minotaur, fight boundaries, death flow and rewards).
+- Trial merge against integration `7aa582aa`: exit 0, no conflicts.
+
+Pending: full CTest (-j 3, timeout retries alone), affected Godot checks,
+headless/rendered journey and final trial merge against the then-current tip.
 Detailed logs remain ignored under work/mission2-r2.
