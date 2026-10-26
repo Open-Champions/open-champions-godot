@@ -87,7 +87,6 @@ func update(observation: Dictionary) -> int:
 	var seen := {}
 	var drawn := 0
 	for row in observation.get("fight_enemies", []):
-		if str(row.kind) not in ["WarBoar", "WarBoarSmall", "Minotaur"]: continue
 		var address := int(row.handle)
 		seen[address] = true
 		var identity := _identity(row)

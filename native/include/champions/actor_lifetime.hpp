@@ -1,5 +1,7 @@
 #pragma once
 #include "champions/objects.hpp"
+#include <memory>
+#include <utility>
 
 // Shared host registry reconciliation, extracted from the audited campaign
 // helpers. Pool addresses are reusable; World membership, pointer and saved
