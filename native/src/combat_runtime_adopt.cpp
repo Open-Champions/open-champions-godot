@@ -5,10 +5,74 @@
 // bodies a record to act on. No game value is added here: the slot/function
 // addresses and the base steps are the executed ones the arena model owns.
 namespace champions::simulation::rta::combat_runtime {
-void World::adopt_creature(Address a) {
+arena_monsters::Model &World::creature_services() {
+  s_->install_ctor_services();
+  auto &m = s_->model;
+  auto bind = [&](const char *name, A::Model::Callback fn) { m.callbacks[name]=std::move(fn); };
+  bind("Creature_processDamage",[](auto &model,const auto &a)->A::Value {
+    model.process_damage(number(a.at(0)),number(a.at(1))); return std::int64_t(0);
+  });
+  bind("Creature_run",[](auto &model,const auto &a)->A::Value {
+    return std::int64_t(model.creature_run(number(a.at(0)),number(a.at(1))));
+  });
+  bind("Creature_updateActive",[](auto &model,const auto &a)->A::Value {
+    return std::int64_t(model.update_active(number(a.at(0))));
+  });
+  bind("Creature_stepAnim",[](auto &model,const auto &a)->A::Value {
+    return std::int64_t(model.step_anim(number(a.at(0)),number(a.at(1))));
+  });
+  bind("Creature_canSeeTargetIn",[](auto &model,const auto &a)->A::Value {
+    return model.can_see_target_in(number(a.at(0)),number(a.at(1)),number(a.at(2)),
+        number(a.at(3)),number(a.at(4)),number(a.at(5)),number(a.at(6)));
+  });
+  bind("Creature_turnToTarget",[](auto &model,const auto &a)->A::Value {
+    return model.turn_to_target(number(a.at(0)));
+  });
+  bind("Creature_settle",[](auto &model,const auto &a)->A::Value {
+    model.settle(number(a.at(0))); return std::int64_t(0);
+  });
+  bind("Creature_moveBy",[](auto &model,const auto &a)->A::Value {
+    return std::int64_t(model.move_by(number(a.at(0)),std::get<Vec3>(a.at(1))));
+  });
+  bind("Creature_moveToTarget",[](auto &model,const auto &a)->A::Value {
+    model.move_to_target(number(a.at(0))); return std::int64_t(0);
+  });
+  bind("Creature_moveToDest",[](auto &model,const auto &a)->A::Value {
+    return std::int64_t(model.move_to_dest(number(a.at(0))));
+  });
+  bind("Creature_fleeFromTarget",[](auto &model,const auto &a)->A::Value {
+    model.flee_from_target(number(a.at(0)),number(a.at(1))); return std::int64_t(0);
+  });
+  bind("Creature_isAwayFromHome",[](auto &model,const auto &a)->A::Value {
+    return std::int64_t(model.is_away_from_home(number(a.at(0))));
+  });
+  bind("Creature_isTargetCharging",[](auto &model,const auto &a)->A::Value {
+    return model.is_target_charging(number(a.at(0)));
+  });
+  bind("Creature_isNotRooted",[](auto &model,const auto &a)->A::Value {
+    return model.is_not_rooted(number(a.at(0)));
+  });
+  bind("Creature_isAttackReady",[](auto &model,const auto &a)->A::Value {
+    return model.is_attack_ready(number(a.at(0)));
+  });
+  bind("Creature_isNotStunned",[](auto &model,const auto &a)->A::Value {
+    return model.is_not_stunned(number(a.at(0)));
+  });
+  bind("Creature_isTargetAttackingMe",[](auto &,const auto &)->A::Value {
+    throw Unsupported("Creature_isTargetAttackingMe: body untraced by the pinned Minotaur contract");
+  });
+  return m;
+}
+void World::unadopt_creature(Address a) {
+  if (!s_->authority->find(a) || !s_->authority->objects->objects.count(a))
+    throw Error("not a registered host combat view");
+  s_->objects.erase(a);
+}
+void World::adopt_creature(Address a, bool during_constructor) {
   if (!s_->full())
     throw Unsupported("adopting a factory creature needs the Full composition");
-  if (!s_->authority->is_factory(a))
+  if (!s_->authority->is_factory(a) &&
+      !(during_constructor && s_->authority->find(a) && s_->authority->objects->objects.count(a)))
     throw Error("not a ported factory object");
   if (s_->objects.count(a))
     throw Error("factory creature already has a combat record");

@@ -1,5 +1,7 @@
 #include "champions/campaign_fight.hpp"
 #include "champions/campaign_actors.hpp"
+#include "champions/minotaur.hpp"
+#include "champions/combat_ctors.hpp"
 #include "champions/campaign_rewards.hpp"
 #include "champions/player_state.hpp"
 #include "champions/player_name_format.hpp"
@@ -42,6 +44,41 @@ constexpr Address PLAYERS = C::PLAYERS, RECORD = C::RECORD_SIZE;
 Raw bits_of(std::int32_t v) { return Raw(v); }
 } // namespace
 
+void bind_minotaur_boundaries(arena_monsters::Model &m, C::World &world, Counts &counts,
+    std::function<void(const std::string &)> refuse) {
+  namespace A = arena_monsters;
+  auto arg = [](const auto &args, unsigned index) {
+    return Raw(std::get<std::int64_t>(args.at(index)));
+  };
+  m.callbacks["Creature_init"]=[refuse](auto &,const auto &)->A::Value {
+      const std::string reason = "Minotaur Creature_init: model bounds height/draw byte unbound";
+      refuse(reason);
+      throw C::Unsupported(reason);
+  };
+  m.callbacks["Holder.v11"]=[&world,&counts,refuse,arg](auto &model,const auto &args)->A::Value {
+      const std::vector<A::Value> rest(args.begin()+1,args.end());
+      return std::int64_t(combat_ctors::holder_slot(model,arg(args,0),11,rest,
+          [&world,&counts,refuse](Raw part,Address c,Address,Raw) {
+            if (!part || !c || (world.read(c+0xc)&2)) return;
+            counts.held_part_requests+=1;
+            const std::string reason = "held-part drop: attachment pose and PhProp publication refused_unknown";
+            refuse(reason);
+            throw C::Unsupported(reason);
+          }));
+  };
+  m.callbacks["Creature_hitTargetInArc"]=[&world,&counts,refuse,arg](auto &,const auto &args)->A::Value {
+      // Preserve the executed hit helper's target/radius/terrain gate. Final
+      // live descriptor contents and delivered player damage were not traced.
+      const auto a=arg(args,0), target=world.target(a+C::TARGET);
+      if (!target || !world.can_see(a,target,arg(args,1),arg(args,2),0,
+                                      arg(args,8),arg(args,9),0)) return std::int64_t(0);
+      counts.minotaur_hit_requests+=1;
+      const std::string reason = "Minotaur delivered player damage: refused_unknown (class hit arguments only)";
+      refuse(reason);
+      throw C::Unsupported(reason);
+  };
+}
+
 struct Fight::Impl {
   std::shared_ptr<WorldAuthority> authority;
   std::shared_ptr<const arena_modes::Executable> exe;
@@ -58,6 +95,7 @@ struct Fight::Impl {
   std::string death_error;
   script_commands::Host *host = nullptr;
   std::unique_ptr<campaign_actors::Runtime> actors;
+  arena_monsters::Model *creatures = nullptr;
   Counts counts;
   std::map<std::string, std::size_t> refusals;
   bool started = false, failed = false;
@@ -73,7 +111,7 @@ struct Fight::Impl {
   std::map<Address, creature_anim::StateId> states;
   std::map<Address, bool> adopted;
   std::vector<Address> adopt_order;
-  std::map<std::uint32_t, Raw> hide_masks;
+  std::map<std::pair<Raw,Raw>, std::uint64_t> hide_masks;
   // player
   Address player = 0, player_handle = 0;
   creature_anim::StateId player_state = 0;
@@ -290,10 +328,8 @@ struct Fight::Impl {
     base.sample_point = [](Raw, Address, const Vec3 &, Raw, Raw, Raw) -> Vec3 {
       throw C::Unsupported("model_getSamplePoint: model geometry not bound");
     };
-    base.hide_mask = [this](Raw model, Raw) -> std::uint64_t {
-      refuse("model_buildHideMask for a combat-constructed class: not bound in the session World");
-      (void)model;
-      return UINT64_MAX;
+    base.hide_mask = [this](Raw model, Raw variant) -> std::uint64_t {
+      return boar_hide_mask(model,variant);
     };
     base.resource = [this](const C::ResourceQuery &q) -> Raw {
       if (q.lump_is_text || q.lump != PLAYER_LUMP_TOKEN) return 0;
@@ -355,16 +391,14 @@ struct Fight::Impl {
 
   // ---- boar family ---------------------------------------------------------
   std::uint64_t boar_hide_mask(std::uint32_t token, std::uint32_t variant) {
-    if (variant) throw campaign_actors::Unsupported("model_buildHideMask: variant bits not bound");
-    auto cached = hide_masks.find(token);
+    auto cached = hide_masks.find({token,variant});
     if (cached != hide_masks.end()) return cached->second;
     auto bytes = actors->resource_bytes(token);
     if (!bytes) throw campaign_actors::Unsupported("model_buildHideMask: model resource unavailable");
     // research docs/formats/model-texture.md (model_buildHideMask 0x179550):
     // the show mask starts as the complement of the default-hidden word.
-    const auto model = decodeRtaModel(*bytes);
-    const auto mask = modelVisibilityMask(model, -1);
-    hide_masks[token] = mask;
+    const auto mask = minotaur::hide_mask(bytes->data,bytes->size,variant);
+    hide_masks[{token,variant}] = mask;
     return mask;
   }
   campaign_actors::Services boar_services() {
@@ -375,6 +409,16 @@ struct Fight::Impl {
     };
     s.model_hide_mask = [this](std::uint32_t token, std::uint32_t variant) {
       return boar_hide_mask(token, variant);
+    };
+    s.minotaur_construct = [this](Raw a,const std::string &type) {
+      minotaur::finish_constructor(*creatures,a,type);
+    };
+    s.minotaur_set_state = [this](Raw a,Raw state) { creatures->vcall(a,27,{std::int64_t(state)}); };
+    s.minotaur_run = [this](Raw a) {
+      if (auto *actor=actors->find(a); actor && actor->ai_refusal) {
+        return;
+      }
+      minotaur::run(*creatures,a);
     };
     s.animation_init = [this](std::uint32_t addr, bool) {
       // WarBoar_ctor: anim_clear, then anim_push of definition slot 16 (idle1,
@@ -488,13 +532,87 @@ struct Fight::Impl {
     return s;
   }
 
+  void bind_minotaur_services() {
+    namespace A=arena_monsters;
+    creatures=&world->creature_services();
+    auto &m=*creatures;
+    auto arg=[](const auto &args,unsigned k) { return Raw(std::get<std::int64_t>(args.at(k))); };
+    m.callbacks["anim_clear"]=[this,arg](auto &,const auto &args)->A::Value {
+      const auto a=arg(args,0)-0x114;
+      const auto st=anim->add_state(8);
+      states[a]=st;
+      anim->anim_clear(st);
+      bundle.bind_actor(a,st);
+      store_cells(a,st);
+      return std::int64_t(0);
+    };
+    m.callbacks["anim_syncToSimFrame"]=[this,arg](auto &,const auto &args)->A::Value {
+      const auto a=arg(args,0)-0x114;
+      const auto st=state_of(a);
+      if (!st) throw C::Unsupported("animation sync: actor state missing");
+      anim->set_sim_frame(read(C::FRAME));
+      anim->anim_sync_to_sim_frame(st);
+      store_cells(a,st);
+      return std::int64_t(0);
+    };
+    m.callbacks["anim_findTrack"]=[this,arg](auto &,const auto &args)->A::Value {
+      const auto st=state_of(arg(args,0)-0x114);
+      const auto clip=clip_for(arg(args,1));
+      if (!st || !clip) return std::int64_t(0);
+      return std::int64_t(anim->anim_find_track(st,clip));
+    };
+    m.callbacks["creature_setDefEntryParams"]=[this,arg](auto &,const auto &args)->A::Value {
+      const auto a=arg(args,0), entry=arg(args,1);
+      const auto clip=clip_for(read(read(a+0x24)+8*entry+4));
+      if (!clip) throw C::Unsupported("Minotaur event clip unavailable");
+      auto &events=anim->clip(clip).events;
+      for (unsigned k=0;k<4;++k) {
+        events[k].mask=std::uint8_t(arg(args,2+k));
+        events[k].seconds=arg(args,6+k);
+      }
+      return std::int64_t(0);
+    };
+    bind_minotaur_boundaries(m, *world, counts, [this](const auto &label) { refuse(label); });
+    m.callbacks["Creature_dropLoot"]=[this,arg](auto &,const auto &args)->A::Value {
+      world->drop_loot(arg(args,0),std::get<Vec3>(args.at(1)),arg(args,2),arg(args,3),
+          arg(args,4),arg(args,5),arg(args,6),arg(args,7),arg(args,8),arg(args,9));
+      return std::int64_t(0);
+    };
+
+    world->define_creature_table(minotaur::VTABLE,{{4,minotaur::RUN},{5,minotaur::DRAW},{27,minotaur::SET_STATE}});
+    // Preserve the selected executable's table adjustments and unported
+    // slots too. Unknown function bodies still refuse on dispatch.
+    for (Raw table:{minotaur::VTABLE,0x50cda0u}) {
+      const unsigned count=table==minotaur::VTABLE?39:25;
+      for(unsigned slot=0;slot<count;++slot) {
+        world->write(table+8*slot,2,exe->word(table+8*slot)&0xffff);
+        world->write(table+8*slot+4,4,exe->word(table+8*slot+4));
+      }
+    }
+    world->set_class_body(minotaur::SET_STATE,[this](Address a,const auto &args) {
+      const auto before=read(a+0x232,2);
+      minotaur::set_state(*creatures,a,args.empty()?0:Raw(args[0]));
+      if (before!=20 && read(a+0x232,2)==20) counts.deaths+=1;
+    });
+  }
+
   void build_boar(const script_commands::Host::CreatureRequest &request) {
     if (!actors) throw campaign_actors::Unsupported("boar runtime is not installed");
-    const auto kind = request.small ? campaign_actors::Kind::WarBoarSmall
+    const bool mino=request.class_name.compare(0,8,"Minotaur")==0;
+    const auto kind = mino ? campaign_actors::Kind::Minotaur : request.small ? campaign_actors::Kind::WarBoarSmall
                                     : campaign_actors::Kind::WarBoar;
     // Rank: the record carries no boss rank in this host (Creature_ctor's
     // bossRank is 0 for an unnamed creature); death loot refuses otherwise.
-    actors->adopt(kind, *request.object, request.angle, std::int64_t(0));
+    if (mino) {
+      // This unbound final Creature_ctor service must fail before the class
+      // constructor writes definition, holder or runtime registration state.
+      creatures->callbacks.at("Creature_init")(*creatures, {std::int64_t(request.address)});
+      world->adopt_creature(request.address,true);
+      try { actors->adopt(kind,*request.object,request.angle,std::int64_t(0)); }
+      catch (...) { world->unadopt_creature(request.address); throw; }
+      adopted[request.address]=true;
+      counts.minotaurs_built+=1;
+    } else actors->adopt(kind, *request.object, request.angle, std::int64_t(0));
     counts.actors_built += 1;
   }
 
@@ -663,6 +781,14 @@ void Fight::install(script_commands::Host &host) {
   p.actors = std::make_unique<campaign_actors::Runtime>(*p.authority->objects, host.resources(),
                                                        p.boar_services(), &p.authority->memory);
   p.actors->set_contain_refusals(true);
+  if (!p.exe) throw C::Unsupported("Minotaur definition: executable unavailable");
+  std::vector<std::string> entries;
+  for (unsigned index=0;index<26;++index)
+    entries.push_back(p.exe->string(p.exe->word(minotaur::DEFINITION+8+8*index)));
+  if (p.exe->word(minotaur::DEFINITION+8+8*26))
+    throw C::Unsupported("Minotaur definition: unsupported resource count");
+  p.actors->bind_minotaur_definition(p.exe->string(p.exe->word(minotaur::DEFINITION)),entries);
+  p.bind_minotaur_services();
   host.set_creature_builder([impl = p_.get()](const script_commands::Host::CreatureRequest &r) {
     impl->build_boar(r);
   });
@@ -697,7 +823,7 @@ std::string Fight::start(const PlayerStart &start) {
     });
     if (p.actors)
       for (const auto &entry : p.actors->actors()) {
-        p.world->adopt_creature(entry.first);
+        if (!p.adopted[entry.first]) p.world->adopt_creature(entry.first);
         if (p.states.count(entry.first)) p.bundle.bind_actor(entry.first, p.states[entry.first]);
       }
   } catch (const std::exception &e) {
@@ -916,6 +1042,15 @@ std::vector<EnemyView> Fight::enemies() const {
     EnemyView v;
     v.address = entry.first;
     v.small = actor.kind == campaign_actors::Kind::WarBoarSmall;
+    v.minotaur = actor.kind == campaign_actors::Kind::Minotaur;
+    v.scale = p.read(entry.first+0xdc);
+    v.model_mask = actor.hp.mem.load(entry.first+0x220,8);
+    if (auto name=p.actors->resource_name(p.actors->definition_entry(actor.kind,1))) {
+      v.model_lump=name->first;
+      v.model_entry=name->second;
+    }
+    if (auto name=p.actors->resource_name(p.actors->definition_entry(actor.kind,2)))
+      v.texture_entry=name->second;
     v.hp = p.read(entry.first + 0x228);
     v.max_hp = p.read(entry.first + 0x22c);
     v.dead = actor.dead();
@@ -936,7 +1071,7 @@ const std::map<std::string, std::size_t> &Fight::refusals() const {
   if (p_->world && p_->world->stub_box_skips())
     merged["unconstructed host stub left out of a collision/target box (class not ported)"] += p_->world->stub_box_skips();
   if (p_->actors)
-    for (const auto &entry : p_->actors->refusal_counts()) merged["WarBoar AI: " + entry.first] += entry.second;
+    for (const auto &entry : p_->actors->refusal_counts()) merged["Creature AI: " + entry.first] += entry.second;
   return merged;
 }
 combat_runtime::World &Fight::world() { return *p_->world; }

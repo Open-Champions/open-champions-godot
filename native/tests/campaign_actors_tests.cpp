@@ -262,17 +262,12 @@ int main() {
       "death2.anm", "hit2front.anm", "hit2left.anm", "hit2right.anm",
       "idle1.anm", "roar.anm", "walk.anm", "walk_trn_lft.anm",
       "walk_trn_ryt.anm"};
-  const std::vector<std::string> minotaur{
-      "minotaur.vif", "minotaur.tex", "atak_180.anm", "atak_back.anm",
-      "atak_f1.anm", "atak_f2.anm", "atak_f3.anm", "atak_left.anm",
-      "atak_right.anm", "block.anm", "death.anm", "death2.anm",
-      "gore.anm", "hitreaction.anm", "idle1.anm", "idle2.anm",
-      "run.anm", "taunt.anm", "taunt2.anm", "walk.anm", "axe.vif",
-      "axe.tex", "shield.vif", "shield.tex", "shield2.vif", "shield2.tex"};
+  std::vector<std::string> minotaur;
+  for (unsigned i=0;i<26;++i) minotaur.push_back("fixture-part-"+std::to_string(i));
   champions::resources::Manager resources;
   auto b = lump(boar), m = lump(minotaur);
   resources.load_lmp("warboar.lmp", {b.data(), b.size()});
-  resources.load_lmp("minotaur.lmp", {m.data(), m.size()});
+  resources.load_lmp("fixture-mino.lmp", {m.data(), m.size()});
   ai_vectors(resources);
   std::vector<std::uint8_t> balance(2 + 3 * 12, 0);
   put(balance, 0, 3);
@@ -419,6 +414,7 @@ int main() {
     refuses([&] { runtime.at(address); }, "destroyed actor lookup refuses");
   }
   C::Runtime actors(world, resources, services);
+  actors.bind_minotaur_definition("fixture-mino.lmp",minotaur);
   refuses([&] {
     actors.construct(C::Kind::WarBoar, {0, 0, 0}, 0,
         std::make_shared<std::vector<std::string>>(1, "hide=1"),
@@ -601,8 +597,9 @@ int main() {
   seed7.shared.state = 7;
   champions::resources::Manager resources7;
   resources7.load_lmp("warboar.lmp", {b.data(), b.size()});
-  resources7.load_lmp("minotaur.lmp", {m.data(), m.size()});
+  resources7.load_lmp("fixture-mino.lmp", {m.data(), m.size()});
   C::Runtime actors7(seed7, resources7, services);
+  actors7.bind_minotaur_definition("fixture-mino.lmp",minotaur);
   auto &on7 = actors7.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100));
   check(on7.object->seed != large.object->seed, "seed 7 own stream differs");
   seed7.frame = 7;
@@ -694,7 +691,7 @@ int main() {
       fresh.frame = 40 + seed % 11;
       champions::resources::Manager res;
       res.load_lmp("warboar.lmp", {b.data(), b.size()});
-      res.load_lmp("minotaur.lmp", {m.data(), m.size()});
+      res.load_lmp("fixture-mino.lmp", {m.data(), m.size()});
       auto svc = services;
       std::vector<std::uint32_t> variant_draws;
       std::vector<std::string> order;
@@ -708,6 +705,7 @@ int main() {
       svc.creature_init = [&](std::uint32_t) { order.emplace_back("init"); };
       svc.minotaur_base_flags = [](std::uint32_t) { return UINT64_C(0x1); };
       C::Runtime rt(fresh, res, svc);
+      rt.bind_minotaur_definition("fixture-mino.lmp",minotaur);
       auto &mi = balanced
           ? rt.construct_balanced(C::Kind::Minotaur, {0, 0, 0}, 0, {}, balance.data(),
                                   balance.size(), tables, combat_world, 0)
@@ -733,5 +731,25 @@ int main() {
       check(order == std::vector<std::string>({"hand", "hand", "variant", "state0", "init"}),
             "Minotaur ctor hand, own draw/hide mask, setState(0), init order");
     }
+  {
+    O::World reused(O::CallbackPolicy::ReferenceBase);
+    C::Runtime runtime(reused, resources, services);
+    auto &original = runtime.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(100), 0);
+    const auto address = original.object->addr;
+    const auto serial = original.object_serial;
+    reused.destroy(*original.object);
+    check(runtime.find(address) == nullptr, "destroyed actor is not findable");
+    auto &replacement = runtime.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(80), 0);
+    check(replacement.object->addr == address && replacement.object_serial != serial,
+          "replacement reuses the pool address with a fresh serial");
+    check(runtime.find(address) == &replacement && replacement.health() == R::from_int(80),
+          "replacement owns a live actor, not a dangling insertion result");
+    reused.destroy(*replacement.object);
+    auto &direct = runtime.construct(C::Kind::WarBoar, {0, 0, 0}, 0, {}, R::from_int(60), 0);
+    check(direct.object->addr == address && runtime.find(address) == &direct &&
+          direct.health() == R::from_int(60), "construction retires stale entries without a prior lookup");
+    reused.destroy(*direct.object);
+    check(runtime.actors().empty(), "enumeration retires destroyed actors");
+  }
   return 0;
 }

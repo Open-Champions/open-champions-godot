@@ -1,22 +1,18 @@
 extends RefCounted
 
-# The shared-World fight's WarBoar-family actors, drawn at their native
-# positions with the class model's rest pose (warboar.vif and its companion
-# texture, read from the owner's folder at run time). Animation playback of the
-# boar clips is not wired to the draw: the rest pose is shown. Scale is the
-# class constructor's +0xdc (0.75, 0.6 for WarBoarSmall; handoff round 2).
+# Rest-pose presentation of shared-World actors. Definition resource identities,
+# visibility and scale come from native constructors at runtime. Animated
+# appearance, held-part attachment and root trajectories remain unverified.
 const MeshBuilder = preload("res://scenes/scene_animation_mesh.gd")
 const RealCreature = preload("res://real_data/real_creature.gd")
-const LARGE_SCALE := 0.75
-const SMALL_SCALE := 0.6
 
 var status := "No enemy model loaded."
-var mesh: ArrayMesh
-var binder: RefCounted
-var foot_offset := 0.0
 var instances: Dictionary = {} # native address -> MeshInstance3D
+var identities: Dictionary = {}
+var models: Dictionary = {} # runtime model identity + visibility -> presentation
 var parent: Node3D
-var textured := false
+var real: Node
+var reader: RefCounted
 
 static func _row_index(rows: Array, name: String) -> int:
 	for i in range(rows.size()):
@@ -28,88 +24,101 @@ func clear() -> void:
 	for address in instances:
 		if is_instance_valid(instances[address]): instances[address].queue_free()
 	instances.clear()
-	mesh = null
-	binder = null
-	textured = false
+	identities.clear()
+	models.clear()
 	status = "No enemy model loaded."
 
-# lump_name: the class definition's archive, read from the executable's table.
-func install(real: Node, reader: RefCounted, host: Node3D, lump_name: String, model_name: String) -> bool:
+func install(source: Node, inspector: RefCounted, host: Node3D) -> void:
 	clear()
+	real = source
+	reader = inspector
 	parent = host
-	var path := str(real.files.get(lump_name.to_lower(), ""))
+
+static func _identity(row: Dictionary) -> String:
+	return JSON.stringify([row.get("model_lump", ""), row.get("model_entry", ""),
+		int(row.get("model_mask", 0)), row.get("texture_entry", "")])
+
+func _retire(address: int) -> void:
+	var instance: MeshInstance3D = instances.get(address)
+	if is_instance_valid(instance):
+		instance.get_parent().remove_child(instance)
+		instance.queue_free()
+	instances.erase(address)
+	identities.erase(address)
+
+func _model(row: Dictionary) -> Dictionary:
+	var key := _identity(row)
+	if models.has(key): return models[key]
+	models[key] = {}
+	var path := str(real.files.get(str(row.get("model_lump", "")).to_lower(), ""))
 	if path.is_empty():
-		status = "Enemy model refused: class archive is absent from the folder."
-		return false
+		status = "Enemy model refused: class archive is absent."
+		return {}
 	var listing: Dictionary = reader.inspect_archive(path)
 	if not listing.get("ok", false):
 		status = "Enemy model refused: class archive could not be inspected."
-		return false
+		return {}
 	var rows: Array = listing.rows
-	var row := _row_index(rows, model_name.to_lower()) if not model_name.is_empty() else -1
-	if row < 0 and model_name.is_empty():
-		# The class archive holds one body model (the definition's slot 1).
-		for i in range(rows.size()):
-			if rows[i] is Dictionary and str(rows[i].get("kind", "")) == "LMP" and str(rows[i].get("name", "")).to_lower().ends_with(".vif"):
-				row = i
-				break
-	if row < 0:
-		status = "Enemy model refused: class model entry is absent."
-		return false
-	var rest: Dictionary = reader.inspect_model(path, row, "rta", str(listing.fingerprint))
+	var index := _row_index(rows, str(row.get("model_entry", "")).to_lower())
+	if index < 0:
+		status = "Enemy model refused: definition body entry is absent."
+		return {}
+	var rest: Dictionary = reader.inspect_model(path, index, "rta", str(listing.fingerprint))
+	var mask := int(row.get("model_mask", 0))
+	for part in rest.get("meshes", []):
+		part["visible_by_default"] = bool(mask & (1 << int(part.index)))
 	var prepared: Dictionary = MeshBuilder.prepare_rest(rest)
 	if not prepared.get("ok", false):
 		status = "Enemy model refused: " + str(prepared.get("error", "rest pose unavailable"))
-		return false
-	mesh = prepared.mesh
-	foot_offset = -float(prepared.bounds.position.y)
-	binder = RealCreature.new()
+		return {}
+	var binder: RefCounted = RealCreature.new()
 	binder.environment = real.environment
-	var bound: Dictionary = binder.bind(path, rows, row)
-	textured = bound.get("ok", false)
-	status = "Class model rest pose drawn%s; boar clips are not wired to the draw." % ("" if textured else " untextured (" + str(bound.get("error", "texture refused")) + ")")
-	return true
+	var bound: Dictionary = binder.bind_named(path, rows, index, str(row.get("texture_entry", "")))
+	for part in binder.meshes:
+		part["visible_by_default"] = bool(mask & (1 << int(part.index)))
+	var result := {"mesh": prepared.mesh, "binder": binder,
+		"textured": bool(bound.get("ok", false)), "foot": -float(prepared.bounds.position.y)}
+	models[key] = result
+	status = "Class body rest poses drawn; animated appearance and held-part attachment remain unverified."
+	return result
 
-func _make_instance(small: bool) -> MeshInstance3D:
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	var scale := SMALL_SCALE if small else LARGE_SCALE
-	instance.scale = Vector3(scale, scale, scale)
-	if textured and binder != null and binder.apply(instance):
-		pass
-	else:
-		var neutral := StandardMaterial3D.new()
-		neutral.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		neutral.cull_mode = BaseMaterial3D.CULL_DISABLED
-		neutral.albedo_color = Color("a07858")
-		instance.material_override = neutral
-	return instance
-
-# One call per presented frame with the controller observation.
 func update(observation: Dictionary) -> int:
-	if mesh == null or parent == null: return 0
-	var rows: Array = observation.get("fight_enemies", [])
+	if parent == null or real == null or reader == null: return 0
 	var seen := {}
 	var drawn := 0
-	for row in rows:
+	for row in observation.get("fight_enemies", []):
 		var address := int(row.handle)
 		seen[address] = true
+		var identity := _identity(row)
+		var model := _model(row)
+		if model.is_empty():
+			_retire(address)
+			continue
 		var instance: MeshInstance3D = instances.get(address)
+		if identities.get(address, "") != identity:
+			_retire(address)
+			instance = null
 		if instance == null or not is_instance_valid(instance):
-			instance = _make_instance(str(row.kind) == "WarBoarSmall")
+			instance = MeshInstance3D.new()
+			instance.mesh = model.mesh
+			if not model.textured or not model.binder.apply(instance):
+				var neutral := StandardMaterial3D.new()
+				neutral.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				neutral.cull_mode = BaseMaterial3D.CULL_DISABLED
+				neutral.albedo_color = Color("a07858")
+				instance.material_override = neutral
 			parent.add_child(instance)
 			instances[address] = instance
+			identities[address] = identity
+		var size := float(row.get("model_scale", 1.0))
+		instance.scale = Vector3.ONE * size
 		var p: Vector3 = row.position
-		var scale := SMALL_SCALE if str(row.kind) == "WarBoarSmall" else LARGE_SCALE
-		instance.position = Vector3(p.x, p.z + foot_offset * scale, -p.y)
+		instance.position = Vector3(p.x, p.z + float(model.foot) * size, -p.y)
 		instance.rotation.y = float(int(row.facing) & 0xffff) * TAU / 65536.0
-		# PRESENTATION ONLY: the death-animation clip choice is undocumented, so
-		# a dead boar (hit points at or below zero, state 0x14) keeps the rest
-		# pose and is drawn faded. This is not the original's death look.
 		instance.transparency = 0.6 if bool(row.get("dead", false)) else 0.0
 		instance.visible = true
 		drawn += 1
 	for address in instances.keys():
-		if not seen.has(address) and is_instance_valid(instances[address]):
-			instances[address].visible = false
+		if not seen.has(address):
+			_retire(address)
 	return drawn

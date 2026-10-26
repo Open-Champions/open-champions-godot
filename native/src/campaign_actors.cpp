@@ -11,13 +11,6 @@ constexpr std::array<const char *, 20> BOAR_NAMES{{
     "death2.anm", "hit2front.anm", "hit2left.anm", "hit2right.anm",
     "idle1.anm", "roar.anm", "walk.anm", "walk_trn_lft.anm",
     "walk_trn_ryt.anm"}};
-constexpr std::array<const char *, 26> MINOTAUR_NAMES{{
-    "minotaur.vif", "minotaur.tex", "atak_180.anm", "atak_back.anm",
-    "atak_f1.anm", "atak_f2.anm", "atak_f3.anm", "atak_left.anm",
-    "atak_right.anm", "block.anm", "death.anm", "death2.anm",
-    "gore.anm", "hitreaction.anm", "idle1.anm", "idle2.anm",
-    "run.anm", "taunt.anm", "taunt2.anm", "walk.anm", "axe.vif",
-    "axe.tex", "shield.vif", "shield.tex", "shield2.vif", "shield2.tex"}};
 // ref_campaign_combat_r5.EVENT_ARGUMENTS: call-site parameters, independent
 // of archive contents or the still-unknown relocated clip pointers.
 constexpr std::array<EventParams, 7> BOAR_EVENTS{{
@@ -77,7 +70,7 @@ std::array<Raw, 5> balance_lookup(const std::uint8_t *data, std::size_t size,
     if (u16(at) != balance_hash(name)) continue;
     std::array<Raw, 5> result{};
     for (unsigned i = 0; i < 5; ++i)
-      result[i] = mul(from_int(std::int16_t(u16(at + 2 + 2 * i))), 0x3c23d70a);
+      result[i] = combat::fmul(combat::itof(u16(at + 2 + 2 * i)), 0x3c23d70a);
     return result;
   }
   // Observed Creature_ctor fallback for a type absent from monsters.bal.
@@ -85,7 +78,7 @@ std::array<Raw, 5> balance_lookup(const std::uint8_t *data, std::size_t size,
 }
 
 Actor::Actor(Kind k, objects::GameObject *o, creature_hp::Memory *shared)
-    : kind(k), object(o),
+    : kind(k), object(o), object_serial(o->serial),
       hp_owned_(shared ? std::make_unique<creature_hp::Model>(*shared)
                        : std::make_unique<creature_hp::Model>()),
       hp(*hp_owned_) {}
@@ -95,8 +88,7 @@ bool Actor::dead() const { return !lt(ZERO, health()); }
 Runtime::Runtime(objects::World &world, resources::Manager &resources, Services services,
                  creature_hp::Memory *shared)
     : world_(world), resources_(resources), services_(std::move(services)),
-      boar_def_(definition("warboar.lmp", BOAR_NAMES)),
-      minotaur_def_(definition("minotaur.lmp", MINOTAUR_NAMES)), shared_(shared) {
+      boar_def_(definition("warboar.lmp", BOAR_NAMES)), shared_(shared) {
   // A shared-memory Runtime is dispatched and resolved by its owner (the
   // combat World calls tick(address); entries resolve in adopt()).
   if (shared_) return;
@@ -113,22 +105,24 @@ Runtime::~Runtime() {
   world_.on_run = {};
   world_.res_find = {};
 }
+void Runtime::bind_minotaur_definition(std::string lump, const std::vector<std::string> &entries) {
+  if (lump.empty() || entries.size()!=26)
+    throw Unsupported("Minotaur definition: archive and 26 entries required");
+  for (const auto &name:entries)
+    if (name.empty()) throw Unsupported("Minotaur definition: empty entry");
+  if (!actors_.empty()) throw Unsupported("Minotaur definition: bind before construction");
+  minotaur_def_=std::make_shared<objects::ClassDef>(std::move(lump),entries);
+}
 
 bool Runtime::owns_live_object(const objects::GameObject &object) const {
   const auto found = world_.objects.find(object.addr);
   return found != world_.objects.end() && found->second == &object && object.alive;
 }
 
-void Runtime::retire_stale() const {
-  for (auto entry = actors_.begin(); entry != actors_.end();) {
-    if (!owns_live_object(*entry->second->object)) entry = actors_.erase(entry);
-    else ++entry;
-  }
-}
 
 Actor &Runtime::register_actor(std::unique_ptr<Actor> actor) {
   retire_stale();
-  if (!owns_live_object(*actor->object))
+  if (!owns_live_object(*actor->object) || actor->object->serial != actor->object_serial)
     throw Unsupported("actor object is not live in this World");
   const auto address = actor->object->addr;
   const auto inserted = actors_.emplace(address, std::move(actor));
@@ -181,6 +175,7 @@ Actor &Runtime::construct_impl(Kind kind, const objects::Vec3 &pos,
     required(services_.minotaur_initial_state, "Minotaur_ctor/setState(0)");
   }
   auto def = kind == Kind::Minotaur ? minotaur_def_ : boar_def_;
+  if (!def) throw Unsupported("Minotaur definition: runtime bindings missing");
   // Preflight avoids consuming a pool block for a missing entry. The actual
   // GameObject_ctor still resolves by name, in definition order, on generation
   // change. Resource decoding/animation upload is a separate Unknown service.
@@ -325,6 +320,17 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
       });
 }
 
+void Runtime::retire_stale() const {
+  for (auto entry = actors_.begin(); entry != actors_.end();) {
+    const auto live = world_.objects.find(entry->first);
+    if (live == world_.objects.end() || live->second != entry->second->object ||
+        live->second->serial != entry->second->object_serial || !live->second->alive)
+      entry = actors_.erase(entry);
+    else
+      ++entry;
+  }
+}
+
 Actor *Runtime::find(std::uint32_t address) {
   retire_stale();
   auto it = actors_.find(address);
@@ -333,6 +339,7 @@ Actor *Runtime::find(std::uint32_t address) {
 
 std::uint32_t Runtime::definition_entry(Kind kind, unsigned slot) {
   auto def = kind == Kind::Minotaur ? minotaur_def_ : boar_def_;
+  if (!def) throw Unsupported("Minotaur definition: runtime bindings missing");
   if (!slot || slot > def->entries.size())
     throw Unsupported("definition slot outside the documented table");
   return def->entries[slot - 1].second;
@@ -344,8 +351,37 @@ Actor &Runtime::adopt(Kind kind, objects::GameObject &object, std::uint32_t angl
   if (!shared_) throw Unsupported("adopt: needs a shared-memory Runtime");
   if (!owns_live_object(object))
     throw Unsupported("adopt: object is not live in this World");
-  if (kind == Kind::Minotaur)
-    throw Unsupported("Minotaur_ctor/base creature flags Unknown");
+  if (kind == Kind::Minotaur) {
+    required(services_.minotaur_construct,"Minotaur constructor");
+    if (!minotaur_def_) throw Unsupported("Minotaur definition: runtime bindings missing");
+    if (actors_.count(object.addr)) throw Unsupported("adopt: address already has an actor");
+    auto def=minotaur_def_;
+    for (const auto &entry:def->entries) {
+      auto handle=resources_.find(def->lump,entry.first);
+      if (!handle || !resources_.bytes(*handle))
+        throw Unsupported("Minotaur constructor: definition resource unavailable");
+    }
+    if (def->generation!=world_.lump_generation) {
+      for (auto &entry:def->entries) entry.second=resolve(def->lump,entry.first);
+      def->generation=world_.lump_generation;
+    }
+    const auto at=object.addr;
+    for (unsigned k=0;k<26;++k)
+      shared_->store(0x501200+12+8*k,4,def->entries[k].second);
+    object.class_def=def;
+    object.class_name="Minotaur";
+    object.angle=std::uint16_t(angle);
+    object.vtable=0x5165f0;
+    object.radius=0x41c80000;
+    auto actor=std::make_unique<Minotaur>(&object,shared_);
+    actor->supplied_rank=boss_rank;
+    services_.minotaur_construct(at,object.type_name.empty()?"Minotaur":object.type_name);
+    object.seed=std::uint32_t(shared_->load(at+0x44,4));
+    actor->state=std::uint32_t(shared_->load(at+0x232,2));
+    actor->hidden_parts=shared_->load(at+0x220,8);
+    actor->creature_flags=shared_->load(at+0xa8,8);
+    return register_actor(std::move(actor));
+  }
   required(services_.model_hide_mask, "constructor/model_buildHideMask");
   required(services_.animation_init, "constructor/anim_clear_push");
   required(services_.set_def_entry_params, "constructor/creature_setDefEntryParams");
@@ -429,6 +465,13 @@ Actor &Runtime::at(std::uint32_t address) {
 }
 
 void Runtime::set_state(Actor &a, std::uint32_t state) {
+  if (shared_ && a.kind==Kind::Minotaur) {
+    required(services_.minotaur_set_state,"Minotaur_setState");
+    services_.minotaur_set_state(a.object->addr,state);
+    a.state=std::uint32_t(shared_->load(a.object->addr+0x232,2));
+    a.death_reported=a.state==20;
+    return;
+  }
   a.state = std::uint32_t(a.hp.mem.load(a.object->addr + 0x232, 2));
   if (state == 0x14 && a.death_reported) return;
   if (a.kind != Kind::Minotaur && state != 0x14) {
@@ -484,8 +527,18 @@ void Runtime::set_state(Actor &a, std::uint32_t state) {
 
 void Runtime::tick(std::uint32_t address) {
   auto &a = at(address);
-  if (a.kind == Kind::Minotaur)
-    throw Unsupported("Minotaur_run: Unknown in campaign-combat rounds 2-8");
+  if (a.kind == Kind::Minotaur) {
+    if (a.ai_refusal) return;
+    required(services_.minotaur_run,"Minotaur_run");
+    try { services_.minotaur_run(address); }
+    catch (const std::exception &e) {
+      if (!contain_) throw;
+      if (!a.ai_refusal) { a.ai_refusal=e.what(); refusal_counts_[e.what()]+=1; }
+    }
+    a.state=std::uint32_t(a.hp.mem.load(address+0x232,2));
+    a.death_reported=a.state==20;
+    return;
+  }
   required(services_.process_damage, "Creature_processDamage");
   required(services_.creature_run, "Creature_run");
   services_.process_damage(address);

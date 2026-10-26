@@ -22,7 +22,11 @@ using Address = combat_runtime::Address;
 
 struct EnemyView {
   Address address = 0;
-  bool small = false, dead = false, ai_frozen = false;
+  bool small = false, minotaur = false, dead = false, ai_frozen = false;
+  // Runtime-only resource identifiers and visibility, for rest-pose display.
+  std::string model_lump, model_entry, texture_entry;
+  std::uint64_t model_mask = 0;
+  Raw scale = ONE;
   Raw hp = 0, max_hp = 0, facing = 0;
   std::uint32_t state = 0;
   Vec3 position{};
@@ -57,6 +61,7 @@ struct GroundDrop {
 struct Counts {
   std::size_t ticks = 0;
   std::size_t actors_built = 0;
+  std::size_t minotaurs_built = 0, minotaur_hit_requests = 0, held_part_requests = 0;
   std::size_t attack_edges = 0;      // J presses fed to the player's pad
   std::size_t player_swings = 0;     // ticks the player was in a melee state
   std::size_t player_hits = 0;       // damage_apply calls with the player as attacker
@@ -82,6 +87,9 @@ struct DeathView {
   Raw animation_time = 0, animation_flags = 0;
   std::string refusal;
 };
+
+void bind_minotaur_boundaries(arena_monsters::Model &, combat_runtime::World &, Counts &,
+    std::function<void(const std::string &)>);
 
 class Fight {
 public:

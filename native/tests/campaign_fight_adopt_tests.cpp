@@ -4,6 +4,7 @@
 #include "champions/campaign_actors.hpp"
 #include "champions/combat_runtime.hpp"
 #include "champions/core_state.hpp"
+#include "champions/minotaur.hpp"
 #include "champions/creature_hp.hpp"
 #include "champions/detail/checkpoint.hpp"
 #include "combat_runtime_internal.hpp"
@@ -262,6 +263,95 @@ void adopt_and_run() {
   check(external_runs == 2, "slot 4 reaches the external owner on the 60-frame list");
 }
 
+void minotaur_shared_health() {
+  namespace M=R::minotaur;
+  auto authority=std::make_shared<R::WorldAuthority>();
+  auto services=CR::flat_fixture_services();
+  services.hide_mask=[](R::Raw,R::Raw){return UINT64_C(0x123456789abcdef0);};
+  services.animation_start=[](CR::Address,R::Raw,R::Raw,R::Raw,R::Raw){};
+  CR::World world(authority,services,0,CR::Composition::Full);
+  auto &model=world.creature_services();
+  world.define_creature_table(M::VTABLE,{{4,M::RUN},{5,M::DRAW},{27,M::SET_STATE}});
+  world.set_class_body(M::SET_STATE,[&](CR::Address a,const auto &args){M::set_state(model,a,R::Raw(args.at(0)));});
+  std::vector<std::string> entries;
+  for(unsigned k=0;k<26;++k)entries.push_back("authored-part-"+std::to_string(k));
+  const auto bytes=lump(entries);
+  champions::resources::Manager resources;
+  resources.load_lmp("authored-class.lmp",{bytes.data(),bytes.size()});
+  C::Services bindings;
+  unsigned constructions = 0;
+  unsigned run_attempts = 0;
+  bindings.minotaur_run = [&](R::Raw) {
+    ++run_attempts;
+    throw CR::Unsupported("synthetic unbound Minotaur service");
+  };
+  bindings.minotaur_construct=[&](R::Raw a,const std::string &type){++constructions; M::finish_constructor(model,a,type);};
+  C::Runtime runtime(*authority->objects,resources,bindings,&authority->memory);
+  runtime.bind_minotaur_definition("authored-class.lmp",entries);
+  auto *object=authority->objects->new_object(M::ALLOCATION,{0,0,0});
+  check(object!=nullptr,"Minotaur allocation");
+  authority->register_object(*object);
+  const auto a=object->addr;
+  for(const auto &p:std::vector<std::pair<unsigned,R::Raw>>{{0x24,M::DEFINITION},{0x44,7},
+      {0x0c,0x20},{0x228,R::from_int(100)},{0x22c,R::from_int(100)}})
+    authority->memory.store(a+p.first,4,p.second);
+  object->type_name="Minotaur";
+  O::World foreign(O::CallbackPolicy::ReferenceBase);
+  auto *foreign_object = foreign.new_object(M::ALLOCATION, {});
+  check(foreign_object && foreign_object->addr == a, "foreign Minotaur has the same numeric address");
+  authority->memory.clear_log();
+  refuses([&] { runtime.adopt(C::Kind::Minotaur, *foreign_object, 0, 0); },
+          "foreign same-address Minotaur refused before construction");
+  check(authority->memory.log().empty() && constructions == 0 && !foreign_object->class_name,
+        "foreign adoption has no shared-memory or constructor effects");
+  bool refused=false;
+  try{world.adopt_creature(a);}catch(const CR::Error &){refused=true;}
+  check(refused,"unfinished factory objects require explicit constructor adoption");
+  const auto objects_before=authority->objects->objects.size();
+  world.adopt_creature(a,true);
+  auto &actor=runtime.adopt(C::Kind::Minotaur,*object,0,0);
+  authority->register_factory(a);
+  check(authority->objects->objects.size()==objects_before,"class constructor allocates no second actor");
+  check(world.contains(a) && &actor.hp.mem==&authority->memory,"shared actor and combat memory");
+  check(world.slot_function(a,2)==0x116638&&world.slot_function(a,4)==M::RUN,"inherited damage slot and class run");
+  const auto player=world.spawn_player(0,CR::Spawn{});
+  world.take_damage(a,player,8,R::from_int(7));
+  check(actor.health()==R::from_int(93)&&world.read(a+0x228)==actor.health(),"Player damage updates the one Minotaur HP body");
+  check(world.target(a+0x2e4)==player,"damage links the real shared-World attacker");
+  // A constructor refusal discards just the temporary combat view; ownership,
+  // bytes and the registered factory object are preserved for the host.
+  world.unadopt_creature(a);
+  const auto combat_actors = world.actors();
+  check(std::find(combat_actors.begin(), combat_actors.end(), a) == combat_actors.end() &&
+        authority->find(a)==object,"temporary adoption rollback preserves owner");
+  const auto serial = actor.object_serial;
+  authority->unregister_object(*object);
+  authority->objects->destroy(*object);
+  authority->memory.clear_log();
+  refuses([&] { runtime.adopt(C::Kind::Minotaur, *object, 0, 0); },
+          "retired Minotaur refused before construction");
+  check(authority->memory.log().empty() && constructions == 1,
+        "retired adoption has no shared-memory or constructor effects");
+  auto *replacement = authority->objects->new_object(M::ALLOCATION, {0, 0, 0});
+  check(replacement && replacement->addr == a && replacement->serial != serial,
+        "Minotaur pool address reused with a fresh identity");
+  authority->register_object(*replacement);
+  replacement->type_name = "Minotaur";
+  authority->memory.store(a + 0x24, 4, M::DEFINITION);
+  authority->memory.store(a + 0x228, 4, R::from_int(80));
+  authority->memory.store(a + 0x22c, 4, R::from_int(80));
+  world.adopt_creature(a, true);
+  auto &rebound = runtime.adopt(C::Kind::Minotaur, *replacement, 0, 0);
+  check(runtime.find(a) == &rebound && rebound.object_serial == replacement->serial &&
+        rebound.health() == R::from_int(80), "replacement Minotaur adopts the new shared body");
+  runtime.set_contain_refusals(true);
+  runtime.tick(a);
+  authority->memory.clear_log();
+  runtime.tick(a);
+  check(run_attempts == 1 && rebound.ai_refusal && authority->memory.log().empty(),
+        "contained Minotaur service refusal freezes subsequent authoritative ticks");
+}
+
 void boar_inherited_vectors() {
   unsigned rays = 0;
   R::Raw ray_answer = R::MINUS_ONE, ray_mask = 99;
@@ -494,6 +584,7 @@ int main() {
     clear_nodes_adjacent_partners();
     destroy_and_readopt();
     adopt_and_run();
+    minotaur_shared_health();
     boar_inherited_vectors();
     activity_follows_the_live_player();
     prune_keeps_linked_iterators();

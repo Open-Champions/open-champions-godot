@@ -60,7 +60,7 @@ R::Raw raw_of(float f) {
 int main(int argc, char **argv) {
   std::string root, level_name = "valor";
   unsigned ticks = 600, attack_every = 30;
-  bool walk = false, near_boar = false, weak = false, near_weakest = false, ai_check = false, death_check = false;
+  bool walk = false, near_boar = false, weak = false, near_weakest = false, near_minotaur = false, ai_check = false, death_check = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--game" && i + 1 < argc) root = argv[++i];
@@ -71,6 +71,7 @@ int main(int argc, char **argv) {
     else if (a == "--near") near_boar = true;
     else if (a == "--weak") weak = true;
     else if (a == "--near-weakest") near_weakest = true;
+    else if (a == "--near-minotaur") near_minotaur = true;
     else if (a == "--ai-check") ai_check = true;
     else if (a == "--death-check") death_check = true;
     else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk] [--near (DIAGNOSTIC: start 40 units from a boar)] [--near-weakest (DIAGNOSTIC: like --near, at the boar with the lowest hit points)] [--weak (DIAGNOSTIC: set HP 1.0 on boars within 400 units to exercise the death path)]\n"; return 2; }
@@ -124,7 +125,8 @@ int main(int argc, char **argv) {
   host.start_single_player();
   host.set_executable(R::script_commands::executable_view(exe));
   const unsigned model_index = 11;
-  std::vector<std::string> lumps{"warboar.lmp", "minotaur.lmp", CF::Fight::player_animation_lump(*exe, model_index)};
+  std::vector<std::string> lumps{exe->string(exe->word(0x502f80)),
+      exe->string(exe->word(0x501200)), CF::Fight::player_animation_lump(*exe, model_index)};
   for (const auto &name : lumps)
     if (files.count(lower(name))) {
       const auto bytes = read_file(files.at(lower(name)));
@@ -163,9 +165,10 @@ int main(int argc, char **argv) {
   start.hp = raw_of(100.f);
   for (const auto &o : objs)
     if (o.cls == "Player1") { start.position = o.position; start.facing = o.angle; break; }
-  if (near_boar)
+  if (near_boar || near_minotaur)
     for (const auto &o : objs)
-      if (o.cls.compare(0, 7, "WarBoar") == 0) {
+      if ((near_boar && o.cls.compare(0, 7, "WarBoar") == 0) ||
+          (near_minotaur && o.cls.compare(0,8,"Minotaur")==0)) {
         start.position = o.position;
         start.position[0] = R::sub(start.position[0], R::from_int(40));
         start.facing = 0;
@@ -252,7 +255,9 @@ int main(int argc, char **argv) {
   std::cout << "authority memory backing bytes=" << authority->memory.bytes().size() << "\n";
   const auto &c = host.counts();
   std::cout << "records built=" << c.objects_built << " unbuilt=" << c.objects_unbuilt << " not_created=" << c.objects_not_created
-            << " fight_actors=" << fight.counts().actors_built << " start_error=" << (start_error.empty() ? "none" : start_error) << "\n";
+            << " fight_actors=" << fight.counts().actors_built
+            << " minotaurs=" << fight.counts().minotaurs_built
+            << " start_error=" << (start_error.empty() ? "none" : start_error) << "\n";
   if (!death_check)
     for (const auto &kv : c.build_refusals) std::cout << "  build refusal x" << kv.second << ": " << kv.first << "\n";
   // Ticks: J pressed for one tick every attack_every ticks.
@@ -313,17 +318,32 @@ int main(int argc, char **argv) {
   for (const auto &e : after) { hp1 += as_float(e.hp); dead += e.dead; }
   {
     std::size_t damaged = 0;
+    std::size_t minotaur_damaged=0,minotaur_dead=0,minotaur_active=0,minotaur_targeted=0;
+    std::map<unsigned,std::size_t> minotaur_states;
     float lowest = 1e30f, most_lost = 0;
     for (const auto &e : after) {
       const float now = as_float(e.hp), was = hp_before[e.address];
+      if(e.minotaur){
+        minotaur_damaged+=now<was;minotaur_dead+=e.dead;minotaur_states[e.state]+=1;
+        minotaur_active += fight.world().read(e.address+0xa8,8)>>63;
+        minotaur_targeted += fight.world().target(e.address+0x234)!=0;
+      }
       if (now < was && !death_check) {
         ++damaged;
-        std::cout << "damaged boar: " << (e.small ? "small" : "large") << " hp " << was << " -> " << now << " max " << as_float(e.max_hp) << " dead=" << e.dead << "\n";
+        if(!e.minotaur)std::cout << "damaged boar: " << (e.small ? "small" : "large") << " hp " << was << " -> " << now << " max " << as_float(e.max_hp) << " dead=" << e.dead << "\n";
       }
       lowest = std::min(lowest, now);
       most_lost = std::max(most_lost, was - now);
     }
-    if (!death_check) std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
+    if (!death_check) {
+      std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
+      std::cout << "minotaurs damaged=" << minotaur_damaged << " dead=" << minotaur_dead
+                << " active=" << minotaur_active << " targeted=" << minotaur_targeted
+                << " hit_requests=" << fight.counts().minotaur_hit_requests
+                << " held_part_requests=" << fight.counts().held_part_requests << "\n";
+      for(const auto &state:minotaur_states)
+        std::cout << "minotaur_state=" << state.first << " count=" << state.second << "\n";
+    }
   }
   const auto player = fight.player();
   const auto &n = fight.counts();

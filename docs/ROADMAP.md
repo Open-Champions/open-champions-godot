@@ -1,5 +1,12 @@
 # One native client, two games
 
+The RTA [Minotaur class adapter](MINOTAUR.md) has diagnostic shared-World
+construction, runtime-resolved resources, exact class state/event contracts and
+inherited player-to-creature damage. Ordinary campaign construction refuses
+until the required bounds-derived initialization service is bound. Animated
+presentation, delivered enemy damage, held-part publication and loot pickup
+remain explicit boundaries; this is not an end-to-end Minotaur fight claim.
+
 ## Current milestone
 
 Campaign [player combat inputs](PLAYER_COMBAT_MOVES.md) now feed attack/combo,

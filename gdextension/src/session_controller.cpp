@@ -3266,6 +3266,9 @@ Dictionary ChampionsSessionController::fight_observation() const {
   Dictionary counts;
   counts["ticks"] = int64_t(n.ticks);
   counts["actors_built"] = int64_t(n.actors_built);
+  counts["minotaurs_built"] = int64_t(n.minotaurs_built);
+  counts["minotaur_hit_requests"] = int64_t(n.minotaur_hit_requests);
+  counts["held_part_requests"] = int64_t(n.held_part_requests);
   counts["attack_edges"] = int64_t(n.attack_edges);
   counts["player_swings"] = int64_t(n.player_swings);
   counts["player_hits"] = int64_t(n.player_hits);
@@ -3295,7 +3298,12 @@ Dictionary ChampionsSessionController::fight_observation() const {
     Dictionary value;
     value["slot"] = int64_t(1 + handle);
     value["handle"] = int64_t(e.address);
-    value["kind"] = e.small ? "WarBoarSmall" : "WarBoar";
+    value["kind"] = e.minotaur ? "Minotaur" : e.small ? "WarBoarSmall" : "WarBoar";
+    value["model_lump"] = String::utf8(e.model_lump.c_str());
+    value["model_entry"] = String::utf8(e.model_entry.c_str());
+    value["texture_entry"] = String::utf8(e.texture_entry.c_str());
+    value["model_mask"] = int64_t(e.model_mask);
+    value["model_scale"] = display_float(e.scale);
     value["present"] = true;
     value["dead"] = e.dead;
     value["ai_frozen"] = e.ai_frozen;
