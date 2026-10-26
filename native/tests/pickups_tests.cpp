@@ -221,10 +221,10 @@ void chest_branch_refusals() {
   bool refused = false;
   try { P::require_supported_chest({}, true); }
   catch (const C::Unsupported &error) { refused = std::string(error.what()).find("timed explosion") != std::string::npos; }
-  check(refused, "trapped opening refuses before dispensing or opening");
+  check(refused, "helper rejects the trapped predicate");
   P::require_supported_chest({}, false);
   P::require_supported_chest({"name=fixture", "item=authored"}, false);
-  check(true, "nontrapped Chest with no action properties has a demonstrable no-op action loop");
+  check(true, "helper accepts nontrapped properties without an action");
 }
 void production_chest_refusals(const std::string &selected = {}) {
   // Production methods are included above so this fixture observes the real
