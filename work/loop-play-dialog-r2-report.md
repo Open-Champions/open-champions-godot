@@ -26,3 +26,15 @@ Release Godot extension rebuild (-j 4): passed.
 
 Gate checkpoint: pending full CTest (`ctest --test-dir build/native
 --output-on-failure -j 3`). This checkpoint is committed before starting it.
+
+Runtime checkpoint: Godot 4.5.2 script-commands and play-hud smokes exit 0
+(0.94 s / 0.50 s). Full-combat smoke exits 0 (299.59 s), including its soak
+and save/load equality checks. FULL_TRACE is unchanged: 36,402 bytes,
+SHA-256 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+First-choice headless private dialog traversal exits 0 (93.91 s): 111 levels,
+24 attempts, 22 opened, 22 closed by the harness, 10,161 checks, 0 failures.
+There are 2 retained missing-camera-offset opening refusals and 3 newly visible
+`confirm: refused trigger` stalls. The harness explicitly leaves stalled dialogs;
+22 closed is not a claim of 22 normal completions. These refusals are the
+expected consequence of stopping unsupported triggers instead of silently
+continuing. This revision does not add support for those target domains.
