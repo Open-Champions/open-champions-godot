@@ -29,7 +29,7 @@ if(BUILD_TESTING)
   # minutes in MachineCSE for this test driver at -O3. Libraries retain their
   # normal Release optimization; only the test driver's inlining is disabled.
   if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(champions-level-flow-tests PRIVATE "$<$<CONFIG:Release>:-fno-inline-functions>")
+    target_compile_options(champions-level-flow-tests PRIVATE "$<$<CONFIG:Release>:-fno-inline-functions;-fno-unroll-loops>")
   endif()
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()

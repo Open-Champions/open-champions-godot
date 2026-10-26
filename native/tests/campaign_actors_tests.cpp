@@ -1,6 +1,9 @@
 #include "champions/campaign_actors.hpp"
 #include "champions/item_generation.hpp"
+#include <algorithm>
 #include <array>
+#include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -71,6 +74,184 @@ seeded_loot(const C::LootArgs &args, std::uint32_t seed) {
   for (const auto &drop : world.drops) kinds.push_back(drop.kind);
   return {kinds, rng.draws};
 }
+
+// Synthetic service vectors mirror research-boar-ai 3f81c89's original-code
+// branch probes. The services are deliberately scripted, not a live tick.
+void ai_vectors(champions::resources::Manager &resources) {
+  unsigned cases = 0;
+  for (const unsigned seed : {20973u, 7u}) {
+    O::World world(O::CallbackPolicy::ReferenceBase);
+    C::Actor *actor = nullptr;
+    std::vector<std::string> calls;
+    std::vector<C::AnimationRequest> animations;
+    R::Raw events = 0, flags = 0, last_hit_flags = 0;
+    unsigned target_n = 0, enemy_n = 0, target_yes = 0, enemy_yes = 0;
+    bool active = true, stopped = false, visible = false, away = false;
+    C::Services s;
+    s.model_hide_mask = [](auto, auto) { return UINT64_C(0); };
+    s.animation_init = [](auto, auto) {};
+    s.set_def_entry_params = [](auto, const auto &) {};
+    s.creature_init = [](auto) {};
+    s.process_damage = [&](auto) { calls.emplace_back("damage"); };
+    s.creature_run = [&](auto) { calls.emplace_back("run"); return stopped; };
+    s.update_active = [&](auto) { calls.emplace_back("active"); return active; };
+    s.animation_step = [&](auto) { calls.emplace_back("anim"); return events; };
+    s.knockback = [&](auto) { calls.emplace_back("knockback"); };
+    s.pick_target = [&](auto) { calls.emplace_back("target"); };
+    s.can_see_target = [&](auto, auto force) { check(force == 0, "force 0"); return visible; };
+    s.away_from_home = [&](auto) { return away; };
+    s.clear_path = [&](auto) { calls.emplace_back("clear"); };
+    s.pick_wander_dest = [&](auto) { calls.emplace_back("wander"); };
+    s.move_to_dest = [&](auto) { calls.emplace_back("dest"); };
+    s.move_to_target = [&](auto) { calls.emplace_back("chase"); };
+    s.turn_to_target = [&](auto) { calls.emplace_back("turn"); };
+    s.flee_from_target = [&](auto, auto kind) { check(kind == 0, "flee kind 0"); calls.emplace_back("flee"); };
+    s.move_zero = [&](auto) { calls.emplace_back("move0"); };
+    s.hit_all_in_arc = [&](auto, auto f) { last_hit_flags = f; calls.emplace_back("hit"); };
+    s.filter_state = [](auto, auto requested) -> std::optional<std::uint32_t> { return requested; };
+    s.animation_start = [&](auto, const C::AnimationRequest &a) { animations.push_back(a); };
+    s.target_in_arc = [&](auto, auto f, auto arc, auto near, auto far) {
+      check(std::int16_t(f) == 0 || std::int16_t(f) == 8000 || std::int16_t(f) == -8000,
+            "class cone facing");
+      check(arc == 3000 || arc == 8000 || arc == 0x7fff, "class arc");
+      check((near == 0 && (far == 0x41c80000 || far == 0x41a00000 || far == 0x41200000)) ||
+            (near == 0x41c80000 && far == 0x42c80000), "class range");
+      return ++target_n == target_yes;
+    };
+    s.enemy_in_cone = [&](auto, auto, auto arc, auto near, auto far) {
+      check((arc == 3000 || arc == 8000) && near == 0 && far == 0x41c80000, "alternative enemy cone");
+      return ++enemy_n == enemy_yes;
+    };
+    C::Runtime runtime(world, resources, s);
+    actor = &runtime.construct(C::Kind::WarBoar, {}, 0, {}, R::from_int(100));
+    const auto a = actor->object->addr;
+    auto &m = actor->hp.mem;
+    const auto reset = [&](unsigned state, unsigned own_seed, bool target = true) {
+      m.store(a + 0x232, 2, state); actor->state = state;
+      m.store(a + 0x234, 4, target ? 0x1000 : 0); // synthetic handle presence
+      m.store(a + 0x11a, 2, 8); m.store(a + 0x3c8, 4, 0);
+      m.store(a + 0x3cc, 4, 6); m.store(a + 0x314, 2, 0);
+      m.store(a + 0x318, 2, 0); m.store(a + 0x31c, 2, 0);
+      m.store(a + 0x300, 4, 0); m.store(a + 0xf4, 4, 0);
+      actor->object->seed = own_seed;
+      target_n = enemy_n = target_yes = enemy_yes = 0;
+      calls.clear(); animations.clear(); events = flags = 0;
+      visible = away = stopped = false; active = true;
+    };
+    const auto draw = [](unsigned &value) { value = value * 0x19660du + 0x3c6ef35fu; return value >> 16; };
+    for (unsigned state : {0u,1u}) for (bool seen : {false,true}) {
+      reset(state,seed); visible = seen; m.store(a + 0xf4,4,180);
+      runtime.tick(a);
+      check(actor->state == (seen ? (state == 0 ? 3u : 0u) : state), "idle and wander sight transitions differ");
+      if (state == 1 && !seen) check(calls.back() == "dest", "unseen wandering continues to destination");
+      ++cases;
+    }
+    for (const auto clock : {180u,181u}) {
+      reset(0,seed); m.store(a + 0x300,4,clock); m.store(a + 0xf4,4,180);
+      runtime.tick(a); check(actor->state == (clock == 180 ? 0u : 1u), "strict idle expiry"); ++cases;
+    }
+    reset(0,seed); away = true; runtime.tick(a);
+    check(actor->state == 1, "away from home enters wander before deadline"); ++cases;
+    std::mt19937 samples(seed);
+    for (unsigned state : {3u, 5u})
+      for (unsigned ordinal = 1; ordinal <= (state == 3 ? 8u : 6u); ++ordinal)
+        for (unsigned last : {6u, 8u}) for (unsigned trial = 0; trial < 12; ++trial) {
+          const auto own_seed = samples();
+          reset(state, own_seed); m.store(a + 0x3cc, 4, last);
+          const auto target_tests = state == 3 ? 5u : 3u;
+          if (ordinal <= target_tests) target_yes = ordinal;
+          else enemy_yes = ordinal - target_tests;
+          unsigned expected = state, model = own_seed;
+          if (state == 3) {
+            if (ordinal == 1 || ordinal == 6) {
+              const unsigned choices[]{8, 9, 6, 6, 6}; expected = choices[draw(model) % 5];
+            } else if (ordinal == 2) expected = 10;
+            else if (ordinal == 3 || ordinal == 7) expected = 8;
+            else if (ordinal == 4 || ordinal == 8) expected = 9;
+          } else {
+            const unsigned choices[]{6, 8, 9, 6, 8, 9}; expected = choices[ordinal - 1];
+            if (ordinal == 1 && last == 6 && draw(model) % 3 == 0) {
+              const unsigned combo[]{10, 8, 9}; expected = combo[draw(model) % 3];
+            }
+          }
+          const auto shared = world.shared.state;
+          runtime.tick(a);
+          check(actor->state == expected && actor->object->seed == model && world.shared.state == shared,
+                "research choice and exact own/shared RNG consumption");
+          if (ordinal == 5 && state == 3) check(calls.back() == "turn", "turn after all attack queries");
+          ++cases;
+        }
+    for (unsigned state = 6; state <= 10; ++state) for (unsigned small : {0u, 1u})
+      for (unsigned ev = 0; ev < 4; ++ev) {
+        reset(state, seed); events = ev; m.store(a + 0x3d0, 1, small);
+        m.store(a + 0x11a, 2, 0); // original probe's finished-animation default
+        auto model = seed;
+        if ((ev & 1) && (state == 7 || (state == 10 && !small)))
+          flags = draw(model) % 3 == 0 ? 0x80008 : 0x40008;
+        else flags = 8;
+        runtime.tick(a);
+        check(actor->state == 3 && m.load(a + 0x3c8, 4) == (ev & 1) && actor->object->seed == model,
+              "attack completion, hit latch and draws");
+        check(std::count(calls.begin(), calls.end(), "hit") == int(bool(ev & 1)) &&
+              (!(ev & 1) || last_hit_flags == flags), "attack event flags");
+        ++cases;
+      }
+    reset(6, seed); events = 1;
+    runtime.tick(a); runtime.tick(a);
+    check(std::count(calls.begin(), calls.end(), "hit") == 2, "latch does not suppress repeated supplied events"); ++cases;
+    for (unsigned state = 6; state <= 10; ++state) for (unsigned ev : {0u,1u}) {
+      reset(state,seed); events = ev; target_yes = 1;
+      runtime.tick(a);
+      check(std::count(calls.begin(),calls.end(),"turn") == int(state == 7 || state == 10 || (state == 6 && !ev)),
+            "only state 6's turning is gated by the hit latch"); ++cases;
+    }
+    for (unsigned playing : {0u, 8u}) {
+      reset(6, seed); events = 2; m.store(a + 0x11a, 2, playing); target_yes = playing ? 2 : 1;
+      runtime.tick(a); check(actor->state == 5, "continuation marker even at animation end"); ++cases;
+    }
+    for (unsigned old : {0u,3u,5u,6u,7u,10u,15u,16u,18u,19u})
+      for (unsigned requested : {0u,1u,3u,5u,6u,7u,8u,9u,10u,18u,19u}) {
+        reset(old, seed); m.store(a + 0x300, 4, 900); m.store(a + 0x3c8, 4, 99);
+        runtime.set_state(a, requested);
+        const bool rejected = requested == 18 && old >= 6 && old <= 15;
+        check(actor->state == (rejected ? old : requested) && animations.size() == (rejected ? 0u : 1u),
+              "requested versus accepted hit reaction");
+        if (requested == 0) check(m.load(a + 0xf4, 4) == 1080, "idle deadline is creature clock plus 180");
+        if (requested >= 6 && requested <= 10)
+        {
+          check(m.load(a + 0x3c8, 4) == 0 && m.load(a + 0x3cc, 4) == requested, "attack entry words");
+          const unsigned offsets[]{0x24,0x54,0x2c,0x3c,0x34};
+          const R::Raw animation_flags[]{8,0x808,0x4008,0x4008,0x808};
+          const auto &r = animations.front();
+          check(r.definition_offset == offsets[requested-6] && r.flags == animation_flags[requested-6] &&
+                r.blend_in == 0x3e999999 && r.blend_out == 0x3e999999 && !r.sync,
+                "executed attack entry animation ABI");
+        }
+        ++cases;
+      }
+    for (unsigned state : {3u,5u}) for (unsigned rooted : {0u,1u}) {
+      reset(state,seed,false); m.store(a + 0x314,2,rooted);
+      runtime.tick(a);
+      check(actor->state == (state == 3 ? 0u : rooted ? 5u : 3u), "target loss and rooted combo fallback"); ++cases;
+    }
+    for (unsigned state : {16u,18u,19u}) for (unsigned ready : {0u,1u}) {
+      reset(state, seed);
+      m.store(a + 0x318, 2, ready ? 0 : 1); m.store(a + 0x31c, 2, ready ? 0 : 1);
+      m.store(a + 0x11a, 2, ready ? 0 : 0x10);
+      runtime.tick(a);
+      check(actor->state == (ready ? (state == 16 ? 0u : 3u) : state), "recovery state");
+      if (!ready && state == 16) check(calls.back() == "flee", "cooldown drives retreat");
+      ++cases;
+    }
+    reset(0, seed); runtime.tick(a);
+    check(calls == std::vector<std::string>({"damage","run","active","anim","knockback","target"}), "tick prefix order"); ++cases;
+    reset(0, seed); stopped = true; runtime.tick(a);
+    check(calls.size() == 2, "base run early return"); ++cases;
+    reset(0, seed); active = false; runtime.tick(a);
+    check(calls.size() == 3, "inactive early return"); ++cases;
+  }
+  std::cout << "warboar synthetic AI cases=" << cases << " seeds=2\n";
+}
 }
 int main() {
   // Definition slot order is the round-5 reference model. No retail data.
@@ -92,6 +273,7 @@ int main() {
   auto b = lump(boar), m = lump(minotaur);
   resources.load_lmp("warboar.lmp", {b.data(), b.size()});
   resources.load_lmp("minotaur.lmp", {m.data(), m.size()});
+  ai_vectors(resources);
   std::vector<std::uint8_t> balance(2 + 3 * 12, 0);
   put(balance, 0, 3);
   const std::array<std::uint16_t, 3> hashes{{0xfe90, 0x270c, 0xec70}};
@@ -116,15 +298,25 @@ int main() {
   world.shared.state = 20973;
   std::vector<std::string> calls;
   std::vector<C::LootArgs> drops;
-  C::TickInput input{true, false, false, false, false, false, 0};
+  R::Raw event_bits = 0;
+  bool sight = false, away = false;
   C::Services services;
-  services.tick_input = [&](std::uint32_t) { return input; };
   services.process_damage = [&](std::uint32_t) { calls.emplace_back("damage"); };
-  services.creature_run = [&](std::uint32_t) { calls.emplace_back("run"); };
-  services.animation_step = [&](std::uint32_t) { calls.emplace_back("anim"); };
+  services.creature_run = [&](std::uint32_t) { calls.emplace_back("run"); return false; };
+  services.update_active = [](std::uint32_t) { return true; };
+  services.animation_step = [&](std::uint32_t) { calls.emplace_back("anim"); return event_bits; };
   services.knockback = [&](std::uint32_t) { calls.emplace_back("knockback"); };
   services.pick_target = [&](std::uint32_t) { calls.emplace_back("target"); };
-  services.dead_update = [&](std::uint32_t) { calls.emplace_back("dead"); };
+  services.dead_update = [&](std::uint32_t, R::Raw) { calls.emplace_back("dead"); };
+  services.can_see_target = [&](std::uint32_t, R::Raw force) {
+    check(force == 0, "WarBoar sight force 0"); return sight;
+  };
+  services.away_from_home = [&](std::uint32_t) { return away; };
+  services.clear_path = [](std::uint32_t) {};
+  services.pick_wander_dest = [](std::uint32_t) {};
+  services.move_zero = [](std::uint32_t) {};
+  services.target_in_arc = [](std::uint32_t, R::Raw, R::Raw, R::Raw, R::Raw) { return false; };
+  services.enemy_in_cone = services.target_in_arc;
   services.hit_all_in_arc = [&](std::uint32_t, std::uint32_t flags) {
     check(flags == 8, "round-2 boar attack flags"); calls.emplace_back("hit");
   };
@@ -169,11 +361,10 @@ int main() {
   services.minotaur_death_remainder = [&](std::uint32_t) {
     calls.emplace_back("minoDeathUnknown");
   };
-  services.filter_state = [&](std::uint32_t, std::uint32_t requested) {
-    check(requested == 6 || requested == 0x14, "r2 state filter");
-    calls.emplace_back("filter"); return true;
+  services.filter_state = [&](std::uint32_t, std::uint32_t requested) -> std::optional<std::uint32_t> {
+    calls.emplace_back("filter"); return requested;
   };
-  services.animation_blend = [&](std::uint32_t, std::uint32_t) {
+  services.animation_start = [&](std::uint32_t, const C::AnimationRequest &) {
     calls.emplace_back("blend");
   };
   {
@@ -198,6 +389,34 @@ int main() {
                                     R::from_int(100)); },
             "missing base creature flags refuse Minotaur construction");
     check(rejected.objects.empty(), "Minotaur base refusal consumes no World block");
+  }
+  {
+    O::World recycled(O::CallbackPolicy::ReferenceBase);
+    auto lifecycle_services = services;
+    lifecycle_services.set_def_entry_params = [](std::uint32_t, const C::EventParams &) {};
+    std::vector<std::uint32_t> ticks;
+    lifecycle_services.process_damage = [&](std::uint32_t address) {
+      ticks.push_back(address);
+    };
+    lifecycle_services.creature_run = [](std::uint32_t) { return 1; };
+    C::Runtime runtime(recycled, resources, lifecycle_services);
+    auto &original = runtime.construct(C::Kind::WarBoar, {}, 0, {}, R::from_int(100));
+    auto *original_object = original.object;
+    const auto address = original_object->addr;
+    recycled.destroy(*original_object);
+    auto &replacement = runtime.construct(C::Kind::WarBoarSmall, {}, 0, {}, R::from_int(80));
+    check(replacement.object->addr == address && replacement.object != original_object,
+          "reconstruction reuses the pool address with a new object identity");
+    check(runtime.find(address) == &replacement && &runtime.at(address) == &replacement,
+          "reconstructed actor remains accessible through the runtime");
+    check(runtime.actors().size() == 1 && replacement.kind == C::Kind::WarBoarSmall &&
+          replacement.health() == R::from_int(80), "replacement owns its new actor state");
+    runtime.tick(address);
+    check(ticks == std::vector<std::uint32_t>({address}), "replacement dispatches its tick");
+    recycled.destroy(*replacement.object);
+    check(runtime.actors().empty() && runtime.find(address) == nullptr,
+          "runtime retires destroyed actors on access");
+    refuses([&] { runtime.at(address); }, "destroyed actor lookup refuses");
   }
   C::Runtime actors(world, resources, services);
   refuses([&] {
@@ -262,6 +481,9 @@ int main() {
         events[15].times[1] == 0x3f199999 &&
         events[21].entry == 4 && events[21].times[0] == 0x3f199999,
         "r5 entry event arguments and order");
+  check(events[3].entry == 7 && events[3].masks[1] == 2 && events[3].times[1] == 0x3f000000 &&
+        events[10].entry == 7 && events[10].times[1] == 0x3f000000,
+        "WBAI-01: state 9 continuation is 0.5 seconds for both variants");
   check(mino.hidden_parts == 0x1234, "Unknown mask comes only from service");
   // First constructor is linked into run60 slot 1. The scheduler invokes
   // the same address held by the grid and HP storage.
@@ -269,50 +491,40 @@ int main() {
   calls.clear(); world.run_objects();
   check(calls == std::vector<std::string>({"damage", "run", "anim", "knockback", "target"}),
         "round-2 bounded tick order");
-  // WarBoar_run state 0 (docs/monsters-2.md "0 idle"): clock > +0xf4, which is
-  // entry age + 180 (fixed), leaves for state 1. The entry age is a caller input.
-  input.state_entry_frame.reset();
-  refuses([&] { actors.tick(large.object->addr); },
-          "state0 requires the entry age behind +0xf4");
+  check(large.hp.mem.load(large.object->addr + 0xf4, 4) == 0,
+        "constructor deadline is zero, without an idle-entry grace period");
   for (const std::int64_t entry : {0, 100}) {
-    input.state_entry_frame = entry;
-    world.frame = entry + 180;
+    large.hp.mem.store(large.object->addr + 0x300, 4, entry);
+    actors.set_state(large.object->addr, 0);
+    large.hp.mem.store(large.object->addr + 0x300, 4, entry + 180);
     actors.tick(large.object->addr);
     check(large.state == 0, "state0 stays through the 180th frame after entry");
-    world.frame = entry + 181;
-    refuses([&] { actors.tick(large.object->addr); },
-            "state0 refuses unported state-1 transition once clock > entry + 180");
-    check(large.state == 0, "idle transition refusal preserves state");
+    large.hp.mem.store(large.object->addr + 0x300, 4, entry + 181);
+    actors.tick(large.object->addr);
+    check(large.state == 1, "strict deadline expiry enters wander");
   }
-  input.state_entry_frame = 0;
   world.frame = 1;
-  // Audit VF-2: a host that cannot cite WarBoar's slot-25 `force` argument
-  // refuses state 0 instead of passing a guessed value.
-  input.sight_refused = true;
-  refuses([&] { actors.tick(large.object->addr); }, "state0 refuses an uncited sight call");
-  input.sight_refused = false;
-  input.has_target = true;
-  refuses([&] { actors.tick(large.object->addr); }, "state0 target Unknown refusal");
-  large.state = 3; // reference state's explicit test input
-  large.hp.mem.store(large.object->addr + 0x232, 2, 3);
-  refuses([&] { actors.tick(large.object->addr); }, "state3 Unknown refusal");
-  input.has_target = false;
-  large.state = 0;
-  large.hp.mem.store(large.object->addr + 0x232, 2, 0);
+  actors.set_state(large.object->addr, 0);
+  sight = true; actors.tick(large.object->addr);
+  check(large.state == 3, "documented force-0 sight activates chase");
+  sight = false; actors.tick(large.object->addr);
+  check(large.state == 0, "chase with no target returns to idle");
   actors.set_state(large.object->addr, 6);
+  large.hp.mem.store(large.object->addr + 0x11a, 2, 8);
   check(large.state == 6 && large.hit_frame == 0 && large.last_attack == 6 &&
         large.hp.mem.load(large.object->addr + 0x232, 2) == 6 &&
         large.hp.mem.load(large.object->addr + 0x3c8, 4) == 0 &&
         large.hp.mem.load(large.object->addr + 0x3cc, 4) == 6,
         "r2 attack state initialization");
-  calls.clear(); input.hit_event = true;
+  calls.clear(); event_bits = 1;
   actors.tick(large.object->addr);
   check(large.hit_frame == 1 && calls.back() == "hit" &&
         large.hp.mem.load(large.object->addr + 0x3c8, 4) == 1,
         "r2 attack hit event");
   actors.tick(large.object->addr);
-  check(large.hit_frame == 1, "one hit per attack state");
-  input.hit_event = false;
+  check(large.hit_frame == 1 && std::count(calls.begin(), calls.end(), "hit") == 2,
+        "supplied hit events are not suppressed by the turning latch");
+  event_bits = 0;
   const auto hp_before_attacker = large.health();
   const auto hit_angle_before = large.hp.mem.load(large.object->addr + 0x2e0, 2);
   const auto owner_before = large.hp.mem.load(large.object->addr + 0x2e4, 4);
@@ -423,12 +635,14 @@ int main() {
             balanced.stats.exp_value,
         "Creature_setStats documented field offsets");
   // Idle timer under the second reference seed's World.
-  input.state_entry_frame = 7;
-  seed7.frame = 187;
+  on7.hp.mem.store(on7.object->addr + 0x300, 4, 7);
+  actors7.set_state(on7.object->addr, 0);
+  on7.hp.mem.store(on7.object->addr + 0x300, 4, 187);
   actors7.tick(on7.object->addr);
-  seed7.frame = 188;
-  refuses([&] { actors7.tick(on7.object->addr); },
-          "seed-7 state0 refuses after entry + 180");
+  check(on7.state == 0, "seed-7 idle equality");
+  on7.hp.mem.store(on7.object->addr + 0x300, 4, 188);
+  actors7.tick(on7.object->addr);
+  check(on7.state == 1, "seed-7 strict idle expiry");
   seed7.frame = 7;
   // Death loot: only the ordinary rank-0, untinted call is modeled.
   for (const auto rank : {1, 2}) {

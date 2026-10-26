@@ -28,31 +28,31 @@ struct EventParams {
 // percentages use the original single-precision 0.01 multiplication.
 std::array<Raw, 5> balance_lookup(const std::uint8_t *, std::size_t,
                                   const std::string &type_name);
-struct TickInput {
-  bool active = false, has_target = false, away_home = false;
-  bool hit_event = false, next_event = false, animation_over = false;
-  // Frame at which state 0 was entered. The class sets +0xf4 to this age plus
-  // the fixed 180 on entry; the boar constructor alone does not establish it.
-  std::optional<std::int64_t> state_entry_frame;
-  // Slot 25 (Creature_canSeeTarget) takes a `force` argument that switches
-  // the ray mode (tools/ref_arena_monsters.py slot25_can_see_target). The
-  // research documents the argument for other classes but not for WarBoar
-  // (docs/monsters-2.md WarBoar says only "sees target"). A host that cannot
-  // cite it leaves has_target unset and sets this: state 0 then refuses.
-  bool sight_refused = false;
+struct AnimationRequest {
+  // Offsets in the resolved class definition, not captured clip pointers.
+  unsigned definition_offset;
+  Raw flags, blend_in, blend_out = 0;
+  bool sync = false;
 };
 struct Services {
-  // Creature_run, updateActive, stepAnim, knockback, pickTarget and the
-  // remaining class AI questions are supplied by the caller. Empty handlers
-  // are Unknown and refuse only when their branch is reached.
-  std::function<TickInput(std::uint32_t)> tick_input;
+  // research-boar-ai 3f81c89. Each service sees the same actor memory. Queries
+  // run after animation/knockback/acquisition, never from a stale input batch.
   std::function<void(std::uint32_t)> process_damage;
-  std::function<void(std::uint32_t)> creature_run;
-  std::function<void(std::uint32_t)> animation_step;
+  std::function<bool(std::uint32_t)> creature_run; // true: return early
+  std::function<bool(std::uint32_t)> update_active;
+  std::function<Raw(std::uint32_t)> animation_step;
   std::function<void(std::uint32_t)> knockback;
   std::function<void(std::uint32_t)> pick_target;
-  std::function<void(std::uint32_t)> dead_update;
+  std::function<void(std::uint32_t, Raw)> dead_update;
   std::function<void(std::uint32_t, std::uint32_t)> hit_all_in_arc;
+  std::function<bool(std::uint32_t, Raw force)> can_see_target;
+  // Both queries use ray mode 0 and lead 0, with signed facing/arc.
+  std::function<bool(std::uint32_t, Raw facing, Raw arc, Raw near, Raw far)> target_in_arc;
+  std::function<bool(std::uint32_t, Raw facing, Raw arc, Raw near, Raw far)> enemy_in_cone;
+  std::function<bool(std::uint32_t)> away_from_home;
+  std::function<void(std::uint32_t)> clear_path, pick_wander_dest;
+  std::function<void(std::uint32_t)> move_to_dest, move_to_target, turn_to_target, move_zero;
+  std::function<void(std::uint32_t, Raw kind)> flee_from_target;
   // The class call sites are known, but model masks, relocated animation
   // state, terrain and hand-part writes have no complete original result.
   // Native resource ID for definition slot 0, then variant.
@@ -71,8 +71,9 @@ struct Services {
   std::function<void(std::uint32_t)> on_death;
   std::function<void(std::uint32_t)> minotaur_death_remainder;
   std::function<void(std::uint32_t)> death_animation;
-  std::function<bool(std::uint32_t, std::uint32_t)> filter_state;
-  std::function<void(std::uint32_t, std::uint32_t)> animation_blend;
+  // nullopt means refused; otherwise the filtered state, including redirects.
+  std::function<std::optional<std::uint32_t>(std::uint32_t, std::uint32_t)> filter_state;
+  std::function<void(std::uint32_t, const AnimationRequest &)> animation_start;
   std::function<void(std::uint32_t)> handle_clear;
   std::function<void(std::uint32_t, std::uint32_t)> handle_link;
 };
@@ -116,7 +117,10 @@ class Runtime {
   resources::Manager &resources_;
   Services services_;
   std::shared_ptr<objects::ClassDef> boar_def_, minotaur_def_;
-  std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
+  mutable std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
+  bool owns_live_object(const objects::GameObject &) const;
+  void retire_stale() const;
+  Actor &register_actor(std::unique_ptr<Actor>);
   std::vector<resources::Handle> handles_;
   std::vector<std::pair<std::string, std::string>> names_;
   creature_hp::Memory *shared_ = nullptr;
@@ -128,7 +132,9 @@ class Runtime {
   Actor &construct_impl(Kind, const objects::Vec3 &, std::uint32_t,
                         objects::Props, Raw,
                         const std::function<void(Actor &)> &);
-  void tick_boar(Actor &, const TickInput &);
+  void tick_boar(Actor &, Raw events);
+  std::uint32_t own_draw(Actor &);
+  void enter_boar_state(Actor &, std::uint32_t);
   void set_state(Actor &, std::uint32_t);
 public:
   // `shared` (optional): the World authority's memory. Adopted actors read
@@ -164,7 +170,10 @@ public:
   std::optional<champions::Bytes> resource_bytes(std::uint32_t token);
   Actor &at(std::uint32_t);
   Actor *find(std::uint32_t);
-  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() const { return actors_; }
+  const std::map<std::uint32_t, std::unique_ptr<Actor>> &actors() const {
+    retire_stale();
+    return actors_;
+  }
   // Opt-in: an Unsupported from the AI portion of a tick is recorded on the
   // actor (Actor::ai_refusal) and counted, and that actor's AI stays frozen;
   // processDamage, Creature_run and the death check keep running.
