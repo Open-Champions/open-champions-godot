@@ -2,6 +2,7 @@
 #include "champions/arena_executable.hpp"
 #include "champions/campaign_moves.hpp"
 #include "champions/combat_runtime.hpp"
+#include "champions/player_death_flow.hpp"
 #include "champions/player_services.hpp"
 #include "champions/script_commands.hpp"
 #include <functional>
@@ -71,6 +72,15 @@ struct Counts {
   std::size_t levels_gained = 0;     // level-ups they caused
   std::size_t factory_runs_skipped = 0;
   std::size_t boar_state_changes = 0, boar_attack_entries = 0, boar_hit_events = 0;
+  std::size_t player_deaths = 0;
+  std::size_t close_menu_requests = 0; // local presentation consumes this serial
+};
+struct DeathView {
+  bool running = false, animation_started = false;
+  unsigned phase = 0, wipe_countdown = 0, dead_countdown = 0, fade = 0;
+  std::size_t animation_steps = 0;
+  Raw animation_time = 0, animation_flags = 0;
+  std::string refusal;
 };
 
 class Fight {
@@ -124,6 +134,13 @@ public:
   // Labelled refusals by reason (what was needed, and why it stayed refused).
   const std::map<std::string, std::size_t> &refusals() const;
   combat_runtime::World &world();
+  const player_death_flow::Flow &death_flow() const;
+  const std::string &death_error() const;
+  DeathView death_view() const;
+  // DIAGNOSTIC ONLY: queue a lethal hit from a live level actor through
+  // Player_takeDamage, then let the real Player_run process it. No HP store.
+  // Boar attack AI is unported; this is not evidence of an organic attack.
+  std::string diagnostic_lethal_hit();
 
 private:
   struct Impl;

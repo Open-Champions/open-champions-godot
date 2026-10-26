@@ -3,7 +3,9 @@ extends RefCounted
 const WorldGeometryFixture = preload("res://tests/world_geometry_fixture.gd")
 const ModelFixture = preload("res://tests/model_fixture.gd")
 const ArchiveFixture = preload("res://tests/texture_fixture.gd")
-const DIRECTORY := "user://session-sandbox-smoke"
+# Other worktrees run this gate concurrently against the same application
+# user directory. Each process owns its fixtures and intentional temp blocker.
+var DIRECTORY := "user://session-sandbox-smoke-" + str(OS.get_process_id())
 var checks := 0
 var failures := 0
 var files: Array[String] = []

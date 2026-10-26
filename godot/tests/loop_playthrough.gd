@@ -1504,11 +1504,61 @@ func run() -> void:
 		"collision differs" in str(mismatch.get("error", ""))
 	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
 		{"different_level_loaded": other_loaded})
+	# A separate, explicitly diagnostic lethal hit on the real level's Player.
+	# It queues Player_takeDamage; no HP/body/state/clip word is forced. The
+	# source is one of the live factory enemies, whose attack AI is unported.
+	var death_loaded: bool = cold.load_session_file(save_path)
+	if death_loaded:
+		cold.start_play()
+		cold.diagnostic_player_death = true
+		scene = cold
+		fe = cold.frontend
+		advance(0, 90) # let spawn/initial state settle before queuing the hit
+		var death_before: Dictionary = cold.controller.get_observation()
+		var queued: Dictionary = cold.controller.fight_diagnostic_lethal_hit()
+		# A local inventory can be open during the hit. The native death closes
+		# it immediately, then requests closure again on the wipe zero crossing.
+		cold.game_menus.open_screen("inventory")
+		advance(0, 1)
+		var entry: Dictionary = cold.controller.get_observation()
+		var menu_closed: bool = not cold.game_menus.open
+		await capture("11-player-dead")
+		advance(0, 254) # 239 countdown steps, then 15 fade steps
+		await capture("12-player-death-fade")
+		advance(0, 100)
+		var dead: Dictionary = cold.controller.get_observation()
+		var retained: bool = int(dead.get("gold", -1)) == int(death_before.get("gold", -2)) \
+			and int(dead.get("experience", -1)) == int(death_before.get("experience", -2)) \
+			and int(dead.get("level", -1)) == int(death_before.get("level", -2))
+		var sequence: bool = queued.get("ok", false) and int(entry.get("fight_player_action_state", -1)) == 4 \
+			and float(entry.get("hp", -1)) == 0.0 and int(entry.get("fight_death_countdown", -1)) == 239 \
+			and menu_closed and dead.get("fight_death_animation_started", false) \
+			and int(dead.get("fight_death_animation_steps", 0)) > 0 \
+			and int(dead.get("fight_death_countdown", -1)) == 0 and int(dead.get("fight_dead_countdown", -1)) == 0 \
+			and int(dead.get("fight_death_fade", -1)) == 128 and int(dead.get("fight_death_phase", -1)) == 1 \
+			and not str(dead.get("fight_death_error", "")).is_empty() and retained \
+			and not dead.get("fight_failed", true)
+		mark("player_death", "blocked_death_reload" if sequence else "refused",
+			{"diagnostic_lethal_hit": true, "death_sequence_verified": sequence,
+			"actors": dead.get("fight_enemies", []).size(), "menu_closed": menu_closed,
+			"hp_zero": float(dead.get("hp", -1)) == 0.0,
+			"native_clip_started": dead.get("fight_death_animation_started", false),
+			"native_clip_steps": dead.get("fight_death_animation_steps", 0),
+			"pose_rendered": dead.get("fight_death_pose_rendered", false),
+			"wipe_countdown": dead.get("fight_death_countdown", -1), "fade": dead.get("fight_death_fade", -1),
+			"phase": dead.get("fight_death_phase", -1), "record_values_retained": retained,
+			"reload_refused": not str(dead.get("fight_death_error", "")).is_empty(),
+			"respawn_completed": false})
+		await capture("13-player-reload-refused")
+	else:
+		mark("player_death", "refused", {"saved_level_reloaded": false})
 	cold.queue_free()
+	scene = null
+	fe = null
 	await process_frame
 	save_json()
 	var incomplete := false
 	for row in rows:
-		if str(row.result) in ["refused", "blocked_by_walk_and_talk", "blocked_unported_combat"]:
+		if str(row.result) in ["refused", "blocked_by_walk_and_talk", "blocked_unported_combat", "blocked_death_reload"]:
 			incomplete = true
 	quit(1 if incomplete else 0)

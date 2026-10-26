@@ -80,6 +80,10 @@ struct Services {
   // any random draw or victim mutation; the host records the reason. Synthetic
   // composition has no gate and uses the established damage pipeline.
   std::function<bool(Address victim, Address attacker)> damage_permitted;
+  // Optional campaign task at priority 20, after runObjects (10); the alive
+  // rebuild/check below still runs at the end of the tick (tasks_run).
+  std::function<void()> death_task;
+  std::function<void()> check_all_dead;
   std::function<bool()> dialog_is_open;
   std::function<Raw()> jumpgate_travel_state;
   // Required for reachable terrain/animation services. No silent zero defaults.

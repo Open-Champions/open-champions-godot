@@ -19,6 +19,7 @@ var raw_observation: Dictionary = {}
 # controller.fight_place_player (DIAGNOSTIC; not an original routine). Shown on
 # the health label so a screenshot cannot be read as an organic approach.
 var diagnostic_placement_at_weakest := false
+var diagnostic_player_death := false
 var held_commands := 0
 var pending_damage := false
 var paused := false
@@ -249,6 +250,7 @@ func _observe(result: Dictionary) -> void:
 	health_bar.max_value = maxf(float(result.max_hp), 0.01)
 	health_bar.value = clampf(float(result.hp), 0.0, health_bar.max_value)
 	health_label.text = "Health %s / %s" % [str(snappedf(float(result.hp), 0.01)), str(snappedf(float(result.max_hp), 0.01))]
+	health_label.tooltip_text = ""
 	if result.get("recovery_enabled", false):
 		health_label.text += " · Mana %.2f / %.2f\nPending HP %.2f · Mana %.2f" % [result.mana, result.max_mana, result.pending_health, result.pending_mana]
 	if result.get("facing_enabled", false) and not result.get("fight_player_ready", false):
@@ -269,6 +271,16 @@ func _observe(result: Dictionary) -> void:
 			int(fight_counts.get("loot_items", 0)), int(result.get("gold", -1))]
 		if diagnostic_placement_at_weakest:
 			health_label.text += "\nDIAGNOSTIC placement at the lowest-HP boar"
+		if int(result.get("fight_player_action_state", 0)) == 4:
+			health_label.text += "\nDead · party countdown %d · revival countdown %d" % [
+				int(result.get("fight_death_countdown", 0)), int(result.get("fight_dead_countdown", 0))]
+			if diagnostic_player_death:
+				health_label.text += "\nDIAGNOSTIC lethal hit through Player_takeDamage"
+			health_label.text += "\nDeath clip runs natively; displayed body remains a rest pose."
+			var death_error := str(result.get("fight_death_error", ""))
+			if not death_error.is_empty():
+				health_label.tooltip_text = death_error
+				health_label.text += "\nReload refused: no valid checkpoint; saved records and world/camera restoration required." if death_error.begins_with("save_reload refused:") else "\nDeath flow refused: " + death_error
 	animation_cache_label.visible = result.get("animation_cache_enabled", false)
 	if animation_cache_label.visible:
 		animation_cache_label.text = "Animation-cache diagnostic · synthetic data, no model pose\nTrack %s · sample track %s · time raw %s · event %s\nRaw joint values %s" % [result.animation_track, result.animation_sample_track, result.animation_time_raw, result.animation_event, str(result.animation_joints_raw)]
