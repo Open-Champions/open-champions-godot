@@ -38,3 +38,26 @@ Same drivers/method as wave 32, output directory changed to wave 33, build paral
 ## Remaining boundaries
 
 The audited loading prerequisite adapter is absent and must refuse. Original physical interaction, gate lifecycle, unsupported actor services, Gold/ground pickup, checkpoint/reload, trajectory/pixel parity and cross-platform execution remain bounded as in wave 32 and the incoming audits. Fresh gate results are pending; B1H-7 is not yet closed by this record.
+
+## Full CTest result record
+
+Executed on runtime candidate `264150c3` after pending record `4fd70467`. Exact output tail:
+
+```text
+        Start 244: campaign-fight-boundaries
+249/251 Test #241: minotaur-class .......................   Passed    0.25 sec
+250/251 Test #242: minotaur-stats-exact .................   Passed    0.39 sec
+251/251 Test #244: campaign-fight-boundaries ............   Passed    0.22 sec
+
+99% tests passed, 1 tests failed out of 251
+
+Label Time Summary:
+fx             =   4.89 sec*proc (5 tests)
+native-fx-2    =   4.89 sec*proc (5 tests)
+
+Total Test time (real) = 2300.12 sec
+
+The following tests FAILED:
+	201 - netplay (Timeout)
+Errors while running CTest
+```
