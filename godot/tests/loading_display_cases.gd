@@ -4,6 +4,14 @@ extends SceneTree
 # alias/start/fade slices. No game bytes are part of this test.
 const Display = preload("res://real_data/loading_display.gd")
 const TerrainStream = preload("res://scenes/level_texture_stream.gd")
+const RealPlay = preload("res://scenes/real_data_play.gd")
+
+class CellSource extends RefCounted:
+	var succeeds := false
+	func cell_view(_cell: int, _base: int) -> Dictionary:
+		return {"ok": succeeds, "error": "synthetic decode failure", "groups": [], "images": []}
+	func window_order(_cells: PackedInt32Array) -> PackedInt64Array:
+		return PackedInt64Array()
 var checks := 0
 var failures := 0
 
@@ -73,10 +81,48 @@ func _initialize() -> void:
 	terrain.resident = {1: []}
 	expect(terrain.loading_busy(), "missing wanted terrain cell is busy")
 	terrain.resident[2] = []
+	terrain.cell_results = {1: {"ok": true}, 2: {"ok": true}}
 	expect(not terrain.loading_busy(), "complete terrain window is ready")
 	terrain.pending_cell = 3
 	expect(terrain.loading_busy(), "pending terrain build is busy")
 	terrain.free()
+	for asynchronous in [false, true]:
+		for succeeds in [false, true]:
+			var source := CellSource.new()
+			source.succeeds = succeeds
+			var stream := TerrainStream.new()
+			stream.streamer = source
+			stream.wanted = PackedInt32Array([1])
+			if asynchronous:
+				stream._advance_stream()
+				while stream.pending_thread.is_alive(): OS.delay_usec(100)
+				stream._advance_stream()
+				stream._advance_stream()
+			else:
+				stream._load_next()
+			var state: Dictionary = stream.loading_state()
+			expect(state.ok == succeeds, "cell success independent of empty geometry, async=%s success=%s" % [asynchronous, succeeds])
+			if succeeds:
+				expect(not state.busy, "successful empty cell is ready")
+			else:
+				expect(state.error == "synthetic decode failure", "required decode failure retains error")
+				var loading_host := RealPlay.new()
+				loading_host.real = RealPlay.RealData.new()
+				loading_host.real.stream_textures = true
+				loading_host.terrain_root = stream
+				expect(not loading_host._loading_terrain_state().ok, "host propagates failed required cell")
+				loading_host.real.free()
+				loading_host.real = null
+				loading_host.terrain_root = null
+				loading_host.free()
+			stream.wanted = PackedInt32Array()
+			expect(stream.loading_state().ok, "failed cell outside required window does not refuse")
+			stream.release_resources()
+			stream.free()
+	var host := RealPlay.new()
+	host.controller = ClassDB.instantiate("ChampionsSessionController")
+	expect(not host._loading_prerequisite_state().ok, "missing loading prerequisite adapter refuses")
+	host.free()
 	var display := Display.new()
 	display.begin_fade()
 	expect(display.fade_present == 0 and Display.fade_value(display.fade_present) == 0,

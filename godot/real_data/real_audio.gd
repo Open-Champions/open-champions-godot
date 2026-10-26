@@ -72,7 +72,8 @@ func ready_tick(packet: Dictionary) -> void:
 	var serviced := false
 	if packet.has("cosmetic_draw"):
 		ambient_poll_refused = false
-		serviced = bridge.sound_tick(int(packet.cosmetic_draw))
+		bridge.sound_tick(int(packet.cosmetic_draw))
+		serviced = bridge.get_last_error().is_empty()
 	elif ambient_poll_refused:
 		serviced = bridge.service_session_sound_without_ambient()
 	else:

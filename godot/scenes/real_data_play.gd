@@ -305,9 +305,21 @@ func _loading_terrain_state() -> Dictionary:
 		return {"ok": false, "error": "Terrain state unavailable."}
 	if not real.stream_textures:
 		return {"ok": true, "busy": false}
-	if not terrain_root.has_meta("level_texture_streamed") or not terrain_root.has_method("loading_busy"):
+	if not terrain_root.has_meta("level_texture_streamed") or not terrain_root.has_method("loading_state"):
 		return {"ok": false, "error": "Terrain stream readiness unavailable."}
-	return {"ok": true, "busy": bool(terrain_root.loading_busy())}
+	return terrain_root.loading_state()
+
+func _loading_prerequisite_state() -> Dictionary:
+	if controller == null or not controller.has_method("loading_prerequisite_state"):
+		return {"ok": false, "error": "Deferred script, equipment, peer and store loading prerequisites have no supported state adapter."}
+	var state: Dictionary = controller.call("loading_prerequisite_state")
+	if not state.get("ok", false): return state
+	for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"]:
+		if not state.get(field) is bool:
+			return {"ok": false, "error": "Loading prerequisite state incomplete: " + field}
+	if not state.deferred_complete or not state.peers_ready or not state.stores_complete:
+		return {"ok": false, "error": "Deferred script, peer or store loading work is not complete."}
+	return state
 
 func _refuse_loaded_transition(requested: String, reason: String) -> bool:
 	_refused_level_request = requested
@@ -382,9 +394,12 @@ func _apply_level_change() -> bool:
 				return _refuse_loaded_transition(requested, str(readiness.get("error", "Loading readiness unavailable.")))
 			if displayed >= 1500 and readiness.get("busy", false):
 				return _refuse_loaded_transition(requested, "Terrain still busy at the documented warm-up escape.")
-			# This offline host has no pending-equipment queue, peer barrier, or
-			# store-stock adapter. Never infer their completion from elapsed time.
-			warmup = LoadingDisplay.warmup_remaining(warmup, bool(readiness.get("busy", false)), false, displayed)
+			var prerequisites := _loading_prerequisite_state()
+			if not prerequisites.get("ok", false):
+				return _refuse_loaded_transition(requested, str(prerequisites.get("error", "Loading prerequisites unavailable.")))
+			if displayed >= 1500 and prerequisites.equipment_pending:
+				return _refuse_loaded_transition(requested, "Equipment still pending at the documented warm-up escape.")
+			warmup = LoadingDisplay.warmup_remaining(warmup, bool(readiness.get("busy", false)), prerequisites.equipment_pending, displayed)
 	else:
 		loading_display.visible = false
 		loading_display.phase = "hidden"

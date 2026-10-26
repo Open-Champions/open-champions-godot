@@ -2,6 +2,9 @@ extends SceneTree
 
 # Synthetic mixer boundary cases. No disc bytes are used.
 const Bank = preload("res://audio/synthetic_bank.gd")
+class AudioAdapter extends "res://real_data/real_audio.gd":
+	func update_camera() -> void:
+		pass
 var checks := 0
 var failures := 0
 
@@ -41,6 +44,20 @@ func _initialize() -> void:
 		"missing cosmetic draw refuses without mutation")
 	check(bridge.sound_tick(7) and bridge.get_observation().level_countdown == 14407,
 		"supplied cosmetic draw resumes documented ambient decision")
+	var audio := AudioAdapter.new()
+	audio.bridge = bridge
+	audio.playing = true
+	audio.level_key = "synthetic"
+	audio.last_tick = 0
+	before = bridge.get_observation()
+	audio.ready_tick({"tick": 1, "level_key": "synthetic", "events": [], "cosmetic_draw": 7})
+	after = bridge.get_observation()
+	check(after.tick == before.tick + 1 and after.draw_frame == before.draw_frame + 1,
+		"supplied no-queue tick advances service and draw counters through adapter")
+	check(audio.bank_errors.is_empty() and audio.last_tick == 1,
+		"supplied no-queue tick has no bank error")
+	audio.bridge = null
+	audio.free()
 	bridge = null
 	print("LOADING_AUDIO %d/%d" % [checks - failures, checks])
 	quit(1 if failures else 0)
