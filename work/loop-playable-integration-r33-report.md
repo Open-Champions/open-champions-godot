@@ -39,9 +39,12 @@ Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-on
 
 - Recovery private sweep `w33-off`: **111/111 tried, loaded, played; 230 checks, 0 failures, 0 top-level refusal kinds**. Four 60-tick slices; private disc read-only. Internal unsupported-service counters remain separate. Counts-only summaries: ignored `work/private/w33-off-s{0,28,56,84}.json`; log `resume-sweep-w33-off.out`. Full journey remains pending.
 
+- Focused fresh matrix counts: loading display **57/57**, loading audio **10/10**, enemy identity **22/22 headless and rendered**, campaign moves **33/33**, death UI **11/11 headless, 13/13 rendered**. Fresh matrix logs contain **0 SCRIPT ERROR** entries; **18 logs retain ObjectDB exit-leak warnings**.
+- **B1H-7 CLOSED for gate-report completeness**: integrated Blood1 hostile native paths were executed by the focused actor gate (including the 320 original-backed targeted frames), the inherited full native result is recorded without rerun, all four extension/library builds pass, 54 inherited Godot cases plus seven additions pass, both 111-level sweeps pass and FULL_TRACE is unchanged. This does not claim live Blood1 hostile scene binding, placement or landed damage; those remain outside the actor gate's evidence.
+
 ## Full scripted journey
 
-Pending fresh headless/rendered execution; compare against wave 32's 53/54 steps without relaxing acceptance. Native AI/death diagnostic probes above pass; those do not establish the full journey.
+Recovery progress at `add10b65`: native Release, all four universal builds, focused Blood1 actors, AI/death probes, 61/61 Godot matrix, 2,641-check synthetic combat, 300/300 save/load, unchanged trace and both 111-level/230-check sweeps PASS. Fresh headless/rendered execution is now RUNNING; compare against wave 32's 53/54 steps without relaxing acceptance. These preceding gates do not establish the full journey.
 
 ## Exact command families
 
