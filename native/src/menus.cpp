@@ -261,7 +261,6 @@ std::vector<Gap> gaps() {
       {"skill-tree-node-pairs", "The 17 line calls were not recorded as endpoint pairs."},
       {"hotkey-from-skills", "This screen does not send the HUD spell-assign message."},
       {"shop-stock-generation", "Stock generation was not run again in the menu research."},
-      {"shop-choice-centre-x", "Shop choice rows have a baseline y. Their centre x was not in the checked arguments."},
       {"workshop-body", "Mode 3 hands the cell to workshop_input. That body is not in this contract."},
       {"confirm-box-geometry", "An equipped sell opens hud_confirmBox. Its frame was not executed."},
       {"exp-threshold-table", "Experience thresholds at 0x41b558 are not in this contract. Level award applies the documented point bands only."},
@@ -516,8 +515,10 @@ bool Ledger::bag_index(std::uint32_t addr, int &bag, int &index) const {
 }
 
 Action Ledger::press(int mode, std::uint32_t edge) {
-  if (live_record_ && mode != 2)
-    throw Refusal("live imported record supports inventory actions only");
+  if (live_record_ && mode == 0)
+    throw Refusal("shop stock generation is unknown; no live stock item may be bought");
+  if (live_record_ && mode != 1 && mode != 2)
+    throw Refusal("live imported record supports inventory and shop sale actions only");
   if (page() >= 3)
     return Action::None;
   const auto cell = cursor_cell(0, cursor_x_, cursor_y_);
@@ -785,6 +786,19 @@ Frame Ledger::frame(const std::string &screen) {
     return out;
   }
   if (screen == "shop") {
+    // Only the first sprite's tint is pinned. The other two observed calls
+    // have no verified tint and cannot yet be submitted by this renderer.
+    out.sprites.push_back({66, 210, 0, 0x80808080u, "", "buttontop.tex"});
+    out.texts.push_back({160, 203, 0x80323c3cu, true, "Buy"});
+    out.texts.push_back({160, 243, 0x80323c3cu, true, "Sell"});
+    out.draw_order = {{0, 0, false, 0}, {0, 1, true, 0}, {0, 2, true, 1}};
+    out.gaps.push_back({"shop-buysell-tint", "The buysell.tex submission tint is not pinned; draw refused."});
+    out.gaps.push_back({"shop-front-tint", "The front.tex submission tint is not pinned; draw refused."});
+    out.gaps.push_back({"shop-choice-text", "Choice positions are observed; English labels are host text until localized strings are resolved."});
+    if (live_record_) {
+      out.gaps.push_back({"shop-stock-count", "Fixed stock count and generation budget are unknown; stock is not generated."});
+      return out;
+    }
     const auto strip = inventory_strip(0);
     const auto above = inventory_strip_above(0);
     out.rects.push_back({strip.x0, strip.y0, strip.x1, strip.y1, 0x80808080u, strip.layer});
@@ -882,18 +896,44 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
   }
   // Collect file-backed definition rows before changing the live ledger.
   std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> image_rows;
+  std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> image_strings;
+  const auto image_cstr = [&](std::uint32_t at) {
+    if (!at) throw Refusal("live definition name or stack stem has no executable address");
+    std::vector<std::uint8_t> value;
+    // Same bounded image-string limit as script_items::image_tables.
+    for (std::uint32_t i = 0; i < 0x4000u; ++i) {
+      const auto byte = image_byte(at + i);
+      value.push_back(byte);
+      if (!byte) return value;
+    }
+    throw Refusal("live definition name or stack stem has no bounded terminator");
+  };
   for (const auto *rows : {&tables.defs, &tables.presets}) {
     for (const auto &definition : *rows) {
       if (!definition) continue;
       std::vector<std::uint8_t> row(0x40);
       for (std::uint32_t i = 0; i < 0x40; ++i) row[i] = image_byte(definition->addr + i);
+      const auto name_at = std::uint32_t(row[0]) | std::uint32_t(row[1]) << 8 |
+                           std::uint32_t(row[2]) << 16 | std::uint32_t(row[3]) << 24;
+      auto name = image_cstr(name_at);
+      if (std::string(name.begin(), name.end() - 1) != definition->name)
+        throw Refusal("live definition name differs from the selected executable table");
+      image_strings.emplace_back(name_at, std::move(name));
       image_rows.emplace_back(definition->addr, std::move(row));
     }
+  }
+  for (const auto stem_at : {0x5385e0u, 0x538660u}) {
+    auto stem = image_cstr(stem_at);
+    if (stem.size() == 1)
+      throw Refusal("live stack stem is empty; sale quantity and credit are unsafe");
+    image_strings.emplace_back(stem_at, std::move(stem));
   }
   tables_ = std::move(tables);
   pictures_ = std::move(pictures);
   for (const auto &[at, row] : image_rows)
     for (std::uint32_t i = 0; i < row.size(); ++i) machine_->w8(at + i, row[i]);
+  for (const auto &[at, value] : image_strings)
+    for (std::uint32_t i = 0; i < value.size(); ++i) machine_->w8(at + i, value[i]);
   // The existing passive-rank reader consults the file-backed class rows.
   for (std::uint32_t i = 0; i < CLASS_STRIDE * 7u; ++i)
     machine_->w8(CLASS_ROW + i, image_byte(CLASS_ROW + i));
@@ -903,6 +943,9 @@ void Ledger::adopt_record(const std::vector<std::uint8_t> &bytes, items::Tables 
   live_record_ = true;
   for (auto &cells : display_cells_) cells.clear();
   for (auto &reason : display_refusals_) reason.clear();
+  // The authored constructor's stock item is a test fixture, never live stock.
+  machine_->w32(stock_addr_, 0);
+  machine_->w32(0x868078, 0);
   set_page(0);
 }
 

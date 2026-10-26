@@ -23,8 +23,11 @@ var status: Label
 var opener: Button
 var inventory_art: RefCounted
 var live_imported := false
+var vendor_open := false
+var vendor_resume := false
 var icon_index := PackedByteArray()
 var icon_cache := {}
+var shop_art_cache := {}
 var icon_index_path := ""
 var inventory_art_path := ""
 
@@ -142,6 +145,7 @@ func sync_font(art) -> void:
 			inventory_art = FrontendPainter.new()
 			inventory_art.configure(real, scene.get("inspector"))
 			inventory_art_path = art_path
+			shop_art_cache.clear()
 			queue_redraw()
 		var index_path := str(real.files.get("piccache.hdr", ""))
 		if index_path != icon_index_path:
@@ -183,6 +187,25 @@ func _icon(picture: String) -> Dictionary:
 	icon_cache[picture] = {"texture": ImageTexture.create_from_image(image), "width": int(decoded.width), "height": int(decoded.height)}
 	return icon_cache[picture]
 
+func _shop_art(resource: String) -> Dictionary:
+	if shop_art_cache.has(resource):
+		return shop_art_cache[resource]
+	if inventory_art == null or scene == null or scene.get("real") == null:
+		return {}
+	var real = scene.get("real")
+	var lumps: Array[String] = ["interfac.lmp", "inventry.lmp"]
+	for name in real.files.keys():
+		var key := str(name)
+		if key.to_lower().ends_with(".lmp") and not lumps.has(key):
+			lumps.append(key)
+	for lump in lumps:
+		var art: Dictionary = inventory_art.load_art(lump, resource, true)
+		if not art.is_empty():
+			shop_art_cache[resource] = art
+			return art
+	shop_art_cache[resource] = {}
+	return {}
+
 func open_screen(which: String) -> void:
 	if service == null:
 		return
@@ -208,11 +231,50 @@ func open_screen(which: String) -> void:
 	_refresh_status()
 	queue_redraw()
 
+func open_vendor_shop() -> Dictionary:
+	if scene == null or not scene.has_method("set_paused") or scene.get("controller") == null or not scene.get("session_started") or scene.get("stopped") or scene.get("paused"):
+		return {"ok": false, "error": "Shop refused: offline pause lifecycle is unavailable."}
+	if vendor_open:
+		return {"ok": true, "stock_refusal": "Fixed stock count and generation budget are unknown."}
+	scene.set_paused(true)
+	var observed: Dictionary = scene.get("raw_observation")
+	if not bool(scene.get("paused")) or not observed.get("paused", false):
+		return {"ok": false, "error": "Shop refused: offline session did not pause."}
+	# The session owns the pause; its generic pause controls would consume the
+	# viewport needed by the shop. Keep that separate host panel hidden here.
+	var flow_menu: Control = scene.get("menu")
+	if flow_menu != null:
+		flow_menu.hide()
+		if scene.has_method("_frame_layout"):
+			scene._frame_layout()
+	vendor_resume = true
+	var adopted := adopt_imported()
+	vendor_open = true
+	open_screen("shop")
+	if not adopted.get("ok", false):
+		live_imported = false
+		_refresh_status()
+		status.text = str(adopted.get("error", "Real player record unavailable.")) + "\n" + status.text
+		return adopted
+	return {"ok": true, "stock_refusal": "Fixed stock count and generation budget are unknown."}
+
 func close_menu() -> void:
+	var was_vendor := vendor_open
+	var resume := was_vendor and vendor_resume
 	open = false
+	vendor_open = false
+	vendor_resume = false
 	mouse_filter = MOUSE_FILTER_IGNORE
 	opener.visible = true
 	host.visible = false
+	if resume and scene != null and scene.has_method("set_paused"):
+		scene.set_paused(false)
+	if was_vendor:
+		# shop_close unloads the shared inventory resources after resume refresh.
+		inventory_art = null
+		inventory_art_path = ""
+		icon_cache.clear()
+		shop_art_cache.clear()
 	queue_redraw()
 
 func _open_inventory_page(page: int) -> void:
@@ -242,7 +304,19 @@ func handle_host_key(event: InputEvent) -> bool:
 		_press(int(row.drop_mask))
 		return true
 	if key == KEY_K:
+		if vendor_open and not live_imported:
+			status.text = "Real player record unavailable; transaction refused.\n" + status.text
+			return true
 		_press(int(row.shop_mask))
+		return true
+	if vendor_open and key == KEY_S:
+		if not live_imported:
+			status.text = "Real player record unavailable; sale refused.\n" + status.text
+			return true
+		open_screen("shop-bag")
+		return true
+	if vendor_open and key == KEY_B:
+		open_screen("shop")
 		return true
 	return false
 
@@ -294,6 +368,9 @@ func _call(method: String, args: Array) -> void:
 func _press(edge: int) -> void:
 	if service == null:
 		return
+	if vendor_open and not live_imported:
+		status.text = "Real player record unavailable; transaction refused.\n" + status.text
+		return
 	var result: Dictionary = service.press(mode, edge)
 	if result.get("ok", false) and live_imported and scene != null and scene.get("ps2_import") != null:
 		var synced: Dictionary = scene.get("ps2_import").replace_record(service.record_bytes())
@@ -314,7 +391,11 @@ func _refresh_status() -> void:
 	if not row.get("ok", false):
 		status.text = str(row.get("error", "menu state refused"))
 		return
-	var source := "Imported player" if row.get("live_record", false) else "Authored fixture"
+	var source := "Authored fixture"
+	if vendor_open and not live_imported:
+		source = "No imported player"
+	elif live_imported and row.get("live_record", false):
+		source = "Imported player"
 	var font_note := "" if small_font_texture != null else "\nGame font unavailable; item text hidden."
 	var drop_note := "\nDrop unavailable for imported play." if row.get("live_record", false) else ""
 	var detail_note := "\nItem detail fields unavailable." if screen == "inventory" else ""
@@ -326,8 +407,9 @@ func _refresh_status() -> void:
 				page_note = "\nPAGE ITEMS REFUSED: display grid unavailable."
 			elif str(gap.id) == "inventory-grid-footprint":
 				page_note = "\nITEM FOOTPRINT REFUSED: later placement unknown."
+	var shop_note := "\nShop stock unavailable: fixed count and generation budget unknown. S sell / B buy / Esc close." if vendor_open else ""
 	status.text = "%s · Page %d\nGold %d · Level %d\nJ equip/unequip · U drop\n%s controls are host keys.%s%s%s%s" % [
-		source, int(row.page), int(row.gold), int(row.level), str(row.scheme).capitalize(), drop_note, detail_note, font_note, page_note]
+		source, int(row.page), int(row.gold), int(row.level), str(row.scheme).capitalize(), drop_note, detail_note + shop_note, font_note, page_note]
 
 func _gui_input(event: InputEvent) -> void:
 	if not open or service == null:
@@ -345,6 +427,14 @@ func _logical(pos: Vector2) -> Vector2:
 	if factor <= 0.0:
 		return Vector2.ZERO
 	return Vector2(pos.x / factor, pos.y / (factor * 480.0 / 448.0))
+
+func _shop_queue(frame: Dictionary) -> Array:
+	var packets: Array = frame.get("draw_order", []).duplicate(true)
+	packets.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if int(a.layer) != int(b.layer):
+			return int(a.layer) < int(b.layer)
+		return int(a.submission) > int(b.submission))
+	return packets
 
 func _draw() -> void:
 	if not open or service == null:
@@ -450,6 +540,21 @@ func _draw() -> void:
 			var cursor_art: Dictionary = inventory_art.load_art(str(sprite.lump), str(sprite.resource), true)
 			if not cursor_art.is_empty():
 				draw_texture(cursor_art.texture, Vector2(int(sprite.x), int(sprite.y)), _word(int(sprite.tint)))
+	if screen == "shop":
+		for packet in _shop_queue(drawn):
+			var index := int(packet.index)
+			if str(packet.kind) == "sprite":
+				var sprites: Array = drawn.get("sprites", [])
+				if index < 0 or index >= sprites.size(): continue
+				var sprite: Dictionary = sprites[index]
+				var art: Dictionary = _shop_art(str(sprite.resource))
+				if not art.is_empty():
+					draw_texture(art.texture, Vector2(int(sprite.x), int(sprite.y)), _word(int(sprite.tint)))
+			elif str(packet.kind) == "text":
+				var shop_texts: Array = drawn.get("texts", [])
+				if index < 0 or index >= shop_texts.size() or (vendor_open and index >= 2): continue
+				var row_text: Dictionary = shop_texts[index]
+				_glyphs(int(row_text.x), int(row_text.y), str(row_text.text), int(row_text.colour), bool(row_text.centred), false)
 	if screen in ["stats", "level-up", "skills"] or (screen == "inventory" and int(service.state().get("page", 0)) >= 3):
 		for text in drawn.texts:
 			_glyphs(int(text.x), int(text.y), str(text.text), int(text.colour), bool(text.centred), true)

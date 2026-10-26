@@ -1,4 +1,5 @@
 extends Control
+signal shop_requested(slot: int)
 
 # The NPC dialog box (docs/DIALOG.md). The native controller owns the dialog
 # machine, its draw calls and the gamefontmed glyph layout; this view only
@@ -65,6 +66,11 @@ func _forward_voice() -> void:
 	if audio_owner != null and audio_owner.get("audio") != null:
 		bridge = audio_owner.audio.get("bridge")
 	for event in controller.dialog_events():
+		if str(event.get("kind", "")) == "shop":
+			var shop_args: Array = event.get("args", [])
+			if shop_args.size() >= 3 and int(shop_args[1]) == 0 and int(shop_args[2]) == 1:
+				shop_requested.emit(int(shop_args[0]))
+			continue
 		if bridge == null: continue
 		var args: Array = event.get("args", [])
 		match str(event.get("kind", "")):

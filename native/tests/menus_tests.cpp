@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 using namespace champions::menus;
@@ -166,6 +167,18 @@ void layout_vectors() {
 
 void ledger_vectors() {
   {
+    Ledger shop;
+    const auto initial = shop.bag_count(0);
+    expect(shop.press(0, CROSS_CONFIRM.shop) == Action::Buy, "fixture shop buy action");
+    expect(shop.gold() == 441 && shop.bag_count(0) == initial + 1,
+           "100 value buy truncates to 59 and inserts in player bag");
+    const auto sold = hit_cell(0, 0, 2);
+    shop.set_cursor(sold.x0, sold.y0);
+    expect(shop.press(1, CROSS_CONFIRM.shop) == Action::Sell, "fixture shop sell action");
+    expect(shop.gold() == 445 && shop.bag_count(0) == initial,
+           "100 value sell credits 4 and removes from player bag");
+  }
+  {
     Ledger book;
     expect(book.gold() == 500 && book.bag_count(0) == 2 && book.skill_points() == 4, "seed");
     expect(book.stat_points() == 3 && book.level() == 5 && book.acknowledged() == 4, "seed points");
@@ -181,20 +194,47 @@ void ledger_vectors() {
       auto def = std::make_shared<champions::simulation::rta::items::Definition>();
       def->addr = champions::simulation::rta::items::A_DEFS + static_cast<std::uint32_t>(i) * 64;
       def->name = i == 0 ? "blade" : "charm";
+      def->price = 10;
       def->slot = i;
       def->category = 0;
       tables.defs.push_back(def);
     }
     const auto page_tables = tables;
+    std::unordered_map<std::uint32_t, std::uint8_t> image;
+    const auto image_word = [&](std::uint32_t at, std::uint32_t value) {
+      for (unsigned byte = 0; byte < 4; ++byte)
+        image[at + byte] = static_cast<std::uint8_t>(value >> (byte * 8));
+    };
+    const auto image_string = [&](std::uint32_t at, const std::string &value) {
+      for (std::size_t byte = 0; byte < value.size(); ++byte)
+        image[at + static_cast<std::uint32_t>(byte)] = static_cast<std::uint8_t>(value[byte]);
+      image[at + static_cast<std::uint32_t>(value.size())] = 0;
+    };
+    for (int index = 0; index < 2; ++index) {
+      const auto at = champions::simulation::rta::items::A_DEFS + static_cast<std::uint32_t>(index) * 64;
+      const auto name_at = 0x3f7000u + static_cast<std::uint32_t>(index) * 0x10u;
+      image_word(at, name_at);
+      image_string(name_at, index == 0 ? "blade" : "charm");
+    }
+    image[champions::simulation::rta::items::A_DEFS + 64 + 0x1c] = 1;
+    image_string(0x5385e0u, "throw");
+    image_string(0x538660u, "throw");
+    const auto image_byte = [&](std::uint32_t at) -> std::uint8_t {
+      const auto found = image.find(at);
+      return found == image.end() ? 0 : found->second;
+    };
     Ledger copied;
-    copied.adopt_record(authored.record_bytes(), std::move(tables), {},
-                        [](std::uint32_t at) -> std::uint8_t {
-                          return at == champions::simulation::rta::items::A_DEFS + 64 + 0x1c ? 1 : 0;
-                        });
+    copied.adopt_record(authored.record_bytes(), std::move(tables), {}, image_byte);
     expect(copied.press(2, 0x40) == Action::Equip &&
            copied.record_word(0x43f0) == PLAYER + BAG_ITEMS, "imported record equip pointer");
     expect(copied.press(2, 0x40) == Action::Unequip &&
            copied.record_word(0x43f0) == 0, "imported record unequip pointer");
+    reject([&] { copied.press(0, CROSS_CONFIRM.shop); }, "unknown live stock refuses purchase");
+    expect(copied.frame("shop").sprites.size() == 1, "shop submits only the pinned-tint sprite");
+    expect(copied.record_word(0xe4) == 500, "refused stock does not debit gold");
+    expect(copied.press(1, CROSS_CONFIRM.shop) == Action::Sell &&
+           copied.gold() == 501 && copied.bag_count(0) == 1,
+           "live sale credits the imported record and removes one item");
     reject([&] { copied.press(2, 0x10); }, "live drop refuses missing world placement");
     auto page_record = authored.record_bytes();
     const auto put_word = [&](std::size_t at, std::uint32_t value) {
@@ -208,7 +248,7 @@ void ledger_vectors() {
         page_record[BAG_ITEMS + base + byte] = page_record[BAG_ITEMS + byte];
     }
     Ledger pages;
-    pages.adopt_record(page_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
+    pages.adopt_record(page_record, page_tables, {}, image_byte);
     std::array<std::vector<IconSize>, BAGS> page_sizes;
     for (int bag = 0; bag < BAGS; ++bag)
       page_sizes[bag].assign(static_cast<std::size_t>(pages.bag_count(bag)), {32, 0, true});
@@ -263,7 +303,7 @@ void ledger_vectors() {
     for (int byte = 0; byte < 4; ++byte)
       next_row_record[BAG_COUNT + BAG_STRIDE + byte] = static_cast<std::uint8_t>(6u >> (8 * byte));
     Ledger packed;
-    packed.adopt_record(next_row_record, page_tables, {}, [](std::uint32_t) -> std::uint8_t { return 0; });
+    packed.adopt_record(next_row_record, page_tables, {}, image_byte);
     page_sizes[1] = {{0, 0, true}, {32, 0, true}, {0, 0, true},
                      {64, 0, true}, {0, 0, true}, {32, 0, true}};
     packed.build_display_grid(page_sizes);
@@ -287,6 +327,26 @@ void ledger_vectors() {
              return std::string(gap.id) == "inventory-grid-footprint" &&
                     gap.column == 1 && gap.row == 0;
            }), "verified preceding cell survives unknown footprint; later cells refuse");
+    auto stack_tables = page_tables;
+    stack_tables.defs[0]->name = "throwing-dart";
+    image_string(0x3f7000u, "throwing-dart");
+    auto stack_record = authored.record_bytes();
+    stack_record[BAG_ITEMS + 4] = 25;
+    stack_record[BAG_ITEMS + 5] = 0;
+    Ledger stack;
+    stack.adopt_record(stack_record, stack_tables, {}, image_byte);
+    // Independent contract: value 25*10=250; the 0x3d4ccccc float factor
+    // makes trunc((250*20)/25*factor) = 9, rather than decimal 0.05's 10.
+    // The two name-matched stems also make drop remove min(25,20), leaving 5.
+    const auto stack_action = stack.press(1, CROSS_CONFIRM.shop);
+    expect(stack_action == Action::Sell && stack.gold() == 509 &&
+           stack.bag_count(0) == 2 && stack.record_bytes()[BAG_ITEMS + 4] == 5,
+           "name-matched stack sale credits nine and removes twenty");
+    image[0x538660u] = 0;
+    Ledger unsafe;
+    reject([&] { unsafe.adopt_record(stack_record, stack_tables, {}, image_byte); },
+           "empty sale stem refuses before any live credit");
+    expect(unsafe.gold() == 500, "refused live stem never credits gold");
   }
   {
     Ledger book;
@@ -308,7 +368,25 @@ void ledger_vectors() {
   {
     Ledger book;
     expect(book.press(0, 0x80) == Action::Buy && book.gold() == 441 && book.bag_count(0) == 3, "buy");
-    expect(book.frame("shop").texts.at(0).text == "stock", "stock cell");
+    const auto shop_frame = book.frame("shop");
+    expect(shop_frame.texts.size() == 3 && shop_frame.texts[0].x == 160 &&
+           shop_frame.texts[0].y == 203 && shop_frame.texts[1].y == 243 &&
+           shop_frame.texts[2].text == "stock", "shop choice positions and fixture stock cell");
+    expect(shop_frame.sprites.size() == 1 && shop_frame.sprites[0].tint == 0x80808080u &&
+           shop_frame.draw_order.size() == 3 &&
+           !shop_frame.draw_order[0].text && shop_frame.draw_order[0].index == 0 &&
+           shop_frame.draw_order[0].layer == 0 && shop_frame.draw_order[0].submission == 0 &&
+           shop_frame.draw_order[1].text && shop_frame.draw_order[1].index == 0 &&
+           shop_frame.draw_order[1].layer == 0 && shop_frame.draw_order[1].submission == 1 &&
+           shop_frame.draw_order[2].text && shop_frame.draw_order[2].index == 1 &&
+           shop_frame.draw_order[2].layer == 0 && shop_frame.draw_order[2].submission == 2,
+           "research shop submissions retain layer and order");
+    bool refused_buy_sell_tint = false, refused_front_tint = false;
+    for (const auto &gap : shop_frame.gaps) {
+      refused_buy_sell_tint |= std::string(gap.id) == "shop-buysell-tint";
+      refused_front_tint |= std::string(gap.id) == "shop-front-tint";
+    }
+    expect(refused_buy_sell_tint && refused_front_tint, "unpinned shop tints remain refusals");
   }
   {
     Ledger book;
