@@ -336,13 +336,13 @@ int main(int argc, char **argv) {
       most_lost = std::max(most_lost, was - now);
     }
     if (!death_check) {
-    std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
-    std::cout << "minotaurs damaged=" << minotaur_damaged << " dead=" << minotaur_dead
-              << " active=" << minotaur_active << " targeted=" << minotaur_targeted
-              << " hit_requests=" << fight.counts().minotaur_hit_requests
-              << " held_part_requests=" << fight.counts().held_part_requests << "\n";
-    for(const auto &state:minotaur_states)
-      std::cout << "minotaur_state=" << state.first << " count=" << state.second << "\n";
+      std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
+      std::cout << "minotaurs damaged=" << minotaur_damaged << " dead=" << minotaur_dead
+                << " active=" << minotaur_active << " targeted=" << minotaur_targeted
+                << " hit_requests=" << fight.counts().minotaur_hit_requests
+                << " held_part_requests=" << fight.counts().held_part_requests << "\n";
+      for(const auto &state:minotaur_states)
+        std::cout << "minotaur_state=" << state.first << " count=" << state.second << "\n";
     }
   }
   const auto player = fight.player();
