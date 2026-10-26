@@ -3,10 +3,16 @@
 #include "champions/pickups.hpp"
 #include "champions/combat_ctors.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/arena_executable.hpp"
+#include "champions/player_services.hpp"
+#define private public
 #include "champions/campaign_fight.hpp"
+#undef private
 #include "champions/session_combat_runtime_adapter.hpp"
+#include "../src/campaign_fight.cpp"
 #include <cstring>
 #include <iostream>
+#include <tuple>
 namespace R = champions::simulation::rta;
 namespace P = R::pickups;
 namespace C = R::combat_runtime;
@@ -206,16 +212,11 @@ void adopted_chest_lifetime() {
 }
 void chest_branch_refusals() {
   for (const auto &props : std::vector<std::vector<std::string>>{{"action=authored"}, {"action="}, {"name=fixture", "action=authored"}}) {
-    for (unsigned initial_state : {0u, 1u}) {
-      unsigned state = initial_state, loot = 0, completion = 0;
-      bool refused = false;
-      try {
-        P::require_supported_chest(props, false);
-        ++state; ++loot; ++completion;
-      } catch (const C::Unsupported &error) { refused = std::string(error.what()).find("action script") != std::string::npos; }
-      check(refused && state == initial_state && loot == 0 && completion == 0,
-            "action-bearing opening/completion refuses before state or loot mutation");
-    }
+    bool refused = false;
+    try {
+      P::require_supported_chest(props, false);
+    } catch (const C::Unsupported &error) { refused = std::string(error.what()).find("action script") != std::string::npos; }
+    check(refused, "helper rejects every action property, including an empty value");
   }
   bool refused = false;
   try { P::require_supported_chest({}, true); }
@@ -224,6 +225,113 @@ void chest_branch_refusals() {
   P::require_supported_chest({}, false);
   P::require_supported_chest({"name=fixture", "item=authored"}, false);
   check(true, "nontrapped Chest with no action properties has a demonstrable no-op action loop");
+}
+void production_chest_refusals(const std::string &selected = {}) {
+  for (const std::string branch : {"action-use", "action-run", "trap-use", "trap-run"}) {
+    if (!selected.empty() && selected != branch) continue;
+    auto authority = std::make_shared<R::WorldAuthority>();
+    R::script_commands::Host host(authority);
+    R::world_queries::Level level(R::world_queries::LevelData{});
+    R::player_services::Bundle bundle(level);
+    auto executable = std::make_shared<R::arena_modes::Executable>();
+    R::campaign_fight::Fight fight(authority, executable, bundle, [] { return false; });
+    auto &impl = *fight.p_;
+    impl.host = &host;
+    impl.item_tables = std::make_shared<I::Tables>();
+    const bool running = branch.find("run") != std::string::npos;
+    const bool trapped = branch.find("trap") != std::string::npos;
+    const auto address = authority->objects->pool.allocate(0x88);
+    auto owner = host.variables().new_object({}, 0x100018, {}, 0, "5Chest", {}, address, 0x88);
+    authority->register_factory(address);
+    auto &chest = impl.chests[address];
+    chest.owner = owner;
+    if (!trapped) chest.props = {"action=authored"};
+    chest.animation = impl.anim->add_state(1);
+    R::creature_anim::Clip clip;
+    clip.length = 1;
+    chest.clip = impl.anim->add_clip(clip);
+    fight.world().write(address + 0x48, 4, 0x5118d8);
+    fight.world().write(address + 0x4c, 2, 9);
+    fight.world().write(address + 0x58, 1, trapped);
+    fight.world().write(address + 0x84, 4, running ? 1 : 0);
+    fight.world().write(C::PLAYERS + 0xe4, 4, 500);
+    if (running) {
+      impl.anim->anim_push(chest.animation, chest.clip, 0x204);
+      impl.anim->anim_snap_top_to_end(chest.animation);
+      host.variables().world->run_every_frame(*owner);
+    }
+    const auto animation = [&] {
+      const auto &state = impl.anim->state(chest.animation);
+      std::vector<std::uint64_t> observation{state.pose, std::uint64_t(state.count),
+          std::uint64_t(state.capacity), state.flags};
+      for (const auto track_id : state.tracks) {
+        const auto &track = impl.anim->track(track_id);
+        observation.insert(observation.end(), {track_id, track.clip, track.slot,
+            track.weight, track.rate, track.life, track.life_rate, track.time,
+            track.flags, std::uint64_t(track.sound_idx)});
+      }
+      return observation;
+    };
+    const auto run_links = [&] {
+      std::vector<const R::Link *> links{&authority->objects->run_active};
+      for (const auto &head : authority->objects->run15) links.push_back(&head);
+      for (const auto &head : authority->objects->run60) links.push_back(&head);
+      for (const auto &head : owner->heads) links.push_back(&head);
+      std::set<const R::Link *> seen(links.begin(), links.end());
+      std::vector<std::uintptr_t> observation;
+      for (std::size_t index = 0; index < links.size(); ++index) {
+        const auto *link = links[index];
+        observation.insert(observation.end(), {reinterpret_cast<std::uintptr_t>(link),
+            reinterpret_cast<std::uintptr_t>(link->next), reinterpret_cast<std::uintptr_t>(link->prev),
+            reinterpret_cast<std::uintptr_t>(link->partner), reinterpret_cast<std::uintptr_t>(link->obj),
+            std::uintptr_t(link->kind), link->tag, link->object_raw});
+        for (const auto *neighbor : {link->next, link->prev, link->partner})
+          if (neighbor && seen.insert(neighbor).second) links.push_back(neighbor);
+      }
+      return observation;
+    };
+    const auto services = [&] {
+      const auto &counts = impl.counts;
+      return std::make_tuple(counts.chests_opened, counts.loot_calls, counts.loot_items,
+          counts.loot_shared_draws, counts.pickups, counts.pickup_recipients,
+          impl.ground_drops.size(), impl.drop_handles, impl.item_resources.size(),
+          impl.refusals, fight.world().events().size(), host.items().counts.given,
+          host.items().counts.lost);
+    };
+    const auto bytes_before = authority->memory.bytes();
+    const auto chest_before = authority->memory.effective_bytes(address, 0x88);
+    const auto gold_before = fight.world().read(C::PLAYERS + 0xe4);
+    const auto animation_before = animation();
+    const auto links_before = run_links();
+    const auto services_before = services();
+    const auto owner_before = authority->find(address);
+    bool refused = false;
+    try {
+      if (running) impl.chest_run(address);
+      else impl.chest_use(address, 0);
+    } catch (const C::Unsupported &error) {
+      refused = std::string(error.what()).find(trapped ? "timed explosion" : "action script") != std::string::npos;
+    }
+    check(authority->memory.bytes() == bytes_before &&
+          authority->memory.effective_bytes(address, 0x88) == chest_before,
+          "production Chest refusal preserves authoritative bytes, gold, state, flags and seeds");
+    check(fight.world().read(C::PLAYERS + 0xe4) == gold_before,
+          "production Chest refusal preserves player gold");
+    check(animation() == animation_before, "production Chest refusal preserves animation cells");
+    check(run_links() == links_before, "production Chest refusal preserves actual World run-list links");
+    check(services() == services_before, "production Chest refusal makes no loot, inventory or service changes");
+    check(authority->find(address) == owner_before && owner->alive && authority->is_factory(address),
+          "production Chest refusal preserves live factory ownership");
+    check(refused, "production Chest path must refuse the unsupported action or trap, not an unrelated service");
+    if (running) {
+      chest.props.clear();
+      fight.world().write(address + 0x58, 1, 0);
+      check(impl.chest_run(address) && fight.world().read(address + 0x84) == 2 &&
+            (fight.world().read(address + 0x62, 2) & 0x80),
+            "supported control actually completes via production animation status, not a guessed duration");
+      check(run_links() != links_before, "supported completing Chest actually leaves the run list");
+    }
+  }
 }
 void save_preflight() {
   Inventory inventory;
@@ -486,10 +594,16 @@ void item_constructors() {
   for(unsigned k=0;k<12;++k) check(mem.load(0x5110+4*k,4)==matrix[k],"ctor3 preserves supplied transform");
 }
 } // namespace
-int main() {
+int main(int argc, char **argv) {
   try {
+    if (argc == 2) {
+      production_chest_refusals(argv[1]);
+      check(checks != 0, "selected production Chest regression exists");
+      std::cout << "pickup checks " << checks << " passed\n";
+      return 0;
+    }
     inventory_limits(); equip_callback(); bounds(); flight_and_settle(); adopted_chest_lifetime(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
-    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals(); save_preflight(); campaign_use_binding();
+    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals(); production_chest_refusals(); save_preflight(); campaign_use_binding();
     std::cout << "pickup checks " << checks << " passed\n"; return 0;
   } catch(const std::exception &e) { std::cerr << "pickup check " << checks << ": " << e.what() << '\n'; return 1; }
 }
