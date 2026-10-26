@@ -1,4 +1,5 @@
 #include "champions/mission2_actors.hpp"
+#include "champions/actor_lifetime.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -56,7 +57,9 @@ Raw Runtime::own(std::uint32_t a) {
   return seed >> 16;
 }
 Actor &Runtime::adopt(Kind k, objects::GameObject &o, std::uint32_t facing) {
-  if (authority_.find(o.addr) != &o || !o.alive || actors_.count(o.addr))
+  retire_stale();
+  if (!actor_lifetime::owns_live_object(*authority_.objects, o) ||
+      authority_.find(o.addr) != &o || actors_.count(o.addr))
     throw Unsupported("mission2 adopt: needs one live, registered, unadopted object");
   const auto &p = profile(k);
   auto def_it = definitions_.find(p.definition);
@@ -141,13 +144,19 @@ Actor &Runtime::adopt(Kind k, objects::GameObject &o, std::uint32_t facing) {
     ++refusals_[e.what()];
   }
   authority_.objects->run_every_60(o);
-  auto *result = actor.get();
-  actors_.emplace(a, std::move(actor));
-  return *result;
+  return actor_lifetime::register_actor<Unsupported>(*authority_.objects, actors_,
+      std::move(actor), [this](const objects::GameObject &live) {
+        return authority_.find(live.addr) == &live;
+      });
+}
+void Runtime::retire_stale() const {
+  actor_lifetime::retire_stale(*authority_.objects, actors_,
+      [this](const objects::GameObject &live) { return authority_.find(live.addr) == &live; });
 }
 Actor *Runtime::find(std::uint32_t a) {
+  retire_stale();
   const auto it = actors_.find(a);
-  return it == actors_.end() || !it->second->object->alive ? nullptr : it->second.get();
+  return it == actors_.end() ? nullptr : it->second.get();
 }
 void Runtime::tail(Actor &a) {
   if (clockwork(a.kind)) {

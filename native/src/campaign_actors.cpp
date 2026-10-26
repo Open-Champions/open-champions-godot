@@ -1,4 +1,5 @@
 #include "champions/campaign_actors.hpp"
+#include "champions/actor_lifetime.hpp"
 #include <array>
 #include <utility>
 
@@ -115,20 +116,13 @@ void Runtime::bind_minotaur_definition(std::string lump, const std::vector<std::
 }
 
 bool Runtime::owns_live_object(const objects::GameObject &object) const {
-  const auto found = world_.objects.find(object.addr);
-  return found != world_.objects.end() && found->second == &object && object.alive;
+  return actor_lifetime::owns_live_object(world_, object);
 }
 
 
 Actor &Runtime::register_actor(std::unique_ptr<Actor> actor) {
-  retire_stale();
-  if (!owns_live_object(*actor->object) || actor->object->serial != actor->object_serial)
-    throw Unsupported("actor object is not live in this World");
-  const auto address = actor->object->addr;
-  const auto inserted = actors_.emplace(address, std::move(actor));
-  if (!inserted.second)
-    throw Unsupported("address already has an actor");
-  return *inserted.first->second;
+  return actor_lifetime::register_actor<Unsupported>(world_, actors_, std::move(actor),
+      [](const objects::GameObject &) { return true; });
 }
 
 std::optional<std::pair<std::string, std::string>> Runtime::resource_name(std::uint32_t token) const {
@@ -321,14 +315,8 @@ Actor &Runtime::construct_balanced(Kind kind, const objects::Vec3 &pos,
 }
 
 void Runtime::retire_stale() const {
-  for (auto entry = actors_.begin(); entry != actors_.end();) {
-    const auto live = world_.objects.find(entry->first);
-    if (live == world_.objects.end() || live->second != entry->second->object ||
-        live->second->serial != entry->second->object_serial || !live->second->alive)
-      entry = actors_.erase(entry);
-    else
-      ++entry;
-  }
+  actor_lifetime::retire_stale(world_, actors_,
+      [](const objects::GameObject &) { return true; });
 }
 
 Actor *Runtime::find(std::uint32_t address) {

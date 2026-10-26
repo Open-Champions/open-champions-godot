@@ -313,6 +313,71 @@ void lifetime_boundaries() {
   guardian.runtime.tick(boss.object->addr); // exhausted budget never attempts a spawn
   check(guardian.read(boss.object->addr + 0x3d4) == 50, "no invented Droid beyond the documented budget");
 }
+// Host lifetime expectations follow the audited campaign helpers and pinned
+// ref_objects construction/destruction + ref_core pool reuse, not class AI.
+void registry_reuse() {
+  for (auto kind : {M::Kind::Cutter, M::Kind::Hammer, M::Kind::Droid, M::Kind::IronGuardian}) {
+    Fixture f;
+    auto &old = f.actor(kind);
+    auto *object = old.object;
+    const auto address = object->addr;
+    const auto serial = object->serial;
+    old.constructor_refusal = "synthetic old constructor refusal";
+    old.ai_refusal = "synthetic old AI refusal";
+    old.death_refusal = "synthetic old death refusal";
+    old.death_started = old.death_reported = true;
+    f.authority->unregister_object(*object);
+    f.authority->objects->destroy(*object, 3);
+    auto &fresh = f.actor(kind); // adoption itself must retire the predecessor
+    check(fresh.object->addr == address && fresh.object->serial != serial,
+          "pool address reused with a fresh serial");
+    check(f.runtime.find(address) == &fresh && f.runtime.actors().size() == 1,
+          "only replacement enumerated and found");
+    check(!fresh.constructor_refusal && !fresh.ai_refusal && !fresh.death_refusal &&
+          !fresh.death_started && !fresh.death_reported, "no refusal/death state inherited");
+    f.runtime.tick(address);
+    check(!f.calls.empty(), "fresh replacement AI executes");
+    f.runtime.set_state(address, 20);
+    check(fresh.death_started && fresh.death_reported, "fresh replacement death executes");
+    f.authority->objects->destroy(*fresh.object, 3);
+    const auto &constant = f.runtime;
+    check(constant.actors().empty(), "const enumeration retires destroyed objects");
+    check(!f.runtime.find(address), "destroyed object not found");
+    refused([&] { f.runtime.adopt(kind, *object, 0); });
+  }
+  {
+    Fixture f;
+    auto &a = f.actor(M::Kind::Droid);
+    const auto address = a.object->addr;
+    // Foreign pointer has the same address and serial, so neither suffices.
+    R::objects::GameObject foreign(address, a.object->serial);
+    const auto before = f.read(address + 0x48);
+    refused([&] { f.runtime.adopt(M::Kind::Droid, foreign, 0); });
+    check(f.read(address + 0x48) == before && f.runtime.find(address) == &a,
+          "foreign adoption has no constructor effects");
+    f.authority->unregister_object(*a.object);
+    f.authority->register_object(foreign);
+    check(f.runtime.actors().empty(), "authority mismatch retires registry view");
+    refused([&] { f.runtime.adopt(M::Kind::Droid, foreign, 0); });
+  }
+  {
+    Fixture f;
+    auto &a = f.actor(M::Kind::Droid);
+    const auto address = a.object->addr;
+    auto *old = a.object;
+    f.authority->unregister_object(*old);
+    f.authority->objects->destroy(*old, 3);
+    auto *replacement = f.authority->objects->new_object(M::profile(M::Kind::Droid).size, {0,0,0});
+    check(replacement && replacement->addr == address && replacement->serial != a.object_serial,
+          "serial mismatch fixture reuses pool address");
+    f.authority->register_object(*replacement);
+    // Even matching the current pointer cannot validate an old saved serial.
+    a.object = replacement;
+    check(!f.runtime.find(address) && f.runtime.actors().empty(), "saved serial mismatch retired");
+    auto &fresh = f.runtime.adopt(M::Kind::Droid, *replacement, 0);
+    check(fresh.object_serial == replacement->serial, "valid replacement readopted after serial mismatch");
+  }
+}
 void shared_world_damage() {
   for (auto k : {M::Kind::Cutter,M::Kind::Hammer,M::Kind::IronGuardian}) {
     Fixture f;
@@ -391,7 +456,7 @@ void shared_world_damage() {
 } // namespace
 int main() {
   try {
-    constructors(); balance_rows(); ticks_and_damage(); death_and_explosion(); refusals_still_process_damage(); lifetime_boundaries(); shared_world_damage();
+    constructors(); balance_rows(); ticks_and_damage(); death_and_explosion(); refusals_still_process_damage(); lifetime_boundaries(); registry_reuse(); shared_world_damage();
     std::cout << "mission2 actors: " << checks << " checks, 16 ticks/162 calls, 3 hit dispatches, 4 deaths, 1 explosion PASS\n";
     return 0;
   } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

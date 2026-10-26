@@ -34,9 +34,10 @@ struct Services {
 struct Actor {
   Kind kind;
   objects::GameObject *object;
+  const std::uint64_t object_serial;
   std::optional<std::string> constructor_refusal, ai_refusal, death_refusal;
   bool death_started = false, death_reported = false;
-  Actor(Kind k, objects::GameObject &o) : kind(k), object(&o) {}
+  Actor(Kind k, objects::GameObject &o) : kind(k), object(&o), object_serial(o.serial) {}
   virtual ~Actor() = default;
 };
 struct ClockworkCutter : Actor { explicit ClockworkCutter(objects::GameObject &o) : Actor(Kind::Cutter, o) {} };
@@ -48,7 +49,8 @@ class Runtime {
   resources::Manager &resources_;
   const arena_modes::Executable &exe_;
   Services services_;
-  std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
+  mutable std::map<std::uint32_t, std::unique_ptr<Actor>> actors_;
+  void retire_stale() const;
   std::map<std::uint32_t, std::shared_ptr<objects::ClassDef>> definitions_;
   std::vector<resources::Handle> resources_held_;
   std::map<std::string, std::size_t> refusals_;
@@ -69,7 +71,7 @@ public:
   // allocation, shared seed draw or stat roll occurs.
   Actor &adopt(Kind, objects::GameObject &, std::uint32_t facing);
   Actor *find(std::uint32_t);
-  const auto &actors() const { return actors_; }
+  const auto &actors() const { retire_stale(); return actors_; }
   const auto &refusals() const { return refusals_; }
   void contain_refusals(bool on) { contain_ = on; }
   void tick(std::uint32_t);
