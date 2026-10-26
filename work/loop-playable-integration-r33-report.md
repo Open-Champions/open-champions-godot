@@ -37,6 +37,8 @@ Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-on
 
 - Recovery private sweep `w33-on`: **111/111 tried, loaded, played; 230 checks, 0 failures, 0 top-level refusal kinds**. Four 60-tick slices; private disc read-only. Internal unsupported-service counters remain separate. Counts-only summaries: ignored `work/private/w33-on-s{0,28,56,84}.json`; log `resume-sweep-w33-on.out`. Full journey remains pending.
 
+- Recovery private sweep `w33-off`: **111/111 tried, loaded, played; 230 checks, 0 failures, 0 top-level refusal kinds**. Four 60-tick slices; private disc read-only. Internal unsupported-service counters remain separate. Counts-only summaries: ignored `work/private/w33-off-s{0,28,56,84}.json`; log `resume-sweep-w33-off.out`. Full journey remains pending.
+
 ## Full scripted journey
 
 Pending fresh headless/rendered execution; compare against wave 32's 53/54 steps without relaxing acceptance. Native AI/death diagnostic probes above pass; those do not establish the full journey.
