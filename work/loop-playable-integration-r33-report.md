@@ -1,4 +1,4 @@
-STATUS: RUNNING — four audited tips merged and committed; pending full CTest. Wave 33 validation is in progress.
+STATUS: RUNNING — remaining native/Godot/sweep gates pass; headless journey recorded, rendered journey running; Blood1 route blocked by audited loading prerequisite refusal.
 
 # Playable integration wave 33 — 2026-10-26
 
@@ -42,9 +42,11 @@ Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-on
 - Focused fresh matrix counts: loading display **57/57**, loading audio **10/10**, enemy identity **22/22 headless and rendered**, campaign moves **33/33**, death UI **11/11 headless, 13/13 rendered**. Fresh matrix logs contain **0 SCRIPT ERROR** entries; **18 logs retain ObjectDB exit-leak warnings**.
 - **B1H-7 CLOSED for gate-report completeness**: integrated Blood1 hostile native paths were executed by the focused actor gate (including the 320 original-backed targeted frames), the inherited full native result is recorded without rerun, all four extension/library builds pass, 54 inherited Godot cases plus seven additions pass, both 111-level sweeps pass and FULL_TRACE is unchanged. This does not claim live Blood1 hostile scene binding, placement or landed damage; those remain outside the actor gate's evidence.
 
+- Fresh headless full journey: **67 steps**, exit **1**, six refusal kinds, final `blocked_death_reload`. New loading-adapter refusal blocks Blood1 continuation; rendered run pending.
+
 ## Full scripted journey
 
-Recovery progress at `add10b65`: native Release, all four universal builds, focused Blood1 actors, AI/death probes, 61/61 Godot matrix, 2,641-check synthetic combat, 300/300 save/load, unchanged trace and both 111-level/230-check sweeps PASS. Fresh headless/rendered execution is now RUNNING; compare against wave 32's 53/54 steps without relaxing acceptance. These preceding gates do not establish the full journey.
+Recovery progress at `add10b65`: native Release, all four universal builds, focused Blood1 actors, AI/death probes, 61/61 Godot matrix, 2,641-check synthetic combat, 300/300 save/load, unchanged trace and both 111-level/230-check sweeps PASS. Fresh headless run completed **67 steps**, exit **1**, result written, no timeout/crash, six refusal kinds, zero captures; final `player_death: blocked_death_reload`. The inherited 53 steps gain 14 Blood1 continuation/boundary records. Blood1 arrival/destination are refused (`loading_ready=false`, two loading presents), so this is not a successful Blood1 route. Rendered variant RUNNING. Evidence: ignored `resume-playthrough/headless/result.json` and `godot.log`; counts in `resume-playthrough.out`.
 
 ## Exact command families
 
