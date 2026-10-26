@@ -6,11 +6,13 @@
 #include "champions/ui_text_layout.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
+#include "champions/objects.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/hud_extras.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/dir_access.hpp>
@@ -156,6 +158,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_trigger_status"), &ChampionsSessionController::script_trigger_status);
   ClassDB::bind_method(D_METHOD("script_player_markers"), &ChampionsSessionController::script_player_markers);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
+  ClassDB::bind_method(D_METHOD("script_use_status"), &ChampionsSessionController::script_use_status);
+  ClassDB::bind_method(D_METHOD("script_gate_status"), &ChampionsSessionController::script_gate_status);
+  ClassDB::bind_method(D_METHOD("script_gate_confirm", "destination"), &ChampionsSessionController::script_gate_confirm);
   bind_text_methods();
   bind_hub_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
@@ -674,6 +679,24 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       control_->shared_seed() != *script_world_)
     unpair_script_seed();
   for (auto tick = before; tick < current_.ready_ticks; ++tick) {
+    if (gate_clear_next_tick_) {
+      gate_travel_.arrived();
+      gate_clear_next_tick_ = false;
+    }
+    if (gate_travel_.ticks && !gate_travel_.request_written && scripts_) {
+      if (gate_travel_.tick(scripts_->level().pending)) {
+        scripts_->variables().memory.string(0x41b6d0, gate_travel_.destination);
+        scripts_->variables().memory.byte(0x41b720, rta::level_flow::ORIENT_NONE);
+        gate_arrival_pending_ = true;
+      }
+    }
+    // Player_run/Player_draw may ask for a prompt without a pressed use. The
+    // bridge cannot resolve either stage until the live grid is supplied.
+    if (std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+                    [](const auto &r) { return r.cls == "JumpGate" || r.cls == "Portal" || r.cls == "PortalHurt"; }))
+      gate_prompt_refusal_ = "Gate proximity discovery refused: the live object-grid query and campaign hub/GateList lifecycle are unavailable.";
+    const bool exit_used = exit_use_pending_ && run_level_use();
+    exit_use_pending_ = false;
     if (scripts_->dialog_attached()) {
       // Priority 10 runObjects (Player_interact), then the dialog run task
       // at 110, before the Script task at 125 (research docs/script.md 2.6).
@@ -687,8 +710,10 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       }
       if (dialog_use_pending_) {
         dialog_use_pending_ = false;
-        std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
-        dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+        if (!exit_used) {
+          std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
+          dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+        }
       }
     }
     run_level_triggers(); // the 15-list follows the every-frame player walk
@@ -709,6 +734,14 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     if (!ui_frame_driven_)
       scripts_->ui_frame_step();
   }
+}
+bool ChampionsSessionController::run_level_use() {
+  // objects.ob alone is not the ordered, limited live object-grid query.
+  // It omits competing interactables, extents, flags and vehicle state. Do
+  // not execute a selected record or its prompt from an invented query.
+  exit_use_refusal_ = "Physical use refused: player vehicle state and the ordered live object-grid query (extents, flags, competitors, limit) are unavailable.";
+  gate_prompt_refusal_ = "Gate proximity discovery refused: the live object-grid query and campaign hub/GateList lifecycle are unavailable.";
+  return !script_level_objects_.empty();
 }
 void ChampionsSessionController::run_level_triggers() {
   if (live_triggers_.empty()) return;
@@ -970,11 +1003,6 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
-    // A pending post action belongs to the destination's script load. This
-    // bounded host does not carry it, so keep the current level intact.
-    if (carry_campaign && scripts_ &&
-        !scripts_->variables().memory.cstr(0x86fa80).empty())
-      throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
     auto next_authority = (!combat_ && !level_)
@@ -1011,6 +1039,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                : std::uint32_t(music_volume_bits));
     next->set_fade_level(scripts_ ? scripts_->fade_level() : script_fade_);
     const bool carried = carry_campaign && scripts_;
+    const std::string post_action = carried
+        ? scripts_->variables().memory.cstr(0x86fa80) : std::string();
     const auto live_player = player_ && carried
         ? std::optional<rta::player_state::Record>(observed_player()) : player_;
     if (live_player) next->set_player_currents_known(live_player->current_known);
@@ -1023,6 +1053,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->load_campaign(campaign_image);
       campaign_image_restored = next->save_campaign() == campaign_image;
     }
+    if (!post_action.empty()) next->variables().set_post_action(post_action);
     if (live_player)
       bind_player_to_scripts(*next, *live_player);
     // A fresh stream from the play session's configured shared seed; the
@@ -1145,7 +1176,19 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     world_adapter_ = std::move(next_adapter);
     world_runtime_ = std::move(next_runtime);
     world_authority_ = std::move(next_authority);
+    if (!carried) {
+      gate_destinations_ = {};
+      gate_travel_ = {};
+      gate_arrival_pending_ = false;
+      gate_clear_next_tick_ = false;
+    }
     script_level_objects_ = std::move(next_objects);
+    // Live PushTrigger deletion is unavailable along with live dispatch. Do
+    // not construct a per-attachment once mask that revives on re-entry.
+    used_once_exits_.clear();
+    exit_use_pending_ = false;
+    exit_use_count_ = 0;
+    exit_use_refusal_.clear();
     if (carried && !trigger_level_name_.empty()) {
       auto &saved = trigger_states_[trigger_level_name_];
       saved.clear();
@@ -1298,6 +1341,12 @@ Dictionary ChampionsSessionController::disable_level_script() {
   scripts_.reset();
   reset_fight();
   script_level_objects_.clear();
+  gate_destinations_ = {};
+  gate_travel_ = {};
+  gate_arrival_pending_ = false;
+  gate_clear_next_tick_ = false;
+  used_once_exits_.clear();
+  exit_use_pending_ = false;
   live_triggers_.clear();
   for (auto &list : trigger_lists_) list.clear();
   trigger_refusal_.clear();
@@ -1365,14 +1414,18 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
 } // namespace
 Dictionary ChampionsSessionController::dialog_use() {
   Dictionary out;
-  out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open);
-  if (scripts_ && fight_level_ == "hub2") {
-    out["ok"] = false;
+  const bool player_valid = player_ && observed_player().current_known && observed_player().hp > 0;
+  out["ok"] = false;
+  if (!player_valid)
+    out["error"] = "Player_interact refused: a controlled player object with positive record health is required.";
+  else if (scripts_ && scripts_->hud().help_open)
+    out["error"] = "Player_interact refused: the help box owns use input.";
+  else if (scripts_ && fight_level_ == "hub2") {
     dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
     out["error"] = dialog_last_use_;
-  }
-  if (out["ok"])
-    dialog_use_pending_ = true;
+  } else
+    out["error"] = "Player_interact refused: ridden-vehicle state and the ordered live object-grid query are unavailable.";
+  exit_use_refusal_ = String(out["error"]).utf8().get_data();
   return out;
 }
 Array ChampionsSessionController::dialog_events() {
@@ -1842,6 +1895,11 @@ Array ChampionsSessionController::script_exit_targets() const {
         item["max"] = Vector3(display_float(live->body.max[0]), display_float(live->body.max[1]), 0);
       }
     }
+    if (kind == "PushTrigger") {
+      item["physical_use"] = false;
+      item["physical_use_refusal"] =
+          "Physical use requires the ordered live object grid and player vehicle state.";
+    }
     // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
     // Neither is a direct script action. The host exposes them without claiming
     // an undocumented interaction or gate destination.
@@ -1901,6 +1959,33 @@ Array ChampionsSessionController::script_player_markers() const {
     result.push_back(item);
   }
   return result;
+}
+Dictionary ChampionsSessionController::script_use_status() const {
+  Dictionary result;
+  result["uses"] = int64_t(exit_use_count_);
+  result["record"] = int64_t(exit_use_record_);
+  result["refusal"] = String::utf8(exit_use_refusal_.c_str());
+  return result;
+}
+Dictionary ChampionsSessionController::script_gate_status() const {
+  Dictionary out;
+  out["menu_open"] = gate_travel_.menu_open;
+  out["travel_ticks"] = int64_t(gate_travel_.ticks);
+  out["request_written"] = gate_travel_.request_written;
+  out["prompt"] = String::utf8(gate_prompt_refusal_.c_str());
+  out["refusal"] = "Gate travel requires the campaign hub, saved/reset GateList, menu pause/task state, and constructed destination object grid and seed.";
+  Array destinations;
+  for (const auto &name : gate_destinations_.choosable(start_level_name_))
+    destinations.push_back(String::utf8(name.c_str()));
+  out["destinations"] = destinations;
+  return out;
+}
+Dictionary ChampionsSessionController::script_gate_confirm(const String &destination) {
+  Dictionary out;
+  (void)destination;
+  out["ok"] = false;
+  out["error"] = "Gate travel refused: campaign hub/GateList lifecycle, paused menu task, and destination constructor seed/blocking grid are unavailable.";
+  return out;
 }
 Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   Dictionary result;
@@ -2415,6 +2500,8 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
       const auto records = rta::level_flow::parse_objects(
           {start_objects_.data(), start_objects_.size()});
       rta::level_flow::StoryGround story;
+      if (gate_arrival_pending_)
+        throw std::runtime_error("Portal arrival refused: destination constructors, post-constructor seed, blocking-object grid and live actor facing are unavailable.");
       if (start_previous_level_.empty() && start_entrance_.empty()) {
         story = rta::level_flow::story_start_ground({}, records, query);
       } else {
@@ -2618,6 +2705,8 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     terrain_ = pending_->terrain;
     std::swap(terrain_name_, pending_->name);
     pending_.reset();
+    gate_clear_next_tick_ = gate_arrival_pending_;
+    gate_arrival_pending_ = false;
     // No observation allocation or numeric validation after publication.
     // A loaded state starts a fresh interpolation pair with no elapsed debt.
     current_ = std::move(restored);

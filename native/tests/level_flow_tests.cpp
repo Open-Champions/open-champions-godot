@@ -618,6 +618,18 @@ void robustness_and_state() {
   }));
   CHECK(push.deleted && actions == push.actions);
   CHECK(!push.interact(false, {}));
+  const std::vector<UseCandidate> nearby{{10, v(3, 4, 0), 0},
+                                          {11, v(2, 0, 0), 0x100000},
+                                          {12, v(-2, 0, 0), 0x100000},
+                                          {13, v(1, 0, 0), 0x100000}};
+  CHECK(nearest_use_candidate(v(0, 0, 0), nearby) == 13);
+  CHECK(nearest_use_candidate(v(0, 0, 0),
+                              {{11, v(2, 0, 0), 0x100000},
+                               {12, v(-2, 0, 0), 0x100000}}) == 11);
+  CHECK(!nearest_use_candidate(v(0, 0, 0), {{10, v(0, 0, 0), 0}}));
+  CHECK(use_query_contains_centre(v(0, 0, 0), v(-48, 48, 60)));
+  CHECK(!use_query_contains_centre(v(0, 0, 0), v(-48.01f, 0, 0)));
+  CHECK(!use_query_contains_centre(v(0, 0, 0), v(0, 0, -0.01f)));
   world_queries::LevelData data;
   data.heightfields.push_back({});
   data.elements.push_back(
@@ -937,7 +949,9 @@ void integration() {
   CHECK(state.travel.confirm("aab", "aa", state.gates));
   for (int i = 0; i < 179; ++i)
     CHECK(!adapter.advance_ready());
-  CHECK(state.pending.name.empty());
+  CHECK(state.travel.ticks == 180 && state.pending.name.empty());
+  CHECK(!adapter.advance_ready());
+  CHECK(state.travel.ticks == 181 && state.pending.name.empty());
   CHECK(adapter.advance_ready());
   CHECK(state.pending.name == "aab" && state.travel.ticks == 181);
   CHECK(!adapter.advance_ready());

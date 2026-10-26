@@ -106,6 +106,18 @@ private:
   std::map<std::string, std::vector<champions::simulation::rta::level_flow::TriggerState>> trigger_states_;
   void run_level_triggers();
   std::map<std::size_t, champions::simulation::rta::hub_services::Savepoint> hub_savepoints_;
+  bool exit_use_pending_ = false;
+  std::vector<bool> used_once_exits_;
+  std::size_t exit_use_count_ = 0;
+  std::size_t exit_use_record_ = 0;
+  std::string exit_use_refusal_;
+  bool run_level_use();
+  champions::simulation::rta::level_flow::GateList gate_destinations_;
+  champions::simulation::rta::level_flow::GateTravel gate_travel_;
+  bool gate_arrival_pending_ = false;
+  bool gate_clear_next_tick_ = false;
+  std::uint32_t gate_arrival_seed_ = 0;
+  std::string gate_prompt_refusal_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   bool ui_frame_driven_ = false;
@@ -283,6 +295,9 @@ public:
   godot::Dictionary inspect_exit_records(const godot::PackedByteArray &) const;
   godot::Dictionary script_trigger_status() const;
   godot::Array script_player_markers() const;
+  godot::Dictionary script_use_status() const;
+  godot::Dictionary script_gate_status() const;
+  godot::Dictionary script_gate_confirm(const godot::String &destination);
   godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
