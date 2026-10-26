@@ -323,23 +323,19 @@ int main(int argc, char **argv) {
     float lowest = 1e30f, most_lost = 0;
     for (const auto &e : after) {
       const float now = as_float(e.hp), was = hp_before[e.address];
-<<<<<<< HEAD
       if(e.minotaur){
         minotaur_damaged+=now<was;minotaur_dead+=e.dead;minotaur_states[e.state]+=1;
         minotaur_active += fight.world().read(e.address+0xa8,8)>>63;
         minotaur_targeted += fight.world().target(e.address+0x234)!=0;
       }
-      if (now < was) {
-=======
       if (now < was && !death_check) {
->>>>>>> 3550e1bf
         ++damaged;
         if(!e.minotaur)std::cout << "damaged boar: " << (e.small ? "small" : "large") << " hp " << was << " -> " << now << " max " << as_float(e.max_hp) << " dead=" << e.dead << "\n";
       }
       lowest = std::min(lowest, now);
       most_lost = std::max(most_lost, was - now);
     }
-<<<<<<< HEAD
+    if (!death_check) {
     std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
     std::cout << "minotaurs damaged=" << minotaur_damaged << " dead=" << minotaur_dead
               << " active=" << minotaur_active << " targeted=" << minotaur_targeted
@@ -347,9 +343,7 @@ int main(int argc, char **argv) {
               << " held_part_requests=" << fight.counts().held_part_requests << "\n";
     for(const auto &state:minotaur_states)
       std::cout << "minotaur_state=" << state.first << " count=" << state.second << "\n";
-=======
-    if (!death_check) std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
->>>>>>> 3550e1bf
+    }
   }
   const auto player = fight.player();
   const auto &n = fight.counts();
