@@ -6,7 +6,7 @@ differential probes. `audits/research-minotaur-fix.md` reports PASS. Executed
 means bounded EE execution with recorded service call-outs, not a PS2 fight.
 This implementation is RTA US v2.00 only.
 
-## Implemented
+## Implemented class and diagnostic contracts
 
 - Factory allocation `0x470`, constructor `0x288fdc` and definition `0x501200`;
   the existing base Creature constructor runs before the class-local body.
@@ -25,9 +25,10 @@ This implementation is RTA US v2.00 only.
   cover both seeds, levels 1–160 and the five Valor-scaled levels.
 - Disc-time definition identifiers, clip binding and event advancement. No
   Minotaur archive, model, texture or animation identifiers are compiled in.
-- One authority object, memory body, HP and RNG identity. Player damage reaches
-  the inherited damage slot. The session fight uses the player-position activity
-  mode rather than an unset origin-camera focus.
+- Diagnostic adoption fixtures use one authority object, memory body, HP and
+  RNG identity; player damage reaches the inherited damage slot there. The
+  session fight uses the player-position activity mode rather than an unset
+  origin-camera focus, but ordinary Minotaur construction currently refuses.
 - Actor registry entries are retired by World membership, pointer and serial,
   preventing stale entries or dangling insertions when a pool address is reused.
   Synthetic tests cover standalone reconstruction and shared Minotaur adoption.
@@ -66,5 +67,8 @@ publication/pickup/Gold. None of these results establishes PS2 combat parity.
 `minotaur-class` checks 1,502 authored cases / 19,557 assertions over seeds
 20973 and 7. `minotaur-stats-exact` replays 8,250 reference-generated cases.
 `campaign-actors` and `campaign-fight-adopt` check address reuse and shared HP.
-The acceptance report is `work/loop-minotaur-report.md`; private logs and
-screenshots remain under ignored `work/minotaur-final/`.
+`campaign-fight-boundaries` checks the three throwing missing-service paths.
+`godot/tests/real_fight_enemies_identity.gd` checks presentation identity,
+material replacement and absent-actor retirement with authored observations.
+The current acceptance report is `work/loop-port-minotaur-r2-report.md`;
+private logs and screenshots remain under ignored `work/minotaur-r2/`.
