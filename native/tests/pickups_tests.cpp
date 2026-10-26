@@ -3,6 +3,8 @@
 #include "champions/pickups.hpp"
 #include "champions/combat_ctors.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/campaign_fight.hpp"
+#include "champions/session_combat_runtime_adapter.hpp"
 #include <cstring>
 #include <iostream>
 namespace R = champions::simulation::rta;
@@ -275,12 +277,22 @@ void allocation_loss() {
   for (const auto &e:g.world.events()) if(e.name=="item_settled") lost=e.args.at(1)==0;
   check(lost && (g.world.read(a+0xc)&8), "failed replacement allocation still queues flight deletion");
 }
+void campaign_use_binding() {
+  auto authority = std::make_shared<R::WorldAuthority>();
+  R::world_queries::Level level(R::world_queries::LevelData{});
+  R::player_services::Bundle bundle(level);
+  auto executable = std::make_shared<R::arena_modes::Executable>();
+  R::campaign_fight::Fight fight(authority, executable, bundle, [] { return false; });
+  check(fight.world().read(0x41b9c0) == 0x80,
+        "campaign binds the configured default use action instead of the zero executable initializer");
+}
 void manual_input() {
   Ground g;
   const auto player = g.world.spawn_player(0, {});
   R::Mat34 matrix{}; matrix[0]=matrix[4]=matrix[8]=R::ONE;
   const auto item = g.world.spawn_resting_item({raw(10),0,0},0x3000,0x3100,0x3200,g.record(),matrix);
-  g.world.write(0x41b9c0,4,0x80);
+  C::SessionAdapter adapter(g.world);
+  adapter.bind_button(0, C::World::Button::Use, 0x80);
   g.world.interact(player,C::PADS);
   check(g.prompts==1 && g.uses==0, "prompt is called without a press");
   g.world.pad(0,0x80,0); g.world.interact(player,C::PADS);
@@ -289,12 +301,17 @@ void manual_input() {
   check(g.prompts==3 && g.uses==0, "display-only prompt never activates");
   g.world.interact(player,C::PADS);
   check(g.uses==1, "matching remappable pressed-use activates");
+  adapter.bind_button(0, C::World::Button::Use, 0x40);
+  g.world.pad(0,0,0x80); g.world.interact(player,C::PADS);
+  check(g.uses==1, "old use binding does not activate after remapping");
+  g.world.pad(0,0,0x40); g.world.interact(player,C::PADS);
+  check(g.uses==2, "configured use binding is read at interaction time");
   g.world.write(item+0x10,4,raw(80)); g.world.update_grid(item);
   g.world.interact(player,C::PADS);
-  check(g.uses==1, "manual query is bounded in x/y");
+  check(g.uses==2, "manual query is bounded in x/y");
   g.world.write(item+0x10,4,0); g.world.write(item+0x18,4,raw(61)); g.world.update_grid(item);
   g.world.interact(player,C::PADS);
-  check(g.uses==1, "query ends at player z+60");
+  check(g.uses==2, "query ends at player z+60");
 }
 void carried_equipment() {
   Ground g;
@@ -468,7 +485,7 @@ void item_constructors() {
 int main() {
   try {
     inventory_limits(); equip_callback(); bounds(); flight_and_settle(); adopted_chest_lifetime(); allocation_loss(); manual_input(); manual_ranking_and_prompt_status(); carried_equipment(); world_to_inventory();
-    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals(); save_preflight();
+    gold_contact_and_credit(); container_gold_branch(); grant_sequences(); item_constructors(); chest_branch_refusals(); save_preflight(); campaign_use_binding();
     std::cout << "pickup checks " << checks << " passed\n"; return 0;
   } catch(const std::exception &e) { std::cerr << "pickup check " << checks << ": " << e.what() << '\n'; return 1; }
 }

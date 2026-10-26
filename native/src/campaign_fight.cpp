@@ -19,6 +19,7 @@ namespace {
 // The pad mapping the Full composition fixture uses for the client (combat_play):
 // the attack button mask. A host choice, not a recorded original word.
 constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
+constexpr Raw USE_MASK = 0x80;
 // Player_ctor's 12 model definitions (research-player-model 7f13899,
 // docs/spec/player-model-resources.md): word 0 names the animation LMP, words
 // 1..111 (8 bytes apart) name the slot entries.
@@ -546,8 +547,6 @@ struct Fight::Impl {
     }
     script_items::BinderView inventory(host->variables().memory);
     script_items::recalc_load_limits(inventory);
-    const auto use_mask = exe->word(0x41b9c0);
-    world->write(0x41b9c0, 4, use_mask);
     // Player_ctor's documented contact radius (loot-drop section 6).
     world->write(player + 0x1c, 4, 0x41400000);
     reset_idle_anim();
@@ -588,6 +587,7 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
   p.adapter = std::make_unique<C::SessionAdapter>(*p.world);
   p.adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
   p.adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
+  p.adapter->bind_button(0, C::World::Button::Use, USE_MASK);
   p.bundle.set_local_slot(0);
   p.dispatch->run = [impl = p_.get()](Address a) -> bool {
     auto &q = *impl;

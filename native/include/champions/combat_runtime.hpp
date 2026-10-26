@@ -313,7 +313,7 @@ public:
   void press_attack(unsigned slot, bool held = true);
   // Explicit button-mask word and pad edge/held words for a slot. Masks are
   // the caller's controller mapping; none is invented here.
-  enum class Button { Attack, AbilityA, AbilityB, Block, PotionA, PotionB, Swap };
+  enum class Button { Attack, AbilityA, AbilityB, Block, PotionA, PotionB, Swap, Use };
   void bind_button(unsigned slot, Button, Raw mask);
   void pad(unsigned slot, Raw held, Raw pressed);
   Address give_weapon(unsigned slot, const Weapon &);
