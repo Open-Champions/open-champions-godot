@@ -120,3 +120,7 @@ actions/traps and other unported services remain refused. The bounded
 headless/rendered journey gates pass; there are no remaining blockers to
 the requested pickup recovery. Full saved-inventory reload, original visual
 parity and the unported systems are not claimed.
+
+## PP2F-1 full CTest (recorded by the orchestrator, 2026-10-26)
+
+Tests committed in `c87f08dc` and `4f61dfca`. The full `ctest --test-dir build/native -j 3 --output-on-failure` run happened while machine load was ~290: **232/242 passed**, 10653.13 s (log `work/pickups/pp2f-full-ctest.log`). Eight failures were timeouts; `session-anim-cache-transport` and `session-facing-exact` were reported Failed. All 10 were rerun at low load with `-j2` (log `work/pickups/pp2f-rerun-failed.log`): **10/10 passed**, 609.18 s. Guard-removal verification and the PP2F-1 playthrough/Godot results are still to be written up by the next job.
