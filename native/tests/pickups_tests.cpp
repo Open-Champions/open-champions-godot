@@ -301,17 +301,21 @@ void manual_input() {
   check(g.prompts==3 && g.uses==0, "display-only prompt never activates");
   g.world.interact(player,C::PADS);
   check(g.uses==1, "matching remappable pressed-use activates");
+  g.world.write(item+0x10,4,raw(80)); g.world.update_grid(item);
+  g.world.interact(player,C::PADS);
+  check(g.uses==1, "manual query is bounded in x/y");
+  g.world.write(item+0x10,4,0); g.world.write(item+0x18,4,raw(61)); g.world.update_grid(item);
+  g.world.interact(player,C::PADS);
+  check(g.uses==1, "query ends at player z+60");
+  g.world.write(item+0x18,4,0); g.world.update_grid(item);
   adapter.bind_button(0, C::World::Button::Use, 0x40);
   g.world.pad(0,0,0x80); g.world.interact(player,C::PADS);
   check(g.uses==1, "old use binding does not activate after remapping");
   g.world.pad(0,0,0x40); g.world.interact(player,C::PADS);
   check(g.uses==2, "configured use binding is read at interaction time");
-  g.world.write(item+0x10,4,raw(80)); g.world.update_grid(item);
+  adapter.bind_button(0, C::World::Button::Use, 0);
   g.world.interact(player,C::PADS);
-  check(g.uses==2, "manual query is bounded in x/y");
-  g.world.write(item+0x10,4,0); g.world.write(item+0x18,4,raw(61)); g.world.update_grid(item);
-  g.world.interact(player,C::PADS);
-  check(g.uses==2, "query ends at player z+60");
+  check(g.uses==2, "zero use binding cannot activate a pickup");
 }
 void carried_equipment() {
   Ground g;
