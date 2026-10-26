@@ -1,4 +1,4 @@
-STATUS: MORE — five audited branches integrated and committed; final full CTest is still running. The campaign journey retains explicit physical-use, reward and checkpoint-reload refusals.
+STATUS: MORE — five audited branches integrated and committed; all gates green (full CTest 247/247). The campaign journey retains explicit physical-use, reward and checkpoint-reload refusals.
 
 # Playable integration wave 32 — 2026-10-25
 
@@ -32,7 +32,7 @@ Raw logs, private saves/caches and captures remain ignored under `work/playable-
 
 - Native Release configure/build: PASS, `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` followed by `cmake --build build/native -j 4`.
 - Universal macOS GDExtension and level-texture libraries, both `template_debug` and `template_release`: all four configure/build pairs PASS, with Release optimization and `arm64;x86_64`.
-- Full `ctest --test-dir build/native --output-on-failure -j 3`: IN PROGRESS; 247 registered tests. Final result will replace this line before completion.
+- Full `ctest --test-dir build/native --output-on-failure -j 3`: **247/247 PASS**, 845.90 s (log work/playable-wave32/ctest.log; recorded by the orchestrator after the job's provider stopped).
 - Godot dev matrix: **54/54 exit 0**. Full synthetic combat: **2,641 checks, 0 failures**. `FULL_SAVE_LOAD`: **300/300** presentations with identical continued/uninterrupted presentation hashes.
 - `FULL_TRACE`: **36,402 bytes**, SHA-256 **`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**, unchanged. No baseline or fixture was weakened.
 - Both private level sweeps: scripts-on **111/111 tried, loaded, played**, **230 checks**, 0 failures, 0 top-level refusal kinds; scripts-off the same. Each uses four 60-tick slices. Internal unsupported script/object/terrain services remain in their separate counters; top-level zero does not mean those paths are supported.
