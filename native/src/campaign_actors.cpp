@@ -528,9 +528,8 @@ void Runtime::set_state(Actor &a, std::uint32_t state) {
 void Runtime::tick(std::uint32_t address) {
   auto &a = at(address);
   if (a.kind == Kind::Minotaur) {
+    if (a.ai_refusal) return;
     required(services_.minotaur_run,"Minotaur_run");
-    // A contained refusal still permits the shared damage/death pipeline on
-    // subsequent ticks; the class run owns the original prefix and exits.
     try { services_.minotaur_run(address); }
     catch (const std::exception &e) {
       if (!contain_) throw;

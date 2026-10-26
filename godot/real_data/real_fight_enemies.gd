@@ -8,6 +8,7 @@ const RealCreature = preload("res://real_data/real_creature.gd")
 
 var status := "No enemy model loaded."
 var instances: Dictionary = {} # native address -> MeshInstance3D
+var identities: Dictionary = {}
 var models: Dictionary = {} # runtime model identity + visibility -> presentation
 var parent: Node3D
 var real: Node
@@ -23,6 +24,7 @@ func clear() -> void:
 	for address in instances:
 		if is_instance_valid(instances[address]): instances[address].queue_free()
 	instances.clear()
+	identities.clear()
 	models.clear()
 	status = "No enemy model loaded."
 
@@ -32,8 +34,20 @@ func install(source: Node, inspector: RefCounted, host: Node3D) -> void:
 	reader = inspector
 	parent = host
 
+static func _identity(row: Dictionary) -> String:
+	return JSON.stringify([row.get("model_lump", ""), row.get("model_entry", ""),
+		int(row.get("model_mask", 0)), row.get("texture_entry", "")])
+
+func _retire(address: int) -> void:
+	var instance: MeshInstance3D = instances.get(address)
+	if is_instance_valid(instance):
+		instance.get_parent().remove_child(instance)
+		instance.queue_free()
+	instances.erase(address)
+	identities.erase(address)
+
 func _model(row: Dictionary) -> Dictionary:
-	var key := "%s|%s|%d" % [row.get("model_lump", ""), row.get("model_entry", ""), int(row.get("model_mask", 0))]
+	var key := _identity(row)
 	if models.has(key): return models[key]
 	models[key] = {}
 	var path := str(real.files.get(str(row.get("model_lump", "")).to_lower(), ""))
@@ -75,9 +89,15 @@ func update(observation: Dictionary) -> int:
 	for row in observation.get("fight_enemies", []):
 		var address := int(row.handle)
 		seen[address] = true
+		var identity := _identity(row)
 		var model := _model(row)
-		if model.is_empty(): continue
+		if model.is_empty():
+			_retire(address)
+			continue
 		var instance: MeshInstance3D = instances.get(address)
+		if identities.get(address, "") != identity:
+			_retire(address)
+			instance = null
 		if instance == null or not is_instance_valid(instance):
 			instance = MeshInstance3D.new()
 			instance.mesh = model.mesh
@@ -89,6 +109,7 @@ func update(observation: Dictionary) -> int:
 				instance.material_override = neutral
 			parent.add_child(instance)
 			instances[address] = instance
+			identities[address] = identity
 		var size := float(row.get("model_scale", 1.0))
 		instance.scale = Vector3.ONE * size
 		var p: Vector3 = row.position
@@ -98,6 +119,6 @@ func update(observation: Dictionary) -> int:
 		instance.visible = true
 		drawn += 1
 	for address in instances.keys():
-		if not seen.has(address) and is_instance_valid(instances[address]):
-			instances[address].visible = false
+		if not seen.has(address):
+			_retire(address)
 	return drawn

@@ -120,7 +120,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · level script actions can change real levels; combat and other campaign paths remain incomplete."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks), WarBoars and Minotaurs. The player is unarmed (starting equipment refused_unknown). Bodies use rest poses. Minotaur decisions and attack events run; delivered player damage, held-part physics and loot pickup remain refused."
+			mode_label.text = "Play mode · shared-World player (WASD moves, J attacks) and WarBoars. The player is unarmed (starting equipment refused_unknown). Bodies use rest poses. Minotaur construction is refused: Creature_init bounds are unbound. Enemy damage, held-part physics and loot pickup remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):

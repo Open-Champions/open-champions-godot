@@ -280,6 +280,11 @@ void minotaur_shared_health() {
   resources.load_lmp("authored-class.lmp",{bytes.data(),bytes.size()});
   C::Services bindings;
   unsigned constructions = 0;
+  unsigned run_attempts = 0;
+  bindings.minotaur_run = [&](R::Raw) {
+    ++run_attempts;
+    throw CR::Unsupported("synthetic unbound Minotaur service");
+  };
   bindings.minotaur_construct=[&](R::Raw a,const std::string &type){++constructions; M::finish_constructor(model,a,type);};
   C::Runtime runtime(*authority->objects,resources,bindings,&authority->memory);
   runtime.bind_minotaur_definition("authored-class.lmp",entries);
@@ -339,6 +344,12 @@ void minotaur_shared_health() {
   auto &rebound = runtime.adopt(C::Kind::Minotaur, *replacement, 0, 0);
   check(runtime.find(a) == &rebound && rebound.object_serial == replacement->serial &&
         rebound.health() == R::from_int(80), "replacement Minotaur adopts the new shared body");
+  runtime.set_contain_refusals(true);
+  runtime.tick(a);
+  authority->memory.clear_log();
+  runtime.tick(a);
+  check(run_attempts == 1 && rebound.ai_refusal && authority->memory.log().empty(),
+        "contained Minotaur service refusal freezes subsequent authoritative ticks");
 }
 
 void boar_inherited_vectors() {

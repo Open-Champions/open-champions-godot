@@ -42,6 +42,41 @@ constexpr Address PLAYERS = C::PLAYERS, RECORD = C::RECORD_SIZE;
 Raw bits_of(std::int32_t v) { return Raw(v); }
 } // namespace
 
+void bind_minotaur_boundaries(arena_monsters::Model &m, C::World &world, Counts &counts,
+    std::function<void(const std::string &)> refuse) {
+  namespace A = arena_monsters;
+  auto arg = [](const auto &args, unsigned index) {
+    return Raw(std::get<std::int64_t>(args.at(index)));
+  };
+  m.callbacks["Creature_init"]=[refuse](auto &,const auto &)->A::Value {
+      const std::string reason = "Minotaur Creature_init: model bounds height/draw byte unbound";
+      refuse(reason);
+      throw C::Unsupported(reason);
+  };
+  m.callbacks["Holder.v11"]=[&world,&counts,refuse,arg](auto &model,const auto &args)->A::Value {
+      const std::vector<A::Value> rest(args.begin()+1,args.end());
+      return std::int64_t(combat_ctors::holder_slot(model,arg(args,0),11,rest,
+          [&world,&counts,refuse](Raw part,Address c,Address,Raw) {
+            if (!part || !c || (world.read(c+0xc)&2)) return;
+            counts.held_part_requests+=1;
+            const std::string reason = "held-part drop: attachment pose and PhProp publication refused_unknown";
+            refuse(reason);
+            throw C::Unsupported(reason);
+          }));
+  };
+  m.callbacks["Creature_hitTargetInArc"]=[&world,&counts,refuse,arg](auto &,const auto &args)->A::Value {
+      // Preserve the executed hit helper's target/radius/terrain gate. Final
+      // live descriptor contents and delivered player damage were not traced.
+      const auto a=arg(args,0), target=world.target(a+C::TARGET);
+      if (!target || !world.can_see(a,target,arg(args,1),arg(args,2),0,
+                                      arg(args,8),arg(args,9),0)) return std::int64_t(0);
+      counts.minotaur_hit_requests+=1;
+      const std::string reason = "Minotaur delivered player damage: refused_unknown (class hit arguments only)";
+      refuse(reason);
+      throw C::Unsupported(reason);
+  };
+}
+
 struct Fight::Impl {
   std::shared_ptr<WorldAuthority> authority;
   std::shared_ptr<const arena_modes::Executable> exe;
@@ -334,8 +369,6 @@ struct Fight::Impl {
     s.minotaur_set_state = [this](Raw a,Raw state) { creatures->vcall(a,27,{std::int64_t(state)}); };
     s.minotaur_run = [this](Raw a) {
       if (auto *actor=actors->find(a); actor && actor->ai_refusal) {
-        world->process_damage(a);
-        world->creature_run(a);
         return;
       }
       minotaur::run(*creatures,a);
@@ -492,35 +525,13 @@ struct Fight::Impl {
       }
       return std::int64_t(0);
     };
-    m.callbacks["Creature_init"]=[this](auto &,const auto &)->A::Value {
-      refuse("Creature_init: model bounds height/draw byte unbound; constructor defaults retained");
-      refuse("Minotaur rendered animation and root trajectory: refused_unknown");
-      return std::int64_t(0);
-    };
+    bind_minotaur_boundaries(m, *world, counts, [this](const auto &label) { refuse(label); });
     m.callbacks["Creature_dropLoot"]=[this,arg](auto &,const auto &args)->A::Value {
       world->drop_loot(arg(args,0),std::get<Vec3>(args.at(1)),arg(args,2),arg(args,3),
           arg(args,4),arg(args,5),arg(args,6),arg(args,7),arg(args,8),arg(args,9));
       return std::int64_t(0);
     };
-    m.callbacks["Holder.v11"]=[this,arg](auto &model,const auto &args)->A::Value {
-      const std::vector<A::Value> rest(args.begin()+1,args.end());
-      return std::int64_t(combat_ctors::holder_slot(model,arg(args,0),11,rest,
-          [this](Raw part,Address c,Address,Raw) {
-            if (!part || !c || (read(c+0xc)&2)) return;
-            counts.held_part_requests+=1;
-            refuse("held-part drop: attachment pose and PhProp publication refused_unknown");
-          }));
-    };
-    m.callbacks["Creature_hitTargetInArc"]=[this,arg](auto &,const auto &args)->A::Value {
-      // Preserve the executed hit helper's target/radius/terrain gate. Final
-      // live descriptor contents and delivered player damage were not traced.
-      const auto a=arg(args,0), target=world->target(a+C::TARGET);
-      if (!target || !world->can_see(a,target,arg(args,1),arg(args,2),0,
-                                      arg(args,8),arg(args,9),0)) return std::int64_t(0);
-      counts.minotaur_hit_requests+=1;
-      refuse("Minotaur delivered player damage: refused_unknown (class hit arguments only)");
-      return std::int64_t(0);
-    };
+
     world->define_creature_table(minotaur::VTABLE,{{4,minotaur::RUN},{5,minotaur::DRAW},{27,minotaur::SET_STATE}});
     // Preserve the selected executable's table adjustments and unported
     // slots too. Unknown function bodies still refuse on dispatch.
@@ -546,6 +557,9 @@ struct Fight::Impl {
     // Rank: the record carries no boss rank in this host (Creature_ctor's
     // bossRank is 0 for an unnamed creature); death loot refuses otherwise.
     if (mino) {
+      // This unbound final Creature_ctor service must fail before the class
+      // constructor writes definition, holder or runtime registration state.
+      creatures->callbacks.at("Creature_init")(*creatures, {std::int64_t(request.address)});
       world->adopt_creature(request.address,true);
       try { actors->adopt(kind,*request.object,request.angle,std::int64_t(0)); }
       catch (...) { world->unadopt_creature(request.address); throw; }

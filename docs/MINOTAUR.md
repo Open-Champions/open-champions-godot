@@ -36,6 +36,13 @@ This implementation is RTA US v2.00 only.
 
 ## Explicit boundaries
 
+Ordinary campaign Minotaur construction now throws `Unsupported` before class
+adoption: the required final `Creature_init` bounds service is unbound. Class
+fixtures remain diagnostic, not a successful authoritative encounter. A
+sight-approved hit with unbound damage and a held-part drop with unbound
+publication also throw; the holder hand bit is not cleared on failure. A
+contained unsupported Minotaur path freezes instead of continuing common ticks.
+
 The factory host still restricts construction to one player at difficulty 1;
 statistics at other difficulties are tested independently, not enabled campaign
 sessions. Minotaur placement properties other than `name` refuse because their
@@ -44,7 +51,7 @@ init services are not bound.
 Live descriptor contents and delivered Minotaur damage, the target-attacking-me
 predicate, bounds-derived initialization, animated appearance/root trajectory,
 held-part attachment and PhProp publication are not established by the pinned
-class research. They stay counted refusals. Gold scatter/allocation, ground-item
+class research. They stay counted, throwing refusals. Gold scatter/allocation, ground-item
 publication, pickup and credit remain unported. The existing unarmed player is
 a labelled stand-in, not the campaign's original equipment.
 

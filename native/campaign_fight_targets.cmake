@@ -47,6 +47,10 @@ if(BUILD_TESTING AND TARGET champions-campaign-actors AND TARGET champions-comba
     add_test(NAME campaign-fight-adopt COMMAND champions-campaign-fight-adopt-tests)
 endif()
 if(BUILD_TESTING AND TARGET champions-campaign-fight)
+    add_executable(champions-campaign-fight-boundary-tests
+        "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_fight_boundary_tests.cpp")
+    target_link_libraries(champions-campaign-fight-boundary-tests PRIVATE champions-campaign-fight)
+    add_test(NAME campaign-fight-boundaries COMMAND champions-campaign-fight-boundary-tests)
     add_executable(champions-campaign-rewards-tests "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_rewards_tests.cpp")
     target_link_libraries(champions-campaign-rewards-tests PRIVATE champions-campaign-fight)
     add_test(NAME campaign-rewards COMMAND champions-campaign-rewards-tests)

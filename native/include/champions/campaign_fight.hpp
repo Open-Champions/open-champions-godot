@@ -72,6 +72,9 @@ struct Counts {
   std::size_t boar_state_changes = 0, boar_attack_entries = 0, boar_hit_events = 0;
 };
 
+void bind_minotaur_boundaries(arena_monsters::Model &, combat_runtime::World &, Counts &,
+    std::function<void(const std::string &)>);
+
 class Fight {
 public:
   // `bundle` must outlive the Fight. `dialog_open` reports the script dialog.
