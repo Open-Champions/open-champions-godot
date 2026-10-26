@@ -21,6 +21,7 @@ struct TickInput {
   bool away_home = false;
   // Caller answers the class +0xf4 deadline after its state-0 setup.
   std::optional<std::int64_t> idle_deadline;
+  std::optional<objects::Vec3> target_position;
 };
 struct Services {
   std::function<void(std::uint32_t)> model_init, animation_init, creature_init;

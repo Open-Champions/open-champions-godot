@@ -1,6 +1,9 @@
 #include "champions/blood1_actors.hpp"
 #include <algorithm>
 #include <array>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -91,7 +94,8 @@ void run_seed(std::uint32_t seed) {
   std::vector<std::array<std::uint64_t, 4>> drop_timers;
   B::Runtime *active_runtime = nullptr;
   bool filter_refuse = false;
-  B::TickInput input{true, false, false, false, false, 1000};
+  B::TickInput input{true, false, false, false, false, 1000, O::Vec3{0,0,0}};
+  std::vector<O::Vec3> grid_positions;
   const auto timers_at = [&](std::uint32_t address) {
     const auto &m = active_runtime->at(address).hp.mem;
     return std::array<std::uint64_t, 4>{{
@@ -114,7 +118,10 @@ void run_seed(std::uint32_t seed) {
   s.holder_update = [&](std::uint32_t) { calls.emplace_back("holder"); };
   s.holder_descriptor = [&](std::uint32_t) { calls.emplace_back("descriptor"); };
   s.turn_target = [&](std::uint32_t) { calls.emplace_back("turn"); };
-  s.grid_update = [&](std::uint32_t) { calls.emplace_back("grid"); };
+  s.grid_update = [&](std::uint32_t address) {
+    calls.emplace_back("grid");
+    grid_positions.push_back(active_runtime->at(address).object->pos);
+  };
   s.settle = [&](std::uint32_t) { calls.emplace_back("settle"); };
   s.can_see_target = [&](std::uint32_t) { calls.emplace_back("see"); };
   s.away_home_probe = [&](std::uint32_t) { calls.emplace_back("home"); };
@@ -227,6 +234,59 @@ void run_seed(std::uint32_t seed) {
               "WarWraith fade, creature flags, and object flag after tick");
       }
     }
+    std::ifstream vectors(std::filesystem::path(__FILE__).parent_path() /
+                          "vectors/blood1_targeted.tsv");
+    check(bool(vectors), "original targeted frame vectors available");
+    std::uint32_t vector_seed, kind, hit, complete, fade, height, target_height, result;
+    std::string expected_calls;
+    std::size_t compared = 0;
+    while (vectors >> vector_seed >> kind >> hit >> complete >> fade >> height >>
+           target_height >> result >> expected_calls) {
+      if (vector_seed != seed || kind != i) continue;
+      a.state = 6;
+      a.object->pos = {R::from_int(12), R::from_int(24), height};
+      a.hp.mem.store(address + 0x18, 4, height);
+      a.hp.mem.store(address + 0x3c8, 1, fade);
+      input.has_target = true;
+      input.hit_event = hit != 0;
+      input.animation_over = complete != 0;
+      input.target_position = O::Vec3{0, 0, target_height};
+      calls.clear(); transitions.clear(); hits.clear(); grid_positions.clear();
+      actors.tick(address);
+      std::string observed_calls;
+      for (const auto &call : calls) {
+        if (!observed_calls.empty()) observed_calls += ',';
+        observed_calls += call;
+      }
+      check(observed_calls == expected_calls, "original targeted frame call order");
+      check(a.object->pos == O::Vec3{R::from_int(12), R::from_int(24), result},
+            "original targeted frame position, including equal height and overshoot");
+      check(a.hp.mem.load(address + 0x18, 4) == result,
+            "targeted height mirrored in actor memory");
+      check(grid_positions == (i == 3 ? std::vector<O::Vec3>{a.object->pos} :
+                                        std::vector<O::Vec3>{}),
+            "original grid observes updated position exactly once");
+      check(transitions == (complete ? std::vector<std::uint32_t>{i == 3 ? 3u : 5u} :
+                                       std::vector<std::uint32_t>{}),
+            "original targeted completion transition");
+      check(hits == (hit ? std::vector<std::uint32_t>{i == 1 ? 0x440008u : 8u} :
+                          std::vector<std::uint32_t>{}),
+            "original event-only hit dispatch");
+      ++compared;
+    }
+    check(vectors.eof() && compared == 40, "all original targeted vectors compared");
+    if (i == 3) {
+      input.target_position.reset();
+      calls.clear(); grid_positions.clear();
+      const auto position = a.object->pos;
+      const auto prior_fade = a.hp.mem.load(address + 0x3c8, 1);
+      refuses([&] { actors.tick(address); }, "missing target position refuses targeted frame");
+      check(calls == std::vector<std::string>{"damage", "run"} &&
+            grid_positions.empty() && a.object->pos == position &&
+            a.hp.mem.load(address + 0x3c8, 1) == prior_fade,
+            "target position refusal precedes class attack effects");
+    }
+    input.target_position = O::Vec3{0,0,0};
     a.state = 6; input.has_target = true; input.hit_event = true;
     input.animation_over = false;
     if (i == 3) a.hp.mem.store(address + 0x3c8, 1, 100);

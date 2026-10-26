@@ -309,6 +309,8 @@ void Runtime::tick(std::uint32_t address) {
       a.state != 0x14)
     throw Unsupported("class run: state or AI branch Unknown");
   const bool wraith = a.kind == Kind::WarWraith;
+  if (wraith && a.state == 6 && in.has_target && !in.target_position)
+    throw Unsupported("WarWraith_run/targeted attack: target position Unknown");
   auto fade = wraith ? std::uint32_t(a.hp.mem.load(address + 0x3c8, 1)) : 0u;
   if (wraith && fade > 100)
     throw Unsupported("WarWraith_run: fade outside documented range");
@@ -376,19 +378,31 @@ void Runtime::tick(std::uint32_t address) {
       services_.settle(address);
       if (in.has_target && in.hit_event) {
         required(services_.hit_target_in_arc, "Creature_hitTargetInArc");
-        required(services_.turn_target, "Creature_turnToTarget");
         services_.hit_target_in_arc(address,
             a.kind == Kind::KoboldTough ? 0x440008 : 8);
+      }
+      if (in.has_target) {
+        required(services_.turn_target, "Creature_turnToTarget");
         services_.turn_target(address);
       }
-    } else if (in.has_target && in.hit_event) {
-      required(services_.holder_descriptor, "WarWraith_run/holder descriptor");
-      required(services_.hit_target_at_reach, "Creature_hitTargetAtReach");
+    } else if (in.has_target) {
+      if (in.hit_event) {
+        required(services_.holder_descriptor, "WarWraith_run/holder descriptor");
+        required(services_.hit_target_at_reach, "Creature_hitTargetAtReach");
+        services_.holder_descriptor(address + 0x3d0);
+        services_.hit_target_at_reach(address, 8);
+      }
       required(services_.grid_update, "WarWraith_run/obj_updateGridCell");
       required(services_.turn_target, "WarWraith_run/targeted turn");
-      services_.holder_descriptor(address + 0x3d0);
-      services_.hit_target_at_reach(address, 8);
       services_.turn_target(address);
+      auto &height = a.object->pos[2];
+      const auto target_height = (*in.target_position)[2];
+      const auto step = div(from_int(1), from_int(6));
+      if (lt(height, target_height))
+        height = add(height, step);
+      else if (lt(target_height, height))
+        height = sub(height, step);
+      a.hp.mem.store(address + 0x18, 4, height);
       services_.grid_update(address);
     }
     if (*in.animation_over) {
