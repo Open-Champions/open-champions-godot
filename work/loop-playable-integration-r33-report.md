@@ -33,6 +33,8 @@ Candidate runtime revision: `264150c3` (recovery starts at `6dbc3369`, report-on
 - Native death probe: PASS, 78 actors, 600 ticks, dead/zero HP retained, countdowns zero, phase 1/fade 128, 239 native death-clip steps, record retention and reload refusal passed. Diagnostic hit only.
 - Recovery evidence: ignored `work/playable-wave33/resume-{native-build,blood1-actors,boar-ai,death-probe}.log`. All four universal extension/library configure/build pairs PASS (8/8 exit 0), Release, arm64;x86_64, parallelism 4; `build-results.json` and `resume-extension-builds.out`. Remaining Godot/private/journey gates pending fresh recovery execution.
 
+- Recovery Godot dev matrix: **61/61 exit 0**, comprising the inherited 54 plus seven loading/identity/combat/death cases. Full synthetic combat: **2,641 checks, 0 failures**. `FULL_SAVE_LOAD`: **300/300**, identical continued/uninterrupted presentation hashes. `FULL_TRACE`: **36,402 bytes**, SHA-256 **`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**, unchanged. Evidence: `resume-godot-matrix.out`, `guard-matrix/godot-results.json`, `godot-combined-full-combat.log`. This is synthetic/fixture coverage; full journey remains pending.
+
 ## Full scripted journey
 
 Pending fresh headless/rendered execution; compare against wave 32's 53/54 steps without relaxing acceptance. Native AI/death diagnostic probes above pass; those do not establish the full journey.
