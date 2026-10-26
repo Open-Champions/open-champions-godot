@@ -10,7 +10,7 @@ STATUS: MORE — NLU-9 fixed; current Release/native and menu Godot gates pass. 
 - Regression sensitivity: compiling the new native assertions against `ba2f8532`'s unmodified menu implementation fails (exit 134) at `tail refusal preserves exhausted record and ledger metadata`. The same assertions pass against this fix. Only ignored local comparison artifacts were created.
 - PASS: Release extension build, `cmake --build build/godot-extension -j 4`; Godot headless `menu_smoke.gd` — **88 checks / zero failures**; `frontend_smoke.gd` — **124 checks / zero failures / 20 screens**; `play_hud_smoke.gd` — **passed**. Each command exits zero; menu smoke retains an ObjectDB leak-at-exit warning. Logs: `work/levelup-r1/nlu9-extension-build.log`, `nlu9-menu-smoke.log`, `nlu9-frontend.log`, `nlu9-play-hud.log`. The older 54-command matrix and private sweep were not rerun for this scoped fix; their earlier results and caveats are historical.
 - FULL_TRACE: headless `playable_wave_smoke_full_combat.gd -- --ready-ticks=640` exits zero, **2,620 checks / zero failures**. It emits **31,622 bytes**, SHA-256 `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, exactly matching the historical branch result and `docs/INTEGRATION.md`. The requested **36,402 bytes / `9c7922b2…c659`** remains a **MISMATCH**; no full expected hash or reproducing command is available. Trace production/combat code is unchanged; no baseline or gate was weakened. Log: `work/levelup-r1/nlu9-full-combat.log`; ObjectDB leak-at-exit warning remains.
-- RUNNING: full `ctest --test-dir build/native --output-on-failure -j 3`; actual final count will replace this line. Log: `work/levelup-r1/nlu9-ctest.log`.
+- PASS: full `ctest --test-dir build/native --output-on-failure -j 3` — **226/226 passed**, **776.08 s** (log `work/levelup-r1/nlu9-ctest.log`; recorded by the orchestrator after the job's provider stopped).
 
 ## NLU-7 / NLU-8 follow-up (2026-10-25)
 
@@ -23,7 +23,7 @@ STATUS: MORE — NLU-9 fixed; current Release/native and menu Godot gates pass. 
 - Matrix caveat: zero command exit codes do not mean error-free logs. Two script errors in unchanged `scene_play_flow` fixture callbacks report missing `loaded`; one unchanged `ui_layout_smoke` call supplies four arguments to a five-argument method. These unrelated paths were not modified; the matrix is **54/54 zero exits, not an error-free gate**.
 - PASS: `bash work/levelup-r1/run-slices.sh levelup-r1-fix3 --scripts` — **4/4 slices exit 0**, **111 tried / 111 loaded / 111 played**, **230 checks / zero failures**. Private input was read-only; only aggregate counts are reported. This reruns the prior fix-2 sweep gate.
 - TRACE MISMATCH: matrix full-combat execution measures **31,622 bytes**, SHA-256 `4da5705531dd885150aa42a715fff04e88274b3ac65ea449d98c72070a4b78d9`, matching the historical report and `docs/INTEGRATION.md`, but not the requested **36,402 bytes / `9c7922b2…c659`**. No full requested hash or reproducing command was supplied; trace generation and unrelated combat code remain unchanged.
-- RUNNING: `ctest --test-dir build/native --output-on-failure -j 3`, logged locally in `work/levelup-r1/fix3-ctest.log`. Final figures will replace this entry. This reruns the prior fix-2 full native gate.
+- PASS: `ctest --test-dir build/native --output-on-failure -j 3` — **226/226 passed**, **876.28 s** (log `work/levelup-r1/fix3-ctest.log`; recorded by the orchestrator). This reruns the prior fix-2 full native gate.
 
 ## NLU-6 follow-up (2026-10-25)
 
