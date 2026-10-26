@@ -69,6 +69,7 @@ struct Counts {
   std::uint64_t xp_gained = 0;       // experience those awards added
   std::size_t levels_gained = 0;     // level-ups they caused
   std::size_t factory_runs_skipped = 0;
+  std::size_t boar_state_changes = 0, boar_attack_entries = 0, boar_hit_events = 0;
 };
 
 class Fight {

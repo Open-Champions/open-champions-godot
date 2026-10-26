@@ -28,6 +28,11 @@ void Bundle::bind_actor(Address actor, creature_anim::StateId state) {
   motion_.erase(actor); // a new binding has no advance for this actor
   actors_[actor] = state;
 }
+creature_anim::Motion Bundle::animation_motion(Address actor) const {
+  const auto it = motion_.find(actor);
+  if (it == motion_.end()) missing("animation motion: actor has not advanced");
+  return it->second;
+}
 void Bundle::bind_player_reader(std::function<std::uint64_t(Address, unsigned)> read) {
   player_read_ = std::move(read);
 }

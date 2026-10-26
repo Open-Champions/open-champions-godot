@@ -23,6 +23,11 @@ namespace {
 void check(bool ok, const char *why) {
   if (!ok) throw std::runtime_error(why);
 }
+template <class Function> void refuses(Function function, const char *why) {
+  bool caught = false;
+  try { function(); } catch (const C::Unsupported &) { caught = true; }
+  check(caught, why);
+}
 void put(std::vector<std::uint8_t> &b, std::size_t at, std::uint32_t v) {
   for (unsigned i = 0; i != 4; ++i) b.at(at + i) = std::uint8_t(v >> (i * 8));
 }
@@ -146,17 +151,58 @@ C::Services boar_actor_services(std::vector<std::string> &calls) {
   };
   actor_services.creature_init = [&](std::uint32_t) { calls.emplace_back("init"); };
   actor_services.process_damage = [&](std::uint32_t) { calls.emplace_back("damage"); };
-  actor_services.creature_run = [&](std::uint32_t) { calls.emplace_back("run"); };
-  actor_services.tick_input = [&](std::uint32_t) {
-    C::TickInput in;
-    in.active = true;
-    in.state_entry_frame = 0;
-    return in;
-  };
-  actor_services.animation_step = [](std::uint32_t) {};
+  actor_services.creature_run = [&](std::uint32_t) { calls.emplace_back("run"); return false; };
+  actor_services.update_active = [](std::uint32_t) { return true; };
+  actor_services.animation_step = [](std::uint32_t) { return R::Raw(0); };
   actor_services.knockback = [](std::uint32_t) {};
   actor_services.pick_target = [](std::uint32_t) {};
   return actor_services;
+}
+
+void destroy_and_readopt() {
+  champions::resources::Manager resources;
+  auto bytes = lump(BOAR_ENTRIES);
+  resources.load_lmp("warboar.lmp", {bytes.data(), bytes.size()});
+  auto authority = std::make_shared<R::WorldAuthority>();
+  std::vector<std::string> calls;
+  auto services = boar_actor_services(calls);
+  std::vector<std::uint32_t> ticks;
+  services.process_damage = [&](std::uint32_t address) { ticks.push_back(address); };
+  services.creature_run = [](std::uint32_t) { return 1; };
+  C::Runtime runtime(*authority->objects, resources, services, &authority->memory);
+  auto *original = authority->objects->new_object(0x3d8, {});
+  check(original != nullptr, "original adoption pool block");
+  const auto address = original->addr;
+  runtime.adopt(C::Kind::WarBoar, *original, 0, std::int64_t(0));
+  refuses([&] { runtime.adopt(C::Kind::WarBoar, *original, 0, std::nullopt); },
+          "duplicate live adoption refuses");
+  authority->objects->destroy(*original);
+  auto *replacement = authority->objects->new_object(0x3d8, {});
+  check(replacement && replacement != original && replacement->addr == address,
+        "shared World reuses the address with a distinct object");
+  check(runtime.find(address) == nullptr && runtime.actors().empty(),
+        "replacement object cannot resolve to the retired actor");
+  refuses([&] { runtime.adopt(C::Kind::WarBoar, *original, 0, std::nullopt); },
+          "retired object cannot be adopted over its replacement");
+  authority->memory.store(address + 0x228, 4, 0x42a00000);
+  auto &actor = runtime.adopt(C::Kind::WarBoarSmall, *replacement, 0, std::int64_t(0));
+  check(actor.object == replacement && actor.health() == 0x42a00000 &&
+        &runtime.at(address) == &actor && runtime.actors().size() == 1,
+        "readopted actor exposes the replacement's shared state");
+  runtime.tick(address);
+  check(ticks == std::vector<std::uint32_t>({address}), "readopted actor ticks");
+  authority->objects->destroy(*replacement);
+  auto *next = authority->objects->new_object(0x3d8, {});
+  check(next && next->addr == address, "next adoption reuses the same address");
+  auto &next_actor = runtime.adopt(C::Kind::WarBoar, *next, 0, std::int64_t(0));
+  check(next_actor.object == next && runtime.actors().size() == 1,
+        "adoption retires stale entries without an intervening lookup");
+  O::World foreign(O::CallbackPolicy::ReferenceBase);
+  auto *foreign_object = foreign.new_object(0x3d8, {});
+  check(foreign_object != nullptr, "foreign pool block");
+  refuses([&] { runtime.adopt(C::Kind::WarBoar, *foreign_object, 0, std::nullopt); },
+          "object from another World cannot be adopted");
+  check(runtime.find(address) == &next_actor, "invalid adoption preserves the live actor");
 }
 
 void adopt_and_run() {
@@ -200,6 +246,15 @@ void adopt_and_run() {
   world.define_creature_table(0x517cf0, {{4, 0x2ba3a0}, {27, 0x2bac60}});
   world.adopt_creature(at);
   check(world.contains(at), "adopted creature is a combat actor");
+  const auto nodes = authority->objects->handles.count_free();
+  const auto grid_back = object->heads[2].next;
+  world.write(at + 0x10, 4, R::from_int(256));
+  world.update_grid(at);
+  check(object->heads[2].next == grid_back && authority->objects->handles.count_free() == nodes,
+        "adopted movement reuses the factory's existing grid node without allocation");
+  auto nearby = world.collect_box({R::from_int(220),R::from_int(-40),R::from_int(-40)},
+                                  {R::from_int(290),R::from_int(40),R::from_int(40)},16);
+  check(std::find(nearby.begin(),nearby.end(),at) != nearby.end(), "moving adopted actor remains spatially queryable");
   check(world.slot_function(at, 4) == 0x2ba3a0 && world.slot_function(at, 27) == 0x2bac60 &&
             world.slot_function(at, 2) == 0x116638,
         "vtable image: documented overrides over the executed Creature slots");
@@ -224,7 +279,8 @@ void minotaur_shared_health() {
   champions::resources::Manager resources;
   resources.load_lmp("authored-class.lmp",{bytes.data(),bytes.size()});
   C::Services bindings;
-  bindings.minotaur_construct=[&](R::Raw a,const std::string &type){M::finish_constructor(model,a,type);};
+  unsigned constructions = 0;
+  bindings.minotaur_construct=[&](R::Raw a,const std::string &type){++constructions; M::finish_constructor(model,a,type);};
   C::Runtime runtime(*authority->objects,resources,bindings,&authority->memory);
   runtime.bind_minotaur_definition("authored-class.lmp",entries);
   auto *object=authority->objects->new_object(M::ALLOCATION,{0,0,0});
@@ -235,6 +291,14 @@ void minotaur_shared_health() {
       {0x0c,0x20},{0x228,R::from_int(100)},{0x22c,R::from_int(100)}})
     authority->memory.store(a+p.first,4,p.second);
   object->type_name="Minotaur";
+  O::World foreign(O::CallbackPolicy::ReferenceBase);
+  auto *foreign_object = foreign.new_object(M::ALLOCATION, {});
+  check(foreign_object && foreign_object->addr == a, "foreign Minotaur has the same numeric address");
+  authority->memory.clear_log();
+  refuses([&] { runtime.adopt(C::Kind::Minotaur, *foreign_object, 0, 0); },
+          "foreign same-address Minotaur refused before construction");
+  check(authority->memory.log().empty() && constructions == 0 && !foreign_object->class_name,
+        "foreign adoption has no shared-memory or constructor effects");
   bool refused=false;
   try{world.adopt_creature(a);}catch(const CR::Error &){refused=true;}
   check(refused,"unfinished factory objects require explicit constructor adoption");
@@ -258,6 +322,11 @@ void minotaur_shared_health() {
   const auto serial = actor.object_serial;
   authority->unregister_object(*object);
   authority->objects->destroy(*object);
+  authority->memory.clear_log();
+  refuses([&] { runtime.adopt(C::Kind::Minotaur, *object, 0, 0); },
+          "retired Minotaur refused before construction");
+  check(authority->memory.log().empty() && constructions == 1,
+        "retired adoption has no shared-memory or constructor effects");
   auto *replacement = authority->objects->new_object(M::ALLOCATION, {0, 0, 0});
   check(replacement && replacement->addr == a && replacement->serial != serial,
         "Minotaur pool address reused with a fresh identity");
@@ -270,6 +339,111 @@ void minotaur_shared_health() {
   auto &rebound = runtime.adopt(C::Kind::Minotaur, *replacement, 0, 0);
   check(runtime.find(a) == &rebound && rebound.object_serial == replacement->serial &&
         rebound.health() == R::from_int(80), "replacement Minotaur adopts the new shared body");
+}
+
+void boar_inherited_vectors() {
+  unsigned rays = 0;
+  R::Raw ray_answer = R::MINUS_ONE, ray_mask = 99;
+  auto services = CR::flat_fixture_services();
+  services.raycast = [&](const R::Vec3 &, const R::Vec3 &, R::Raw mask, R::Raw radius) {
+    ++rays; ray_mask = mask;
+    check(radius == 0x3f8ccccc, "sight ray radius parameter"); return ray_answer;
+  };
+  bool permit = true;
+  services.damage_permitted = [&](auto, auto) { return permit; };
+  CR::World w(services, 0, CR::Composition::Full);
+  CR::Spawn spawn;
+  spawn.team = 0; spawn.home_range = R::from_int(1000);
+  const auto a = w.spawn_skelight(spawn);
+  spawn.team = 1; spawn.position[0] = R::from_int(54);
+  const auto b = w.spawn_skelight(spawn);
+  w.write(a + 0x1c, 4, R::from_int(30)); w.write(b + 0x1c, 4, 0);
+  struct Sight { int distance, facing, near, far; R::Raw ray, mode; bool expected; };
+  const Sight sight[]{
+    {54,0,0,25,R::MINUS_ONE,0,true}, {55,0,0,25,R::MINUS_ONE,0,false},
+    {55,0,25,100,R::MINUS_ONE,0,true}, {130,0,25,100,R::MINUS_ONE,0,false},
+    {54,2999,0,25,R::MINUS_ONE,0,true}, {54,3000,0,25,R::MINUS_ONE,0,false},
+    {54,0,0,25,0x3f000000,0,false}, {54,0,0,25,0x3f000000,1,false},
+    {54,0,0,25,R::ONE,0,false}, {54,0,0,25,0x3f8ccccd,1,true},
+    {54,0,24,25,R::MINUS_ONE,0,true}, {54,0,25,25,R::MINUS_ONE,0,false}};
+  for (const auto &v : sight) {
+    w.write(b + 0x10, 4, R::from_int(v.distance)); ray_answer = v.ray; rays = 0;
+    check(bool(w.can_see(a,b,R::Raw(v.facing),3000,v.mode,R::from_int(v.near),R::from_int(v.far))) == v.expected,
+          "radius-adjusted sight boundaries");
+    if (rays) check(ray_mask == (v.mode ? 0u : 3u), "mode changes mask without bypassing terrain");
+  }
+  w.relink(a + CR::TARGET, b);
+  w.write(a + 0x3ac, 2, 300); w.write(a + 0x3ae, 2, 500);
+  ray_answer = R::MINUS_ONE;
+  for (const auto force : {0u,1u}) for (const auto arc : {0x4000u,0x7fffu})
+    for (const auto distance : {100,400}) {
+      w.write(a + 0x3b0, 2, arc); w.write(b + 0x10, 4, R::from_int(distance)); rays = 0;
+      check(w.creature_can_see_target(a, force), "pointblank-first wrapper with visual fallback");
+      check(rays == 1 && ray_mask == (force || arc == 0x7fff ? 0u : 3u), "wrapper ray mode");
+    }
+  ray_answer = R::ONE;
+  check(!w.creature_can_see_target(a, 1), "forced sight still refuses a terrain hit at exactly 1");
+  // 480-frame home leash: equality re-enables it; one frame newer disables it.
+  ray_answer = R::MINUS_ONE;
+  w.clear_handle(a + CR::TARGET);
+  w.write(a + 0x10, 4, R::from_int(800)); w.write(b + 0x10, 4, R::from_int(1100));
+  w.write(b + 0x1c, 4, R::from_int(30));
+  w.update_grid(a); w.update_grid(b); w.write(CR::FRAME, 4, 1000);
+  w.write(a + 0x304, 4, 520); w.pick_target(a, true);
+  check(w.target(a + CR::TARGET) == 0, "leash at exact 480-frame boundary");
+  w.write(a + 0x304, 4, 521); w.pick_target(a, true);
+  check(w.target(a + CR::TARGET) == b, "recent damage relaxes home leash");
+  w.write(a + 0x304, 4, 0); w.write(a + 0x10, 4, R::from_int(980)); w.update_grid(a);
+  w.pick_target(a, true);
+  check(w.target(a + CR::TARGET) == b, "both radii plus 60: equality is not leashed");
+  w.write(b + 0x10, 4, R::from_int(2200)); w.update_grid(b);
+  w.write(CR::FRAME, 4, R::Raw(w.read(a + 0x230, 1)) & 31u); w.pick_target(a);
+  check(w.target(a + CR::TARGET) == 0, "a scan loses a target absent from its box");
+  // The caller must use the filtered state, including root/stun/cooldown.
+  w.relink(a + CR::TARGET, b);
+  w.write(a + 0x314, 2, 1); w.write(a + 0x31c, 2, 1); w.write(a + 0x318, 2, 1);
+  check(w.creature_filter_state_result(a,3) == 5u, "root redirect precedes stun/cooldown");
+  w.write(a + 0x314, 2, 0);
+  check(w.creature_filter_state_result(a,3) == 19u, "stun precedes cooldown");
+  w.write(a + 0x31c, 2, 0);
+  check(w.creature_filter_state_result(a,3) == 16u, "cooldown redirects to retreat");
+  w.clear_handle(a + CR::TARGET);
+  check(w.creature_filter_state_result(a,0) == 0u && w.read(a + 0x318,2) == 0,
+        "idle filter clears target and no-target cooldown");
+  // Multi-victim dispatch uses the existing damage pipeline in query order;
+  // all inputs here are authored, including the victim HP and attack fields.
+  w.write(a + 0x10, 4, 0); w.write(b + 0x10, 4, R::from_int(40));
+  w.update_grid(a); w.update_grid(b);
+  spawn.position[0] = R::from_int(42); const auto c = w.spawn_skelight(spawn);
+  CR::Arc hit;
+  hit.facing = 0; hit.angle = 3000; hit.near = 0; hit.far = R::from_int(25);
+  hit.minimum = 11; hit.maximum = 22; hit.attack = 333; hit.flags = 8;
+  w.clear_history(); w.hit_all_in_arc(a, hit);
+  std::vector<CR::Address> victims;
+  for (const auto &event : w.events()) if (event.name == "damage_apply") victims.push_back(CR::Address(event.args[0]));
+  check(victims.size() == 2 && std::find(victims.begin(),victims.end(),b) != victims.end() &&
+        std::find(victims.begin(),victims.end(),c) != victims.end(), "every passing enemy reaches damage_apply");
+  permit = false;
+  const auto rng = w.read(CR::SHARED_SEED), hp = w.read(b + 0x228);
+  w.hit_all_in_arc(a, hit);
+  check(w.read(CR::SHARED_SEED) == rng && w.read(b + 0x228) == hp,
+        "host damage refusal takes no shared draw and changes no HP");
+}
+
+void activity_follows_the_live_player() {
+  auto services = CR::flat_fixture_services();
+  services.external_run = [](auto) { return true; }; // test activity, not a class tick
+  CR::World w(services,1,CR::Composition::Full);
+  CR::Spawn spawn;
+  spawn.position[0] = R::from_int(1000);
+  const auto creature = w.spawn_skelight(spawn);
+  spawn.position = {};
+  const auto player = w.spawn_player(0,spawn);
+  w.tick();
+  check(!w.creature_update_active(creature), "distant player leaves creature inactive");
+  w.write(player + 0x10,4,R::from_int(900)); w.update_grid(player);
+  w.tick();
+  check(w.creature_update_active(creature), "activity uses the live player position after movement");
 }
 
 // The combat World retains finished iterators only while something still
@@ -397,8 +571,11 @@ int main() {
     memory_budget();
     memory_budget_after_checkpoint();
     clear_nodes_adjacent_partners();
+    destroy_and_readopt();
     adopt_and_run();
     minotaur_shared_health();
+    boar_inherited_vectors();
+    activity_follows_the_live_player();
     prune_keeps_linked_iterators();
     retention_does_not_change_the_walk();
     long_run_releases_iterators();

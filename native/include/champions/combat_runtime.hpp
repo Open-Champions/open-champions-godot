@@ -75,6 +75,10 @@ struct ResourceQuery {
   std::string lump_text, entry;
 };
 struct Services {
+  // Optional host evidence boundary. False refuses this damage dispatch before
+  // any random draw or victim mutation; the host records the reason. Synthetic
+  // composition has no gate and uses the established damage pipeline.
+  std::function<bool(Address victim, Address attacker)> damage_permitted;
   std::function<bool()> dialog_is_open;
   std::function<Raw()> jumpgate_travel_state;
   // Required for reachable terrain/animation services. No silent zero defaults.
@@ -259,6 +263,14 @@ public:
   bool creature_away_from_home(Address);
   // Creature_filterState 0x10a9c0: true when the requested state is allowed.
   bool creature_filter_state(Address, std::uint32_t requested);
+  std::optional<std::uint32_t> creature_filter_state_result(Address, std::uint32_t requested);
+  bool creature_can_see_target(Address, Raw force);
+  void creature_clear_path(Address);
+  void creature_pick_wander_dest(Address);
+  void creature_move_to_dest(Address);
+  void creature_move_to_target(Address);
+  void creature_turn_to_target(Address);
+  void creature_flee_from_target(Address, Raw kind);
   // Creature_onDeath 0x10beb8 (virtual slot 28).
   void creature_on_death(Address, Raw quiet = 0);
   // Grid nodes left out of box queries because they are unconstructed host

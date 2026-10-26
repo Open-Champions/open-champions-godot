@@ -25,6 +25,11 @@ endforeach()
 if(BUILD_TESTING)
   add_executable(champions-level-flow-tests "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_tests.cpp")
   target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow champions-objects champions-terrain-file)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Large synthetic fixtures trigger pathological LLVM unrolling/inlining.
+    # Retain Release optimization; this affects only the test driver.
+    target_compile_options(champions-level-flow-tests PRIVATE -fno-unroll-loops -fno-inline-functions)
+  endif()
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()
 

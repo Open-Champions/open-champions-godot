@@ -310,6 +310,7 @@ int run_damage(World::State &s, Address v, Address a, Raw lo, Raw hi,
 } // namespace
 int World::State::damage(Address v, Address a, Raw lo, Raw hi, Raw attack,
                          Raw flags) {
+  if (!full() && services.damage_permitted && !services.damage_permitted(v, a)) return 0;
   if (full())
     return damage_full(v, a, attack, 0, 0, flags, 0, lo, hi);
   domain();
@@ -326,6 +327,7 @@ int World::State::damage(Address v, Address a, Raw lo, Raw hi, Raw attack,
 // it: a projectile attacker refuses, a weapon item is the descriptor.
 int World::State::damage_full(Address v, Address a, Raw attack, Raw, Raw,
                               Raw flags, Raw item, Raw lo, Raw hi) {
+  if (services.damage_permitted && !services.damage_permitted(v, a)) return 0;
   domain();
   actor(v);
   if (a) {
