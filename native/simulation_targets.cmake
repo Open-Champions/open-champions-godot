@@ -251,6 +251,16 @@ else()
     target_compile_options(champions-campaign-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-campaign-actors)
+# Bounded blood1 Kobold variants and WarWraith; World-owned, no scene binding.
+add_library(champions-blood1-actors "${CHAMPIONS_SIMULATION_ROOT}/src/blood1_actors.cpp")
+target_include_directories(champions-blood1-actors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-blood1-actors PUBLIC champions-objects champions-creature-hp ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
+if(MSVC)
+    target_compile_options(champions-blood1-actors PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-blood1-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-blood1-actors)
 
 # AntQueen, Skeleton and Soul constructors, set-states and run prologues
 # (research-combat-ctors e9777eb) on the arena model.
