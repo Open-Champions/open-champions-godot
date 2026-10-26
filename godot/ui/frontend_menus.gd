@@ -374,7 +374,11 @@ func _start_play(level_name: String) -> void:
 		start_mode = "no game folder: built-in play session; level %s not loaded" % level_name
 	scene.start_play()
 	if scene.session_started and scene.game_menus != null and scene.game_menus.service != null and character.get("ready", false):
-		var adopted: Dictionary = scene.game_menus.service.adopt(character)
+		var imported: bool = character.get("imported", false)
+		var has_executable: bool = real != null and real.files.has("slus_209.73")
+		# A saved character can still enter the built-in session without a selected
+		# disc. Its scalar HUD/menu state is available; live item actions remain refused.
+		var adopted: Dictionary = scene.game_menus.adopt_imported() if imported and has_executable else scene.game_menus.service.adopt(character)
 		if not adopted.get("ok", false):
 			_log("menu ledger refused the character: " + str(adopted.get("error", "")))
 	if scene.session_started:
@@ -465,6 +469,8 @@ func _draw() -> void:
 		view_painter.build(scene_view)
 		last_scene = scene_view.duplicate(true)
 	view_painter.paint(self)
+	if screen() in ["char-class", "char-appearance"]:
+		_draw_body_asset_preview()
 	# Host labels: what the research leaves Unknown on this screen.
 	var gold := Color(0.95, 0.78, 0.35)
 	if bool(scene_view.get("host_layout", false)):
@@ -485,6 +491,22 @@ func _draw() -> void:
 			_host_text(Vector2(8, y), "· " + str(note), 9, Color(0.72, 0.76, 0.82), 624)
 			y += height + 2
 	_host_text(Vector2(6, 445), KEY_HELP + " · F1 = notes", 9, Color(0.45, 0.5, 0.55))
+
+func _draw_body_asset_preview() -> void:
+	# Constructor resource pairing is observed, but the menu's camera and
+	# reachable appearance values are Unknown. Show only the disc body texture.
+	var code := str(view.get("preview_body_code", ""))
+	if code.is_empty() or view_painter == null:
+		return
+	var asset: Dictionary = view_painter.load_body_texture(code)
+	var box := Rect2(390, 105, 180, 180)
+	draw_rect(box, Color(0.08, 0.09, 0.1, 1.0), true)
+	if not asset.is_empty():
+		draw_texture_rect(asset.texture, box, false)
+	else:
+		_host_text(Vector2(396, 180), "Disc body texture unavailable", 12, Color(0.95, 0.5, 0.45), 170)
+	_host_text(Vector2(390, 303), "DISC RGB TEXTURE · model %d" % int(view.get("preview_model", 0)), 10, Color(0.95, 0.78, 0.35))
+	_host_text(Vector2(390, 319), "Camera and variants Unknown", 10, Color(0.72, 0.76, 0.82))
 
 func _bits_to_float(bits: int) -> float:
 	var buffer := PackedByteArray()

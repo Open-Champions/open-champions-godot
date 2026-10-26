@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
         auto current = T::parsed(T::control(scene->snapshot()));
         steps.push_back(T::sequence({T::sequence({T::text(a), T::n(value)}),
                                      T::delta(previous, current)}));
-        previous = current;
+        previous = std::move(current);
       }
       out << line << '\t' << T::sequence({start, T::sequence(steps)}) << '\n';
     }

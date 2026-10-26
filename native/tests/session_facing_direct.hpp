@@ -66,12 +66,12 @@ struct Fixture {
     session.submit({5, 0, 128, 128, 128, 128, 0, 0}, 0, 0, 1, no_sim);
   }
 };
-inline std::string observe(const R::session::Snapshot &s) {
-  auto base = s;
-  base.turning.reset();
+inline std::string observe(R::session::Snapshot s) {
+  auto turning = champions::test::session_turn_trace::turning(*s.turning);
+  s.turning.reset();
   return T::sequence(
-      {champions::test::recovery_trace::observation(base),
-       champions::test::session_turn_trace::turning(*s.turning)});
+      {champions::test::recovery_trace::observation(std::move(s)),
+       std::move(turning)});
 }
 inline std::string run(const std::string &name, unsigned f) {
   Fixture x(name == "direct_failure" ? 1 : 65536, false, f);
@@ -89,10 +89,10 @@ inline std::string run(const std::string &name, unsigned f) {
     } catch (const std::exception &) {
       result = "error";
     }
-    const auto current = T::parsed(observe(x.session.snapshot()));
+    auto current = T::parsed(observe(x.session.snapshot()));
     steps.push_back(
         T::sequence({T::text(result), T::delta(previous, current)}));
-    previous = current;
+    previous = std::move(current);
   }
   return T::sequence({start, T::sequence(steps)});
 }

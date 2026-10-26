@@ -37,12 +37,18 @@ int World::State::can_see(Address c, Address o, Raw face, Raw arc, Raw mode,
 }
 int World::State::hit_arc(Address c, const Arc &a, bool all) {
   actor_domain(c);
+  auto hit = [&](Address victim) {
+    auto low = from_int(a.minimum), high = from_int(a.maximum);
+    if (hit_descriptor)
+      return damage_with_descriptor(*this, victim, c, a.attack, a.flags,
+                                    *hit_descriptor, low, high);
+    return damage(victim, c, low, high, a.attack, a.flags);
+  };
   if (!all) {
     auto t = target(c + TARGET);
     if (!t || !can_see(c, t, a.facing, a.angle, 0, a.near, a.far, 0))
       return 0;
-    return damage(target(c + TARGET), c, from_int(a.minimum),
-                  from_int(a.maximum), a.attack, a.flags);
+    return hit(t);
   }
   auto p = vec(c + 16);
   auto h = mul(a.far, 0x3fb33333);
@@ -55,8 +61,7 @@ int World::State::hit_arc(Address c, const Arc &a, bool all) {
   int any = 0;
   for (auto o : list)
     if (enemy(c, o) && can_see(c, o, a.facing, a.angle, 0, a.near, a.far, 0))
-      if (damage(o, c, from_int(a.minimum), from_int(a.maximum), a.attack,
-                 a.flags))
+      if (hit(o))
         any = 1;
   return any;
 }

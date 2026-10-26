@@ -33,6 +33,17 @@ std::optional<combat::Descriptor> stack_descriptor(const Value &v) {
   }
   return d;
 }
+// WeaponShield slot 17 returns its embedded four-row damage descriptor.
+combat::Descriptor holder_descriptor(const World::State &s, Address address) {
+  combat::Descriptor d;
+  for (unsigned k = 0; k < 4; ++k) {
+    std::vector<std::int64_t> row;
+    for (unsigned f = 0; f < 4; ++f)
+      row.push_back(s16(Raw(s.model.mem.load(address + 0x24 + 8 * k + 2 * f, 2))));
+    d.push_back(std::move(row));
+  }
+  return d;
+}
 struct DescriptorScope {
   World::State &s;
   const combat::Descriptor *saved;
@@ -206,6 +217,29 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   if (slot == 6 && !args.empty())
     note("touch", {self, ar(0)});
   note("virtual", {self, slot});
+  if (fn == 0x27142c) {
+    model.nightmare_on_hit_terrain(self);
+    return iv(0);
+  }
+  if (fn == 0x271484) {
+    std::vector<Raw> touched;
+    if (!args.empty()) {
+      if (auto objects = std::get_if<A::Objects>(&args[0]))
+        touched = objects->values;
+      else if (auto contacts = std::get_if<A::Contacts>(&args[0]))
+        touched = contacts->values;
+    }
+    model.nightmare_on_touch_list(self, touched);
+    return iv(0);
+  }
+  if (fn == 0x27155c) {
+    model.nightmare_set_state(self, ar(0));
+    return iv(0);
+  }
+  if (fn == 0x272f4c) {
+    model.horsemen_set_state(self, ar(0));
+    return iv(0);
+  }
   if (slot == 1 && (fn == 0x151454 || fn == 0x3c6468)) {
     projectile_destroy(self, ar(0));
     return iv(0);
@@ -313,6 +347,9 @@ Value World::State::full_vcall(Address obj, unsigned slot,
 Value World::State::dispatch_virtual(Address self, unsigned slot,
                                      std::vector<Value> args) {
   auto fn = u(u(self + 0x48) + 8 * slot + 4);
+  if (fn == 0x27142c || fn == 0x271484 || fn == 0x27155c ||
+      fn == 0x272f4c)
+    return full_vcall(self, slot, std::move(args));
   if (run_class_hook(fn, self, args))
     return iv(0);
   if (knows(fn)) {
@@ -490,6 +527,8 @@ void World::State::install_services() {
                          "Creature_setEffectTimer",
                          "obj_addToAlwaysDraw",
                          "path_blockNodes",
+                         "path_requestToPoint", "path_requestType1",
+                         "path_requestType2", "path_requestType3",
                          "StaticFire_typeinfo",
                          "sound_playSample",
                          "trail_create",
@@ -702,12 +741,15 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
     auto parts=std::uint64_t(std::get<std::int64_t>(a.at(6)));
     combat_ctors::phprop_ctor(model,ar(1),v(2),ar(3),ar(4),ar(5),parts,ar(7),ar(8),ar(0));
+    prop_model_pointers[ar(1)] = u(ar(1) + 0x4c);
     return iv(0);
   }
   if (n == "PhProp_ctor2")
     { prop_slots(0x511ba8,0x3c2fc8,0x155fcc);
       combat_ctors::phprop_ctor2(model,ar(1),v(2),ar(3),ar(4),ar(5),ar(6),ar(7),ar(8),
-        std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));return iv(0); }
+        std::uint64_t(std::get<std::int64_t>(a.at(9))),ar(10),ar(11),ar(0));
+      prop_model_pointers[ar(1)] = u(ar(1) + 0x4c);
+      return iv(0); }
   if (n == "Gold_ctor2")
     { for (const auto &entry:std::map<unsigned,Raw>{{1,0x3c31d8},{4,0x157b58},
                                                      {6,0x157a9c}}) {
@@ -804,6 +846,9 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "path_blockNodes")
     throw Unsupported("path_blockNodes: a path-grid service is not supplied");
+  if (n == "path_requestToPoint" || n == "path_requestType1" ||
+      n == "path_requestType2" || n == "path_requestType3")
+    throw Unsupported(n + ": a runtime path-search service is not supplied");
   if (n == "obj_stopRunning") {
     auto obj=ar(0);
     if (head(obj+4).next) handles.remove(head(obj+4).next);
@@ -1017,8 +1062,14 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return iv(resource_at(ar(0), ar(1)));
   }
   if (n == "libc_sprintf") {
-    if (full())
+    if (full()) {
+      if (services.format_name) {
+        const auto argument = std::holds_alternative<std::monostate>(a.at(1))
+            ? std::optional<Raw>{} : std::optional<Raw>{ar(1)};
+        return iv(services.format_name(ar(0), argument));
+      }
       return iv(0);
+    }
     return A::CallbackResult::tuple(
         {A::CallbackResult::text("buf"), A::CallbackResult::bytes("")});
   }
@@ -1040,8 +1091,15 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "creature_canSeeObj")
     return iv(can_see(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6), ar(7)));
   if (n == "Creature_hitTargetInArc" || n == "Creature_hitAllEnemiesInArc") {
-    if (ar(7))
-      throw Unsupported("weapon descriptor");
+    std::optional<combat::Descriptor> descriptor;
+    if (ar(7)) {
+      const auto holder = u(ar(0) + 0x50);
+      if (!full() || actor(ar(0)).kind != Kind::Creature || !holder ||
+          holder + 0x50 != ar(7) || u(holder) != 0x50cda0)
+        throw Unsupported("weapon descriptor outside actor holder");
+      descriptor = holder_descriptor(*this, ar(7));
+    }
+    DescriptorScope scope(*this, descriptor ? &*descriptor : nullptr);
     Arc x;
     x.facing = ar(1);
     x.angle = ar(2);
@@ -1055,6 +1113,11 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "creature_findEnemyInCone")
     return iv(cone(ar(0), ar(1), ar(2), ar(3), ar(4)));
+  if (n == "creature_inKnockdownAnim") {
+    if (!services.in_knockdown_anim)
+      throw Unsupported("Nightmare contact needs knockdown animation service");
+    return iv(services.in_knockdown_anim(ar(0)) ? 1 : 0);
+  }
   if (n == "damage_apply") {
     if (!full()) {
       if (ar(6))
@@ -1120,18 +1183,29 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       set_cooldown_on(ar(0), ar(1), ar(2));
       return iv(0);
     }
-    if (n == "Creature_dropLoot")
-      throw Unsupported("Creature_dropLoot: loot generation and type-info "
-                        "tests are outside the composed runtime");
+    if (n == "Creature_dropLoot") {
+      if (u(ar(0) + 0x48) != 0x515730)
+        throw Unsupported("Creature_dropLoot: loot generation and type-info "
+                          "tests are outside the composed runtime");
+      drop_loot(ar(0), v(1), ar(2), ar(3), ar(4), ar(5), ar(6), ar(7),
+                ar(8), ar(9));
+      return iv(0);
+    }
     if (n == "creature_moveSimple")
       return iv(move_with_collision(ar(0), v(1), 0, 0));
     if (n == "obj_moveWithCollision")
       return iv(move_with_collision(ar(0), v(1), ar(2), ar(3)));
     if (n == "obj_moveAndCollide")
       return iv(move_and_collide(ar(0), v(1)));
-    if (n == "world_collectObjectsInArc")
-      return A::Objects{collect_in_arc(v(0), ar(1), ar(2), ar(3), ar(4), ar(5),
-                                       ar(6))};
+    if (n == "world_collectObjectsInArc") {
+      // Player_castSkill supplies the six-argument form with no filter;
+      // projectile constructors also use the explicit seven-argument form.
+      if (a.size() == 6)
+        return A::Objects{collect_in_arc(v(0), ar(1), ar(2), 0, ar(3), ar(4), ar(5))};
+      if (a.size() == 7)
+        return A::Objects{collect_in_arc(v(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6))};
+      throw Unsupported("world_collectObjectsInArc argument count");
+    }
     if (n == "world_collectInSphere") {
       if (a.size() == 4)
         return A::Objects{collect_in_sphere(v(0), ar(2), ar(3))};
@@ -1360,6 +1434,14 @@ void World::State::run(Address a) {
     note("run", {a});
     if (fn == 0x1edb18) combat_ctors::gutchunk_run(model, a);
     else combat_ctors::phprop_run(model, a);
+    return;
+  }
+  if (fn == 0x27236c || fn == 0x270bbc) {
+    note("run", {a});
+    if (fn == 0x27236c)
+      model.horsemen_run(a);
+    else
+      model.nightmare_run(a);
     return;
   }
   if (fn == 0x238938) {

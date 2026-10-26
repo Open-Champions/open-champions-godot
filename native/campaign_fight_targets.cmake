@@ -24,6 +24,7 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
    TARGET champions-player-services AND TARGET champions-combat-runtime AND
    TARGET champions-player-state AND TARGET champions-items AND CHAMPIONS_FIGHT_ARCHIVE)
     add_library(champions-campaign-fight "${CMAKE_CURRENT_LIST_DIR}/src/campaign_fight.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/src/player_death_flow.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/src/campaign_rewards.cpp")
     target_include_directories(champions-campaign-fight PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
     target_link_libraries(champions-campaign-fight PUBLIC
@@ -43,6 +44,13 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
     endif()
 endif()
 if(BUILD_TESTING AND TARGET champions-campaign-actors AND TARGET champions-combat-runtime)
+    add_executable(champions-minotaur-tests "${CMAKE_CURRENT_LIST_DIR}/tests/minotaur_tests.cpp")
+    target_link_libraries(champions-minotaur-tests PRIVATE champions-campaign-actors champions-combat-ctors)
+    add_test(NAME minotaur-class COMMAND champions-minotaur-tests)
+    add_test(NAME minotaur-stats-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/test_minotaur_vectors.py"
+        --native $<TARGET_FILE:champions-minotaur-tests>
+        --vectors "${CMAKE_CURRENT_LIST_DIR}/tests/vectors/minotaur_stats.txt.gz")
     add_executable(champions-campaign-fight-adopt-tests "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_fight_adopt_tests.cpp")
     target_include_directories(champions-campaign-fight-adopt-tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
     target_link_libraries(champions-campaign-fight-adopt-tests PRIVATE champions-campaign-actors champions-combat-runtime)
@@ -52,6 +60,13 @@ if(BUILD_TESTING AND TARGET champions-campaign-fight)
     add_executable(champions-mission2-actors-tests "${CMAKE_CURRENT_LIST_DIR}/tests/mission2_actors_tests.cpp")
     target_link_libraries(champions-mission2-actors-tests PRIVATE champions-mission2-actors champions-combat-runtime)
     add_test(NAME mission2-actors COMMAND champions-mission2-actors-tests)
+    add_executable(champions-campaign-fight-boundary-tests
+        "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_fight_boundary_tests.cpp")
+    target_link_libraries(champions-campaign-fight-boundary-tests PRIVATE champions-campaign-fight)
+    add_test(NAME campaign-fight-boundaries COMMAND champions-campaign-fight-boundary-tests)
+    add_executable(champions-player-death-flow-tests "${CMAKE_CURRENT_LIST_DIR}/tests/player_death_flow_tests.cpp")
+    target_link_libraries(champions-player-death-flow-tests PRIVATE champions-campaign-fight)
+    add_test(NAME player-death-flow COMMAND champions-player-death-flow-tests)
     add_executable(champions-campaign-rewards-tests "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_rewards_tests.cpp")
     target_link_libraries(champions-campaign-rewards-tests PRIVATE champions-campaign-fight)
     add_test(NAME campaign-rewards COMMAND champions-campaign-rewards-tests)

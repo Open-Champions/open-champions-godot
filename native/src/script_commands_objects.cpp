@@ -98,6 +98,7 @@ constexpr std::uint32_t HORSEMEN_FOOT_FIRST = 0x532dc8;
 // rows' name tests give the variant: 0x532cc8, 0x532cd8, 0x532ce8, 0x532cf8 -> 0..3.
 constexpr std::uint32_t HORSEMEN_CTOR = 0x271c70, NIGHTMARE_CTOR = 0x270968;
 constexpr std::uint32_t RIDER_TESTS[] = {0x532cc8, 0x532cd8, 0x532ce8, 0x532cf8};
+constexpr std::uint32_t ON_FOOT_TESTS[] = {0x532dc8, 0x532dd8, 0x532de8, 0x532df8};
 constexpr std::uint32_t MOUNT_BLOCK_SIZE = 0x3d8;
 
 struct Refused : std::runtime_error {
@@ -422,10 +423,12 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
   last_draws_complete_ = false;
-  // Only the four rider rows the research documents (mounted 1) and the Nightmare row. The
-  // other rows that call the same constructor (0x532dc8..0x532df8) are not documented there.
+  // Both sets of Horsemen rows call the same constructor. The factory supplies
+  // the mounted argument; properties always come from the individual record.
   bool rider_row = false;
   for (const auto t : RIDER_TESTS)
+    rider_row = rider_row || outcome.test == t;
+  for (const auto t : ON_FOOT_TESTS)
     rider_row = rider_row || outcome.test == t;
   if ((outcome.constructor() == HORSEMEN_CTOR && rider_row) || outcome.constructor() == NIGHTMARE_CTOR)
     return build_mounted(record, outcome, c, props);
@@ -439,7 +442,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // captured. Definition names come from the selected executable, never the
   // capture's returned pointers. This verifies the native resource service
   // separately from the still-unported actor execution.
-  if (creature_builder_ && (outcome.constructor() == 0x2ba03c ||
+  if (creature_builder_ && (outcome.constructor() == 0x2ba03c || outcome.constructor() == 0x288fdc ||
       outcome.constructor() == 0x24e124 || outcome.constructor() == 0x27b840 ||
       outcome.constructor() == 0x27a00c))
     return build_creature_family(record, outcome, c, props);
@@ -466,7 +469,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       return Build::NotBuilt;
     }
     counts_.build_refusals[boar ? "WarBoar class tick and shared actor runtime unavailable" :
-                                  "Minotaur: base Creature_ctor flags, hide variant and hand writes Unknown; Minotaur_run not in the research"] += 1;
+                                  "Minotaur class tick and shared actor runtime unavailable"] += 1;
     return Build::NotBuilt;
   }
   if (outcome.constructor() == 0x158928) {
@@ -876,7 +879,6 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   return Build::Built;
 }
 
-
 // WarBoar / WarBoarSmall (constructor 0x2ba03c; research t3/research-campaign-combat
 // 328b072, handoff rounds 2-8). Order as in the original: GameObject_ctor (one
 // shared draw), the executed base Creature_ctor with max-HP argument 10.0 and
@@ -889,18 +891,19 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
                                         const level_factory::Outcome &outcome, std::uint32_t c,
                                         const std::vector<std::string> &props) {
   namespace AM = arena_monsters;
+  const bool minotaur=outcome.constructor()==0x288fdc;
   // mission2-enemies.md ffff9a7: all four use this same base chain with
   // placeholder 10 HP, then their own class definition and constructor.
   const auto ctor = outcome.constructor();
   const std::uint32_t definition = ctor == 0x24e124 ? 0x4ff260 :
-      ctor == 0x27b840 ? 0x500a88 : ctor == 0x27a00c ? 0x500960 : 0x502f80;
+      ctor == 0x27b840 ? 0x500a88 : ctor == 0x27a00c ? 0x500960 : minotaur ? 0x501200 : 0x502f80;
   constexpr Raw BOAR_MAX_HP_ARGUMENT = 0x41200000; // 10.0 (monsters-2.md WarBoar)
   if (!external_seed_) {
     counts_.build_refusals["no session seed"] += 1;
     return Build::NotBuilt;
   }
   if (!stats_ready_) {
-    counts_.build_refusals["campaign creature needs monsters.bal and the level monster level"] += 1;
+    counts_.build_refusals["factory creature needs balance data and the level monster level"] += 1;
     return Build::NotBuilt;
   }
   if (variables_->memory.u32(0x4d8ae0) != 1 ||
@@ -909,6 +912,18 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
     return Build::NotBuilt;
   }
   auto &exe = *exe_;
+  // The pinned Valor records have only name entries. Other Creature_init
+  // property effects need their executed services before this host can build.
+  if (minotaur)
+    for (const auto &p:props) {
+      const auto end=p.find('=');
+      auto key=p.substr(0,end);
+      for (auto &ch:key) if (ch>='A'&&ch<='Z') ch=char(ch+32);
+      if (key!="name") {
+        counts_.build_refusals["Minotaur Creature_init property service unavailable"]+=1;
+        return Build::NotBuilt;
+      }
+    }
   M1::Memory mem({}, [&exe](creature_hp::Address a, std::size_t n) -> std::uint64_t {
     std::uint64_t v = 0;
     for (std::size_t i = n; i-- > 0;) {
@@ -952,7 +967,7 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
     if (self != c)
       throw Refused("GameObject_ctor on another block");
     auto list = std::make_shared<std::vector<std::string>>(props);
-    obj = variables_->new_object({}, 0, pos, 0, ctor == 0x2ba03c ? "7WarBoar" : record.cls,
+    obj = variables_->new_object({}, 0, pos, 0, minotaur ? "8Minotaur" : ctor == 0x2ba03c ? "7WarBoar" : record.cls,
                                  list, c, outcome.size);
     const std::pair<std::uint32_t, std::uint64_t> words[] = {
         {0x00, 0}, {0x04, 0}, {0x08, 0}, {0x48, VT_GAMEOBJECT}, {0x1c, RADIUS_24},
@@ -1055,6 +1070,7 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
     request.constructor = ctor;
     request.angle = record.angle;
     request.object = obj.get();
+    obj->type_name=record.cls;
     creature_builder_(request);
   } catch (const std::exception &error) {
     counts_.build_refusals[error.what()] += 1;
@@ -1073,10 +1089,13 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
 // 338d459, docs/spec/horsemen-mount.md sections 1-2. The four addressed lists
 // each contain miniboss=1 and a distinct name. One rider record consumes two
 // pool blocks and two shared draws; a placed Nightmare consumes one of each.
+// Mounted riders receive a fixed MiniBoss mount list; on-foot rows consume
+// their own record properties and construct no mount.
 Host::Build Host::build_mounted(const level_flow::Record &record, const level_factory::Outcome &outcome,
                                 std::uint32_t c, const std::vector<std::string> &props) {
   namespace AM = arena_monsters;
   const bool rider = outcome.constructor() == HORSEMEN_CTOR;
+  bool mounted = false;
   if (!external_seed_) {
     counts_.build_refusals["no session seed"] += 1;
     return Build::NotBuilt;
@@ -1087,6 +1106,10 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     bool known = false;
     for (std::uint32_t k = 0; k < 4; ++k)
       if (outcome.test == RIDER_TESTS[k]) {
+        variant = k;
+        known = true;
+        mounted = true;
+      } else if (outcome.test == ON_FOOT_TESTS[k]) {
         variant = k;
         known = true;
       }
@@ -1167,7 +1190,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
     m.mem.store(self + 0x29, 1, 73);
     m.mem.store(self + 0x44, 4, external_seed_->draw());
     ++draws;
-    if ((rider && draws == 2) || (!rider && draws == 1))
+    if ((mounted && draws == 2) || (!mounted && draws == 1))
       last_draws_complete_ = true;
     return std::int64_t(0);
   };
@@ -1262,7 +1285,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   const auto facing = static_cast<Raw>(static_cast<std::int32_t>(static_cast<std::int16_t>(record.angle)));
   try {
     if (rider)
-      model.horsemen_ctor(c, type_ptr, record.position, facing, 0, variant, 1);
+      model.horsemen_ctor(c, type_ptr, record.position, facing, 0, variant, mounted ? 1 : 0);
     else
       model.nightmare_ctor(c, type_ptr, record.position, facing, 0);
   } catch (const std::exception &error) {
@@ -1278,7 +1301,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   }
   // Failed mount allocation leaves an on-foot rider in state 0 (spec 1.1).
   // Keep that partial constructor as a labelled stub; never abort level load.
-  if (rider && !mount_block) {
+  if (mounted && !mount_block) {
     last_draws_complete_ = draws == 1;
     counts_.build_refusals["rider on foot (mount pool exhausted)"] += 1;
     stubs_.insert(objects.at(c)->addr);

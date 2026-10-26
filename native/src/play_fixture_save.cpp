@@ -20,6 +20,8 @@ enum Op : std::uint8_t {
   ATTACH = 9, DRAW_SLOTS = 10,
   OPEN_GATE = 11, CONFIRM_GATE = 12, REQUEST_LEVEL = 13,
   SPAWN_CREATURE = 14, DROP_POTION = 15, // wave 12, Full only
+  SELECT_DISEASE_BOLT = 16, PRESS_DISEASE_BOLT = 17, RELEASE_DISEASE_BOLT = 18,
+  SPAWN_MOUNTED_HORSEMAN = 19, // opt-in Horsemen pair, Full only
 };
 void require(bool ok, const char *what) {
   if (!ok) throw Error(what);
@@ -31,6 +33,16 @@ struct Corrupt : Error {
 };
 void valid(bool ok, const char *what) {
   if (!ok) throw Corrupt(what);
+}
+void spawn_mounted_fixture(combat_play::Session &session, unsigned variant) {
+  // Authored flat-fixture placement and stats, shared with its other
+  // 120-HP encounter actors. This is not a retail spawn record.
+  combat_runtime::Spawn rider, mount;
+  rider.position = mount.position = {from_int(0), from_int(80), from_int(0)};
+  rider.facing = mount.facing = 0xc000;
+  rider.hp = mount.hp = 0x42f00000;
+  rider.team = mount.team = 1;
+  session.spawn_mounted_horseman(variant, rider, mount);
 }
 struct Writer {
   Bytes b;
@@ -177,6 +189,23 @@ CombatScene::~CombatScene() {
   effects_.reset(); // before the session it observes
 }
 
+Raw CombatScene::probe_walk_life_zero(const std::function<Raw()> &read_exposed) {
+  require(full(), "walk-cell probe requires the synthetic Full fixture");
+  const auto actors = session_->actors();
+  require(!actors.empty() && actors[0].present, "walk-cell probe requires the Full player");
+  auto &world = session_->world();
+  const auto life_address = world.target(actors[0].handle) + 0x14c;
+  const Raw saved_life = static_cast<Raw>(world.read(life_address));
+  struct Restore {
+    combat_runtime::World &world;
+    combat_runtime::Address address;
+    Raw value;
+    ~Restore() { world.write(address, 4, value); }
+  } restore{world, life_address, saved_life};
+  world.write(life_address, 4, 0);
+  return read_exposed();
+}
+
 template <class F> auto CombatScene::record(std::uint8_t op, std::uint32_t value, F &&f) -> decltype(f()) {
   if (!replaying_) {
     require(journal_.size() < MAX_ACTIONS, "fixture journal is full; save refused beyond this point");
@@ -218,11 +247,31 @@ void CombatScene::set_block(bool held) {
 void CombatScene::cast_holy_strike() {
   record(CAST_HOLY_STRIKE, 0, [&] { session_->cast_holy_strike(); });
 }
+void CombatScene::select_disease_bolt(unsigned rank) {
+  require(rank >= 1 && rank <= 20, "Disease Bolt rank needs a probed player rank 1 to 20");
+  // Value zero is the original rank-one journal entry. Preserve existing
+  // fixture saves and the default Full trace byte for byte.
+  record(SELECT_DISEASE_BOLT, rank == 1 ? 0 : rank,
+         [&] { session_->select_disease_bolt(rank); });
+}
+void CombatScene::press_disease_bolt(bool held) {
+  record(PRESS_DISEASE_BOLT, held, [&] { session_->press_disease_bolt(held); });
+}
+void CombatScene::release_disease_bolt() {
+  record(RELEASE_DISEASE_BOLT, 0, [&] { session_->release_disease_bolt(); });
+}
 void CombatScene::spawn_creature(unsigned own_class) {
   record(SPAWN_CREATURE, own_class, [&] {
     if (own_class >= combat_play::OWN_CLASS_COUNT)
       throw combat_runtime::Unsupported("unknown own-machine class");
     session_->spawn_creature(combat_play::OWN_CLASSES[own_class]);
+  });
+}
+void CombatScene::spawn_mounted_horseman(unsigned variant) {
+  record(SPAWN_MOUNTED_HORSEMAN, variant, [&] {
+    if (variant >= 4)
+      throw combat_runtime::Unsupported("Horsemen variant outside 0..3");
+    spawn_mounted_fixture(*session_, variant);
   });
 }
 void CombatScene::drop_potion(unsigned kind) {
@@ -261,9 +310,21 @@ void CombatScene::apply(const Action &a) {
   case RELEASE_ATTACK: session_->release_attack(); return;
   case SET_BLOCK: valid(a.value <= 1, "journal block value"); session_->set_block(a.value != 0); return;
   case CAST_HOLY_STRIKE: session_->cast_holy_strike(); return;
+  case SELECT_DISEASE_BOLT:
+    valid(a.value <= 20, "journal Disease Bolt rank");
+    session_->select_disease_bolt(a.value == 0 ? 1 : a.value);
+    return;
+  case PRESS_DISEASE_BOLT:
+    valid(a.value <= 1, "journal spell press value");
+    session_->press_disease_bolt(a.value != 0); return;
+  case RELEASE_DISEASE_BOLT: session_->release_disease_bolt(); return;
   case SPAWN_CREATURE:
     valid(a.value < combat_play::OWN_CLASS_COUNT, "journal creature class");
     session_->spawn_creature(combat_play::OWN_CLASSES[a.value]);
+    return;
+  case SPAWN_MOUNTED_HORSEMAN:
+    valid(a.value < 4, "journal Horsemen variant");
+    spawn_mounted_fixture(*session_, a.value);
     return;
   case DROP_POTION:
     valid(a.value >= 1 && a.value <= 3, "journal potion kind");

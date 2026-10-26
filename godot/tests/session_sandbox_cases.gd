@@ -3,7 +3,9 @@ extends RefCounted
 const WorldGeometryFixture = preload("res://tests/world_geometry_fixture.gd")
 const ModelFixture = preload("res://tests/model_fixture.gd")
 const ArchiveFixture = preload("res://tests/texture_fixture.gd")
-const DIRECTORY := "user://session-sandbox-smoke"
+# Other worktrees run this gate concurrently against the same application
+# user directory. Each process owns its fixtures and intentional temp blocker.
+var DIRECTORY := "user://session-sandbox-smoke-" + str(OS.get_process_id())
 var checks := 0
 var failures := 0
 var files: Array[String] = []
@@ -63,6 +65,23 @@ func flat_world(special := false) -> PackedByteArray:
 	data.encode_u16(tail + 2, 65535)
 	if special:
 		data.encode_u16(0x114, 1)
+	return data
+
+# Two authored, disjoint flat elements sharing a height field. The second is
+# inside the same query grid but outside the first element's bounds.
+func flat_world_pair() -> PackedByteArray:
+	var data := flat_world()
+	var field := data.slice(0x100, 0x100 + 0x14 + 129 * 129 * 2)
+	data.resize(0x10000 + field.size())
+	for i in field.size(): data[0x10000 + i] = field[i]
+	data.encode_u32(0xcc, 0x10000)
+	var element := data.slice(0xc0, 0xe4)
+	for i in element.size(): data[0xe4 + i] = element[i]
+	data.encode_u16(0xe4, 132)
+	data.encode_u16(0xe8, 156)
+	data.encode_u32(0x1c, 2)
+	data.encode_u16(0x8412, 1)
+	data.encode_u16(0x8414, 0xffff)
 	return data
 
 # Return only weak references after each local owner has gone out of scope.
@@ -252,6 +271,24 @@ func run(scene) -> bool:
 	check(scene.load_terrain_file(floor_path), "authored coherent flat WORLD loads through real decoder and candidate swap")
 	check(scene.raw_observation.submissions == 0 and scene.raw_observation.hp_raw == 0x42c80000 and scene.terrain_root.get_child_count() == 1, "successful terrain replacement starts clean authority and nonempty ground")
 	check(scene.raw_observation.get("movement_policy", "") == "dry_creature" and scene.raw_observation.get("ready_tick_limit", 0) == 512, "terrain replacement retains active creature policy and bounded run")
+	var pair_path := write_file("Two plain elements.WORLD", flat_world_pair())
+	check(scene.load_terrain_file(pair_path) and scene.controller.get_play_capabilities().terrain_elements == 2 and scene.terrain_root.get_child_count() == 2,
+		"two documented flat terrain elements load and display")
+	var pair_save := DIRECTORY.path_join("Two plain elements.ocplay")
+	var pair_saved: Dictionary = scene.controller.save_file(pair_save)
+	var pair_reload: Dictionary = scene.controller.prepare_save_file(pair_save) if pair_saved.get("ok", false) else {}
+	check(pair_saved.get("ok", false) and pair_reload.get("ok", false) and pair_reload.get("terrain", {}).get("surfaces", []).size() == 2,
+		"multi-element collision preview prepares from a native continuation")
+	if pair_reload.get("ok", false): scene.controller.cancel_terrain_file(pair_reload.token)
+	var hole := flat_world_pair()
+	hole.encode_u16(0x8416, 0)
+	hole.encode_u16(0x8418, 0xffff)
+	hole.encode_u32(0x8404, 6)
+	var hole_path := write_file("Missing element coverage.WORLD", hole)
+	var hole_result: Dictionary = scene.controller.prepare_terrain_file(hole_path)
+	check(not hole_result.get("ok", false) and "partial surface coverage" in str(hole_result.get("error", "")),
+		"multi-element preview refuses a collision-grid hole")
+	check(scene.load_terrain_file(floor_path), "single-element fixture returns after multi-element save probe")
 	scene.handle_input_event(key(KEY_D))
 	scene.advance_step()
 	scene.advance_step()

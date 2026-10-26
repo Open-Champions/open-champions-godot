@@ -560,7 +560,7 @@ int main(int argc, char **argv) {
     }
     for (const auto &[cls, size, reason] :
          std::array<std::tuple<std::string, std::uint32_t, std::string>, 3>{{
-             {"FootVariant", 0x478, "Holder.v1 table slot 1 is untraced"},
+             {"FootVariant", 0x478, ""},
              {"ZekVariant", 0x480, "Holder.v1 table slot 1 is untraced"},
              {"MountedVariant", 0x478, ""}}}) {
       rta::SharedRandom class_seed(20973);
@@ -573,9 +573,9 @@ int main(int argc, char **argv) {
       check(class_host.adopt_objects(record.data(), record.size()), cls + " adopted");
       rta::Pool class_pool;
       const auto built = class_host.is_built(class_pool.allocate(size));
-      if (cls == "MountedVariant")
+      if (cls == "MountedVariant" || cls == "FootVariant")
         check(built && class_host.counts().build_refusals.empty(),
-              "mounted Horseman builds through its audited constructor");
+              cls + " builds through its audited Horseman constructor");
       else
         check(!built && class_host.counts().build_refusals.count(reason) == 1,
               cls + " has a counted constructor refusal");

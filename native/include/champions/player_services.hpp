@@ -63,6 +63,8 @@ public:
   void bind_animation(creature_anim::Runtime &runtime,
                       std::function<creature_anim::ClipId(Address, Raw)> clips);
   void bind_actor(Address actor, creature_anim::StateId state);
+  // Result of this actor's most recent advance (including raw root yaw).
+  creature_anim::Motion animation_motion(Address actor) const;
   // Supply the shared World's read method when its actor authority is ready.
   // Values are read on every call, so equip and action transitions are visible.
   void bind_player_reader(std::function<std::uint64_t(Address, unsigned)> read);

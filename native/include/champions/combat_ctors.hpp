@@ -159,7 +159,8 @@ void install_round3(A::Model &);
 // Weapon1/WeaponShield slots 1–17 at 9ff6ae0; slots 18–24 and Weapon2
 // element access at research-combat-ctors-4 6baf4cd.
 Raw holder_slot(A::Model &, Address holder, unsigned slot,
-                const std::vector<A::Value> &args);
+                const std::vector<A::Value> &args,
+                const std::function<void(Raw, Address, Address, Raw)> &drop = {});
 void draw_held_part(A::Model &, Address x, Raw part, Address creature);
 void build_element_damage(A::Model &, Address descriptor, Raw kind);
 Raw damage_desc_get_element(A::Model &, Address descriptor);

@@ -12,6 +12,9 @@ constexpr Raw F_100 = 0x42c80000, F_DEG = 0x43360b60, F_THIRD = 0x3eaa7ef9,
               HOLY_SHIELD_DTOR = 0x3cf0c4, HOLY_SHIELD_RUN = 0x2e8428;
 // Object bodies of the composed skill modules.
 constexpr Raw HOLYSTRIKE_RUN = 0x2ebc50, HOLYSTRIKE_HIT = 0x2ecae8,
+              DISEASEBOLT_RUN = 0x2ca1a8, DISEASEBOLT_HIT = 0x2caec8,
+              DISEASEBOLT_CAST = 0x2cb1c0, DISEASEBOLT_CAN_USE = 0x2cb368,
+              DISEASEBOLT_COST = 0x2cb33c,
               SPARKS_RUN = 0x28fa3c, SPARKS_TOUCH = 0x2900c8,
               HOLYSTRIKE_CAST = 0x2ecfcc, HOLYSTRIKE_CAN_USE = 0x2ed20c,
               SHOCKOFFIRE_CAST = 0x2ed4e4, WAVE_CAN_USE = 0x316b1c,
@@ -458,7 +461,8 @@ struct SkillA {
 };
 } // namespace
 bool World::State::skill_body(Raw fn) const {
-  return fn == HOLYSTRIKE_RUN || fn == HOLYSTRIKE_HIT || fn == SPARKS_RUN ||
+  return fn == DISEASEBOLT_RUN || fn == DISEASEBOLT_HIT ||
+         fn == HOLYSTRIKE_RUN || fn == HOLYSTRIKE_HIT || fn == SPARKS_RUN ||
          fn == SPARKS_TOUCH;
 }
 Value World::State::skill_virtual(Address skill, unsigned slot,
@@ -493,10 +497,19 @@ Value World::State::skill_virtual(Address skill, unsigned slot,
   case 0x3c8218:
     return iv(1);
   case HOLYSTRIKE_CAN_USE:
+  case DISEASEBOLT_CAN_USE:
   case WAVE_CAN_USE:
     return iv(1);
   default:
     break;
+  }
+  if (slot == 5 && fn == DISEASEBOLT_COST) {
+    // SkillDiseaseBolt_manaCost 0x2cb33c. The documented step 2.0000129...
+    // is float32 0x40000036. Keep the PS2 model's separate mul and add:
+    // IEEE host arithmetic gives different low bits at ranks 2, 5 and 20.
+    if (ar(0) < 1 || ar(0) > 20)
+      throw Unsupported("Disease Bolt cost outside probed player ranks 1..20");
+    return iv(add(from_int(9), mul(from_int(ar(0) - 1), 0x40000036)));
   }
   if (slot != 2)
     throw Unsupported("Skill slot " + std::to_string(slot) + " reaches " +
@@ -506,6 +519,8 @@ Value World::State::skill_virtual(Address skill, unsigned slot,
   auto facing = ar(3);
   if (fn == HOLYSTRIKE_CAST)
     return iv(holystrike_cast(self, level, caster, pos, facing));
+  if (fn == DISEASEBOLT_CAST)
+    return iv(diseasebolt_cast(self, level, caster, pos, facing));
   if (fn == SHOCKOFFIRE_CAST) {
     auto at = b_alloca(0x10);
     for (unsigned i = 0; i < 3; ++i)
@@ -566,6 +581,12 @@ Value World::State::spell_virtual(Address spell, unsigned slot,
 Value World::State::object_body(Address obj, Raw fn, unsigned slot,
                                 std::vector<Value> args) {
   switch (fn) {
+  case DISEASEBOLT_RUN:
+    diseasebolt_run(obj);
+    return iv(0);
+  case DISEASEBOLT_HIT:
+    diseasebolt_hit(obj, number(args.at(0)));
+    return iv(0);
   case HOLYSTRIKE_RUN:
     holystrike_run(obj);
     return iv(0);
@@ -1051,5 +1072,101 @@ Vec3 World::State::spell_ball(Address spell) {
       return {x, y, z};
   }
   throw Error("ball rejection budget");
+}
+// Disease Bolt's outgoing damage path is observed; expiry is deliberately
+// refused because the audited research does not include its destructor.
+Raw World::State::diseasebolt_cast(Address skill, Raw level, Address caster,
+                                   const Vec3 &pos, Raw facing) {
+  if (level < 1 || level > 20)
+    throw Unsupported("Disease Bolt cast outside probed player ranks 1..20");
+  if (!caster || !(u(caster + 12) & 0x40))
+    throw Unsupported("Disease Bolt nonplayer statistics are not installed in this fixture");
+  for (unsigned i = 0; i < 3; ++i)
+    w(caster + 0x98 + 2 * i, 2, Raw(-100));
+  w(caster + 0x9e, 2, 0);
+  auto obj = pool_new(0x7c);
+  if (!obj) return 0;
+  projectile_ctor(obj, pos, caster);
+  w(obj + 0x54, 0);
+  w(obj + 0x48, VT_DISEASEBOLT);
+  w(obj + 0x58, 0);
+  w(obj + 0x38, 2, facing);
+  w(obj + 0x6c, 0);
+  w(obj + 0x64, mul(cos16(Raw(s16m(obj + 0x38))), 0x43af0000));
+  w(obj + 0x68, mul(sin16(Raw(s16m(obj + 0x38))), 0x43af0000));
+  w(obj + 0x60, 2, level);
+  if (caster) handle_link(obj + 0x54, caster, caster);
+  auto frame = u(FRAME);
+  w(obj + 0x5c, skill);
+  w(obj + 0x70, frame + 300);
+  w(obj + 0x74, frame + 10);
+  w(obj + 0x78, 0);
+  if (caster) {
+    for (auto other : collect_in_arc(vec(obj + 16), Raw(s16m(obj + 0x38)), 0,
+                                     0, 0x438bfffc, 0x42700000, 0)) {
+      if (number(vcall(caster, 20, {iv(other)}))) {
+        handle_link(obj + 0x58, other, other);
+        break;
+      }
+    }
+    clear(STACK_HEAD);
+  }
+  schedule(obj, 1);
+  resource_at(0x54e988, 0x54e990);
+  note("presentation:sound_playOnObject");
+  note("diseasebolt_spawn", {obj, caster, level});
+  return 0;
+}
+void World::State::diseasebolt_run(Address obj) {
+  constexpr Raw defs[3] = {0x8e50a0, 0x8e50f0, 0x8e5140};
+  for (unsigned i = 0; i < 3; ++i)
+    for (unsigned n = 0; n < (i == 2 ? 6u : 5u); ++n)
+      puff(obj, defs[i], vec(obj + 16), i ? 0x41700000 : 0x41200000,
+           i ? 0x40a00000 : 0x41800000);
+  if (u(obj + 0x58) && s32m(obj + 0x74) < s32m(FRAME)) {
+    SkillA a{*this};
+    auto skill = u(obj + 0x5c);
+    auto owner = u(obj + 0x4c) ? u(u(obj + 0x4c) + 12) : 0;
+    auto rank = Raw(s16m(obj + 0x60));
+    auto rate = (owner && (u(owner + 12) & 0x40)
+                     ? a.stat(skill, 1, rank)
+                     : a.tier2(skill, 1, rank, 10)) * 182u;
+    auto target = u(u(obj + 0x58) + 12);
+    auto diff = std::int64_t(atan2_16(sub(u(target + 20), u(obj + 20)),
+                                     sub(u(target + 16), u(obj + 16)))) -
+                s16m(obj + 0x38);
+    auto step = diff < 0 ? -diff : diff;
+    auto heading = Raw(s16m(obj + 0x38));
+    heading += Raw(step < s32(rate) ? diff : diff < 1 ? -std::int64_t(rate)
+                                                    : std::int64_t(rate));
+    w(obj + 0x38, 2, heading);
+    w(obj + 0x64, mul(cos16(Raw(s16m(obj + 0x38))), 0x43af0000));
+    w(obj + 0x6c, 0);
+    w(obj + 0x68, mul(sin16(Raw(s16m(obj + 0x38))), 0x43af0000));
+  }
+  auto hit = move_and_collide(obj, vec(obj + 0x64));
+  if ((hit & 2) && u(obj + 0x78)) w(obj + 0x70, 0);
+  if (hit & 1) w(obj + 0x70, 0);
+  if (s32m(FRAME) < s32m(obj + 0x70)) return;
+  throw Unsupported("Disease Bolt expiry needs its unverified destructor");
+}
+void World::State::diseasebolt_hit(Address obj, Address other) {
+  if (u(obj + 0x78)) return;
+  auto owner = u(obj + 0x54) ? u(u(obj + 0x54) + 12) : 0;
+  if (!owner) {
+    if (!(u(other + 12) & 0x20)) w(obj + 0x78, 1);
+  } else if (!number(vcall(owner, 20, {iv(other)}))) return;
+  auto flags = u(other + 12);
+  if (!(flags & 0x40) && (flags & 0x20) && (q(other + 0xa8) & 0x200)) return;
+  SkillA a{*this};
+  auto skill = u(obj + 0x5c), rank = Raw(s16m(obj + 0x60));
+  auto damage = owner && (u(owner + 12) & 0x40)
+                    ? a.stat(skill, 0, rank) : a.tier2(skill, 0, rank, 0);
+  auto amount = from_int(damage);
+  auto high = spread_max(amount, own(obj));
+  auto desc = descriptor({{0x26, damage, damage, 0}});
+  damage_with_descriptor(*this, other, owner, 100000, 0, desc, amount, high);
+  w(obj + 0x78, 1);
+  note("diseasebolt_hit", {obj, other, damage});
 }
 } // namespace champions::simulation::rta::combat_runtime

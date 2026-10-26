@@ -160,6 +160,22 @@ bool holy_strike_flying(const FS::CombatScene &scene) {
     if (scene.session().world().read(a + 0x48) == C::VT_HOLYSTRIKE) return true;
   return false;
 }
+void mounted_journal() {
+  FS::CombatScene scene(terrain(), combat_play::Fixture::Full, constants, identity);
+  scene.spawn_mounted_horseman(0);
+  const auto before = scene.actors();
+  bool rider = false, mount = false;
+  for (const auto &actor : before) {
+    rider |= actor.slot == 7 && actor.present;
+    mount |= actor.slot == 8 && actor.present;
+  }
+  check(rider && mount, "mounted pair is visible in the Full fixture");
+  const auto saved = scene.save();
+  auto loaded = FS::CombatScene::load(saved, "rta", constants, identity);
+  check(loaded.scene && loaded.scene->actors().size() == before.size() &&
+            loaded.scene->shared_seed() == scene.shared_seed(),
+        "mounted pair replays through the fixture journal");
+}
 void full_combat() {
   constexpr int TICKS = 300, SAVE_AT = 174; // cast on 170, the bolt flies until about 178
   FullRun whole = full_start();
@@ -536,6 +552,21 @@ void refusals() {
         "only the Full fixture takes recipe constants");
 }
 
+void ranked_spell_save() {
+  FS::CombatScene scene(terrain(), combat_play::Fixture::Full, constants, identity);
+  const auto empty = scene.save();
+  check(refuses([&] { scene.select_disease_bolt(0); }, "rank"),
+        "out-of-range ranked selection refuses before journaling");
+  check(scene.save() == empty, "invalid rank leaves the fixture save unchanged");
+  scene.select_disease_bolt(2);
+  const auto bytes = scene.save();
+  auto loaded = FS::CombatScene::load(bytes, "rta", constants, identity);
+  check(loaded.scene->world().read(C::PLAYERS + 0x4b0a, 2) == 2,
+        "ranked Disease Bolt selection survives journal replay");
+  check(loaded.scene->save() == bytes,
+        "ranked Disease Bolt selection preserves the save witness");
+}
+
 // ---- (e) round-1 fixtures ----------------------------------------------------------------------------
 void round_one(combat_play::Fixture which, const std::string &name) {
   auto run = [&](int ticks, FS::CombatScene &scene, std::string &trace) {
@@ -573,12 +604,14 @@ int main(int argc, char **argv) {
     constants_json = read(argv[1]);
     constants = std::make_shared<const FX::skills::RecipeConstants>(FX::skills::RecipeConstants::from_json(constants_json));
     identity = FS::identify(constants_json);
+    mounted_journal();
     full_combat();
     wave12_extensions();
     combat_ctors_extensions();
     level_travel();
     world_snapshot();
     refusals();
+    ranked_spell_save();
     round_one(combat_play::Fixture::Combat, "Combat");
     round_one(combat_play::Fixture::Animated, "Animated");
   } catch (const std::exception &e) {

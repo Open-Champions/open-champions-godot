@@ -1,6 +1,18 @@
 # One native client, two games
 
+The RTA [Minotaur class adapter](MINOTAUR.md) has diagnostic shared-World
+construction, runtime-resolved resources, exact class state/event contracts and
+inherited player-to-creature damage. Ordinary campaign construction refuses
+until the required bounds-derived initialization service is bound. Animated
+presentation, delivered enemy damage, held-part publication and loot pickup
+remain explicit boundaries; this is not an end-to-end Minotaur fight claim.
+
 ## Current milestone
+
+Campaign [player combat inputs](PLAYER_COMBAT_MOVES.md) now feed attack/combo,
+held guard and guard-swap into the shared World's real Player. Unarmed starting
+equipment remains labelled; heavy and the two ability-slot requests name their
+unbound learned-record prerequisites and refuse explicitly.
 
 The default Godot scene is a bounded, Session-backed movement and health test with
 authored controls. A standalone C++17 archive inspector and archive browser remain
@@ -184,6 +196,11 @@ repository's `names.tsv` and `symbols/`. Modern Clang probes are not continued.
 
 Each milestone needs an executable result and recorded evidence. A blank window,
 placeholder character or accepted archive table is not a completed game feature.
+
+The shared-World [WarBoar AI](WARBOAR_AI.md) adds the researched sight,
+acquisition/leash, wander/chase, attack-event and reaction/retreat decisions.
+Normal-route outgoing player damage, live trajectory parity, runtime path
+search and script-driven group activation retain explicit refusals.
 
 ## Deterministic behavior and game differences
 

@@ -51,12 +51,16 @@ public:
   void end_session();
   bool play_menu_music(bool wait_for_current);
   bool music_play_global(const String &name, int64_t flags);
+  bool handoff_level_entry(bool recall);
   bool play_boss_music(const String &creature_type, const String &object_name);
   bool stop_boss_music();
   double get_stream_time(int32_t stream) const;
   int64_t get_gated_flag_entries() const;
   Dictionary get_observation() const;
   bool sound_tick(int32_t cosmetic_draw);
+  bool sound_tick_without_cosmetic();
+  bool service_loader_sound_pair();
+  bool service_session_sound_without_ambient();
   int32_t pump_frames(int32_t max_frames);
   String get_last_error() const { return last_error_; }
 };

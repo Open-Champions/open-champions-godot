@@ -1,4 +1,7 @@
 #include "champions/combat_runtime.hpp"
+#include "champions/campaign_moves.hpp"
+#include "champions/player_name_format.hpp"
+#include "champions/player.hpp"
 #include "champions/core_state.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
 #include <cstdlib>
@@ -50,6 +53,8 @@ struct Fixture {
   bool dialog = false;
   Raw travel = 0;
   std::string loot_class;
+  bool format_names = false;
+  std::vector<std::string> formatted_names;
   void poke(C::Address a, unsigned n, std::uint64_t v) { world->write(a, n, v); }
   std::uint64_t peek(C::Address a, unsigned n) { return world->read(a, n); }
   void start(C::Address actor, Raw clip, Raw flags) {
@@ -126,6 +131,18 @@ struct Fixture {
         sum += ch;
       return 0xb0000000u | Raw((sum * 131 + q.entry.size()) & 0xffffff);
     };
+    if (format_names) s.format_name = [this](C::Address format, std::optional<Raw> value) {
+      std::string text;
+      for (unsigned i = 0; i < 64 && peek(format + i, 1); ++i)
+        text += char(peek(format + i, 1));
+      auto name = player::format_name(text, value
+          ? std::optional<std::int32_t>{std::int32_t(*value)} : std::optional<std::int32_t>{});
+      formatted_names.push_back(name);
+      constexpr C::Address buffer = 0x9000; // Authored fixture scratch, not a game address.
+      for (unsigned i = 0; i <= name.size(); ++i)
+        poke(buffer + i, 1, i < name.size() ? std::uint8_t(name[i]) : 0);
+      return buffer;
+    };
     s.is_class = [this](C::Address, const std::string &name) {
       return !loot_class.empty() && name == loot_class + "_typeinfo";
     };
@@ -198,7 +215,8 @@ template <class F> void refused(F fn, const std::string &s) {
 struct Host {
   Fixture f;
   std::unique_ptr<C::World> w;
-  explicit Host(bool planes = false) {
+  explicit Host(bool planes = false, bool names = false) {
+    f.format_names = names;
     auto s = f.services();
     if (planes)
       s.screen_planes = [](const Vec3 &) {
@@ -228,6 +246,120 @@ struct Host {
   }
 };
 void hosts() {
+  {
+    check(player::format_name("fixture_combo%d", 2) == "fixture_combo2",
+          "Player name formatting substitutes the selected variant");
+    check(player::format_name("signed%d", -1) == "signed-1", "name format preserves signed value");
+    check(player::format_name("literal", std::nullopt) == "literal", "literal names need no argument");
+    refused([&] { player::format_name("missing%d", std::nullopt); }, "missing name argument refused");
+    refused([&] { player::format_name("unknown%s", 1); }, "unknown format conversion refused");
+    refused([&] { player::format_name("two%d%d", 1); }, "extra format conversion refused");
+    refused([&] { player::format_name(std::string(64, 'x'), 1); }, "resource name host bound enforced");
+  }
+  {
+    namespace M = champions::simulation::rta::campaign_fight;
+    M::MovePad pad;
+    auto input = pad.update(M::ATTACK | M::GUARD);
+    check(input.held == 48 && input.pressed == 48, "campaign simultaneous pad edges");
+    check(pad.update(48).pressed == 0, "held campaign buttons do not repeat edges");
+    check(pad.update(M::MOVEMENT | M::GUARD).held == M::GUARD,
+          "movement commands cannot become combat pad bits");
+    check(pad.update(0).pressed == 0, "campaign release is not a press");
+    input = pad.update(M::HEAVY | M::ABILITY1 | M::ABILITY2);
+    check(input.requests == (M::HEAVY | M::ABILITY1 | M::ABILITY2) && input.held == 0 && input.pressed == 0,
+          "unavailable heavy and ability requests cannot become a light attack or cast");
+    refused([&] { pad.update(1024); }, "unknown campaign command rejected");
+    check(pad.update(M::HEAVY).requests == 0, "invalid command preserves edge state");
+  }
+  {
+    namespace M = champions::simulation::rta::campaign_fight;
+    Host h(false, true);
+    auto player = h.player(0, 0);
+    // Authored format strings at the observed Player_run call-site literals.
+    for (const auto &entry : {std::pair<C::Address, std::string>{0x5361b0, "fixture_combo%d"},
+                              {0x536120, "fixture_sound%d"}})
+      for (unsigned i = 0; i <= entry.second.size(); ++i)
+        h.w->write(entry.first + i, 1, i < entry.second.size() ? std::uint8_t(entry.second[i]) : 0);
+    C::SessionAdapter adapter(*h.w);
+    adapter.bind_button(0, C::World::Button::Attack, M::ATTACK);
+    M::MovePad pad;
+    bool combo = false;
+    for (Raw frame = 0; frame < 100; ++frame) {
+      auto input = pad.update(frame % 12 == 0 ? M::ATTACK : 0);
+      adapter.pad_input(0, {0, 0, input.held, input.pressed});
+      adapter.ready_tick(frame);
+      auto step = h.w->read(player + 0x460, 1);
+      check(step <= 1, "unarmed combo caps at the documented second step");
+      combo = combo || step == 1;
+    }
+    check(combo, "campaign press edges drive real Player combo transition");
+    bool variant_name = false;
+    for (const auto &name : h.f.formatted_names)
+      variant_name = variant_name || name == "fixture_combo2";
+    check(variant_name, "combo variant formatting reaches the resource lookup instead of the fixture null-name stub");
+    unsigned starts = 0, advances = 0;
+    for (const auto &e : h.w->events()) {
+      if (e.args.empty() || e.args[0] != player) continue;
+      if (e.name == "anim_start" && e.args.size() >= 3 && e.args[2] == 0x802) ++starts;
+      if (e.name == "anim_advance") ++advances;
+    }
+    check(starts >= 2 && advances > 0,
+          "campaign combo reaches the Player attack animation start and advance hooks");
+  }
+  {
+    namespace M = champions::simulation::rta::campaign_fight;
+    Host h;
+    auto player = h.player(0, 0);
+    C::SessionAdapter adapter(*h.w);
+    adapter.bind_button(0, C::World::Button::Block, M::GUARD);
+    adapter.bind_button(0, C::World::Button::Swap, M::GUARD_MOVE);
+    M::MovePad pad;
+    auto tick = [&](Raw frame, Raw command) {
+      auto input = pad.update(command);
+      adapter.pad_input(0, {0, 0, input.held, input.pressed});
+      adapter.ready_tick(frame);
+    };
+    tick(0, M::GUARD);
+    check(h.w->read(player + 0x58c) == 2, "unarmed guard does not invent equipment");
+    h.w->give_weapon(0, {});
+    tick(1, M::GUARD);
+    tick(2, M::GUARD);
+    check(h.w->read(player + 0x58c) == 8 && h.w->read(player + 0x47f, 1),
+          "equipped guard uses real Player state and blocking byte");
+    tick(3, M::GUARD | M::GUARD_MOVE);
+    check(h.w->read(player + 0x58c) == 11 && h.w->read(player + 0x481, 1) == 47,
+          "guard swap uses native evade animation and 47-frame stick lock");
+    const auto definition = h.w->read(player + 0x24);
+    const auto evade = h.w->read(C::Address(definition) + 0xa4);
+    bool evade_started = false;
+    for (const auto &e : h.w->events())
+      if (e.name == "anim_start" && e.args.size() >= 3 && e.args[0] == player &&
+          e.args[1] == evade && e.args[2] == 0x808)
+        evade_started = true;
+    check(evade_started, "guard swap selects the weapon row's evade animation hook");
+  }
+  {
+    namespace M = champions::simulation::rta::campaign_fight;
+    Host h;
+    auto player = h.player(0, 0);
+    C::Weapon bow;
+    bow.cls = 4; bow.subtype = 4;
+    auto item = h.w->give_weapon(0, bow);
+    h.w->write(C::PLAYERS + 0x43f8, 4, item);
+    // The guard helper is documented independently. A complete bow tick still
+    // refuses on its unbound Archery statistic before it reaches the state.
+    auto memory = h.w->memory();
+    champions::simulation::rta::player::Tick guard(memory, player);
+    check(guard.can_block(0, 2) == 0, "a bow in slot 2 vetoes the guard helper");
+    C::SessionAdapter adapter(*h.w);
+    adapter.bind_button(0, C::World::Button::Block, M::GUARD);
+    h.w->write(C::PLAYERS + 0x43f8, 4, 0);
+    h.w->give_weapon(0, {});
+    h.w->write(0x44fe08, 4, 0x10000000);
+    adapter.pad_input(0, {0, 0, M::GUARD, M::GUARD});
+    adapter.ready_tick(0);
+    check(h.w->read(player + 0x58c) == 2, "level combat veto prevents equipped guard");
+  }
   {
     // The round-1 composition keeps its API: round-2 entry points refuse.
     C::World r1(C::flat_fixture_services());

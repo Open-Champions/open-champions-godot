@@ -1,6 +1,9 @@
 #pragma once
 #include "champions/core_math.hpp"
 #include "champions/creature_hp.hpp"
+#include "champions/arena_monsters.hpp"
+#include "champions/archive.hpp"
+#include "champions/world_queries.hpp"
 #include "champions/world_authority.hpp"
 #include <array>
 #include <map>
@@ -74,6 +77,14 @@ struct ResourceQuery {
   std::string lump_text, entry;
 };
 struct Services {
+  // Optional host evidence boundary. False refuses this damage dispatch before
+  // any random draw or victim mutation; the host records the reason. Synthetic
+  // composition has no gate and uses the established damage pipeline.
+  std::function<bool(Address victim, Address attacker)> damage_permitted;
+  // Optional campaign task at priority 20, after runObjects (10); the alive
+  // rebuild/check below still runs at the end of the tick (tasks_run).
+  std::function<void()> death_task;
+  std::function<void()> check_all_dead;
   std::function<bool()> dialog_is_open;
   std::function<Raw()> jumpgate_travel_state;
   // Required for reachable terrain/animation services. No silent zero defaults.
@@ -111,6 +122,8 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // Nightmare charge contact excludes players in knockdown animation.
+  std::function<bool(Address)> in_knockdown_anim;
   // model_getMeshJoint 0x179358 (model, mesh index) -> the u8 at +6 of the
   // 10-byte mesh record (model-texture.md, mesh record). The record is loaded
   // data (the user's disc at run time); the research models the call as an
@@ -132,6 +145,10 @@ struct Services {
                      Raw index, Raw scale)>
       sample_point;
   std::function<Raw(const ResourceQuery &)> resource;
+  // Player_run's name formatting call-outs. Return an address of a terminated
+  // string in this World. Optional: the frozen Full fixtures retain their
+  // zero-name stub; a real campaign binds the executable's literal/%d formats.
+  std::function<Raw(Address format, std::optional<Raw> argument)> format_name;
   // Creature_dropLoot / Goblin death call-outs: rtti_typeInfoEquals(typeid(*c),
   // <class>_typeinfo) by the getter's name, loot_generateDrops and
   // loot_spawnNamedItem (the item name is an executable string address).
@@ -150,6 +167,9 @@ struct Services {
   // body ran. A false return falls through to the executed dispatch.
   std::function<bool(Address actor)> external_run;
 };
+// Install the original terrain query answers from one selected, post-fixup
+// WORLD. The caller owns Level for as long as the resulting World runs.
+Services with_terrain(Services base, world_queries::Level &level);
 struct Arc {
   Raw facing = 0, angle = 6000, minimum = 4, maximum = 8, attack = 100,
       flags = 8;
@@ -216,6 +236,13 @@ public:
   // Own-machine classes. The vtable is allocated on the first spawn, so an
   // untouched world keeps the Skelight corpus image.
   Address spawn_class(const std::string &name, const Spawn & = {});
+  // Authored synthetic placement of one documented mounted Horsemen pair.
+  // The two Spawn records supply fixture stats; the native run bodies own the
+  // subsequent AI, contact, damage and lifecycle. Returns {rider, mount}.
+  std::array<Address, 2> spawn_mounted_horseman(unsigned variant,
+                                               const Spawn &rider,
+                                               const Spawn &mount);
+  void set_mounted_state(Address mount, Raw state);
   Address spawn_player(unsigned slot, const Spawn &, int strength = 20,
                        int level = 1);
   bool contains(Address) const;
@@ -233,7 +260,13 @@ public:
   // damage, targeting and knockback bodies (damage_apply, Creature_takeDamage,
   // grid queries) accept it as a victim or target. The vtable at +0x48 must be
   // defined (define_creature_table) first. Never allocates, draws or links.
-  void adopt_creature(Address factory_object);
+  // during_constructor permits a temporary view of a registered host block;
+  // the caller must unadopt it if the class constructor refuses.
+  void adopt_creature(Address factory_object, bool during_constructor = false);
+  // Shared executed Creature services for independently ported class bodies.
+  // Uses this World's memory, handles, targeting, terrain and random stream.
+  arena_monsters::Model &creature_services();
+  void unadopt_creature(Address); // discard only a factory combat view
   // Writes a creature vtable image: the executed Creature base slots, then the
   // class's own overrides (slot -> function address).
   void define_creature_table(Address table,
@@ -252,6 +285,14 @@ public:
   bool creature_away_from_home(Address);
   // Creature_filterState 0x10a9c0: true when the requested state is allowed.
   bool creature_filter_state(Address, std::uint32_t requested);
+  std::optional<std::uint32_t> creature_filter_state_result(Address, std::uint32_t requested);
+  bool creature_can_see_target(Address, Raw force);
+  void creature_clear_path(Address);
+  void creature_pick_wander_dest(Address);
+  void creature_move_to_dest(Address);
+  void creature_move_to_target(Address);
+  void creature_turn_to_target(Address);
+  void creature_flee_from_target(Address, Raw kind);
   // Creature_onDeath 0x10beb8 (virtual slot 28).
   void creature_on_death(Address, Raw quiet = 0);
   // Grid nodes left out of box queries because they are unconstructed host
@@ -280,6 +321,13 @@ public:
   void process_damage(Address);
   void player_find_target(Address, Raw reach);
   void player_melee_hit(Address, Address, Raw extra = 0, Raw scale = 0);
+  // Mode-B arena_startWave's bounded intro state and arena_runTask's first
+  // 181 visits. The wave builder and later empty-wave branch are not implied.
+  void begin_arena_intro();
+  void arena_intro_visit();
+  // Bind the owner-supplied .vif hulls at a PhProp's resource pointer. Checks
+  // every active mesh bit before publishing bytes to the owned World memory.
+  void bind_prop_model(Address prop, champions::Bytes vif);
   void apply_knockback(Address, Raw scale);
   Raw move_creature(Address, const Vec3 &);
   void dead_update(Address, Raw events, Raw hold, Raw size,
@@ -307,6 +355,10 @@ public:
   Address spawn_missile(Address owner, const Missile &);
   Address spawn_thrown(Address owner, const Thrown &);
   Address give_skill(int skill_id, const SkillSetup &);
+  // Opt-in authored Full-fixture record. The caller supplies mana and a
+  // researched player rank (1..20); no character value is inferred.
+  void select_disease_bolt(unsigned slot, Raw mana, Raw max_mana,
+                           unsigned rank = 1);
   // The cast is made where Player_run state 5 would call Player_castSkill:
   // a player's before its tick tail, a creature's at the end of its run.
   void queue_cast(Address caster, int skill_id, int level = 1,

@@ -20,6 +20,7 @@ var dynamic_service: RefCounted
 var fonts := {}        # "medium"/"small" -> {bytes, texture, size}
 var art := {}          # lump/entry -> {texture, width, height}
 var art_missing := {}
+var body_listing := {}    # full SELECT.LMP listing; body textures are not UI candidates
 var items: Array = []  # sorted at paint time
 var drawn := {"sprite": 0, "frame_piece": 0, "rect": 0, "text": 0, "text_fallback": 0, "sprite_missing": 0}
 var last_error := ""
@@ -30,6 +31,7 @@ func configure(real_data: Node, archive_inspector: Object) -> void:
 	fonts.clear()
 	art.clear()
 	art_missing.clear()
+	body_listing.clear()
 	if ClassDB.class_exists("ChampionsUiLayoutService"):
 		layout_service = ClassDB.instantiate("ChampionsUiLayoutService")
 	if ClassDB.class_exists("ChampionsUiDynamicLayoutService"):
@@ -168,6 +170,38 @@ func load_art(lump: String, name: String, weave: bool) -> Dictionary:
 				rgba = shaped.rgba
 		var image := Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, rgba)
 		art[key] = {"texture": ImageTexture.create_from_image(image), "width": w, "height": h}
+		return art[key]
+	art_missing[key] = true
+	return {}
+
+func load_body_texture(code: String) -> Dictionary:
+	var name := code + "_bodyv1.tex"
+	var key := "select.lmp/" + name
+	if art.has(key):
+		return art[key]
+	if art_missing.has(key) or real == null or inspector == null or not real.files.has("select.lmp"):
+		return {}
+	var path: String = real.files["select.lmp"]
+	if body_listing.is_empty():
+		body_listing = inspector.inspect_archive(path)
+	if not body_listing.get("ok", false):
+		art_missing[key] = true
+		return {}
+	var rows: Array = body_listing.get("rows", [])
+	for index in range(rows.size()):
+		var row: Dictionary = rows[index]
+		if str(row.get("name", "")).to_lower() != name:
+			continue
+		var decoded: Dictionary = inspector.inspect_texture(path, index, "rta", body_listing.fingerprint)
+		if not decoded.get("ok", false):
+			break
+		# Match the existing model viewer's neutral preview policy. Stored alpha
+		# is not a documented front-end blend rule; show RGB opaquely and label it.
+		var rgba: PackedByteArray = decoded.rgba.duplicate()
+		for offset in range(3, rgba.size(), 4):
+			rgba[offset] = 255
+		var image := Image.create_from_data(int(decoded.width), int(decoded.height), false, Image.FORMAT_RGBA8, rgba)
+		art[key] = {"texture": ImageTexture.create_from_image(image), "width": int(decoded.width), "height": int(decoded.height)}
 		return art[key]
 	art_missing[key] = true
 	return {}

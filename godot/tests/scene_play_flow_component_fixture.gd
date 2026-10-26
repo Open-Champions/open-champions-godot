@@ -8,6 +8,9 @@ var configured: Array = []
 var clears := 0
 var suspended := false
 var observations: Array = []
+# The production art_ready consumer reads these even when no art is supplied.
+var loaded: Dictionary = {}
+var catalogue: Dictionary = {}
 func configure(first, second = null) -> void:
 	configured = [first, second]
 func show_library() -> void:

@@ -190,6 +190,7 @@ void World::State::gutchunk_ctor(Address obj, const Vec3 &pos, Raw kind, Raw bit
     w(0x511ba8+8*pair.first+4,pair.second);
   }
   combat_ctors::gutchunk_ctor(model,obj,pos,kind,bits);
+  prop_model_pointers[obj] = u(obj + 0x4c);
 }
 Address World::State::gutchunk_spawn(const Vec3 &pos, Raw kind, Raw bits) {
   // Direct host entry has no earlier creature constructor to register the

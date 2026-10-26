@@ -15,6 +15,7 @@ enum class Fixture : std::uint8_t { Combat, Animated, Full };
 // Client controller mapping for the Full fixture (combat_runtime leaves the
 // masks to the caller; these are the research fixture's authored words).
 inline constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
+inline constexpr Raw ABILITY_A_MASK = 0x40; // authored Full-fixture button
 // Holy Strike skill id (combat_runtime World::give_skill / cast).
 inline constexpr int HOLY_STRIKE = 16;
 // The own-state-machine classes World::spawn_class runs (creature-ai), in
@@ -67,6 +68,9 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike(); // made in the player's next run (World::queue_cast)
+  void select_disease_bolt(unsigned rank = 1); // authored Full-fixture quick-slot A
+  void press_disease_bolt(bool held = true); // original Player_run pad path
+  void release_disease_bolt();
   // ---- Wave-12 client extensions of the Full fixture (authored set-up) ----
   // Each runs merged executed bodies; placement and set-up values are the
   // fixture's own authored ones, not original spawn data. A refusal leaves
@@ -77,6 +81,9 @@ public:
   // words) can be built; the other eight classes refuse because their
   // constructors were not executed.
   void spawn_creature(const std::string &own_class);
+  std::array<combat_runtime::Address, 2> spawn_mounted_horseman(
+      unsigned variant, const combat_runtime::Spawn &rider,
+      const combat_runtime::Spawn &mount);
   const std::string &own_creature_class() const; // empty until spawned
   // drop_potion: a thrown potion of kind 1..3 (combat-runtime-4
   // playerProjectile_run) at the player's position with the Thrown defaults

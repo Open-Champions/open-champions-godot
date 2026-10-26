@@ -1,4 +1,5 @@
 #pragma once
+#include "champions/hub_services.hpp"
 #include "champions/frame_clock.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/campaign_fight.hpp"
@@ -25,6 +26,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -78,11 +80,45 @@ class ChampionsSessionController : public godot::RefCounted {
 public:
   // DIAGNOSTIC, not an original routine (scripted runs only).
   godot::Dictionary fight_place_player(const godot::Vector3 &position, int64_t facing);
+  godot::Dictionary fight_diagnostic_lethal_hit();
   // Save/load: put the saved player position and health back (not an original routine).
   godot::Dictionary fight_restore_player(const godot::Vector3 &position, int64_t facing, int64_t hp_raw);
 private:
   // Parsed records belong to this level's script image and are replaced with it.
   std::vector<champions::simulation::rta::level_flow::Record> script_level_objects_;
+  struct LiveTrigger {
+    std::size_t record = 0;
+    champions::simulation::rta::level_flow::Trigger body;
+    bool refused = false;
+    LiveTrigger(std::size_t i, champions::simulation::rta::level_flow::Trigger t, bool r)
+        : record(i), body(std::move(t)), refused(r) {}
+  };
+  std::vector<LiveTrigger> live_triggers_;
+  std::array<std::vector<std::size_t>, 15> trigger_lists_;
+  unsigned trigger_list_cursor_ = 0;
+  std::size_t trigger_frame_ = 0;
+  std::string trigger_refusal_;
+  std::size_t trigger_samples_ = 0, trigger_dispatches_ = 0,
+              trigger_missing_ = 0;
+  std::size_t trigger_queued_dispatches_ = 0;
+  std::size_t trigger_queued_record_ = 0;
+  std::string trigger_queued_destination_;
+  std::string trigger_level_name_;
+  std::map<std::string, std::vector<champions::simulation::rta::level_flow::TriggerState>> trigger_states_;
+  void run_level_triggers();
+  std::map<std::size_t, champions::simulation::rta::hub_services::Savepoint> hub_savepoints_;
+  bool exit_use_pending_ = false;
+  std::vector<bool> used_once_exits_;
+  std::size_t exit_use_count_ = 0;
+  std::size_t exit_use_record_ = 0;
+  std::string exit_use_refusal_;
+  bool run_level_use();
+  champions::simulation::rta::level_flow::GateList gate_destinations_;
+  champions::simulation::rta::level_flow::GateTravel gate_travel_;
+  bool gate_arrival_pending_ = false;
+  bool gate_clear_next_tick_ = false;
+  std::uint32_t gate_arrival_seed_ = 0;
+  std::string gate_prompt_refusal_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   bool ui_frame_driven_ = false;
@@ -129,6 +165,7 @@ private:
   std::optional<std::uint8_t> help_chime_;
   bool help_paused_ = false;
   static void bind_text_methods();
+  static void bind_hub_methods();
   void apply_text(champions::simulation::rta::script_commands::Host &);
   void note_help_box();
   void release_help_pause();
@@ -184,7 +221,11 @@ public:
   godot::Dictionary combat_release_attack();
   godot::Dictionary combat_block(bool held);
   godot::Dictionary combat_cast_holy_strike();
+  godot::Dictionary combat_select_disease_bolt(int64_t rank = 1);
+  godot::Dictionary combat_press_disease_bolt(bool held = true);
+  godot::Dictionary combat_release_disease_bolt();
   godot::Dictionary combat_spawn_creature(int64_t own_class);
+  godot::Dictionary combat_spawn_mounted_horseman(int64_t variant);
   godot::Dictionary combat_drop_potion(int64_t kind);
   static godot::PackedStringArray own_creature_classes();
   // fx_skill_recipes.py --json (user's) or the labelled synthetic fixture.
@@ -222,6 +263,8 @@ public:
   godot::Array combat_resource_lump_names() const;
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
+  godot::Array hub_service_targets() const;
+  godot::Dictionary hub_service_use(int64_t index, bool card_busy);
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,
   // 0x40 confirm), taken at the next ready tick.
   godot::Dictionary dialog_press(int64_t pad_bits);
@@ -246,8 +289,18 @@ public:
   godot::Dictionary dialog_voice_state(const godot::Dictionary &voice);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
+  // Counts-only campaign and script boundary for a live story-level probe.
+  godot::Dictionary script_story_status() const;
   godot::Dictionary script_level_request() const;
+  godot::Dictionary script_mission_menu_state() const;
+  godot::Dictionary script_mission_menu_tick(int64_t pad_bits, int64_t fade);
   godot::Array script_exit_targets() const;
+  godot::Dictionary inspect_exit_records(const godot::PackedByteArray &) const;
+  godot::Dictionary script_trigger_status() const;
+  godot::Array script_player_markers() const;
+  godot::Dictionary script_use_status() const;
+  godot::Dictionary script_gate_status() const;
+  godot::Dictionary script_gate_confirm(const godot::String &destination);
   godot::Dictionary script_run_exit(int64_t index);
   // Every .uni table of GTEXT.LMP (registered first) and the sound group of
   // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
@@ -265,6 +318,7 @@ public:
   godot::Dictionary set_ui_frame_driver(bool driven);
   // The visible units of a text key without advancing the miss ring.
   godot::PackedInt32Array text_key_units(const godot::String &key) const;
+  godot::Dictionary text_lookup(const godot::String &key) const;
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);
@@ -282,6 +336,7 @@ public:
   godot::Dictionary release_input();
   godot::Dictionary stop_session();
   godot::Dictionary get_observation() const;
+  godot::Dictionary probe_full_walk_weight_test();
   godot::Dictionary get_terrain() const;
   godot::Dictionary save_file(const godot::String &path);
   godot::Dictionary save_snapshot_file(const godot::String &path);

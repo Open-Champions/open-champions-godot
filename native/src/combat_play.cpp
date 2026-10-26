@@ -15,7 +15,8 @@ struct Session::State {
   objects::TaskList tasks;
   // Slot 3 is the optional one-per-session creature. Slots 4, 5 and 6 are
   // the Full fixture's AntQueen, Skeleton and Soul.
-  std::array<Raw, 7> handles{};
+  // Slots 7 and 8 are an optional mounted rider and Nightmare pair.
+  std::array<Raw, 9> handles{};
   std::string own_class;
   std::array<Raw, 3> pending{};
   session_control::Observation status;
@@ -36,6 +37,8 @@ struct Session::State {
   std::set<C::Address> players;
   C::SessionAdapter::PadInput pad{};
   bool attack_pressed = false, attack_held = false, block_held = false, block_was = false;
+  bool ability_pressed = false, ability_held = false;
+  bool disease_selected = false;
   bool cast_pending = false;
   TickObserver observer;
   void full_start(C::Address actor, Raw clip, Raw flags) {
@@ -91,6 +94,7 @@ struct Session::State {
     };
     out.animation_start = [this](Raw a, Raw clip, Raw flags, Raw, Raw) { full_start(a, clip, flags); };
     out.animation_advance = [this](Raw a, Raw) { return full_advance(a); };
+    out.in_knockdown_anim = [](C::Address) { return false; }; // no knockdown clip in this fixture
     out.is_class = [](C::Address, const std::string &) { return false; };
     out.loot_generate = [](const C::LootDrop &) {};
     out.spawn_named_item = [](const Vec3 &, Raw) {};
@@ -290,6 +294,7 @@ struct Session::State {
     adapter = std::make_unique<C::SessionAdapter>(*world);
     adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
     adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
+    adapter->bind_button(0, C::World::Button::AbilityA, ABILITY_A_MASK);
     tasks.add(1, 10, "combatRunObjects", 0);
     network.num_players = 1;
     network.run_tasks = [this](netwire::Machine &net) {
@@ -297,10 +302,14 @@ struct Session::State {
         world->clear_history();
         visual_events.clear();
         auto in = pad;
-        in.held = (attack_held ? ATTACK_MASK : 0) | (block_held ? BLOCK_MASK : 0);
-        in.pressed = (attack_pressed ? ATTACK_MASK : 0) | (block_held && !block_was ? BLOCK_MASK : 0);
+        in.held = (attack_held ? ATTACK_MASK : 0) | (block_held ? BLOCK_MASK : 0) |
+                  (ability_held ? ABILITY_A_MASK : 0);
+        in.pressed = (attack_pressed ? ATTACK_MASK : 0) |
+                     (block_held && !block_was ? BLOCK_MASK : 0) |
+                     (ability_pressed ? ABILITY_A_MASK : 0);
         adapter->pad_input(0, in);
         attack_pressed = false;
+        ability_pressed = false;
         block_was = block_held;
         if (cast_pending) adapter->cast(handles[0], HOLY_STRIKE, 1);
         cast_pending = false;
@@ -422,6 +431,7 @@ void Session::release_input() {
   s_->pending.fill(0);
   s_->pad = {};
   s_->attack_pressed = s_->attack_held = s_->block_held = false;
+  s_->ability_pressed = s_->ability_held = false;
   s_->cast_pending = false;
 }
 void Session::set_paused(bool value) { release_input(); s_->status.paused = value; }
@@ -448,6 +458,26 @@ void Session::cast_holy_strike() {
   if (!s_->world->target(s_->handles[0])) throw C::Error("player handle expired");
   s_->cast_pending = true;
 }
+void Session::select_disease_bolt(unsigned rank) {
+  if (!full()) throw C::Unsupported("Disease Bolt selection needs the Full combat fixture");
+  if (s_->status.stopped || s_->disease_selected)
+    throw C::Unsupported("Disease Bolt selection is unavailable or already made");
+  if (!s_->world->target(s_->handles[0])) throw C::Error("player handle expired");
+  // Authored synthetic fixture resource, like the Full fixture's HP. This is
+  // not a new-character current mana claim and is never used on a campaign.
+  s_->world->select_disease_bolt(0, from_int(100), from_int(100), rank);
+  s_->disease_selected = true;
+}
+void Session::press_disease_bolt(bool held) {
+  if (!full() || !s_->disease_selected)
+    throw C::Unsupported("Disease Bolt input needs a selected Full-fixture spell");
+  if (s_->status.stopped) throw C::Error("combat fixture stopped");
+  s_->ability_pressed = true;
+  s_->ability_held = held;
+}
+void Session::release_disease_bolt() {
+  s_->ability_held = false;
+}
 void Session::spawn_creature(const std::string &own_class) {
   if (!full()) throw C::Unsupported("own-machine creatures need the Full combat fixture");
   if (s_->status.stopped) throw C::Error("combat fixture stopped");
@@ -471,6 +501,23 @@ void Session::spawn_creature(const std::string &own_class) {
       const auto clip = Raw(s_->world->read(definition + off));
       if (clip && !s_->clips.count(clip)) s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
     }
+}
+std::array<C::Address, 2> Session::spawn_mounted_horseman(
+    unsigned variant, const C::Spawn &rider, const C::Spawn &mount) {
+  if (!full()) throw C::Unsupported("mounted Horsemen need the Full combat fixture");
+  if (s_->status.stopped) throw C::Error("combat fixture stopped");
+  if (s_->handles[7] || s_->handles[8])
+    throw C::Unsupported("one mounted pair per combat fixture");
+  auto pair = s_->world->spawn_mounted_horseman(variant, rider, mount);
+  s_->handles[7] = s_->world->retain(pair[0]);
+  s_->handles[8] = s_->world->retain(pair[1]);
+  // Synthetic event timeline for the four documented mounted swing entries.
+  auto def = Raw(s_->world->read(pair[0] + 0x24));
+  for (Raw off : {0x8cu, 0x94u, 0x9cu, 0xc4u}) {
+    auto clip = Raw(s_->world->read(def + off));
+    s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
+  }
+  return pair;
 }
 const std::string &Session::own_creature_class() const { return s_->own_class; }
 void Session::drop_potion(unsigned kind) {

@@ -1,4 +1,6 @@
 #include "champions/menus.hpp"
+#include "champions/arena_executable.hpp"
+#include "champions/script_items.hpp"
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -49,6 +51,7 @@ class ChampionsMenuService : public RefCounted {
     out["equipment_index"] = ledger_->equipment_index(0);
     out["page"] = ledger_->page();
     out["dragging"] = ledger_->dragging();
+    out["live_record"] = ledger_->live_record();
     out["scheme"] = String::utf8(scheme_.c_str());
     const auto masks = ledger_->scheme();
     out["shop_mask"] = int64_t(masks.shop);
@@ -81,6 +84,9 @@ protected:
     ClassDB::bind_method(D_METHOD("adopt", "character"), &ChampionsMenuService::adopt);
     ClassDB::bind_method(D_METHOD("gaps"), &ChampionsMenuService::gaps);
     ClassDB::bind_method(D_METHOD("layout"), &ChampionsMenuService::layout);
+    ClassDB::bind_method(D_METHOD("record_word", "offset"), &ChampionsMenuService::record_word);
+    ClassDB::bind_method(D_METHOD("adopt_record", "record", "executable", "picture_index"), &ChampionsMenuService::adopt_record);
+    ClassDB::bind_method(D_METHOD("record_bytes"), &ChampionsMenuService::record_bytes);
   }
 
 public:
@@ -123,11 +129,81 @@ public:
       for (const auto &gap : drawn.gaps) {
         Dictionary row;
         row["id"] = String::utf8(gap.id);
-        row["reason"] = String::utf8(gap.reason);
+        row["reason"] = String::utf8(gap.reason.c_str());
+        row["column"] = gap.column;
+        row["row"] = gap.row;
         gaps.push_back(row);
       }
       out["texts"] = texts;
+      Array selected_texts;
+      for (const auto &text : drawn.selected_texts) {
+        Dictionary row;
+        row["x"] = text.x;
+        row["y"] = text.y;
+        row["colour"] = int64_t(text.colour);
+        row["centred"] = text.centred;
+        row["text"] = String::utf8(text.text.c_str());
+        selected_texts.push_back(row);
+      }
+      out["selected_texts"] = selected_texts;
       out["rects"] = rects;
+      Array sprites;
+      for (const auto &sprite : drawn.sprites) {
+        Dictionary row;
+        row["x"] = sprite.x;
+        row["y"] = sprite.y;
+        row["layer"] = sprite.layer;
+        row["tint"] = int64_t(sprite.tint);
+        row["lump"] = String::utf8(sprite.lump.c_str());
+        row["resource"] = String::utf8(sprite.resource.c_str());
+        sprites.push_back(row);
+      }
+      out["sprites"] = sprites;
+      Array icons;
+      for (const auto &icon : drawn.icons) {
+        Dictionary row;
+        row["column"] = icon.column;
+        row["row"] = icon.row;
+        row["category"] = icon.category;
+        row["slot"] = icon.slot;
+        row["tint"] = int64_t(icon.tint);
+        row["picture"] = String::utf8(icon.picture.c_str());
+        icons.push_back(row);
+      }
+      out["icons"] = icons;
+      Array held_icons;
+      for (const auto &icon : drawn.held_icons) {
+        Dictionary row;
+        row["x"] = icon.x;
+        row["y"] = icon.y;
+        row["layer"] = icon.layer;
+        row["tint"] = int64_t(icon.tint);
+        row["picture"] = String::utf8(icon.picture.c_str());
+        held_icons.push_back(row);
+      }
+      out["held_icons"] = held_icons;
+      Array frames;
+      for (const auto &frame : drawn.frames) {
+        Dictionary row;
+        row["x"] = frame.x;
+        row["y"] = frame.y;
+        row["width"] = frame.width;
+        row["height"] = frame.height;
+        row["style"] = frame.style;
+        row["tint"] = int64_t(frame.tint);
+        frames.push_back(row);
+      }
+      out["frames"] = frames;
+      Array draw_order;
+      for (const auto &packet : drawn.draw_order) {
+        Dictionary row;
+        row["layer"] = packet.layer;
+        row["submission"] = packet.submission;
+        row["kind"] = packet.text ? "text" : "sprite";
+        row["index"] = packet.index;
+        draw_order.push_back(row);
+      }
+      out["draw_order"] = draw_order;
       out["gaps"] = gaps;
       return out;
     } catch (const std::exception &error) {
@@ -146,6 +222,125 @@ public:
   Dictionary set_cursor(int x, int y) {
     ledger_->set_cursor(x, y);
     return success();
+  }
+  Dictionary record_word(int64_t offset) {
+    try {
+      if (offset < 0 || offset > 0x4c30 - 4)
+        throw M::Refusal("player record offset is outside the record");
+      auto out = success();
+      out["value"] = int64_t(ledger_->record_word(static_cast<std::uint32_t>(offset)));
+      return out;
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
+  Dictionary adopt_record(const PackedByteArray &record, const PackedByteArray &executable,
+                          const PackedByteArray &picture_index) {
+    try {
+      if (record.size() != 0x4c30 || executable.is_empty())
+        throw M::Refusal("player record or selected executable is absent");
+      champions::simulation::rta::arena_modes::Executable image;
+      if (!image.load(std::vector<std::uint8_t>(executable.ptr(), executable.ptr() + executable.size())))
+        throw M::Refusal("selected executable is not a file-backed ELF32 image");
+      auto reader = [&image](std::uint32_t at, std::size_t count) {
+        std::vector<std::uint8_t> bytes;
+        bytes.reserve(count);
+        for (std::size_t i = 0; i < count; ++i)
+          bytes.push_back(image.byte(at + static_cast<std::uint32_t>(i)));
+        return bytes;
+      };
+      auto tables = champions::simulation::rta::script_items::image_tables(reader);
+      if (!tables) throw M::Refusal("selected executable has no item tables");
+      // The shop's item_getValue path also reads these file-backed tables.
+      // docs/data-tables.md §1: seven subtype multipliers and twelve quality rows.
+      for (std::uint32_t row = 0; row < 7; ++row)
+        tables->weapon_multipliers.push_back(image.word(0x3e9cb0u + row * 4u));
+      for (std::uint32_t row = 0; row < 12; ++row)
+        tables->quality_rows.push_back({image.word(0x3e9c18u + row * 12u),
+                                        image.word(0x3e9c1cu + row * 12u),
+                                        image.word(0x3e9c20u + row * 12u)});
+      champions::inventory_icons::PictureTables pictures;
+      for (std::uint32_t row = 0; row < 134; ++row) {
+        const auto ptr = image.word(0x3e9ce0u + row * 0x10u + 4u);
+        pictures.model_textures.push_back(ptr ? image.string(ptr) : std::string());
+      }
+      for (std::uint32_t row = 0; row < 73; ++row) {
+        const auto at = 0x400e50u + row * 0x28u + 6u;
+        pictures.prefix_colours.push_back({static_cast<std::int8_t>(image.byte(at)),
+                                           static_cast<std::int8_t>(image.byte(at + 1)),
+                                           static_cast<std::int8_t>(image.byte(at + 2))});
+      }
+      for (std::uint32_t row = 0; row < 12; ++row) {
+        const auto ptr = image.word(0x4026d8u + row * 4u);
+        if (!ptr) throw M::Refusal("body code is absent from the selected executable");
+        pictures.body_codes[row] = image.string(ptr);
+      }
+      const auto candidate_pictures = pictures;
+      auto next = std::make_unique<M::Ledger>();
+      next->adopt_record(std::vector<std::uint8_t>(record.ptr(), record.ptr() + record.size()),
+                         *tables, std::move(pictures),
+                         [&image](std::uint32_t at) { return image.byte(at); });
+      std::uint32_t unverified_definition = 0;
+      if (!picture_index.is_empty()) {
+        const auto index = champions::inventory_icons::parse_index(
+            picture_index.ptr(), static_cast<std::size_t>(picture_index.size()));
+        std::array<std::vector<M::IconSize>, M::BAGS> sizes;
+        const auto names = next->bag_picture_names();
+        for (int bag = 0; bag < M::BAGS; ++bag) {
+          for (const auto &name : names[bag]) {
+            const auto *entry = champions::inventory_icons::find_entry(index, name);
+            // Index dimensions are runtime observations, not evidence that
+            // the original builder rounds this footprint to one row.
+            sizes[bag].push_back(entry ? M::IconSize{entry->width, entry->height}
+                                       : M::IconSize{0, 0});
+          }
+        }
+        next->build_display_grid(sizes);
+        // Select a bounded-looking runtime footprint for the refusal probe
+        // without recording a private item name or table address.
+        const auto body = static_cast<std::int32_t>(next->record_word(0x54));
+        const auto flags = std::uint64_t(next->record_word(0x138)) |
+                           (std::uint64_t(next->record_word(0x13c)) << 32);
+        const auto prefix = static_cast<std::uint8_t>(next->record_word(0x150) & 0xff);
+        for (const auto &definition : tables->defs) {
+          if (!definition || definition->category != 2) continue;
+          champions::inventory_icons::PictureItem candidate;
+          candidate.definition.name = definition->name;
+          candidate.definition.category = definition->category;
+          candidate.definition.slot = definition->slot;
+          candidate.definition.subtype = definition->subtype;
+          candidate.definition.damage_min = definition->damage_min;
+          candidate.definition.damage_max = definition->damage_max;
+          candidate.definition.picture = definition->picture;
+          candidate.definition.model_row = static_cast<std::size_t>(definition->model_row);
+          candidate.flags = flags;
+          candidate.prefix = prefix;
+          try {
+            const auto name = champions::inventory_icons::picture_filename(candidate, body, candidate_pictures, {});
+            const auto *entry = champions::inventory_icons::find_entry(index, name);
+            if (entry && entry->width >= 0 && entry->width <= 64 &&
+                entry->height > 0 && entry->height <= M::CURSOR_ROW) {
+              unverified_definition = definition->addr;
+              break;
+            }
+          } catch (const std::exception &) {
+          }
+        }
+      }
+      ledger_ = std::move(next);
+      auto result = fill_state(success());
+      result["unverified_definition"] = int64_t(unverified_definition);
+      return result;
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
+  PackedByteArray record_bytes() const {
+    const auto bytes = ledger_->record_bytes();
+    PackedByteArray out;
+    out.resize(static_cast<int64_t>(bytes.size()));
+    std::memcpy(out.ptrw(), bytes.data(), bytes.size());
+    return out;
   }
   Dictionary set_page(int page) {
     try {
@@ -264,7 +459,7 @@ public:
       for (const auto &gap : M::gaps()) {
         Dictionary row;
         row["id"] = String::utf8(gap.id);
-        row["reason"] = String::utf8(gap.reason);
+        row["reason"] = String::utf8(gap.reason.c_str());
         rows.push_back(row);
       }
       out["gaps"] = rows;

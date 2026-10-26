@@ -6,10 +6,13 @@
 #include "champions/ui_text_layout.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
+#include "champions/objects.hpp"
 #include "champions/arena_executable.hpp"
+#include "champions/hud_extras.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/dir_access.hpp>
@@ -51,6 +54,26 @@ Dictionary failure(const std::exception &error) {
   out["error"] = String::utf8(error.what());
   return out;
 }
+// US v2.00 mission table, research-story-route and docs/QUESTS.md. Read the
+// owner's executable at run time; no retail table or text enters the project.
+std::vector<rta::quests::MissionRow> mission_rows(const rta::arena_modes::Executable &exe) {
+  constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
+  std::vector<rta::quests::MissionRow> rows;
+  rows.reserve(13);
+  for (std::uint32_t i = 0; i < 13; ++i) {
+    const auto base = table + i * stride;
+    auto name = [&](std::uint32_t offset) {
+      const auto ptr = exe.word(base + offset);
+      return ptr ? exe.string(ptr) : std::string();
+    };
+    rows.push_back({name(0x08), name(0x0c), name(0x10), name(0x14),
+                    std::int32_t(exe.word(base + 0x20)), std::int32_t(exe.word(base + 0x24)),
+                    std::int32_t(exe.word(base + 0x28))});
+  }
+  if (rows.front().story != "blood1")
+    throw std::runtime_error("The selected executable does not establish the first story mission.");
+  return rows;
+}
 void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
           double z) {
   for (const Vector3 p :
@@ -83,7 +106,11 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("combat_release_attack"), &ChampionsSessionController::combat_release_attack);
   ClassDB::bind_method(D_METHOD("combat_block", "held"), &ChampionsSessionController::combat_block);
   ClassDB::bind_method(D_METHOD("combat_cast_holy_strike"), &ChampionsSessionController::combat_cast_holy_strike);
+  ClassDB::bind_method(D_METHOD("combat_select_disease_bolt", "rank"), &ChampionsSessionController::combat_select_disease_bolt, DEFVAL(1));
+  ClassDB::bind_method(D_METHOD("combat_press_disease_bolt", "held"), &ChampionsSessionController::combat_press_disease_bolt, DEFVAL(true));
+  ClassDB::bind_method(D_METHOD("combat_release_disease_bolt"), &ChampionsSessionController::combat_release_disease_bolt);
   ClassDB::bind_method(D_METHOD("combat_spawn_creature", "own_class"), &ChampionsSessionController::combat_spawn_creature);
+  ClassDB::bind_method(D_METHOD("combat_spawn_mounted_horseman", "variant"), &ChampionsSessionController::combat_spawn_mounted_horseman);
   ClassDB::bind_method(D_METHOD("combat_drop_potion", "kind"), &ChampionsSessionController::combat_drop_potion);
   ClassDB::bind_static_method("ChampionsSessionController", D_METHOD("own_creature_classes"), &ChampionsSessionController::own_creature_classes);
   ClassDB::bind_method(D_METHOD("set_effect_recipe_constants_json", "json", "source"),
@@ -118,14 +145,28 @@ void ChampionsSessionController::_bind_methods() {
   // DIAGNOSTIC ONLY (unchecked placement; scripted test runs and the .fight load).
   ClassDB::bind_method(D_METHOD("fight_place_player", "position", "facing"),
                        &ChampionsSessionController::fight_place_player);
+  ClassDB::bind_method(D_METHOD("fight_diagnostic_lethal_hit"),
+                       &ChampionsSessionController::fight_diagnostic_lethal_hit);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
+  ClassDB::bind_method(D_METHOD("script_story_status"),
+                       &ChampionsSessionController::script_story_status);
   ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_state"), &ChampionsSessionController::script_mission_menu_state);
+  ClassDB::bind_method(D_METHOD("script_mission_menu_tick", "pad_bits", "fade"),
+                       &ChampionsSessionController::script_mission_menu_tick);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
+  ClassDB::bind_method(D_METHOD("inspect_exit_records", "objects"), &ChampionsSessionController::inspect_exit_records);
+  ClassDB::bind_method(D_METHOD("script_trigger_status"), &ChampionsSessionController::script_trigger_status);
+  ClassDB::bind_method(D_METHOD("script_player_markers"), &ChampionsSessionController::script_player_markers);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
+  ClassDB::bind_method(D_METHOD("script_use_status"), &ChampionsSessionController::script_use_status);
+  ClassDB::bind_method(D_METHOD("script_gate_status"), &ChampionsSessionController::script_gate_status);
+  ClassDB::bind_method(D_METHOD("script_gate_confirm", "destination"), &ChampionsSessionController::script_gate_confirm);
   bind_text_methods();
+  bind_hub_methods();
   ClassDB::bind_method(D_METHOD("set_player_character", "character"),
                        &ChampionsSessionController::set_player_character);
   ClassDB::bind_method(D_METHOD("save_player_companion", "path"),
@@ -168,6 +209,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::stop_session);
   ClassDB::bind_method(D_METHOD("get_observation"),
                        &ChampionsSessionController::get_observation);
+  ClassDB::bind_method(D_METHOD("probe_full_walk_weight_test"),
+                       &ChampionsSessionController::probe_full_walk_weight_test);
   ClassDB::bind_method(D_METHOD("get_terrain"),
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
@@ -352,9 +395,32 @@ Dictionary ChampionsSessionController::get_observation() const {
     return failure(e);
   }
 }
+Dictionary ChampionsSessionController::probe_full_walk_weight_test() {
+  try {
+    if (!combat_ || !combat_->full())
+      throw std::runtime_error("Walk-cell probe requires the synthetic Full fixture.");
+    const auto player = combat_->actors().at(0);
+    const auto address = combat_->world().target(player.handle);
+    const auto expected = combat_->world().read(address + 0x144);
+    const auto observed = combat_->probe_walk_life_zero([&] {
+      const Array actors = combat_observation()["combat_actors"];
+      const Dictionary row = actors[0];
+      return rta::Raw(int64_t(row["locomotion_walk_weight_raw"]));
+    });
+    Dictionary out;
+    out["ok"] = true;
+    out["expected_weight_raw"] = int64_t(expected);
+    out["observed_weight_raw"] = int64_t(observed);
+    return out;
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
 Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
-    if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
+    const auto allowed = !combat_ && !level_ && fight_ && fight_->player_ready()
+        ? rta::campaign_fight::COMMAND_MASK : rta::session_control::COMMAND_MASK;
+    if (mask < 0 || mask > allowed)
       throw std::runtime_error("Unknown control command.");
     const auto before = active_observation().ready_ticks;
     cache_state(active_advance(dialog_gate(static_cast<uint32_t>(mask))), true);
@@ -396,7 +462,9 @@ Dictionary ChampionsSessionController::snap_presentation() {
 Dictionary ChampionsSessionController::advance_time(int64_t usec,
                                                     int64_t mask) {
   try {
-    if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
+    const auto allowed = !combat_ && !level_ && fight_ && fight_->player_ready()
+        ? rta::campaign_fight::COMMAND_MASK : rta::session_control::COMMAND_MASK;
+    if (mask < 0 || mask > allowed)
       throw std::runtime_error("Unknown control command.");
     if (current_.paused || current_.stopped || current_.failed) {
       clock_.reset();
@@ -555,6 +623,7 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["policy"] = rta::play_session::POLICY;
   result["history_policy"] = "windowed";
   result["history_window"] = int64_t((combat_ || level_) ? 0 : rta::play_session::DEFAULT_WINDOW);
+  result["terrain_elements"] = int64_t(active_setup().initial_terrain.data.elements.size());
   Array formats;
   if (!combat_ && !level_) formats.push_back("play-continuation-v1");
   else {
@@ -614,6 +683,24 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       control_->shared_seed() != *script_world_)
     unpair_script_seed();
   for (auto tick = before; tick < current_.ready_ticks; ++tick) {
+    if (gate_clear_next_tick_) {
+      gate_travel_.arrived();
+      gate_clear_next_tick_ = false;
+    }
+    if (gate_travel_.ticks && !gate_travel_.request_written && scripts_) {
+      if (gate_travel_.tick(scripts_->level().pending)) {
+        scripts_->variables().memory.string(0x41b6d0, gate_travel_.destination);
+        scripts_->variables().memory.byte(0x41b720, rta::level_flow::ORIENT_NONE);
+        gate_arrival_pending_ = true;
+      }
+    }
+    // Player_run/Player_draw may ask for a prompt without a pressed use. The
+    // bridge cannot resolve either stage until the live grid is supplied.
+    if (std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+                    [](const auto &r) { return r.cls == "JumpGate" || r.cls == "Portal" || r.cls == "PortalHurt"; }))
+      gate_prompt_refusal_ = "Gate proximity discovery refused: the live object-grid query and campaign hub/GateList lifecycle are unavailable.";
+    const bool exit_used = exit_use_pending_ && run_level_use();
+    exit_use_pending_ = false;
     if (scripts_->dialog_attached()) {
       // Priority 10 runObjects (Player_interact), then the dialog run task
       // at 110, before the Script task at 125 (research docs/script.md 2.6).
@@ -627,9 +714,14 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       }
       if (dialog_use_pending_) {
         dialog_use_pending_ = false;
-        std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
-        dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+        if (!exit_used) {
+          std::array<rta::Raw, 3> at{current_.position[0], current_.position[1], current_.position[2]};
+          dialog_last_use_ = String::utf8(scripts_->use(0, at).c_str());
+        }
       }
+    }
+    run_level_triggers(); // the 15-list follows the every-frame player walk
+    if (scripts_->dialog_attached()) {
       rta::script_commands::DialogInputs in;
       in.pad = dialog_pad_;
       dialog_pad_ = 0;
@@ -645,6 +737,49 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     note_help_box();
     if (!ui_frame_driven_)
       scripts_->ui_frame_step();
+  }
+}
+bool ChampionsSessionController::run_level_use() {
+  // objects.ob alone is not the ordered, limited live object-grid query.
+  // It omits competing interactables, extents, flags and vehicle state. Do
+  // not execute a selected record or its prompt from an invented query.
+  exit_use_refusal_ = "Physical use refused: player vehicle state and the ordered live object-grid query (extents, flags, competitors, limit) are unavailable.";
+  gate_prompt_refusal_ = "Gate proximity discovery refused: the live object-grid query and campaign hub/GateList lifecycle are unavailable.";
+  return !script_level_objects_.empty();
+}
+void ChampionsSessionController::run_level_triggers() {
+  if (live_triggers_.empty()) return;
+  // obj_runEvery15 steps its cursor before linking; runObjects walks the
+  // selected list in reverse link order at priority 10.
+  const auto bucket = (++trigger_frame_) % 15;
+  const auto &list = trigger_lists_[bucket];
+  for (auto it = list.rbegin(); it != list.rend(); ++it) {
+    auto &live = live_triggers_[*it];
+    if (live.refused) continue;
+    ++trigger_samples_;
+    const rta::level_flow::TriggerPlayer player{0, current_.position};
+    live.body.run_exact({player}, false, nullptr, {},
+                        [this, &live](const std::string &name, unsigned slot) {
+      ++trigger_dispatches_;
+      const Dictionary before = script_level_request();
+      const auto stop = scripts_->run_object_entry(live.record, name, slot);
+      const Dictionary after = script_level_request();
+      if (stop == rta::script_commands::Stop::Complete && name == live.body.script &&
+          bool(after.get("queued", false)) &&
+          (!bool(before.get("queued", false)) || before.get("name", String()) != after.get("name", String()))) {
+        ++trigger_queued_dispatches_;
+        trigger_queued_record_ = live.record;
+        trigger_queued_destination_ = String(after.get("name", String())).utf8().get_data();
+      }
+      if (stop == rta::script_commands::Stop::Missing) {
+        ++trigger_missing_;
+        return -1;
+      }
+      if (stop == rta::script_commands::Stop::Refused ||
+          stop == rta::script_commands::Stop::Fault)
+        throw std::runtime_error("Automatic Trigger script was refused.");
+      return scripts_->last_value();
+    });
   }
 }
 // Player_run takes no input while a dialog is open and Player_move zeroes the
@@ -759,6 +894,8 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
       if (!bool(character.get("ready", false))) throw std::runtime_error("Character creation has not finished.");
       next = rta::player_state::create(named, cls,
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
+      // Creation has no live Player recalc or record-to-object current mirror.
+      // Keep current-dependent script commands refused until that event exists.
     }
     player_ = std::move(next);
     ++player_record_revision_;
@@ -870,11 +1007,6 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
-    // A pending post action belongs to the destination's script load. This
-    // bounded host does not carry it, so keep the current level intact.
-    if (carry_campaign && scripts_ &&
-        !scripts_->variables().memory.cstr(0x86fa80).empty())
-      throw std::runtime_error("Level change with a pending post action is unsupported.");
     if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
       throw std::runtime_error("Music volume is not a 32-bit pattern.");
     auto next_authority = (!combat_ && !level_)
@@ -911,6 +1043,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
                                : std::uint32_t(music_volume_bits));
     next->set_fade_level(scripts_ ? scripts_->fade_level() : script_fade_);
     const bool carried = carry_campaign && scripts_;
+    const std::string post_action = carried
+        ? scripts_->variables().memory.cstr(0x86fa80) : std::string();
     const auto live_player = player_ && carried
         ? std::optional<rta::player_state::Record>(observed_player()) : player_;
     if (live_player) next->set_player_currents_known(live_player->current_known);
@@ -923,6 +1057,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->load_campaign(campaign_image);
       campaign_image_restored = next->save_campaign() == campaign_image;
     }
+    if (!post_action.empty()) next->variables().set_post_action(post_action);
     if (live_player)
       bind_player_to_scripts(*next, *live_player);
     // A fresh stream from the play session's configured shared seed; the
@@ -933,6 +1068,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    if (executable_)
+      next->campaign().set_rows(mission_rows(*executable_));
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;
       const PackedByteArray image = resource_lumps[name];
@@ -1043,7 +1180,69 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     world_adapter_ = std::move(next_adapter);
     world_runtime_ = std::move(next_runtime);
     world_authority_ = std::move(next_authority);
+    if (!carried) {
+      gate_destinations_ = {};
+      gate_travel_ = {};
+      gate_arrival_pending_ = false;
+      gate_clear_next_tick_ = false;
+    }
     script_level_objects_ = std::move(next_objects);
+    // Live PushTrigger deletion is unavailable along with live dispatch. Do
+    // not construct a per-attachment once mask that revives on re-entry.
+    used_once_exits_.clear();
+    exit_use_pending_ = false;
+    exit_use_count_ = 0;
+    exit_use_refusal_.clear();
+    if (carried && !trigger_level_name_.empty()) {
+      auto &saved = trigger_states_[trigger_level_name_];
+      saved.clear();
+      for (const auto &live : live_triggers_) saved.push_back(live.body.save());
+    }
+    live_triggers_.clear();
+    for (auto &list : trigger_lists_) list.clear();
+    trigger_list_cursor_ = 0;
+    trigger_frame_ = 0;
+    trigger_refusal_.clear();
+    trigger_samples_ = trigger_dispatches_ = trigger_missing_ = 0;
+    trigger_queued_dispatches_ = 0;
+    trigger_queued_destination_.clear();
+    const bool has_params = std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+        [](const auto &r) { return r.cls == "TriggerParams"; });
+    const bool has_unmodelled_slow = std::any_of(script_level_objects_.begin(), script_level_objects_.end(),
+        [](const auto &r) { return r.cls == "Shooter" || r.cls == "FallPlatform"; });
+    for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
+      const auto &record = script_level_objects_[i];
+      // FloorSwitch_ctor also joins the 15-list (research monsters-2).
+      // Its construction consumes a cursor position in record order.
+      if (record.cls == "FloorSwitch") {
+        trigger_list_cursor_ = (trigger_list_cursor_ + 1) % 15;
+        continue;
+      }
+      if (record.cls != "Trigger") continue;
+      const auto integer = [&](const char *name) {
+        const auto value = record.prop(name);
+        if (!value) return 0;
+        std::size_t consumed = 0;
+        const auto parsed = std::stoll(*value, &consumed, 10);
+        if (parsed < INT32_MIN || parsed > INT32_MAX)
+          throw std::runtime_error("Trigger dimension outside signed32.");
+        return int(parsed);
+      };
+      const auto script = record.prop("t").value_or("");
+      const bool refused = has_params || has_unmodelled_slow || script.empty();
+      if (refused) trigger_refusal_ =
+          "TriggerParams linking, another slow-list constructor, or missing script is unported.";
+      trigger_list_cursor_ = (trigger_list_cursor_ + 1) % 15;
+      live_triggers_.emplace_back(i, rta::level_flow::Trigger(
+          record.position[0], record.position[1], integer("w"), integer("h"), script), refused);
+      const auto saved = trigger_states_.find(start_level_name_);
+      if (carried && saved != trigger_states_.end() &&
+          live_triggers_.size() <= saved->second.size())
+        live_triggers_.back().body.restore(saved->second[live_triggers_.size() - 1]);
+      trigger_lists_[trigger_list_cursor_].push_back(live_triggers_.size() - 1);
+    }
+    trigger_level_name_ = start_level_name_;
+    hub_savepoints_.clear();
     script_fade_ = scripts_->fade_level();
     if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
@@ -1080,6 +1279,17 @@ void ChampionsSessionController::start_fight(const rta::session_control::Observa
   }
   fight_->start(start);
 }
+Dictionary ChampionsSessionController::fight_diagnostic_lethal_hit() {
+  try {
+    if (!fight_) throw std::runtime_error("no shared-World fight");
+    const auto error = fight_->diagnostic_lethal_hit();
+    if (!error.empty()) throw std::runtime_error(error);
+    Dictionary out;
+    out["ok"] = true;
+    out["diagnostic"] = true;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
 Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &position, int64_t facing, int64_t hp_raw) {
   // A load replaced the scene before play started: the fight begins from the
   // loaded scene, then the saved player is put back.
@@ -1098,6 +1308,8 @@ Dictionary ChampionsSessionController::fight_restore_player(const Vector3 &posit
     return refuse("saved position is not finite");
   if (facing < 0 || facing > 0xffff) return refuse("saved facing is outside 16 bits");
   if (!fight_ || !fight_->player_ready()) return refuse("no shared-World player");
+  if (fight_->player().action_state == 4)
+    return refuse("dead player requires object replacement; cannot restore health or position in place");
   if (hp_raw < 0 || hp_raw > 0xffffffffll) return refuse("saved hit points are outside 32 bits");
   {
     const auto raw = static_cast<rta::Raw>(hp_raw);
@@ -1146,6 +1358,21 @@ Dictionary ChampionsSessionController::disable_level_script() {
   scripts_.reset();
   reset_fight();
   script_level_objects_.clear();
+  gate_destinations_ = {};
+  gate_travel_ = {};
+  gate_arrival_pending_ = false;
+  gate_clear_next_tick_ = false;
+  used_once_exits_.clear();
+  exit_use_pending_ = false;
+  live_triggers_.clear();
+  for (auto &list : trigger_lists_) list.clear();
+  trigger_refusal_.clear();
+  trigger_samples_ = trigger_dispatches_ = trigger_missing_ = 0;
+  trigger_queued_dispatches_ = 0;
+  trigger_queued_destination_.clear();
+  trigger_states_.clear();
+  trigger_level_name_.clear();
+  hub_savepoints_.clear();
   script_seed_.reset();
   script_world_.reset();
   dialog_data_.reset();
@@ -1204,9 +1431,18 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
 } // namespace
 Dictionary ChampionsSessionController::dialog_use() {
   Dictionary out;
-  out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open);
-  if (out["ok"])
-    dialog_use_pending_ = true;
+  const bool player_valid = player_ && observed_player().current_known && observed_player().hp > 0;
+  out["ok"] = false;
+  if (!player_valid)
+    out["error"] = "Player_interact refused: a controlled player object with positive record health is required.";
+  else if (scripts_ && scripts_->hud().help_open)
+    out["error"] = "Player_interact refused: the help box owns use input.";
+  else if (scripts_ && fight_level_ == "hub2") {
+    dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
+    out["error"] = dialog_last_use_;
+  } else
+    out["error"] = "Player_interact refused: ridden-vehicle state and the ordered live object-grid query are unavailable.";
+  exit_use_refusal_ = String(out["error"]).utf8().get_data();
   return out;
 }
 Array ChampionsSessionController::dialog_events() {
@@ -1303,6 +1539,11 @@ Dictionary ChampionsSessionController::dialog_talk_to(int64_t index) {
   Dictionary out;
   out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open) && index >= 0 &&
               std::size_t(index) < scripts_->talkers().size();
+  if (scripts_ && fight_level_ == "hub2") {
+    out["ok"] = false;
+    dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
+    out["error"] = dialog_last_use_;
+  }
   if (out["ok"])
     dialog_talk_pending_ = index;
   return out;
@@ -1329,6 +1570,11 @@ Dictionary ChampionsSessionController::dialog_status() const {
     return out;
   const auto &d = scripts_->dialog();
   out["open"] = d.is_open();
+  out["node_index"] = int64_t(d.node_index);
+  out["visible_choices"] = int64_t(d.visible.size());
+  out["cursor"] = int64_t(d.cursor);
+  out["cursor_target"] = int64_t(d.cursor_target);
+  out["choice_ready"] = d.reveal_done != 0 && d.at_end != 0 && d.more == 0;
   out["camera_moving"] = d.cam_move != 0;
   out["stalled"] = scripts_->dialog_stalled();
   out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
@@ -1544,6 +1790,50 @@ Dictionary ChampionsSessionController::script_command_counts() const {
     result["dialog"] = dialog_count_dict(scripts_->dialog_counts());
   return result;
 }
+Dictionary ChampionsSessionController::script_story_status() const {
+  Dictionary out;
+  out["ok"] = bool(scripts_);
+  if (!scripts_) return out;
+  const auto &campaign = scripts_->campaign();
+  const auto &counts = scripts_->counts();
+  out["mission_1_available"] = bool(campaign.mission_available(1));
+  out["mission_1_complete"] = bool(campaign.mission_complete(1));
+  out["decision"] = int64_t(campaign.decision());
+  out["evil"] = int64_t(campaign.evil());
+  out["quest_lines"] = int64_t(campaign.record(0).quest_count);
+  out["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
+  out["script_faulted"] = scripts_->faulted();
+  out["script_refusal_stopped"] = scripts_->stopped_on_refusal();
+  const auto refused_named = [&](const char *name) -> int64_t {
+    for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i)
+      if (std::strcmp(rta::script_commands::row(i).name, name) == 0)
+        return int64_t(counts.refused[i]);
+    return 0;
+  };
+  out["cutscene_refusals"] = refused_named("cutScene");
+  out["door_refusals"] = refused_named("autoPropSetState");
+  out["actor_cleanup_refusals"] = refused_named("deleteMonster");
+  out["unbuilt_objects"] = int64_t(counts.objects_unbuilt);
+  int64_t arrivals = 0, walkins = 0, keyed_exits = 0, doors = 0, hostiles = 0;
+  for (const auto &record : script_level_objects_) {
+    if (record.cls == "Player1") ++arrivals;
+    else if (record.cls == "Trigger") ++walkins;
+    else if (record.cls == "PushTrigger") ++keyed_exits;
+    else if (record.cls == "BFfiredoor" || record.cls == "BFhappydoor") ++doors;
+    else if (record.cls == "Kobold" || record.cls == "Koboldtough" ||
+             record.cls == "koboldshaman" || record.cls == "WarWraith") ++hostiles;
+  }
+  out["records"] = int64_t(script_level_objects_.size());
+  out["script_entries"] = int64_t(scripts_->public_count());
+  out["arrival_markers"] = arrivals;
+  out["walkin_triggers"] = walkins;
+  out["keyed_exits"] = keyed_exits;
+  out["doors"] = doors;
+  out["hostile_placements"] = hostiles;
+  out["pending_world"] = !scripts_->level().pending.name.empty() ||
+      !scripts_->variables().memory.cstr(0x41b6d0).empty();
+  return out;
+}
 namespace {
 bool is_exit_record(const std::string &name) {
   return name == "Trigger" || name == "PushTrigger" || name == "JumpGate" ||
@@ -1578,6 +1868,76 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
   return result;
 }
+Dictionary ChampionsSessionController::script_mission_menu_state() const {
+  Dictionary out;
+  out["ok"] = bool(scripts_ && executable_ && scripts_->campaign().rows().size() == 13);
+  if (!bool(out["ok"])) return out;
+  try {
+    const auto &campaign = scripts_->campaign();
+    const auto &menu = campaign.menu();
+    out["open"] = campaign.menu_open() && menu.pending.empty() &&
+                  !(menu.state == 4 && menu.counter <= 0);
+    out["state"] = int64_t(menu.state);
+    out["row"] = int64_t(menu.row);
+    out["column"] = int64_t(menu.col);
+    out["counter"] = int64_t(menu.counter);
+    out["mark"] = int64_t(menu.mark);
+    out["evil"] = bool(campaign.evil());
+    out["network"] = campaign.network();
+    out["chooser"] = int64_t(campaign.chooser());
+    out["first_story_available"] = bool(campaign.mission_available(1));
+    out["pending"] = String::utf8(menu.pending.c_str());
+    Array rows;
+    constexpr std::uint32_t table = 0x4fe540u, stride = 0x34u;
+    for (std::uint32_t i = 0; i < 12; ++i) {
+      const auto base = table + i * stride;
+      const auto name = [&](std::uint32_t offset) {
+        const auto ptr = executable_->word(base + offset);
+        return ptr ? executable_->string(ptr) : std::string();
+      };
+      const auto &info = campaign.rows()[i];
+      const int mission = int(i) + 1;
+      const bool available = campaign.mission_available(mission) != 0;
+      const bool complete = campaign.mission_complete(mission) != 0;
+      const auto medal_byte = campaign.record(0).medals[mission];
+      const int medal = medal_byte < 128 ? int(medal_byte) : int(medal_byte) - 256;
+      Dictionary row;
+      row["key"] = String::utf8(name(0x00).c_str());
+      row["evil_key"] = String::utf8(name(0x04).c_str());
+      row["image"] = String::utf8(name(0x18).c_str());
+      row["evil_image"] = String::utf8(name(0x1c).c_str());
+      row["x"] = int64_t(std::int32_t(executable_->word(base + 0x2c)));
+      row["y"] = int64_t(std::int32_t(executable_->word(base + 0x30)));
+      row["available"] = available;
+      row["draw_present"] = i == 0 || available;
+      row["complete"] = complete;
+      row["medal"] = int64_t(medal);
+      row["medal_column"] = bool(rta::quests::helper_value(6, info, available, complete, medal));
+      row["bonus_column"] = bool(rta::quests::helper_value(10, info, available, complete, medal));
+      rows.push_back(row);
+    }
+    out["rows"] = rows;
+  } catch (const std::exception &e) { return failure(e); }
+  return out;
+}
+Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits, int64_t fade) {
+  try {
+    if (!scripts_ || scripts_->campaign().rows().size() != 13 || !scripts_->campaign().menu_open())
+      throw std::runtime_error("No documented mission menu is open.");
+    constexpr std::uint32_t allowed = rta::quests::BTN_CROSS | rta::quests::BTN_CIRCLE |
+                                      rta::quests::BTN_SELECT | rta::quests::BTN_UP |
+                                      rta::quests::BTN_DOWN | rta::quests::BTN_LEFT |
+                                      rta::quests::BTN_RIGHT | 0x200000u | 0x400000u;
+    if (pad_bits < 0 || (std::uint64_t(pad_bits) & ~std::uint64_t(allowed)) != 0 || fade < 0 || fade > 128)
+      throw std::runtime_error("Mission menu input is outside the documented pad and fade range.");
+    rta::quests::MenuInputs inputs;
+    inputs.fade = int(fade);
+    const bool launched = scripts_->tick_mission_menu(int(pad_bits), inputs);
+    auto out = script_mission_menu_state();
+    out["launched"] = launched;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
 Array ChampionsSessionController::script_exit_targets() const {
   Array result;
   if (!scripts_) return result;
@@ -1590,6 +1950,22 @@ Array ChampionsSessionController::script_exit_targets() const {
     item["kind"] = String::utf8(kind.c_str());
     item["position"] = Vector3(display_float(record.position[0]), display_float(record.position[1]),
                                  display_float(record.position[2]));
+    if (kind == "Trigger") {
+      const auto live = std::find_if(live_triggers_.begin(), live_triggers_.end(),
+          [i](const auto &t) { return t.record == i; });
+      item["walk_in"] = live != live_triggers_.end() && !live->refused;
+      if (live != live_triggers_.end() && live->refused)
+        item["walk_in_refusal"] = String::utf8(trigger_refusal_.c_str());
+      if (live != live_triggers_.end()) {
+        item["min"] = Vector3(display_float(live->body.min[0]), display_float(live->body.min[1]), 0);
+        item["max"] = Vector3(display_float(live->body.max[0]), display_float(live->body.max[1]), 0);
+      }
+    }
+    if (kind == "PushTrigger") {
+      item["physical_use"] = false;
+      item["physical_use_refusal"] =
+          "Physical use requires the ordered live object grid and player vehicle state.";
+    }
     // A Portal is an arrival marker; JumpGate's script is a prompt predicate.
     // Neither is a direct script action. The host exposes them without claiming
     // an undocumented interaction or gate destination.
@@ -1600,14 +1976,94 @@ Array ChampionsSessionController::script_exit_targets() const {
   }
   return result;
 }
+Dictionary ChampionsSessionController::inspect_exit_records(const PackedByteArray &objects) const {
+  Dictionary result;
+  result["ok"] = false;
+  try {
+    const auto raw = raw_bytes(objects);
+    const auto records = rta::level_flow::parse_objects({raw.data(), raw.size()});
+    int64_t triggers = 0, pushes = 0, gates = 0, portals = 0;
+    for (const auto &record : records) {
+      triggers += record.cls == "Trigger";
+      pushes += record.cls == "PushTrigger";
+      gates += record.cls == "JumpGate";
+      portals += record.cls == "Portal" || record.cls == "PortalHurt";
+    }
+    result["ok"] = true;
+    result["triggers"] = triggers;
+    result["pushes"] = pushes;
+    result["gates"] = gates;
+    result["portals"] = portals;
+  } catch (const std::exception &e) {
+    result["error"] = String::utf8(e.what());
+  }
+  return result;
+}
+Dictionary ChampionsSessionController::script_trigger_status() const {
+  Dictionary result;
+  result["samples"] = int64_t(trigger_samples_);
+  result["dispatches"] = int64_t(trigger_dispatches_);
+  result["missing"] = int64_t(trigger_missing_);
+  result["queued_dispatches"] = int64_t(trigger_queued_dispatches_);
+  result["queued_record"] = int64_t(trigger_queued_record_);
+  result["queued_destination"] = String::utf8(trigger_queued_destination_.c_str());
+  result["refusal"] = String::utf8(trigger_refusal_.c_str());
+  return result;
+}
+Array ChampionsSessionController::script_player_markers() const {
+  Array result;
+  if (!scripts_) return result;
+  for (std::size_t i = 0; i < script_level_objects_.size(); ++i) {
+    const auto &record = script_level_objects_[i];
+    if (record.cls != "Player1") continue;
+    Dictionary item;
+    item["index"] = int64_t(i);
+    PackedStringArray properties;
+    for (const auto &property : record.props)
+      properties.push_back(String::utf8(property.c_str()));
+    item["properties"] = properties;
+    result.push_back(item);
+  }
+  return result;
+}
+Dictionary ChampionsSessionController::script_use_status() const {
+  Dictionary result;
+  result["uses"] = int64_t(exit_use_count_);
+  result["record"] = int64_t(exit_use_record_);
+  result["refusal"] = String::utf8(exit_use_refusal_.c_str());
+  return result;
+}
+Dictionary ChampionsSessionController::script_gate_status() const {
+  Dictionary out;
+  out["menu_open"] = gate_travel_.menu_open;
+  out["travel_ticks"] = int64_t(gate_travel_.ticks);
+  out["request_written"] = gate_travel_.request_written;
+  out["prompt"] = String::utf8(gate_prompt_refusal_.c_str());
+  out["refusal"] = "Gate travel requires the campaign hub, saved/reset GateList, menu pause/task state, and constructed destination object grid and seed.";
+  Array destinations;
+  for (const auto &name : gate_destinations_.choosable(start_level_name_))
+    destinations.push_back(String::utf8(name.c_str()));
+  out["destinations"] = destinations;
+  return out;
+}
+Dictionary ChampionsSessionController::script_gate_confirm(const String &destination) {
+  Dictionary out;
+  (void)destination;
+  out["ok"] = false;
+  out["error"] = "Gate travel refused: campaign hub/GateList lifecycle, paused menu task, and destination constructor seed/blocking grid are unavailable.";
+  return out;
+}
 Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   Dictionary result;
   result["ok"] = false;
   try {
     if (!scripts_ || index < 0 || std::size_t(index) >= script_level_objects_.size())
       throw std::runtime_error("No level exit at that index.");
+    if (fight_level_ == "hub2")
+      throw std::runtime_error("Alternate-hub trigger entry effects are not audited; no action was run.");
     const auto &record = script_level_objects_[std::size_t(index)];
     const auto &kind = record.cls;
+    const auto portal_before = scripts_->portal_trigger_requests();
     if (kind != "Trigger" && kind != "PushTrigger")
       throw std::runtime_error("Portal arrival and JumpGate prompt have no direct script action in this host.");
     if (unsupported_exit_conditions(record, script_level_objects_))
@@ -1638,8 +2094,11 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
     if (!ran) throw std::runtime_error("This exit has no documented script action.");
     result["ok"] = true;
     result["queued"] = bool(script_level_request().get("queued", false));
+    result["portal_requests"] = int64_t(scripts_->portal_trigger_requests() - portal_before);
   } catch (const std::exception &e) {
     result["error"] = String::utf8(e.what());
+    if (scripts_ && !scripts_->last_fault().empty())
+      result["script_fault"] = String::utf8(scripts_->last_fault().c_str());
   }
   return result;
 }
@@ -1789,6 +2248,7 @@ Dictionary ChampionsSessionController::reset_session() {
 }
 Dictionary ChampionsSessionController::set_paused(bool value) {
   try {
+    if (value && fight_) fight_->release_input();
     if (combat_) combat_->set_paused(value); else if (level_) level_->set_paused(value); else control_->set_paused(value);
     snap();
     return observation();
@@ -1798,6 +2258,7 @@ Dictionary ChampionsSessionController::set_paused(bool value) {
 }
 Dictionary ChampionsSessionController::release_input() {
   try {
+    if (fight_) fight_->release_input();
     if (combat_) combat_->release_input(); else if (level_) level_->release_input(); else control_->release_input();
     snap();
     return observation();
@@ -1831,41 +2292,46 @@ Dictionary ChampionsSessionController::present_terrain(
   if (data.elements.size() > 256)
     throw std::runtime_error(
         "This terrain has too many surfaces for the scene preview.");
-  if (data.elements.size() != 1 || data.elements.front().flags != 0)
-    throw std::runtime_error(
-        "This scene currently displays one plain terrain surface at a time.");
-  const auto &only = data.elements.front();
-  for (const auto coordinate :
-       {only.min_x, only.min_y, only.max_x, only.max_y, only.x, only.y, only.z})
-    if (coordinate < -1048576 || coordinate > 1048576)
-      throw std::runtime_error(
-          "This terrain exceeds the scene display's coordinate range.");
   if (data.grid.empty() || data.grid.size() > 16384)
     throw std::runtime_error(
         "This terrain grid cannot be displayed in the scene yet.");
-  for (const auto &cell : data.grid) {
-    if (cell.empty() || std::any_of(cell.begin(), cell.end(), [](int64_t ref) {
-          return ref != 0 && ref != -1;
-        }))
-      throw std::runtime_error("This terrain has partial surface coverage that "
-                               "the scene cannot display yet.");
-  }
-  if (only.min_x < double(data.tg_x0) * 160 ||
-      only.min_y < double(data.tg_y0) * 160 ||
-      only.max_x >= (double(data.tg_x0) + data.tg_w) * 160 ||
-      only.max_y >= (double(data.tg_y0) + data.tg_h) * 160)
-    throw std::runtime_error(
-        "This terrain surface extends beyond its query grid.");
   rta::ScopedFpu fixed{rta::Fpu{rta::Fpu::Model::Ps2, false, false}};
   rta::world_queries::Level query(data);
   Array surfaces;
   std::size_t tiles = 0;
-  for (const auto &e : data.elements) {
+  for (std::size_t element_index = 0; element_index < data.elements.size(); ++element_index) {
+    const auto &e = data.elements[element_index];
     if (e.flags & 2)
       continue;
+    for (const auto coordinate :
+         {e.min_x, e.min_y, e.max_x, e.max_y, e.x, e.y, e.z})
+      if (coordinate < -1048576 || coordinate > 1048576)
+        throw std::runtime_error(
+            "This terrain exceeds the scene display's coordinate range.");
     if (e.flags != 0 || e.cos != 32767 || e.sin != 0)
       throw std::runtime_error(
           "This scene currently displays plain, unrotated terrain only.");
+    if (e.min_x < double(data.tg_x0) * 160 ||
+        e.min_y < double(data.tg_y0) * 160 ||
+        e.max_x >= (double(data.tg_x0) + data.tg_w) * 160 ||
+        e.max_y >= (double(data.tg_y0) + data.tg_h) * 160)
+      throw std::runtime_error(
+          "This terrain surface extends beyond its query grid.");
+    if (e.min_x >= e.max_x || e.min_y >= e.max_y)
+      throw std::runtime_error("This terrain surface has no visible area.");
+    // The preview draws the whole element rectangle. Refuse holes: every grid
+    // cell touched by that rectangle must list this element for collision.
+    const auto col0 = (e.min_x - data.tg_x0 * 160) / 160;
+    const auto col1 = (e.max_x - data.tg_x0 * 160) / 160;
+    const auto row0 = (e.min_y - data.tg_y0 * 160) / 160;
+    const auto row1 = (e.max_y - data.tg_y0 * 160) / 160;
+    for (auto row = row0; row <= row1; ++row)
+      for (auto col = col0; col <= col1; ++col) {
+        const auto &cell = data.grid[std::size_t(row * data.tg_w + col)];
+        if (std::find(cell.begin(), cell.end(), int64_t(element_index)) == cell.end())
+          throw std::runtime_error("This terrain has partial surface coverage that "
+                                   "the scene cannot display yet.");
+      }
     const auto index =
         e.hf < 0 ? int64_t(data.heightfields.size()) + e.hf : e.hf;
     const auto &hf = data.heightfields.at(static_cast<std::size_t>(index));
@@ -2100,6 +2566,8 @@ ChampionsSessionController::prepare_terrain_file(const String &path,
       const auto records = rta::level_flow::parse_objects(
           {start_objects_.data(), start_objects_.size()});
       rta::level_flow::StoryGround story;
+      if (gate_arrival_pending_)
+        throw std::runtime_error("Portal arrival refused: destination constructors, post-constructor seed, blocking-object grid and live actor facing are unavailable.");
       if (start_previous_level_.empty() && start_entrance_.empty()) {
         story = rta::level_flow::story_start_ground({}, records, query);
       } else {
@@ -2303,6 +2771,8 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     terrain_ = pending_->terrain;
     std::swap(terrain_name_, pending_->name);
     pending_.reset();
+    gate_clear_next_tick_ = gate_arrival_pending_;
+    gate_arrival_pending_ = false;
     // No observation allocation or numeric validation after publication.
     // A loaded state starts a fresh interpolation pair with no elapsed debt.
     current_ = std::move(restored);
@@ -2524,6 +2994,10 @@ Dictionary ChampionsSessionController::combat_observation() const {
       kind = "Skeleton";
     else if (a.slot == 6)
       kind = "Soul";
+    else if (a.slot == 7)
+      kind = "Horsemen";
+    else if (a.slot == 8)
+      kind = "Nightmare";
     else if (a.slot)
       kind = combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight";
     value["kind"] = kind;
@@ -2531,6 +3005,23 @@ Dictionary ChampionsSessionController::combat_observation() const {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));
       value["action_state"] = int64_t(combat_->world().read(address + 0x58c));
+      if (a.slot == 0) {
+        // These are the executed Player_move mode-0 cells, not a position
+        // delta inferred by presentation. Other play policies have no such
+        // cells and must not advertise original player locomotion.
+        value["locomotion_speed_raw"] = int64_t(combat_->world().read(address + 0x468));
+        value["locomotion_blend_raw"] = int64_t(combat_->world().read(address + 0x46c));
+        value["locomotion_walk_weight_raw"] = int64_t(combat_->world().read(address + 0x144));
+        value["locomotion_run1_weight_raw"] = int64_t(combat_->world().read(address + 0x164));
+        value["locomotion_run2_weight_raw"] = int64_t(combat_->world().read(address + 0x184));
+        const auto slot = combat_->world().read(address + 0x3c8);
+        if (slot < 4) {
+          const auto record = 0x4d8af0u + static_cast<std::uint32_t>(slot) * 0x4c30u;
+          value["player_model_index"] = int64_t(combat_->world().read(record + 0x54));
+          value["weapon_animation_class"] = int64_t(static_cast<std::int8_t>(
+              combat_->world().read(record + 0x4a86, 1)));
+        }
+      }
     }
     value["present"] = a.present;
     value["dead"] = a.dead;
@@ -2561,6 +3052,12 @@ Dictionary ChampionsSessionController::combat_observation() const {
   out["combat_actors"] = actors;
   if (combat_->full()) {
     out["combat_sim_frame"] = int64_t(combat_->world().read(rta::combat_runtime::FRAME));
+    const auto rec = rta::combat_runtime::PLAYERS;
+    out["combat_spell_selected"] = combat_->world().read(rec + 0x4440 + 0x20, 2) == 4;
+    out["combat_mana_raw"] = int64_t(combat_->world().read(rec + 0xc0));
+    out["combat_max_mana_raw"] = int64_t(combat_->world().read(rec + 0xc4));
+    out["combat_mana"] = display_float(rta::Raw(combat_->world().read(rec + 0xc0)));
+    out["combat_max_mana"] = display_float(rta::Raw(combat_->world().read(rec + 0xc4)));
     out["effect_constants"] = fx_constants_source_;
     if (const auto *fx_sim = effects()) {
       const auto &c = fx_sim->counts();
@@ -2642,12 +3139,44 @@ Dictionary ChampionsSessionController::combat_cast_holy_strike() {
     return observation();
   } catch (const std::exception &e) { return failure(e); }
 }
+Dictionary ChampionsSessionController::combat_select_disease_bolt(int64_t rank) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt selection needs the Full combat fixture.");
+    if (rank < 1 || rank > 20) throw std::runtime_error("Disease Bolt rank needs a probed player rank 1 to 20.");
+    combat_->select_disease_bolt(unsigned(rank));
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_press_disease_bolt(bool held) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt input needs the Full combat fixture.");
+    combat_->press_disease_bolt(held);
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_release_disease_bolt() {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Disease Bolt input needs the Full combat fixture.");
+    combat_->release_disease_bolt();
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
 Dictionary ChampionsSessionController::combat_spawn_creature(int64_t own_class) {
   try {
     if (!combat_ || !combat_->full()) throw std::runtime_error("Own-machine creatures need the Full combat fixture.");
     if (own_class < 0 || own_class >= int64_t(rta::combat_play::OWN_CLASS_COUNT))
       throw std::runtime_error("Unknown own-machine class.");
     combat_->spawn_creature(unsigned(own_class));
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_spawn_mounted_horseman(int64_t variant) {
+  try {
+    if (!combat_ || !combat_->full())
+      throw std::runtime_error("Mounted Horsemen need the Full combat fixture.");
+    if (variant < 0 || variant > 3)
+      throw std::runtime_error("Horsemen variant is outside 0 to 3.");
+    combat_->spawn_mounted_horseman(unsigned(variant));
     return observation();
   } catch (const std::exception &e) { return failure(e); }
 }
@@ -2719,15 +3248,36 @@ Dictionary ChampionsSessionController::fight_observation() const {
   out["fight_player_ready"] = fight_->player_ready();
   out["fight_failed"] = fight_->failed();
   out["fight_error"] = String::utf8(fight_->error().c_str());
+  const auto death = fight_->death_view();
+  out["fight_death_task"] = death.running;
+  out["fight_death_phase"] = int64_t(death.phase);
+  out["fight_death_error"] = String::utf8(death.refusal.c_str());
+  out["fight_death_countdown"] = int64_t(death.wipe_countdown);
+  out["fight_dead_countdown"] = int64_t(death.dead_countdown);
+  out["fight_death_fade"] = int64_t(death.fade);
+  out["fight_death_animation_started"] = death.animation_started;
+  out["fight_death_animation_steps"] = int64_t(death.animation_steps);
+  out["fight_death_animation_time_raw"] = int64_t(death.animation_time);
+  out["fight_death_animation_flags"] = int64_t(death.animation_flags);
+  // The simulation selects/advances the death clip; the class-body renderer
+  // still shows its rest pose. Never label the rendered body as animated.
+  out["fight_death_pose_rendered"] = false;
   const auto &n = fight_->counts();
   Dictionary counts;
   counts["ticks"] = int64_t(n.ticks);
   counts["actors_built"] = int64_t(n.actors_built);
+  counts["minotaurs_built"] = int64_t(n.minotaurs_built);
+  counts["minotaur_hit_requests"] = int64_t(n.minotaur_hit_requests);
+  counts["held_part_requests"] = int64_t(n.held_part_requests);
   counts["attack_edges"] = int64_t(n.attack_edges);
   counts["player_swings"] = int64_t(n.player_swings);
   counts["player_hits"] = int64_t(n.player_hits);
+  counts["player_animation_starts"] = int64_t(n.player_animation_starts);
+  counts["player_animation_advances"] = int64_t(n.player_animation_advances);
   counts["damage_events"] = int64_t(n.damage_events);
   counts["deaths"] = int64_t(n.deaths);
+  counts["player_deaths"] = int64_t(n.player_deaths);
+  out["fight_close_menus_requests"] = int64_t(n.close_menu_requests);
   counts["loot_calls"] = int64_t(n.loot_calls);
   counts["loot_items"] = int64_t(n.loot_items);
   counts["loot_shared_draws"] = int64_t(n.loot_shared_draws);
@@ -2735,6 +3285,9 @@ Dictionary ChampionsSessionController::fight_observation() const {
   counts["xp_gained"] = int64_t(n.xp_gained);
   counts["levels_gained"] = int64_t(n.levels_gained);
   counts["factory_runs_skipped"] = int64_t(n.factory_runs_skipped);
+  counts["boar_state_changes"] = int64_t(n.boar_state_changes);
+  counts["boar_attack_entries"] = int64_t(n.boar_attack_entries);
+  counts["boar_hit_events"] = int64_t(n.boar_hit_events);
   out["fight_counts"] = counts;
   Dictionary refusals;
   for (const auto &entry : fight_->refusals()) refusals[String::utf8(entry.first.c_str())] = int64_t(entry.second);
@@ -2746,6 +3299,11 @@ Dictionary ChampionsSessionController::fight_observation() const {
     value["slot"] = int64_t(1 + handle);
     value["handle"] = int64_t(e.address);
     value["kind"] = String::utf8(e.kind.c_str());
+    value["model_lump"] = String::utf8(e.model_lump.c_str());
+    value["model_entry"] = String::utf8(e.model_entry.c_str());
+    value["texture_entry"] = String::utf8(e.texture_entry.c_str());
+    value["model_mask"] = int64_t(e.model_mask);
+    value["model_scale"] = display_float(e.scale);
     value["present"] = true;
     value["dead"] = e.dead;
     value["ai_frozen"] = e.ai_frozen;
@@ -2763,6 +3321,11 @@ Dictionary ChampionsSessionController::fight_observation() const {
   if (player.present) {
     out["fight_player_action_state"] = int64_t(player.action_state);
     out["fight_player_weapon_class"] = int64_t(player.weapon_class);
+    out["fight_player_combo_step"] = int64_t(player.combo_step);
+    out["fight_player_attack_variant"] = int64_t(player.attack_variant);
+    out["fight_player_attack_kind"] = int64_t(player.attack_kind);
+    out["fight_player_blocking"] = player.blocking;
+    out["fight_move_refusal"] = String::utf8(player.move_refusal.c_str());
     // Host stand-in: the research does not document the route's starting
     // equipment, so the class-5 (unarmed) record is a labelled fallback.
     out["fight_starting_equipment"] = "refused_unknown";
@@ -2820,7 +3383,8 @@ rta::session_control::Observation ChampionsSessionController::active_advance(uin
   // With a fight established the dry scene never receives the J/H diagnostic
   // damage bit (it is the player's attack button); a failed fight leaves the
   // stand-in with movement only.
-  const uint32_t dry_mask = fight_ && fight_->player_ready() ? (fighting ? 0u : (mask & ~uint32_t(rta::session_control::DAMAGE))) : mask;
+  const uint32_t dry_mask = fight_ && fight_->player_ready()
+      ? (fighting ? 0u : (mask & rta::campaign_fight::MOVEMENT)) : mask;
   auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(dry_mask));
   if (fighting && !next.failed && next.ready_ticks>before) fight_->tick(mask);
   if (!combat_ && !level_ && fight_ && fight_->player_ready()) apply_fight(next);
