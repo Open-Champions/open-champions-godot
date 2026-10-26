@@ -20,6 +20,7 @@ const RealWorld = preload("res://real_data/real_world.gd")
 const MISSION_IMAGES := ["misswar.tex", "missinnovation.tex", "misspit.tex", "misswater.tex",
 	"misstorment.tex", "missdisease.tex", "missvalor.tex", "missfire.tex",
 	"missstorms.tex", "missfeydark.tex", "missnightmare.tex", "missfear.tex"]
+const LoadingDisplay = preload("res://real_data/loading_display.gd")
 
 var args := {}
 var scene: Control
@@ -1013,11 +1014,18 @@ func run() -> void:
 		{"queued": pending.get("queued", false), "orientation": pending.get("orientation", -1)})
 	var record_before: Dictionary = scene.controller.get_observation()
 	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = selected and bool(scene._apply_level_change())
+	if selected and DisplayServer.get_name() != "headless":
+		scene.loading_start_submitted.connect(func(): call_deferred("capture", "10-start"), CONNECT_ONE_SHOT)
+		scene.loading_started.connect(func(): call_deferred("capture", "10-loading"), CONNECT_ONE_SHOT)
+	var transition_ok: bool = selected and bool(await scene._apply_level_change())
+	var loading_frames: int = scene.loading_display.loading_frame
+	var handoff_errors: int = scene.audio.bank_errors.size() if scene.audio != null and "bank_errors" in scene.audio else -1
+	var loading_ok: bool = transition_ok and loading_frames >= 1 + LoadingDisplay.WARMUP_PRESENTS \
+		and scene.loading_display.phase == "fade" and handoff_errors == 0
 	var record_after: Dictionary = scene.controller.get_observation()
 	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var mission1_still_available: bool = bool(scene.controller.script_mission_menu_state().get("first_story_available", false))
-	var record_carried: bool = transition_ok and scene.last_level_script_attached \
+	var record_carried: bool = transition_ok and loading_ok and scene.last_level_script_attached \
 		and scene.last_campaign_carried and scene.last_campaign_image_restored \
 		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
 		and int(record_after.get("player_class", -1)) == int(record_before.get("player_class", -2)) \
@@ -1043,6 +1051,7 @@ func run() -> void:
 		{"level_index_before": transition_before, "level_index_after": scene.real.current,
 		"pending_script_level": pending.get("queued", false),
 		"script_attached": scene.last_level_script_attached, "campaign_carried": scene.last_campaign_carried,
+		"loading_frames": loading_frames, "loading_ready": loading_ok, "audio_handoff_errors": handoff_errors,
 		"campaign_image_restored": scene.last_campaign_image_restored,
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
 		"quest_vars_after": int(quests_after.get("vars", 0)),
@@ -1051,6 +1060,8 @@ func run() -> void:
 		"mission_available_after": int(quests_after.get("mission_available_bits", 0))})
 	mark("level_change", "changed" if record_carried and at_blood1 else "refused",
 		{"level_index_before": transition_before, "level_index_after": scene.real.current})
+	await capture("10-fade-start")
+	for i in range(LoadingDisplay.FADE_PRESENTS + 2): await process_frame
 	await capture("10-level-change")
 	if args.has("route-only"):
 		save_json()

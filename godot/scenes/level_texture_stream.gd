@@ -17,6 +17,7 @@ var seed_focus := Vector2.ZERO
 var focus := -1
 var wanted: PackedInt32Array = PackedInt32Array()
 var resident: Dictionary = {} # cell -> Array of MeshInstance3D
+var cell_results: Dictionary = {}
 var cell_loads := 0
 var cell_evictions := 0
 # One missing cell at a time. Decode produces owned arrays off the render
@@ -30,6 +31,19 @@ var pending_materials: Dictionary = {}
 var pending_built: Array = []
 var pending_group := 0
 const BUILD_BUDGET_USEC := 2500 # Client frame scheduling only.
+
+func loading_busy() -> bool:
+	if pending_thread != null or pending_cell >= 0: return true
+	for cell in wanted:
+		if not resident.has(int(cell)) or not cell_results.get(int(cell), {}).get("ok", false): return true
+	return false
+
+func loading_state() -> Dictionary:
+	for cell in wanted:
+		var result: Dictionary = cell_results.get(int(cell), {})
+		if result.has("ok") and not result.ok:
+			return {"ok": false, "error": str(result.get("error", "Terrain cell decode failed."))}
+	return {"ok": true, "busy": loading_busy()}
 
 func _init() -> void:
 	name = "OwnedTexturedTerrainDisplay"
@@ -108,6 +122,7 @@ func _load_next() -> bool:
 		# Constant-light groups come back uncoloured (base -1): the colour waits
 		# for the loaded level's base level (TEX-3, playable_fx light_constant).
 		var view: Dictionary = streamer.cell_view(cell, -1)
+		cell_results[cell] = {"ok": bool(view.get("ok", false)), "error": str(view.get("error", "Terrain cell decode failed."))}
 		resident[cell] = _build(cell, view) if view.get("ok", false) else []
 		cell_loads += 1
 		_order()
@@ -146,6 +161,12 @@ func _advance_stream() -> void:
 		return
 
 func _build_pending() -> void:
+	if not pending_view.get("ok", false):
+		cell_results[pending_cell] = {"ok": false, "error": str(pending_view.get("error", "Terrain cell decode failed."))}
+		resident[pending_cell] = []
+		_discard_pending()
+		cells_changed.emit()
+		return
 	var groups: Array = pending_view.get("groups", [])
 	var started := Time.get_ticks_usec()
 	while pending_group < groups.size():
@@ -161,6 +182,7 @@ func _build_pending() -> void:
 		if Time.get_ticks_usec() - started >= BUILD_BUDGET_USEC: break
 	if pending_group < groups.size(): return
 	resident[pending_cell] = pending_built
+	cell_results[pending_cell] = {"ok": true}
 	cell_loads += 1
 	_order()
 	# The signal applies moving-piece poses. Light those groups at their final
@@ -219,6 +241,7 @@ func _drop(cell: int) -> void:
 			remove_child(instance)
 			instance.free()
 	resident.erase(cell)
+	cell_results.erase(cell)
 	cell_evictions += 1
 
 func _build(cell: int, view: Dictionary) -> Array:

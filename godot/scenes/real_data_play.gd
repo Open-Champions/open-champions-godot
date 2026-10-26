@@ -6,6 +6,9 @@ extends "res://scenes/play_flow.gd"
 const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const RealPlayer = preload("res://real_data/real_player.gd")
+const LoadingDisplay = preload("res://real_data/loading_display.gd")
+signal loading_started
+signal loading_start_submitted
 const TextHud = preload("res://ui/text_hud.gd")
 const FightEnemies = preload("res://real_data/real_fight_enemies.gd")
 const MissionMenuView = preload("res://ui/mission_menu_view.gd")
@@ -30,6 +33,8 @@ var real_exit_choice: OptionButton
 var mission_menu_panel
 var gate_destination_choice: OptionButton
 var _gate_menu_was_open := false
+var loading_layer: CanvasLayer
+var loading_display: Control
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -133,6 +138,14 @@ func _ready() -> void:
 	else: add_child(mission_menu_panel)
 	hub_services = preload("res://ui/hub_services.gd").new()
 	hub_services.configure(self, menu)
+	loading_layer = CanvasLayer.new()
+	loading_layer.layer = 100
+	add_child(loading_layer)
+	loading_display = LoadingDisplay.new()
+	loading_display.set_anchors_preset(Control.PRESET_FULL_RECT)
+	loading_display.mouse_filter = Control.MOUSE_FILTER_STOP
+	loading_display.visible = false
+	loading_layer.add_child(loading_display)
 	for argument in OS.get_cmdline_user_args():
 		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
@@ -583,6 +596,41 @@ func _queue_level_change() -> void:
 	_level_change_queued = true
 	call_deferred("_apply_level_change")
 
+func _wait_loading_present() -> void:
+	if DisplayServer.get_name() == "headless": await get_tree().process_frame
+	else: await RenderingServer.frame_post_draw
+
+func _loading_terrain_state() -> Dictionary:
+	if real == null or terrain_root == null:
+		return {"ok": false, "error": "Terrain state unavailable."}
+	if not real.stream_textures:
+		return {"ok": true, "busy": false}
+	if not terrain_root.has_meta("level_texture_streamed") or not terrain_root.has_method("loading_state"):
+		return {"ok": false, "error": "Terrain stream readiness unavailable."}
+	return terrain_root.loading_state()
+
+func _loading_prerequisite_state() -> Dictionary:
+	if controller == null or not controller.has_method("loading_prerequisite_state"):
+		return {"ok": false, "error": "Deferred script, equipment, peer and store loading prerequisites have no supported state adapter."}
+	var state: Dictionary = controller.call("loading_prerequisite_state")
+	if not state.get("ok", false): return state
+	for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"]:
+		if not state.get(field) is bool:
+			return {"ok": false, "error": "Loading prerequisite state incomplete: " + field}
+	if not state.deferred_complete or not state.peers_ready or not state.stores_complete:
+		return {"ok": false, "error": "Deferred script, peer or store loading work is not complete."}
+	return state
+
+func _refuse_loaded_transition(requested: String, reason: String) -> bool:
+	_refused_level_request = requested
+	loading_display.phase = "hidden"
+	loading_display.visible = false
+	automatic_steps = false
+	_level_change_loading = false
+	stop_session()
+	status_label.text = "Level transition refused: " + reason
+	return false
+
 func _apply_level_change() -> bool:
 	_level_change_queued = false
 	if _level_change_loading or controller == null or real == null: return false
@@ -607,16 +655,65 @@ func _apply_level_change() -> bool:
 		status_label.text = "Level change refused: same-level reload state is not ported."
 		return false
 	_level_change_loading = true
+	var old_automatic := automatic_steps
+	automatic_steps = false
+	release_controls()
+	var art_ready: bool = loading_display.configure(real, inspector, base)
+	if not art_ready:
+		status_label.text = "Loading art refused: " + loading_display.refusal
+		_refused_level_request = requested
+		automatic_steps = old_automatic
+		_level_change_loading = false
+		return false
+	# The start slice submits its five tinted sprites on each of three presents.
+	loading_start_submitted.emit()
+	for i in range(3): await _wait_loading_present()
+	loading_display.phase = "loading"
+	loading_display.queue_redraw()
+	loading_started.emit()
+	# The session owns input while the display and readiness warm-up run.
+	# Loading itself is synchronous in this client; frames around it remain
+	# observable, while actual concurrent renderer-thread timing is unverified.
+	await _wait_loading_present()
 	var was_playing: bool = play_mode and session_started and not stopped
 	var changed := load_real_level(destination, true, real.current_qualified,
 		str(pending.get("entrance", "")), requested)
 	if changed and was_playing: start_play()
+	if changed:
+		var warmup := LoadingDisplay.WARMUP_PRESENTS
+		var displayed := 0
+		while warmup > 0:
+			await _wait_loading_present()
+			displayed += 1
+			var readiness := _loading_terrain_state()
+			if not readiness.get("ok", false):
+				return _refuse_loaded_transition(requested, str(readiness.get("error", "Loading readiness unavailable.")))
+			if displayed >= 1500 and readiness.get("busy", false):
+				return _refuse_loaded_transition(requested, "Terrain still busy at the documented warm-up escape.")
+			var prerequisites := _loading_prerequisite_state()
+			if not prerequisites.get("ok", false):
+				return _refuse_loaded_transition(requested, str(prerequisites.get("error", "Loading prerequisites unavailable.")))
+			if displayed >= 1500 and prerequisites.equipment_pending:
+				return _refuse_loaded_transition(requested, "Equipment still pending at the documented warm-up escape.")
+			warmup = LoadingDisplay.warmup_remaining(warmup, bool(readiness.get("busy", false)), prerequisites.equipment_pending, displayed)
+	else:
+		loading_display.visible = false
+		loading_display.phase = "hidden"
 	if not changed: _refused_level_request = requested
+	if changed:
+		loading_display.phase = "blank"
+		loading_display.queue_redraw()
+		for i in range(LoadingDisplay.BLANK_FIELDS): await _wait_loading_present()
+		loading_display.begin_fade()
+		# The first normal frame and control opportunity follow the blank fields.
+		# The colour offset recovers on subsequent presents, not simulation ticks.
+	automatic_steps = old_automatic
 	_level_change_loading = false
 	return changed
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
+	if _level_change_loading: return true
 	if controller != null and mission_menu_panel != null and not mission_menu_panel.assets_valid:
 		var refused_menu: Dictionary = controller.script_mission_menu_state()
 		if refused_menu.get("open", false) and event is InputEventKey:
