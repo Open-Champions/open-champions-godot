@@ -61,3 +61,5 @@ The following tests FAILED:
 	201 - netplay (Timeout)
 Errors while running CTest
 ```
+
+Isolated rerun (recorded by the orchestrator, 2026-10-26 15:15, after the job's provider stopped): the full run's only failure was `netplay` (Timeout) while machine load was ~290. Rerun alone at load ~11 with `ctest --test-dir build/native -R '^netplay$' --output-on-failure -j1`: **Passed, 162.98 s**. Full CTest therefore stands at **250/251 in the parallel run (2300.12 s), with the single timeout passing in isolation**; no assertion failures. Remaining wave 33 gates (Godot matrix, synthetic combat, FULL_SAVE_LOAD, FULL_TRACE, sweeps, probes, playthrough) are still pending.
