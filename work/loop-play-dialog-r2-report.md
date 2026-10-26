@@ -38,3 +38,10 @@ There are 2 retained missing-camera-offset opening refusals and 3 newly visible
 22 closed is not a claim of 22 normal completions. These refusals are the
 expected consequence of stopping unsupported triggers instead of silently
 continuing. This revision does not add support for those target domains.
+
+Last-choice headless traversal with --voice-gate-probe: exit 0, 109.59 s,
+111 levels, 24 attempts, 22 opened, 22 harness-closed, 10,142 checks,
+0 failures, 1 voice-gate probe. It retains the same 2 opening refusals and
+3 explicit refused-trigger stalls. No presentation code changed; these runs
+verify runtime behavior and counts, not a fresh rendered-pixel acceptance.
+Full CTest remains running; aggregate and isolated results will follow.
