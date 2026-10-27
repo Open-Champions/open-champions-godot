@@ -100,9 +100,10 @@ func run() -> void:
 			var queued: Dictionary = scene.controller.script_mission1_status()
 			check(queued.save_inhibit and int(queued.deferred_queued) > 0, "save inhibit and deferred door work recorded")
 			var door: Dictionary = scene.controller.script_mission1_action("entry", 0xa3c)
-			check(door.get("refused", false) and not door.get("fault", true), "zero door predicate reaches refused cutscene")
+			check(door.get("refused", false) and not door.get("fault", true), "zero door predicate refuses unsupported sequence")
 			var after: Dictionary = scene.controller.script_mission1_status()
-			check(not after.save_inhibit and not after.door_persistent, "zero clears inhibit; refused cutscene prevents completion write")
+			check(after.save_inhibit == queued.save_inhibit and after.door_persistent == queued.door_persistent, "door refusal preserves inhibit and persistent flag")
+			check(not after.sites_reached.has(0xaa0) and not after.sites_reached.has(0xacc) and not after.sites_reached.has(0xb00), "door refusal dispatches no clear, cutscene or persistent write")
 			row["door"] = door
 			# Campaign qvars survive a fresh host; unknown effect bodies cannot
 			# invent a reconstructed local switch count from those persistent bits.

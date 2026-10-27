@@ -1337,14 +1337,12 @@ Stop Host::run_mission1_entry(std::uint32_t offset) {
     // research-strife-drundar@3216e7b0 docs/strife-drundar.md:214-235,
     // tools/difftest_strife_drundar.py:415-461: getv -> NOT -> JZER.
     // Nonzero saved values branch to 0xb10 without effects. Zero falls
-    // through; stop at the first unestablished effect, never skip it.
+    // through; refuse the unsupported sequence before any mutating effect.
     auto stop = mission1_site(0xa68);
     if (stop != Stop::Complete) return stop;
     if (last_value_ != 0) return Stop::Complete;
-    stop = mission1_site(0xaa0);
-    if (stop != Stop::Complete) return stop;
-    stop = mission1_site(0xacc); // cutscene body remains explicitly refused
-    return stop == Stop::Complete ? mission1_site(0xb00) : stop;
+    remember(RefusedResult("Mission 1: unsupported door sequence; cutscene completion unestablished"));
+    return Stop::Refused;
   }
   remember(RefusedResult("Mission 1: entry body outside addressed effects"));
   return Stop::Refused;

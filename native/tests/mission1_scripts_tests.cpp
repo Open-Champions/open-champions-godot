@@ -248,8 +248,8 @@ int main() {
         const auto before=host.queue().queued;
         for(unsigned i=0;i<5;++i) host.on_ready_tick();
         check(host.queue().queued==before,"continuous ticks do not execute untraced deferred work");
-        check(host.run_mission1_entry(0xa3c)==sc::Stop::Refused,"zero door value stops at unestablished cutscene");
-        check(host.variables().memory.word(0x50605c)==0&&host.variables().quest_get(contract->door_flag)==0,"zero door value clears inhibit but refuses before persistent write");
+        check(host.run_mission1_entry(0xa3c)==sc::Stop::Refused,"zero door value refuses unsupported sequence");
+        check(host.variables().memory.word(0x50605c)==1&&host.variables().quest_get(contract->door_flag)==0,"door refusal preserves inhibit and persistent flag");
         const auto save=host.save_campaign();
         sc::Host restored;check(restored.load(image),"revisit script loads");restored.start_single_player();restored.load_campaign(save);
         for(const auto &sw:contract->switches) check(restored.variables().quest_get(sw.persistent)==1,"campaign restores each switch independently");
@@ -277,10 +277,10 @@ int main() {
       const auto &sites=h.mission1_sites_reached();
       check(sites.count(0xa68)==1,"real diagnostic dispatches persistent read");
       check(stop==(saved==0?sc::Stop::Refused:sc::Stop::Complete),"original zero-only branch polarity");
-      check(h.variables().memory.word(0x50605c)==(saved==0?0u:1u),"only zero clears save inhibit");
-      check(sites.count(0xaa0)==(saved==0?1u:0u) && sites.count(0xacc)==(saved==0?1u:0u),"zero reaches clear and refused cutscene; nonzero skips both");
-      check(!sites.count(0xb00) && h.variables().quest_get(key)==stored,"no persistent write after refused cutscene");
-      if(saved==0) check(h.last_fault().find("untraced script call or effect body")!=std::string::npos,"effect refusal remains explicit");
+      check(h.variables().memory.word(0x50605c)==1u,"door predicate preserves incoming save inhibit");
+      check(!sites.count(0xaa0) && !sites.count(0xacc),"no clear or cutscene dispatch on refusal or nonzero skip");
+      check(!sites.count(0xb00) && h.variables().quest_get(key)==stored,"no persistent write; saved value unchanged");
+      if(saved==0) check(h.last_fault().find("unsupported door sequence")!=std::string::npos,"effect refusal remains explicit");
     }
     // Replacement and removal (authored PROC padding) must fail inspection.
     // Required NOT: research-strife-drundar@3216e7b0 tools/difftest_strife_drundar.py:400,415.
