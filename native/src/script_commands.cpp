@@ -2,6 +2,7 @@
 #include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -389,6 +390,10 @@ void Host::refuse(std::size_t index, amx::Machine &machine, const char *reason) 
   counts_.refused[index] += 1;
   last_refusal_ = std::string("refused ") + kRows[index].name;
   if (reason) last_refusal_ += std::string(": ") + reason;
+  if (mission1_) {
+    counts_.stopped[index] += 1;
+    throw RefusedResult(std::string("Mission 1 unported effect: ") + kRows[index].name);
+  }
   if (complete_commands_ || result_used(machine)) {
     counts_.stopped[index] += 1;
     throw RefusedResult(last_refusal_);
@@ -456,6 +461,21 @@ amx::NativeMap Host::command_map() {
     out.emplace(kRows[i].name, [this, i, function, documented, sync_seed, needs_tables, entrance, cflag, dialog_cmd](
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
+      if (mission1_) {
+        // Only the addressed static calls in the audited handoff are admitted.
+        // An ignored return never licenses skipping an unknown side effect.
+        if (machine.cip >= 8 && mission1_->sites.count(std::uint32_t(machine.cip - 8)))
+          ++mission1_sites_reached_[std::uint32_t(machine.cip - 8)];
+        if (!mission1_->allows(machine, kRows[i].name, params) ||
+            std::string(kRows[i].name) == "trigger" ||
+            std::string(kRows[i].name) == "autoPropSetState" ||
+            std::string(kRows[i].name) == "cutScene" ||
+            std::string(kRows[i].name) == "callScript") {
+          ++counts_.refused[i];
+          ++counts_.stopped[i];
+          throw RefusedResult("Mission 1: untraced script call or effect body");
+        }
+      }
       // The dialog built-ins run only while dialog is attached; item and quest
       // handlers retain their own routing and refusal rules.
       const bool dialog_route = dialog_cmd && dialog_attached_;
@@ -1089,6 +1109,8 @@ void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
 }
 
 bool Host::load(const amx::ByteVector &image) {
+  mission1_.reset();
+  mission1_sites_reached_.clear();
   machine_.reset();
   variables_->script_machine.reset();
   level_started_ = false;
@@ -1110,10 +1132,13 @@ bool Host::load(const amx::ByteVector &image) {
       if (binding.kind != amx::BindingKind::Bound || !binding.function)
         return false;
     }
+    mission1_ = mission1_scripts::Contract::inspect(*machine);
     machine_ = std::move(machine);
     variables_->script_machine = machine_;
     return true;
-  } catch (const std::exception &) {
+  } catch (const std::exception &error) {
+    if (mission1_ || std::string(error.what()).find("Mission 1") == 0) last_fault_ = error.what();
+    mission1_.reset();
     machine_.reset();
     variables_->script_machine.reset();
     return false;
@@ -1127,6 +1152,10 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
   }
   try {
     const auto records = level_flow::parse_objects(champions::Bytes{data, size});
+    if (mission1_) {
+      if (!exe_) throw std::runtime_error("Mission 1 census needs the selected executable");
+      mission1_->validate_objects(records, *exe_);
+    }
     if (exe_)
       return adopt_classified(records);
     record_addresses_.assign(records.size(), 0);
@@ -1146,7 +1175,8 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
       counts_.load_draws_unmodelled += 1;
     }
     return true;
-  } catch (const std::exception &) {
+  } catch (const std::exception &error) {
+    if (mission1_) last_fault_ = std::string(error.what()).find("Mission 1") == 0 ? error.what() : "Mission 1 object adoption refused";
     counts_.objects_refused += 1;
     return false;
   }
@@ -1217,6 +1247,12 @@ Stop Host::enter(const std::string &name, bool optional) {
       counts_.missing_entries += 1;
     return Stop::Missing;
   }
+  if (mission1_) {
+    const auto offset = mission1_->offset_of(name);
+    if (offset) return run_mission1_entry(*offset);
+    remember(RefusedResult("Mission 1: entry body outside addressed handoff"));
+    return Stop::Refused;
+  }
   machine_->budget = session::SCRIPT_BUDGET;
   try {
     const auto result = machine_->execute(found.second, {}, 0);
@@ -1249,7 +1285,13 @@ Stop Host::enter_level(const char *name) {
 
 // level_loadScriptAndObjects runs preStart, loads the objects, then runs start
 // (research 9649e6b docs/script.md 2.1; docs/issues/arena-entry.md 1.4).
-Stop Host::run_prestart() { return enter_level("preStart"); }
+Stop Host::run_prestart() {
+  if (mission1_) {
+    const auto at = mission1_->offset_of("preStart");
+    return at ? run_mission1_entry(*at) : Stop::Missing;
+  }
+  return enter_level("preStart");
+}
 
 // start, then the load's post action (game_loadLevel 0x1e60b8), then one
 // script_runDeferred outside any tick (mainloop_runSession 0x322e6c;
@@ -1258,6 +1300,14 @@ Stop Host::run_prestart() { return enter_level("preStart"); }
 Stop Host::run_start() {
   loading_deferred_complete_ = false;
   const auto refused_before = counts_.refused;
+  if (mission1_) {
+    if (!mission1_->objects_validated) {
+      count_refusal("Mission 1 object census or links not validated");
+      return Stop::Refused;
+    }
+    const auto at = mission1_->offset_of("start");
+    return at ? run_mission1_entry(*at) : Stop::Missing;
+  }
   const auto stop = enter_level("start");
   if (stop == Stop::Fault || stop == Stop::Refused)
     return stop;
@@ -1382,6 +1432,12 @@ void Host::on_ready_tick() {
   hud_->tick_message();
   hud_->tick_widgets();
   mirror_hud();
+  if (mission1_) {
+    // No continuous original/native script run is in the evidence. Deferred
+    // work can be inspected via the explicitly addressed entry API only.
+    counts_.build_refusals.emplace("Mission 1 continuous script execution untraced", 1);
+    return;
+  }
   if (faulted_ || !machine_)
     return;
   machine_->budget = session::SCRIPT_BUDGET;
@@ -1392,6 +1448,141 @@ void Host::on_ready_tick() {
     return;
   }
   classify();
+}
+
+Stop Host::run_mission1_entry(std::uint32_t offset) {
+  if (!mission1_ || !machine_ || !mission1_->entries.count(offset)) return Stop::Refused;
+  if (!mission1_->objects_validated &&
+      !(mission1_->level == mission1_scripts::Level::Strife && offset == 0x568))
+    return Stop::Refused;
+  for (const auto &sw : mission1_->switches)
+    if (sw.action_entry == offset && variables_->quest_get(sw.persistent) != 0)
+      return Stop::Refused; // the paired key is !getv, not a repeatable increment
+  if (faulted_ && !refusal_stopped_) return Stop::Fault;
+  // A new, explicit diagnostic invocation may follow a bounded refusal. This
+  // does not resume a stopped script or drain its deferred/post-action queue.
+  faulted_ = refusal_stopped_ = false;
+  last_fault_.clear();
+  // The handoff proves selected cells, not the intervening entry bodies.
+  // Apply only those cells through the existing binder, never execute unknown
+  // bytecode between two documented call sites.
+  for (const auto &sw : mission1_->switches) {
+    if (offset == sw.key_entry) {
+      auto stop = mission1_site(sw.key_entry + 0x2c);
+      if (stop == Stop::Complete) last_value_ = !last_value_;
+      return stop;
+    }
+    if (offset == sw.action_entry) {
+      // INC at action+0x1c addresses local slot zero (audited switch_effects).
+      machine_->set_cell(0, std::uint32_t(machine_->cell(0)) + 1u);
+      auto stop = mission1_site(sw.action_entry + 0x48);
+      return stop == Stop::Complete ? mission1_site(sw.action_entry + 0x74) : stop;
+    }
+  }
+  if (mission1_->level == mission1_scripts::Level::Drundar && offset == 0xa3c) {
+    // research-strife-drundar@3216e7b0 docs/strife-drundar.md:214-235,
+    // tools/difftest_strife_drundar.py:415-461: getv -> NOT -> JZER.
+    // Nonzero saved values branch to 0xb10 without effects. Zero falls
+    // through; refuse the unsupported sequence before any mutating effect.
+    auto stop = mission1_site(0xa68);
+    if (stop != Stop::Complete) return stop;
+    if (last_value_ != 0) return Stop::Complete;
+    remember(RefusedResult("Mission 1: unsupported door sequence; cutscene completion unestablished"));
+    return Stop::Refused;
+  }
+  remember(RefusedResult("Mission 1: entry body outside addressed effects"));
+  return Stop::Refused;
+}
+
+bool Host::restore_mission1_counter() {
+  if (!mission1_ || !machine_ || mission1_->level != mission1_scripts::Level::Strife) return false;
+  machine_->set_cell(0x14c, std::uint32_t(variables_->quest_get(mission1_->counter_key)));
+  ++mission1_sites_reached_[0x5e8];
+  return true;
+}
+std::int32_t Host::mission1_local_count() const {
+  if (!mission1_ || !machine_) throw std::runtime_error("No Mission 1 addressed contract");
+  return machine_->cell(mission1_->level == mission1_scripts::Level::Strife ? 0x14c : 0);
+}
+
+Stop Host::mission1_site(std::uint32_t offset) {
+  if (!mission1_ || !machine_ || !mission1_->objects_validated || !mission1_->sites.count(offset))
+    return Stop::Refused;
+  if (faulted_ && !refusal_stopped_) return Stop::Fault;
+  const auto &site = mission1_->sites.at(offset);
+  if (site.arguments.empty()) return Stop::Refused; // needs the original VM's computed counter
+  faulted_ = refusal_stopped_ = false;
+  last_fault_.clear();
+  auto &m = *machine_;
+  // Binder scratch is temporary. Global script/campaign effects survive; VM
+  // stack, heap and continuation do not become a fabricated script resume.
+  struct Frame {
+    amx::Machine &m;
+    amx::Address hea, stk, frm, cip, params;
+    explicit Frame(amx::Machine &v) : m(v), hea(v.hea), stk(v.stk), frm(v.frm), cip(v.cip), params(v.params) {}
+    ~Frame() { m.hea=hea; m.stk=stk; m.frm=frm; m.cip=cip; m.params=params; }
+  } frame(m);
+  try {
+    const auto allocation = m.allot(site.arguments.size()+1);
+    if (allocation.first != amx::ERR_NONE || !allocation.second) throw amx::HostFault("Addressed binder scratch refused");
+    const auto at = *allocation.second;
+    m.set_cell(at, site.arguments.size()*4);
+    for (std::size_t i=0; i<site.arguments.size(); ++i) m.set_cell(at+4+4*i, std::uint32_t(site.arguments[i]));
+    m.cip = offset+8;
+    m.budget = session::SCRIPT_BUDGET;
+    const auto names = m.native_names();
+    const auto found = std::find(names.begin(), names.end(), site.command);
+    if (found == names.end()) throw amx::HostFault("Addressed native missing");
+    const auto result = m.call_native(found-names.begin(), at);
+    if (result.first) throw amx::HostFault("Addressed native returned VM error");
+    last_value_ = amx::s32(result.second);
+    return Stop::Complete;
+  } catch (const std::exception &e) {
+    remember(e);
+    return stopped();
+  }
+}
+Stop Host::restore_mission1_addressed() {
+  if (!mission1_ || !mission1_->objects_validated) return Stop::Refused;
+  if (faulted_ && !refusal_stopped_) return Stop::Fault;
+  if (mission1_->level == mission1_scripts::Level::Strife) {
+    restore_mission1_counter();
+    const std::uint32_t sites[4][4] = {{0x6b0,0x6dc,0x708,0x734}, {0x794,0x7c0,0x7ec,0x818},
+                                      {0x878,0x8a4,0x8d0,0x8fc}, {0x95c,0x988,0x9b4,0x9e0}};
+    for (unsigned group=0; group<4; ++group) {
+      const bool flag = variables_->quest_get(mission1_->stage_keys[group]) != 0;
+      if (group == 0 ? !flag : flag) for (const auto at : sites[group]) {
+        const auto stop = mission1_site(at);
+        if (stop != Stop::Complete) return stop;
+      }
+    }
+  } else {
+    if (variables_->quest_get(mission1_->door_flag)) {
+      auto stop = mission1_site(0x374);
+      if (stop != Stop::Complete) return stop;
+      stop = mission1_site(0x3a8);
+      if (stop != Stop::Complete) return stop;
+    }
+    for (const auto &site : mission1_->restore_keys) if (variables_->quest_get(site.second)) {
+      const auto stop = mission1_site(site.first);
+      if (stop != Stop::Complete) return stop;
+    }
+  }
+  return Stop::Complete;
+}
+
+Stop Host::mission1_count_gate() {
+  if (!mission1_ || !mission1_->objects_validated || mission1_->level != mission1_scripts::Level::Drundar)
+    return Stop::Refused;
+  // EQ.C.pri at 0x870, literal eight. No >= or inferred restore count.
+  if (mission1_local_count() != 8) return Stop::Refused;
+  auto stop = mission1_site(0x89c);
+  return stop == Stop::Complete ? mission1_site(0x8dc) : stop;
+}
+Stop Host::mission1_bridge_request(unsigned index) {
+  if (!mission1_ || mission1_->level != mission1_scripts::Level::Strife || index >= 3) return Stop::Refused;
+  const std::uint32_t at[] = {0x1c90,0x1df0,0x1ed4};
+  return mission1_site(at[index]);
 }
 
 Stop Host::run(const std::string &entry) {

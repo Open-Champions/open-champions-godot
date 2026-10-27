@@ -277,6 +277,10 @@ public:
   godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes,
                                                 const godot::String &required_key = godot::String());
   godot::Dictionary level_object_state_status() const;
+  godot::Dictionary script_mission1_status() const;
+  // Explicit diagnostic entries/sites, never physical interaction or a
+  // continuous campaign route. All indices are addressed contract indices.
+  godot::Dictionary script_mission1_action(const godot::String &action, int64_t index = 0);
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   godot::Array hub_service_targets() const;

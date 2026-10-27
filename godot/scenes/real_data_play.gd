@@ -299,6 +299,8 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
+		if scripted and controller.script_mission1_status().get("ok", false):
+			status_label.text = "Level loaded with documented script effects. Continuous scripts, combat and exits remain refused."
 	_show_script_refusal()
 	return true
 
@@ -633,6 +635,8 @@ func attach_level_script(carry_campaign := false) -> bool:
 	last_level_script_attached = bool(result.get("ok", false))
 	if result.get("ok", false): _refused_level_request = ""
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
+	if result.get("ok", false) and controller.script_mission1_status().get("ok", false):
+		status_label.text = "Addressed Mission 1 scripts · continuous execution, combat and transitions refused."
 	_show_script_refusal()
 	_refresh_exit_targets()
 	return result.get("ok", false)

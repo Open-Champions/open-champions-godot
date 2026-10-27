@@ -474,6 +474,8 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
     const auto outcome = level_factory::classify(record.cls, &record.props, *exe_);
     if (outcome.kind != level_factory::Kind::Object) {
       counts_.objects_not_created += 1;
+      if (mission1_ && outcome.kind != level_factory::Kind::Nothing)
+        counts_.build_refusals["Mission 1 no-object factory side effects unported"] += 1;
       // A record with a dialogScript that makes no object has no talker (the
       // TestLocation records: docs/spec/dialog-gaps.md 6). Nothing is created and
       // nothing is refused.
