@@ -1,4 +1,4 @@
-STATUS: MORE — implementation in progress; pending full CTest.
+STATUS: MORE — bounded act progression implemented; pending full CTest.
 
 Scope: assigned play-progression worktree, codex/play-progression, wave-34
 base a68504da. No push or PR. 2026-10-27.
@@ -17,3 +17,13 @@ extends that existing path to other table-proved cross-act destinations, without
 adding a mission order or automatic unlock. Implementation and focused regression
 validation pending. Full Release, CTest, Godot matrix, FULL_SAVE_LOAD, FULL_TRACE
 and both journey gates pending. Pickup 10→11 and baselines remain required.
+
+Focused validation: Release native build PASS; script-commands 1/1 PASS, 0.39 s.
+Regression assertions use synthetic act tables and destinations. They require
+non-mission-2 cross-act clearing, same-act preservation, unchanged XP/level/gold
+and mission flags, replacement-host save/load, no invented mission-3 unlock,
+and inventory refusal before candidate campaign mutation. This is native fixture
+proof, not a played mission completion. The real pending-world bridge now uses
+the same predicate to refuse unsupported cross-act inventory before level load.
+
+Full CTest is pending; the following commit precedes its invocation as requested.

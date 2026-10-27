@@ -149,6 +149,49 @@ void test_act_entry() {
   const auto &after = next.campaign().record(0);
   check(after.level == 3 && after.exp == 123 && after.gold == 37,
         "act reset preserves player level, experience and gold");
+  // research-quests@7efd3ce docs/quests.md:266-298: act matching and
+  // clearing are independent of the mission-2 special route. Synthetic
+  // destinations deliberately have no retail mission order or identifiers.
+  sc::Host later;
+  later.load_campaign(before);
+  const auto later_entry = sc::prepare_campaign_entry(later, &source, tables, "authored-next", false, false);
+  check(later_entry.changed && later_entry.reset && later_entry.act == 1,
+        "a non-mission-2 destination also applies its researched act boundary");
+  check(later.campaign().record(0).quest_count == 0 &&
+            later.variables().quest_get("authored-progress") == 0,
+        "later act entry clears journal and variable values");
+  check(later.campaign().record(0).level == 3 && later.campaign().record(0).exp == 123 &&
+            later.campaign().record(0).gold == 37 && later.campaign().mission_complete(1) &&
+            later.campaign().mission_available(2),
+        "later act reset preserves level XP gold and independently offered missions");
+  const auto later_saved = later.save_campaign();
+  sc::Host loaded;
+  loaded.load_campaign(later_saved);
+  check(loaded.campaign().act() == 1 && loaded.campaign().record(0).quest_count == 0 &&
+            loaded.variables().quest_get("authored-progress") == 0 &&
+            loaded.campaign().record(0).level == 3 && loaded.campaign().record(0).exp == 123 &&
+            loaded.campaign().record(0).gold == 37 && loaded.campaign().mission_complete(1) &&
+            loaded.campaign().mission_available(2),
+        "later act progression survives replacement from the authored campaign save");
+  check(!loaded.campaign().mission_available(3),
+        "act transition and reload do not manufacture a next mission unlock");
+  sc::Host refused_next;
+  refused_next.load_campaign(before);
+  const auto candidate_before = refused_next.save_campaign();
+  source.variables().memory.w32(si::bag_count_at(0, 0), 1);
+  refused = false;
+  try { sc::prepare_campaign_entry(refused_next, &source, tables, "authored-next", false, false); }
+  catch (const std::runtime_error &) { refused = true; }
+  check(refused && refused_next.save_campaign() == candidate_before,
+        "later cross-act inventory refuses before changing the candidate campaign");
+  source.variables().memory.w32(si::bag_count_at(0, 0), 0);
+  sc::Host ordinary_same;
+  ordinary_same.load_campaign(before);
+  const auto ordinary_entry = sc::prepare_campaign_entry(ordinary_same, &source, tables, "authored-same", false, false);
+  check(!ordinary_entry.changed && !ordinary_entry.reset && ordinary_entry.act == 0 &&
+            ordinary_same.campaign().record(0).quest_count == 1 &&
+            ordinary_same.variables().quest_get("authored-progress") == 7,
+        "ordinary same-act entry does not clear campaign progress");
   source.campaign().set_act(-1);
   refused = false;
   try { sc::require_campaign_act_transfer(source, tables, "authored-next", false); }

@@ -37,6 +37,17 @@ inline std::string mission2_story_destination(const quests::Campaign &campaign) 
   return name;
 }
 
+// research-quests@7efd3ce docs/quests.md:266-277,285-298. A table
+// miss is not an act change; current-act prefix matches take precedence.
+inline bool campaign_entry_requires_transfer(const Host &previous,
+                                             const quests::ActTables &tables,
+                                             const std::string &destination,
+                                             bool mission2) {
+  const auto source = previous.campaign().act();
+  const auto found = quests::find_act(destination, source, tables.names);
+  return mission2 || (found >= 0 && found != source);
+}
+
 struct CampaignEntry {
   bool changed = false, reset = false;
   int act = -1;
@@ -50,14 +61,7 @@ inline CampaignEntry prepare_campaign_entry(Host &next, Host *previous,
                                              const std::string &level, bool mission2,
                                              bool imported) {
   CampaignEntry out;
-  // research-quests@7efd3ce docs/quests.md:266-298: the reset is
-  // determined by the executable act tables, not by a mission number.
-  // Unknown destinations keep the existing non-mission-2 route policy:
-  // save_actChanged itself leaves the current act unchanged on no match.
-  const auto source_act = previous ? previous->campaign().act() : -1;
-  const auto found_act = quests::find_act(level, source_act, tables.names);
-  const bool cross_act = previous && found_act >= 0 && found_act != source_act;
-  if (previous && (mission2 || cross_act)) {
+  if (previous && campaign_entry_requires_transfer(*previous, tables, level, mission2)) {
     const auto destination = require_campaign_act_transfer(*previous, tables, level, imported);
     next.campaign().set_acts(tables.names);
     next.level().acts = tables.flow;

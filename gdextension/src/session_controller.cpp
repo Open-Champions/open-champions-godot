@@ -2024,7 +2024,12 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["orientation"] = int64_t(scripts_->variables().memory.read(0x41b720));
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
-  if (bool(result["queued"]) && mission2_story(String::utf8(name.c_str()).get_slice("_", 0))) {
+  // Preflight every table-proved act boundary before presentation loads a
+  // new world, not only mission 2. Same predicate as prepare_campaign_entry:
+  // research-quests@7efd3ce docs/quests.md:266-298.
+  const bool second_story = mission2_story(String::utf8(name.c_str()).get_slice("_", 0));
+  if (bool(result["queued"]) && (second_story || (script_act_tables_ &&
+      rta::script_commands::campaign_entry_requires_transfer(*scripts_, *script_act_tables_, name, false)))) {
     try {
       if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
       rta::script_commands::require_campaign_act_transfer(
