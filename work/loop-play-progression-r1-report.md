@@ -143,4 +143,40 @@ CTest invocation. No baseline, fixture, harness or pickup assertion was changed.
   stopped by verified PIDs. Logs retained under `journey-unimported/`; a local
   editor import completed and the standard runner was restarted unchanged.
   The aborted launch is not a journey result.
-- Headless/rendered standard journey versus wave34 80/81 steps: PENDING.
+- Standard `tools/run_loop_playthrough.py`: **80 headless / 81 rendered
+  steps**, matching wave34. Both exit **1**, zero classified log errors, six
+  refusal kinds; rendered **38 captures**. Both pickup assertions PASS with
+  **10→11**, walked pickup, **zero retry kills / zero diagnostic placements**.
+  `rendered_pickup_verified=false` remains the harness's separate visual flag;
+  it is not promoted to true by the inventory assertion.
+- Both ordinary hub-menu/first-story travel paths remain refused at the
+  persistent unsupported `trigger` stop. These counts do not prove mission2 or
+  later campaign travel. Dead-state save/departure remains refused;
+  `saved_level_reloaded=false`, and the `load_and_carry` row explicitly has
+  `load_attempted=false`. Its unchanged XP/level/gold/HP values are NOT a
+  successful load claim.
+- Inspected rendered `10-mission-menu.png` and `09-loaded.png`: the first shows
+  the hub play view with no open mission panel, the second remains the main
+  menu. These agree with refusal results; no newly working menu or restored
+  level is claimed. No presentation change was made in this task.
+- Read-only selected input census: **994 files before / 994 after**. Journey
+  evidence is ignored under `work/progression/journey/`.
+
+## Commands (local paths supplied at runtime)
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^script-commands$' --output-on-failure -j 1
+ctest --test-dir build/native --output-on-failure -j 3
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR=<pinned-dependency> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension -j 4
+cmake -S gdextension/level_texture -B build/level-texture-debug -DGODOT_CPP_DIR=<pinned-dependency> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/level-texture-debug -j 4
+cmake -S gdextension/creature_anim -B build/creature-anim-debug -DGODOT_CPP_DIR=<pinned-dependency> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/creature-anim-debug -j 4
+python3 tools/godot_matrix.py matrix --godot <local-engine> --captures --out work/progression/matrix
+<local-engine> --headless --path godot --editor --quit-after 120 --frame-delay 50
+python3 tools/run_loop_playthrough.py --godot <local-engine> --game-folder <read-only-input> --out work/progression/journey
+```
+
