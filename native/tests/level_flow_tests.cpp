@@ -8,6 +8,10 @@
 #include <cstring>
 #include <iostream>
 #include <sstream>
+// Keep failure formatting outside this translation unit: the unchanged
+// generated vectors expand thousands of CHECKs in one function. Inlining
+// their string/exception construction makes Release optimization excessive.
+[[noreturn]] void level_flow_check_failed(const char *expression, int line);
 using namespace champions;
 using namespace champions::simulation::rta;
 using namespace champions::simulation::rta::level_flow;
@@ -18,8 +22,7 @@ unsigned checks = 0;
   do {                                                                         \
     ++checks;                                                                  \
     if (!(__VA_ARGS__))                                                        \
-      throw Error(std::string("line ") + std::to_string(__LINE__) + ": " +     \
-                  #__VA_ARGS__);                                               \
+      level_flow_check_failed(#__VA_ARGS__, __LINE__);                           \
   } while (false)
 template <class F> void refuses(F f) {
   bool caught = false;
@@ -163,9 +166,7 @@ std::pair<int, int> round4_lattice();
 StoryGround round4_arena_pre_search(const std::vector<Record> &);
 StoryGround round4_arena_wave(const std::vector<Record> &, std::uint32_t seed);
 std::vector<int> arena_mode_a_cycle(int saved);
-void reference_vectors() {
-#include "level_flow_vectors.inc"
-}
+#include "level_flow_vectors_batched.inc"
 void reference_cases() {
   CHECK(split_request("alpha_beta_gamma") ==
         std::make_pair(std::string("alpha"), std::string("beta_gamma")));

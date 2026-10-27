@@ -51,6 +51,10 @@ var quick_slot_state: Dictionary = {}
 var potion_state: Dictionary = {}
 var potion_event_seen := -1
 var minimap_projection: Dictionary = {}
+var data_source := "isolated-session"
+var live_gold_active := false
+var live_gold_glyph_base := 0
+var live_gold_language := 0
 
 func _ready() -> void:
 	super._ready()
@@ -61,11 +65,14 @@ func _ready() -> void:
 
 func observe_play(value: Dictionary, playing: bool) -> void:
 	play_mode = playing
+	live_gold_active = false
 	drawn.clear()
 	refusals = {}
 	assumed = {}
 	if not playing:
 		gold_seen = false
+		if extras != null: extras.gold_reset(PackedInt64Array())
+		data_source = "isolated-session"
 		potion_event_seen = -1
 		quick_slot_state.clear()
 		potion_state.clear()
@@ -75,6 +82,31 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 		painter_order = PackedInt32Array()
 		queue_redraw()
 		return
+	var previous_source := data_source
+	data_source = "isolated-session"
+	if value.has("hud_player"):
+		var live = value.hud_player
+		if not live is Dictionary or not live.get("ok", false) or live.get("source", "") != "full-player-record" or live.get("slot", -1) != SLOT:
+			# An unavailable live source must never fall back to unrelated
+			# simulation or character-companion values.
+			records.clear()
+			text_glyphs.clear()
+			text_drawn.clear()
+			glow_context.clear()
+			painter_order = PackedInt32Array()
+			refusals = REFUSALS.duplicate()
+			refusals["player_data"] = str(live.get("error", "live Player HUD source refused")) if live is Dictionary else "invalid live Player HUD source"
+			data_source = "refused-player"
+			gold_seen = false
+			if extras != null: extras.gold_reset(PackedInt64Array())
+			queue_redraw()
+			return
+		value = live
+		data_source = str(live.source)
+	if data_source != previous_source:
+		gold_seen = false
+		glow_alpha = 0
+		if extras != null: extras.gold_reset(PackedInt64Array())
 	observe(value)
 	if error.is_empty(): _add_status_extras(value)
 	refusals = REFUSALS.duplicate()
@@ -89,6 +121,8 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 	if not valid_bar(value, "hp", "max_hp"): refusals["health_bar"] = "play observes no health value with a positive maximum (player +0xac/+0xb0)"
 	if not valid_bar(value, "mana", "max_mana"): refusals["mana_bar"] = "play observes no mana value with a positive maximum (player +0xc0/+0xc4)"
 	assumed = ASSUMED.duplicate()
+	if typeof(value.get("mana_cooldown")) == TYPE_INT: assumed.erase("mana_cooldown")
+	if typeof(value.get("dead")) == TYPE_BOOL: assumed.erase("pending_dead_bit")
 	for index in painter_order:
 		var record: Dictionary = records[index]
 		var element := _element(record)
@@ -101,6 +135,10 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 	for element in drawn: refusals.erase(element)
 	_observe_gold(value)
 	_observe_quick_slots(value)
+	if data_source == "full-player-record":
+		assumed.erase("health_flash")
+		refusals["quick_slots"] = "live quick-slot indices, ability IDs, potion counts and timer words are observed; selector raw-pad/messages, notice draw ownership and icon resources are not bound"
+		refusals["health_flash"] = "live damage flash bit is observed; its draw-side clear/acknowledgement edge is not bound"
 	_observe_minimap(value)
 	queue_redraw()
 
@@ -120,13 +158,15 @@ func _element(record: Dictionary) -> String:
 # dead bit clear and their own pending value above zero: no health gate.
 # Inverted rectangles are passed through; they cover no pixels.
 func _add_status_extras(value: Dictionary) -> void:
-	if extras == null or not valid_bar(value, "hp", "max_hp"): return
+	# Executed pending arithmetic accepts negative currents. A negative base
+	# fill is empty, but it must not suppress the independently gated overlays.
+	if extras == null or not bar_inputs_known(value, "hp", "max_hp"): return
 	# hud_view's older layout path also submits an XP bar after player-state
 	# merged. Use the executed hud_extras draw once, with its exact clip.
 	for i in range(records.size() - 1, -1, -1):
 		if str(records[i].get("resource", "")).begins_with("bar_green"):
 			records.remove_at(i)
-	var mana_ok := valid_bar(value, "mana", "max_mana")
+	var mana_ok := bar_inputs_known(value, "mana", "max_mana")
 	var origins: Dictionary = layout_service.hud_origins(false, PackedInt32Array([SLOT]), 1)
 	var request := {
 		"slot": SLOT, "x": int(origins.origins[SLOT]), "local": true,
@@ -156,10 +196,13 @@ func _add_status_extras(value: Dictionary) -> void:
 			records.insert(at, entry)
 			at += 1
 		elif str(draw.resource).begins_with("bar_green"):
-			var mana_index := -1
+			var next_index := records.size()
 			for i in range(records.size()):
-				if str(records[i].get("resource", "")).begins_with("bar_blue"): mana_index = i
-			records.insert(mana_index if mana_index >= 0 else records.size(), draw.duplicate())
+				var resource := str(records[i].get("resource", ""))
+				if resource.begins_with("bar_blue") or resource.begins_with("hud_statusbar00"):
+					next_index = i
+					break
+			records.insert(next_index, draw.duplicate())
 	var layers := PackedInt32Array()
 	for record in records: layers.append(int(record.layer))
 	var order: Dictionary = dynamic_service.painter_indices(layers)
@@ -183,6 +226,23 @@ func configure_gold(language: int) -> void:
 
 func _observe_gold(value: Dictionary) -> void:
 	if extras == null: return
+	if data_source == "full-player-record" and (not value.get("hud_gold") is Dictionary or typeof(value.get("gold_language")) != TYPE_INT):
+		refusals["gold"] = "live Player gold needs its authoritative floater/pending snapshot and observed language byte"
+		return
+	if value.get("hud_gold") is Dictionary:
+		var synced: Dictionary = extras.gold_observe_live(value.hud_gold)
+		if not synced.get("ok", false):
+			refusals["gold"] = str(synced.get("error", "live gold source refused"))
+			return
+		gold_seen = true
+		# The live World already ran hud_tickGold. This display copy only
+		# steps local hold/alpha/motion; no pickup or payout is replayed.
+		live_gold_language = int(value.gold_language) if typeof(value.get("gold_language")) == TYPE_INT else gold_language
+		live_gold_glyph_base = text_glyphs.size()
+		live_gold_active = true
+		if typeof(value.get("gold_language")) == TYPE_INT: assumed.erase("gold_language")
+		refusals.erase("gold_cosmetic_seed")
+		return
 	var pickups = value.get("gold_pickups", [])
 	if not pickups is Array: return
 	if not gold_seen and pickups.is_empty() and typeof(value.get("gold")) != TYPE_INT: return
@@ -204,6 +264,21 @@ func _observe_gold(value: Dictionary) -> void:
 			if not added.get("ok", false): refusals["gold_pickup"] = str(added.get("error", "gold floater refused"))
 	var frame: Dictionary = extras.gold_draw(1, gold_language, font_bytes)
 	if gold_refused: return
+	_paint_gold(frame)
+
+# Live state is observed on simulation ticks, but hud_drawGold's local fades
+# and motion step once per displayed frame. Re-observing cannot advance them.
+func advance_live_gold() -> void:
+	if not live_gold_active or extras == null: return
+	text_glyphs.resize(live_gold_glyph_base)
+	drawn.erase("gold")
+	refusals["gold"] = REFUSALS.gold
+	_paint_gold(extras.gold_draw(1, live_gold_language, font_bytes))
+
+func _process(_delta: float) -> void:
+	if play_mode and live_gold_active: queue_redraw()
+
+func _paint_gold(frame: Dictionary) -> void:
 	if not frame.get("ok", false):
 		refusals["gold"] = str(frame.get("error", "gold counter refused"))
 		return
@@ -276,4 +351,5 @@ func _canvas_transform() -> void:
 
 func _draw() -> void:
 	if not play_mode or size.x <= 0.0 or size.y <= 0.0: return
+	advance_live_gold()
 	super._draw()

@@ -41,6 +41,7 @@ add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 # Reuse the existing implementation. The standalone native build remains Godot-free.
 add_library(champions-archive-binding-core STATIC ../native/src/ui_font.cpp ../native/src/ui_art_shape.cpp ../native/src/ui_font_page.cpp ../native/src/ui_layout.cpp ../native/src/ui_text_layout.cpp ../native/src/hud_dynamic.cpp ../native/src/hud_round3.cpp ../native/src/hud_extras.cpp ../native/src/ui_composite.cpp ../native/src/archive.cpp ../native/src/resource_manager.cpp ../native/src/texture.cpp ../native/src/texture_upscale.cpp ../native/src/inventory_icons.cpp ../native/src/inventory_icon_assoc.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp ../native/src/world_geometry.cpp)
 target_include_directories(champions-archive-binding-core PUBLIC ../native/include)
+target_sources(champions-archive-binding-core PRIVATE ../native/src/hud_player.cpp)
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Link exactly the same deterministic target graph used by native tests.
 set(CHAMPIONS_ACTORS_ARCHIVE champions-archive-binding-core)

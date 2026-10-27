@@ -68,7 +68,8 @@ func observe(value: Dictionary) -> void:
 	# Slot zero is this authored offline singleton view. Unknown cooldown and
 	# flash gates are not submitted. Neutral inputs only obtain
 	# unaffected geometry when a bar is absent; that bar is discarded below.
-	var result: Dictionary = layout_service.hud_base_layers(origins.origins[0], int(value.get("ready_ticks", 0)), value.hp if health_ok else 0.0, value.max_hp if health_ok else 1.0, value.mana if mana_ok else 0.0, value.max_mana if mana_ok else 1.0, int(value.experience) if experience_ok else 0, int(value.experience_base) if experience_ok else 0, int(value.experience_next) if experience_ok else 1, int(value.acknowledged_level) if experience_ok else 0, true, 0, false)
+	var cooldown := int(value.mana_cooldown) if typeof(value.get("mana_cooldown")) == TYPE_INT else 0
+	var result: Dictionary = layout_service.hud_base_layers(origins.origins[0], int(value.get("ready_ticks", 0)), value.hp if health_ok else 0.0, value.max_hp if health_ok else 1.0, value.mana if mana_ok else 0.0, value.max_mana if mana_ok else 1.0, int(value.experience) if experience_ok else 0, int(value.experience_base) if experience_ok else 0, int(value.experience_next) if experience_ok else 1, int(value.acknowledged_level) if experience_ok else 0, true, cooldown, false)
 	if not result.get("ok", false):
 		error = str(result.get("error", "HUD layout refused."))
 		queue_redraw()
@@ -169,10 +170,13 @@ func advance_glow() -> void:
 			records[index] = stepped
 			return
 
-func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
+func bar_inputs_known(value: Dictionary, current: String, maximum: String) -> bool:
 	for key in [current, maximum]:
 		if typeof(value.get(key)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value[key])): return false
-	return float(value[current]) >= 0.0 and float(value[maximum]) > 0.0
+	return float(value[maximum]) > 0.0
+
+func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
+	return bar_inputs_known(value, current, maximum) and float(value[current]) >= 0.0
 
 # 640x448 logical canvas to this control; a 4:3 square-pixel picture is 640x480.
 func _canvas_transform() -> void:

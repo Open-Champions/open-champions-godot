@@ -50,6 +50,11 @@ func continuation_cases() -> void:
 	start_full()
 	var o: Dictionary = scene.raw_observation
 	check(o.get("full_enabled", false) and o.combat_policy == "rta-full-combat-fixture-v1", "explicit Full selection: versioned policy")
+	var hud_player: Dictionary = o.get("hud_player", {})
+	check(hud_player.get("ok", false) and hud_player.get("source", "") == "full-player-record" and hud_player.hp_raw == o.hp_raw, "Full HUD reads the attached live Player record")
+	check(scene.play_hud.data_source == "full-player-record" and "health_bar" in scene.play_hud.drawn, "play HUD consumes the Full Player source")
+	check(hud_player.quick_slots.size() == 2 and hud_player.ability_ids.size() == 8 and hud_player.notice_timers.size() == 8 and hud_player.potion_counts.size() == 2, "live quick-slot/count metadata retains the documented field shapes")
+	check(hud_player.hud_gold.floaters.size() == 8 and not "gold" in scene.play_hud.drawn, "live gold source is bound; direct record values do not open its counter")
 	check(fx.full and o.effects.drawing and actor(0).kind == "Player" and actor(1).kind == "Skelight", "scene bridge attached; player and Skelights")
 	check(actor(0).has("locomotion_speed_raw") and actor(0).has("locomotion_blend_raw")
 		and actor(0).has("weapon_animation_class") and actor(0).has("player_model_index"),

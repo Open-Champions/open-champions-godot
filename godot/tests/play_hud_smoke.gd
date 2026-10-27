@@ -110,8 +110,9 @@ func _run() -> void:
 	check(hud.glow_alpha == 0 and not "level_up_glow" in hud.drawn, "level menu opening resets and suppresses the glow")
 	for key in ["experience", "level_text", "name_text", "level_up_glow", "portrait", "quick_slots", "gold", "minimap"]:
 		if key != "level_up_glow": check(not str(hud.refusals.get(key, "")).is_empty(), key + " refused with a reason")
-	for key in ["status_gates", "health_flash", "mana_cooldown", "pending_dead_bit"]:
+	for key in ["status_gates", "health_flash", "mana_cooldown"]:
 		check(not str(hud.assumed.get(key, "")).is_empty(), key + " listed as an unobserved gate")
+	check(not hud.assumed.has("pending_dead_bit"), "an observed Boolean dead bit is no longer labelled as assumed")
 	# Health 0 with an explicitly clear dead bit still draws pending health.
 	# Missing dead-bit timing at health 0 leaves the rectangle refused.
 	hud.observe_play({"hp": 0.0, "max_hp": 100.0, "pending_health": 5.0, "ready_ticks": 44}, true)
@@ -126,6 +127,12 @@ func _run() -> void:
 	check(not "pending_mana" in hud.drawn and not "pending_health" in hud.drawn and hud.refusals.has("pending_mana"), "positive HP does not supply a missing dead bit")
 	hud.observe_play({"hp": 20.0, "max_hp": 100.0, "mana": 10.0, "max_mana": 50.0, "pending_mana": 3.0, "dead": false, "ready_ticks": 44}, true)
 	check("pending_mana" in hud.drawn and not "pending_health" in hud.drawn, "observed clear dead bit admits only the pending mana rectangle")
+	var negative_currents := {"hp": -5.0, "max_hp": 100.0, "pending_health": 20.0,
+		"mana": -2.0, "max_mana": 50.0, "pending_mana": 10.0, "dead": false, "ready_ticks": 44}
+	hud.observe_play(negative_currents, true)
+	check("pending_health" in hud.drawn and "pending_mana" in hud.drawn, "negative currents do not add an undocumented pending-rectangle gate")
+	hud.observe_play(dict_with(negative_currents, {"dead": true}), true)
+	check(not "pending_health" in hud.drawn and not "pending_mana" in hud.drawn, "the observed dead bit still suppresses both overlays at negative currents")
 	# The experience bar (hud-xp.md): drawn for acknowledged level > 0 with the
 	# bar_green frame (tick >> 2) % 11, origin (27, 56), clip right
 	# trunc(27 + (xp - lower) / (upper - lower) * 99).
@@ -144,6 +151,13 @@ func _run() -> void:
 	var order: Array[String] = []
 	for record in hud.records: order.append(hud._element(record))
 	check(order == ["health_bar", "experience", "mana_bar", "status_frame"], "experience bar sits between health and mana in submission order: %s" % [order])
+	var xp_without_mana := xp_value.duplicate()
+	xp_without_mana.erase("mana")
+	xp_without_mana.erase("max_mana")
+	hud.observe_play(xp_without_mana, true)
+	order.clear()
+	for record in hud.records: order.append(hud._element(record))
+	check(order == ["health_bar", "experience", "status_frame"], "an absent mana bar does not move XP after the status frame")
 	hud.observe_play(dict_with(xp_value, {"acknowledged_level": 0}), true)
 	check(not "experience" in hud.drawn, "acknowledged level 0 draws no experience bar")
 	hud.observe_play(dict_with(xp_value, {"experience": 0}), true)
@@ -211,6 +225,57 @@ func _run() -> void:
 	check(not str(hud.refusals.get("quick_slots", "")).is_empty() and not str(hud.refusals.get("minimap_projector", "")).is_empty(), "missing play producers are labelled")
 	hud.observe_play(value, false)
 	check(not hud.gold_seen, "leaving play resets the gold state")
+	# Authored live-source contract: outer simulation/companion values are
+	# deliberately different. Only the attached Player source may drive bars.
+	var live := {"ok": true, "source": "full-player-record", "slot": 0,
+		"hp": 25.0, "max_hp": 100.0, "mana": 9.0, "max_mana": 30.0,
+		"pending_health": 10.0, "pending_mana": 3.0, "dead": false,
+		"ready_ticks": 12, "mana_cooldown": 1,
+		"level": 3, "acknowledged_level": 2, "experience": 150,
+		"experience_base": 100, "experience_next": 300, "gold": 500, "gold_language": 0}
+	hud.observe_play(dict_with(value, {"hp": 99.0, "hud_player": live}), true)
+	by_element.clear()
+	for record in hud.records: by_element[hud._element(record)] = record
+	check(hud.data_source == "full-player-record" and by_element.health_bar.clip.right == 51, "health fill uses the live Player instead of outer simulation HP")
+	check(by_element.mana_bar.clip.right == 56 and by_element.mana_bar.tint == 0x2aacacac, "live mana fill and observed cooldown tint")
+	check(by_element.experience.clip.right == 51 and by_element.experience.resource == "bar_green03.tex", "live XP and sim-frame animation use the same source")
+	check("pending_health" in hud.drawn and "pending_mana" in hud.drawn and not hud.assumed.has("pending_dead_bit"), "observed Player dead bit permits both pending rectangles")
+	check(not hud.assumed.has("mana_cooldown") and hud.refusals.has("quick_slots"), "observed cooldown removes its assumption; missing selector producers remain refused")
+	check(hud.refusals.has("gold") and not hud.gold_seen, "missing live gold packet refuses without falling back to a local payout model")
+	live["hp"] = 75.0
+	hud.observe_play({"hud_player": live}, true)
+	check(hud.records.any(func(r): return r.get("resource", "").begins_with("bar_red") and r.clip.right == 101), "next Player observation changes the bar live")
+	hud.observe_play(dict_with(value, {"hud_player": {"ok": false, "error": "no live object"}}), true)
+	check(hud.records.is_empty() and hud.text_glyphs.is_empty() and hud.refusals.has("player_data"), "refused live source cannot fall back to unrelated outer HP")
+	hud.observe_play(value, true)
+	check(hud.data_source == "isolated-session" and not hud.records.is_empty(), "ordinary session retains its existing explicit source")
+	# Live payout is authoritative: the presentation never runs gold_tick.
+	var floaters := []
+	for i in range(8): floaters.append({"amount": 0})
+	floaters[0] = {"amount": 100, "start": 0, "slot": 0,
+		"position_raw": PackedInt64Array([0x43960000, 0x43480000, 0]),
+		"velocity_raw": PackedInt64Array([0, 0, 0])}
+	var authoritative := {"frame": 0, "gold": PackedInt64Array([500, 0, 0, 0]),
+		"pending": PackedInt64Array([0, 0, 0, 0]), "floaters": floaters}
+	live["hud_gold"] = authoritative
+	hud.observe_play({"hud_player": live}, true)
+	hud.observe_play({"hud_player": live}, true)
+	check(hud.extras.gold_state().alpha[0] == 0, "repeated live observations do not advance draw-side gold alpha")
+	hud.advance_live_gold()
+	check(hud.extras.gold_state().alpha[0] == 4, "one displayed live-gold frame advances alpha by four")
+	hud.observe_play({"hud_player": live}, true)
+	check(hud.extras.gold_state().alpha[0] == 4, "observing between displayed frames preserves gold alpha")
+	check(hud.extras.gold_observe_live(authoritative).get("ok", false), "complete authoritative gold source accepted")
+	hud.extras.gold_draw(1, 0, PackedByteArray())
+	floaters[0] = {"amount": 0}
+	authoritative.frame = 43
+	authoritative.gold = PackedInt64Array([513, 0, 0, 0])
+	authoritative.pending = PackedInt64Array([87, 0, 0, 0])
+	check(hud.extras.gold_observe_live(authoritative).get("ok", false), "authoritative payout replaces display gold during a busy counter")
+	var live_gold: Dictionary = hud.extras.gold_draw(1, 0, PackedByteArray())
+	check(live_gold.counters.size() == 1 and live_gold.counters[0].text == "513" and hud.extras.gold_state().pending[0] == 87, "live counter uses the current record and never credits a second pickup")
+	check(not hud.extras.gold_observe_live({}).get("ok", true) and hud.extras.gold_state().gold[0] == 513, "incomplete live gold refuses atomically")
+	hud.observe_play(value, false)
 	# A texture that was not loaded is refused, never drawn as a stand-in.
 	var partial := art.duplicate()
 	partial.erase("statusbar")
