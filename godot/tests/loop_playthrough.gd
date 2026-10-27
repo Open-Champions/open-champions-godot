@@ -323,7 +323,8 @@ func move_key(code: int, pressed: bool) -> bool:
 	return scene.handle_input_event(event)
 
 # Exercise authored inputs through the campaign bridge, never the Full fixture
-# helpers or equipment writes. The unarmed stand-in must refuse guard/heavy.
+# helpers or equipment writes. Unarmed guards retain their refusal assertions;
+# the audited starting inventory may instead establish a real equipped guard.
 func campaign_moves() -> bool:
 	var checks := {}
 	var initial: Dictionary = scene.controller.get_observation()
@@ -350,13 +351,25 @@ func campaign_moves() -> bool:
 	advance(0, 100)
 	checks.guard_key = move_key(KEY_K, true)
 	for i in range(3): scene.advance_step()
-	checks.unarmed_guard_refused = "guard: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
-		and not bool(scene.raw_observation.fight_player_blocking) \
-		and int(scene.raw_observation.fight_player_action_state) != 8
+	var unarmed_guard: bool = int(initial.get("fight_player_weapon_class", -1)) == 5
+	var guard_state := int(scene.raw_observation.fight_player_action_state)
+	var guard_blocking := bool(scene.raw_observation.fight_player_blocking)
+	var guard_refusal := str(scene.raw_observation.get("fight_move_refusal", ""))
+	if unarmed_guard:
+		checks.unarmed_guard_refused = "guard: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+			and not bool(scene.raw_observation.fight_player_blocking) \
+			and int(scene.raw_observation.fight_player_action_state) != 8
+	else:
+		checks.equipped_guard = guard_blocking and guard_state == 8 and guard_refusal.is_empty()
 	checks.guard_move_key = move_key(KEY_U, true)
 	scene.advance_step()
-	checks.guard_move_refused = "guard_move: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
-		and int(scene.raw_observation.fight_player_action_state) != 11
+	var swap_state := int(scene.raw_observation.fight_player_action_state)
+	var swap_refusal := str(scene.raw_observation.get("fight_move_refusal", ""))
+	if unarmed_guard:
+		checks.guard_move_refused = "guard_move: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+			and int(scene.raw_observation.fight_player_action_state) != 11
+	else:
+		checks.equipped_guard_move = swap_state == 11 and swap_refusal.is_empty()
 	move_key(KEY_K, false)
 	move_key(KEY_U, false)
 	scene.advance_step()
@@ -400,6 +413,8 @@ func campaign_moves() -> bool:
 	for value in checks.values(): passed += int(value)
 	mark("combat_moves", "passed" if passed == checks.size() else "refused", {
 		"checks": checks.size(), "passed": passed, "observed": checks,
+		"guard_state": guard_state, "guard_blocking": guard_blocking, "guard_refusal": guard_refusal,
+		"swap_state": swap_state, "swap_refusal": swap_refusal, "unarmed": unarmed_guard,
 		"animation_starts": counts.player_animation_starts,
 		"animation_advances": counts.player_animation_advances})
 	return passed == checks.size()
