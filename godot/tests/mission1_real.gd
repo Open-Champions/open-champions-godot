@@ -102,7 +102,7 @@ func run() -> void:
 		if DisplayServer.get_name() != "headless":
 			scene.start_play()
 			for tick in range(8):
-				scene.advance_once()
+				scene.advance_step()
 				await process_frame
 			# Same static-view capture path as the integration journey: force
 			# a real draw instead of awaiting a signal that may never recur.
