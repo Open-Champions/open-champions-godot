@@ -80,7 +80,56 @@ script commands 3/3 PASS, 0.42 s. Auxiliary texture/animation Release builds PAS
 (`-j 4`). Initial Godot launches failed because the texture library was absent;
 local builds resolved setup and loading present then passed 19/19 headless.
 Full CTest running with `-j 3`; exact final count/time and isolated reruns pending.
-Godot matrix, both journeys and FULL_TRACE pending.
+Godot matrix completed; journeys/full CTest final results pending.
+
+### Godot, trace and private-art results
+
+The 54 inherited public matrix cases plus wave-33's seven loading/identity/moves/
+death cases, and loading-present headless/rendered, total 63 public cases.
+**62/63 pass the strict diagnostic gate**. The sole remaining diagnostic is the
+inherited `ui_layout_smoke` required-argument check (`:84`), which deliberately
+calls `hud_text_glyphs` with four arguments when five are required. It emits one
+engine ERROR while exiting 0. Do not represent this as a clean all-pass matrix;
+no test, binding, allowlist or baseline was changed to suppress the diagnostic.
+
+Two setup failures remain separately recorded: the initial private disc case
+lacked its required folder argument (exit 2), and the isolated native-FX visual
+case lacked the relative capture directory (exit 0 plus PNG-save ERROR). The
+private case passed when given the selected read-only input. Native FX passed
+with clean diagnostics when rerun in the assigned project, where its documented
+relative `work/` output directory exists. The aggregate's original 58/61 result
+is retained; the final public 62/63 includes these corrected setup results and
+three additional rendered cases, excludes the private disc case, and includes
+no suppressed errors. Summary: `work/loading-r1-godot-summary.json`.
+
+Loading display passes its corrected 1500/1501 assertions; audio 10/10; present
+19/19 headless and 21/21 rendered; identity 22/22 each; death 11/11 headless and
+13/13 rendered; campaign moves 33/33. Private loading-art check: 111 levels,
+111 selected, 12 documented fallback selections, zero refusals. No private
+resource names or decoded content are reported here.
+
+Full combat: 2,641 checks / zero failures. `FULL_SAVE_LOAD`: 300/300;
+continued/uninterrupted presentation hashes match.
+`FULL_TRACE`: **36,402 bytes**, SHA-256
+**`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**,
+exactly unchanged from wave 33. Evidence:
+`work/loading-r1-matrix/playable_wave_smoke_full_combat.log:17-21`.
+
+Headless journey completed 67 steps, matching wave 33, result written. Arrival
+at step 37 refuses with the exact native diagnostic: deferred loading pass absent,
+faulted or refused commands; equipment runtime player/slot/model publication or
+specialized I/O unbound. `script_attached=true`, `loading_ready=false`, two loading
+frames, zero audio-handoff errors; campaign/image carry is observed but complete
+record carry is false. Peer/store/save no longer appear as unavailable barriers.
+The driver continues explicit diagnostic branches and ends at step 67,
+`player_death: blocked_death_reload` (239 native clip steps, no respawn).
+Rendered final counts and exit statuses pending.
+
+Visual inspection of actual rendered journey captures: the loading-labelled
+capture shows the prior live view, while the destination capture shows the session
+stopped and disabled resume. These do not prove a successful playable handoff or
+loading-art pixel parity. Rendered present tests separately observe an actual draw
+and preserve bounded refusal with drawing disabled.
 
 Ignored raw evidence: `work/loading-r1-*.log`, `work/loading-r1-matrix/`,
 `work/loading-r1-playthrough/`. Tooling is staged under ignored
