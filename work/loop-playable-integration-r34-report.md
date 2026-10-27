@@ -53,3 +53,5 @@ Gates pending. Unsupported behavior remains explicitly refused; synthetic/native
 Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, not yet started at this commit. Native runtime source is the eight-merge candidate plus API-comment clarification only. Result will be recorded in a separate commit, with any timeout rerun alone and both results retained.
 
 - Initial strict matrix caught one composed HUD fixture error: merged level-up catalogue now loads green frames, while inherited missing-art test assumed they were absent. The negative test now explicitly removes all eleven green frames and restores them for the following positive assertions. All existing assertions retained; focused HUD smoke passes with no diagnostics (`hud-fixture-fixed.log`). Initial matrix result remains separate; final retry pending.
+
+- Full synthetic combat PASS: **2,645 checks, 0 failures** (four additional HUD assertions from audited native-hud work; wave 33 had 2,641). Strict log gate accepts the fresh output. `matrix/playable_wave_smoke_full_combat.log`.
