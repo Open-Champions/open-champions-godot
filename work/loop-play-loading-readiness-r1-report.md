@@ -149,3 +149,5 @@ existing matrix-errors tooling, with execution rooted in this assigned worktree.
 2026-10-27: review and requested gates resumed locally; no push/PR, no process-name
 termination, no edits to research, integration or other worktrees; private input
 is read-only. No durable memory update requested or performed.
+
+Full CTest (recorded by the orchestrator, 2026-10-27 ~06:15, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` — **251/251 passed, 803.08 s**, no timeouts (log `work/loading-r1-ctest.log`). With the Godot matrix, unchanged FULL_TRACE and the 67-headless / 68-rendered journeys already recorded above, all requested gates for this round are complete.
