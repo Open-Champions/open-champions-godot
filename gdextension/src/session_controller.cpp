@@ -1110,17 +1110,22 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     // it, so the host records the inferred draw count without moving the seed.
     next->advance_first_level_items(std::string(level_name.utf8().get_data()));
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
-    next->run_prestart();
-    if (!objects.is_empty()) {
+    const auto prestart_stop = next->run_prestart();
+    const bool mission1_stopped = next->mission1_contract() &&
+        (prestart_stop == rta::script_commands::Stop::Refused ||
+         prestart_stop == rta::script_commands::Stop::Fault ||
+         prestart_stop == rta::script_commands::Stop::Wait);
+    // A refused Mission 1 preStart ends attachment execution. Restoration is
+    // available only through an explicit diagnostic, never an automatic retry.
+    if (!mission1_stopped && !objects.is_empty()) {
       std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
       std::memcpy(raw.data(), objects.ptr(), raw.size());
       const bool adopted = next->adopt_objects(raw.data(), raw.size());
       if (next->mission1_contract() && !adopted)
         throw std::runtime_error(next->last_fault().empty() ? "Mission 1 object census or addressed links refused." : next->last_fault());
     }
-    if (next->mission1_contract()) next->restore_mission1_addressed();
     std::shared_ptr<DialogData> data;
-    if (!dialog.is_empty()) {
+    if (!mission1_stopped && !dialog.is_empty()) {
       data = std::make_shared<DialogData>();
       rta::script_commands::DialogLevel level;
       level.level = String(dialog.get("level", String())).utf8().get_data();
@@ -1168,9 +1173,13 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->attach_dialog(std::move(level), std::move(services));
       dialog_box_loaded_ = next->dialog_box_word() != 0;
     }
-    next->run_start();
+    if (!mission1_stopped) {
+      const auto start_stop = next->run_start();
+      if (next->mission1_contract() && start_stop == rta::script_commands::Stop::Fault)
+        throw std::runtime_error(next->last_fault());
+    }
     std::vector<rta::level_flow::Record> next_objects;
-    if (!objects.is_empty()) {
+    if (!mission1_stopped && !objects.is_empty()) {
       const auto raw = raw_bytes(objects);
       next_objects = rta::level_flow::parse_objects({raw.data(), raw.size()});
     }

@@ -1334,10 +1334,10 @@ Stop Host::run_mission1_entry(std::uint32_t offset) {
     }
   }
   if (mission1_->level == mission1_scripts::Level::Drundar && offset == 0xa3c) {
-    auto stop = mission1_site(0xa68);
-    if (stop != Stop::Complete || last_value_ != 0) return stop;
-    stop = mission1_site(0xaa0);
-    return stop == Stop::Complete ? mission1_site(0xacc) : stop;
+    // The pinned handoff does not establish the value-producing operation at
+    // 0xa78. Neither saved nor unsaved polarity is authorized by getv/JZER.
+    remember(RefusedResult("Mission 1: door predicate at 0xa78 unestablished"));
+    return Stop::Refused;
   }
   remember(RefusedResult("Mission 1: entry body outside addressed effects"));
   return Stop::Refused;

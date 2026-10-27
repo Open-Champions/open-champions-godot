@@ -115,7 +115,7 @@ Fixture drundar() {
   f.call(0x89c,"setSaveInhibit",{1});
   f.call(0x8dc,"addDeferedCall",{f.text(f.entry(0x934))});
   f.call(0x9e4,"callScript",{f.text(f.entry(0xa3c))});
-  f.call(0xa68,"getv",{flag}); f.cells(0xa78,{0x54,0x35,0xb10});
+  f.call(0xa68,"getv",{flag}); f.cells(0xa7c,{0x35,0xb10}); // 0xa78 is unknown, not an evidenced NOT
   f.call(0xaa0,"setSaveInhibit",{0}); f.call(0xacc,"cutScene",{f.text("authored-cutscene")});
   f.call(0xb00,"setv",{flag,1});
   return f;
@@ -247,8 +247,8 @@ int main() {
         const auto before=host.queue().queued;
         for(unsigned i=0;i<5;++i) host.on_ready_tick();
         check(host.queue().queued==before,"continuous ticks do not execute untraced deferred work");
-        check(host.run_mission1_entry(0xa3c)==sc::Stop::Refused,"door stops at unknown cutscene");
-        check(host.variables().memory.word(0x50605c)==0&&host.variables().quest_get(contract->door_flag)==0,"door clears inhibit but does not invent completion after cutscene refusal");
+        check(host.run_mission1_entry(0xa3c)==sc::Stop::Refused,"door refuses unknown predicate");
+        check(host.variables().memory.word(0x50605c)==1&&host.variables().quest_get(contract->door_flag)==0,"unknown door predicate preserves inhibit and persistence");
         const auto save=host.save_campaign();
         sc::Host restored;check(restored.load(image),"revisit script loads");restored.start_single_player();restored.load_campaign(save);
         for(const auto &sw:contract->switches) check(restored.variables().quest_get(sw.persistent)==1,"campaign restores each switch independently");
@@ -257,6 +257,21 @@ int main() {
       f.code[key/4]=s?3:9;f.options.publics.clear();
       sc::Host changed;
       check(!changed.load(f.image(s?47:36,s?21:20)),"changed literal predicate refused");
+    }
+    // No operation at the unestablished cell authorizes the door diagnostic.
+    // Test changed polarity and removal without pretending either is original.
+    for (auto operation : {a::Cell(0x54), a::Cell(0x00)}) {
+      auto f=drundar(); f.cells(0xa78,{operation});
+      sc::Host h;
+      check(h.load(f.image(36,20)),"bounded contract admits unknown gap without executing it");
+      h.set_executable(executable());
+      auto blob=objects(records(*h.mission1_contract()));
+      check(h.adopt_objects(blob.data(),blob.size()),"door mutation fixture adopts");
+      h.variables().memory.write(0x50605c,{1,0,0,0});
+      const auto before=h.mission1_sites_reached();
+      check(h.run_mission1_entry(0xa3c)==sc::Stop::Refused,"changed or removed 0xa78 rejected by diagnostic");
+      check(h.variables().memory.word(0x50605c)==1 && h.mission1_sites_reached()==before,
+            "unknown predicate cannot dispatch even getv or clear save inhibit");
     }
     // An undocumented store inserted between the known action cells must
     // never run. The bounded adapter executes only the addressed increment.

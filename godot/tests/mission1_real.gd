@@ -47,6 +47,19 @@ func run() -> void:
 		scene.level_script.set_pressed_no_signal(true)
 		check(scene.load_real_level(index), "destination terrain loads")
 		var initial: Dictionary = scene.controller.script_mission1_status()
+		if initial.get("ok", false) and int(initial.branch) == 0:
+			var counts: Dictionary = scene.controller.script_command_counts()
+			check(not initial.objects_validated and int(counts.objects_registered) == 0, "refused preStart cannot adopt objects")
+			check(int(initial.refusal_stops) == 1 and int(counts.started) == 0, "attachment stops after preStart without starting another entry")
+			check(initial.sites_reached.is_empty(), "refused attachment cannot restore counter or dispatch visibility sites")
+			var before_count := int(initial.local_count)
+			for tick in range(3):
+				scene.advance_step()
+				await process_frame
+			var stopped: Dictionary = scene.controller.script_mission1_status()
+			check(stopped.sites_reached.is_empty() and int(stopped.local_count) == before_count, "ticks preserve stopped counter and visibility sites")
+			results.append({"branch": 0, "initial": initial, "final": stopped})
+			continue
 		check(initial.get("ok", false) and initial.get("objects_validated", false), "addressed script and object links validate")
 		if not initial.get("ok", false):
 			var selected: Dictionary = scene.real.levels[index]
@@ -87,9 +100,9 @@ func run() -> void:
 			var queued: Dictionary = scene.controller.script_mission1_status()
 			check(queued.save_inhibit and int(queued.deferred_queued) > 0, "save inhibit and deferred door work recorded")
 			var door: Dictionary = scene.controller.script_mission1_action("entry", 0xa3c)
-			check(door.get("refused", false) and not door.get("fault", true), "door stops at cutscene")
+			check(door.get("refused", false) and not door.get("fault", true), "door refuses unknown predicate")
 			var after: Dictionary = scene.controller.script_mission1_status()
-			check(not after.save_inhibit and not after.door_persistent, "no completion flag invented after refused cutscene")
+			check(after.save_inhibit and not after.door_persistent, "unknown predicate preserves inhibit and completion flag")
 			row["door"] = door
 			# Campaign qvars survive a fresh host; unknown effect bodies cannot
 			# invent a reconstructed local switch count from those persistent bits.
