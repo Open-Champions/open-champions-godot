@@ -1,4 +1,4 @@
-STATUS: MORE — eight audited branches integrated; completed gates green; journey BLOCKED: 80 headless / 81 rendered steps, exit 1 without timeout, pickup lost (10→10). Rejected pursuit edit discarded; restored script journey remains unverified.
+STATUS: MORE — pickup runtime-binding diagnosis confirmed; clean-tree journey reproduction running; fix and requested gates pending.
 
 # Playable integration wave 34 — 2026-10-26
 
@@ -115,3 +115,13 @@ Both write results, with six aggregate refusal kinds and an ObjectDB exit-leak w
 **Disposition:** discarded all 24 uncommitted pursuit lines with the requested checkout command. No assertion, baseline, fixture, timeout, production code, RNG state or private data was changed. Restored script remains at the inherited committed version; its prior follow-up timeout remains distinct evidence, and a fresh restored-script completion is unverified. The remaining journey gate is **BLOCKED**, not green; resolving upstream runtime bindings/navigation is outside this conflict-only test assignment. Already completed gates (including final CTest 253/253) were not rerun.
 
 Inspected actual rendered `04b-fight-approach.png` and `05-fight-attempt.png`; captures support diagnostic combat presentation, not pickup acceptance or original-client parity. Evidence stays ignored under `work/playable-wave34/playthrough-final/` plus `playthrough-final.out`; the summary, variant JSON and full logs preserve all refusals. Only this tracked report was committed; no push, PR, branch creation, sibling edits or process termination.
+
+## Pickup runtime-binding repair — diagnosis checkpoint (2026-10-27)
+
+Assigned clean start `dcf15739`, branch `codex/playable-integration`. No pursuit edit is present. Clean-tree wrapper is running unchanged in `pickup-clean-repro/`; completion is pending. A separate clean native diagnostic (`--ticks 600 --near-weakest --weak --attack-every 30`, default level/seed) completes and independently reproduces `WarBoar_setState(20): potion lookup is outside supplied table` and a tick formatting refusal; it is diagnostic placement/HP, not normal-route acceptance. Evidence `pickup-clean-native.log`.
+
+Observed source: `image_tables` loads neither potion pointer list, while `generate_consumable` indexes them. Pinned research-loot-drop `77c2f70`, `docs/data-tables.md` section 1 and `docs/spec/items.md` sections 1/7.5 establish addresses `0x402708` / `0x402730`, 4-byte pointers, nine names each followed by null. These can be loaded through the existing runtime ImageReader; no authored game strings are needed.
+
+The formatter callback reads sparse World memory, populated only for player literal ranges. Shared non-player callers include PhProp construction at format address `0x532688` (research-combat-ctors-3 `9ff6ae0`, `docs/spec/gut-chunk.md`; native `combat_phprop_ctors.cpp`) and creature presentation formats. The strict callback was introduced by `c8bc0e00`; `4d6cb8e3` has no callback, and Full `libc_sprintf` returns zero in its absence. Thus the old pickup result did not establish complete formatting or potion binding. The composed journey additionally runs combat-move checks before the inherited fight/retry loop, changing elapsed ticks and shared draw context. No claim of identical loot rolls is warranted. Fix will read requested format addresses through the same executable loader used elsewhere, retaining the existing syntax/length refusals.
+
+Diagnosis checkpoint only: no runtime/test/baseline change yet; causal split for the full clean journey remains pending. No private names, decoded content or private paths are committed.
