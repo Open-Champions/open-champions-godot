@@ -1,4 +1,5 @@
-STATUS: IN PROGRESS — PSD-R1 refusal fixes; pending full CTest.
+STATUS: DONE — both PSD-R1 findings fixed; requested gates recorded.
+Full mission gameplay remains blocked at the unchanged evidence boundary.
 
 Pinned research remains 0d42d465276aeb768ad54316b34cb4dabe3a2c35.
 PSD-R1-1: attachment checks Mission 1 preStart stop; refusal/fault/wait
@@ -54,3 +55,27 @@ No push/PR; private inputs remain read-only and untracked.
   work/mission1/r2/. No baseline or journey-tool changes.
 - Full CTest remains pending at this evidence checkpoint; pending note was
   committed in 439c1479 before its invocation. Final result follows.
+
+
+## Final full CTest and delivery
+
+Full CTest: ctest --test-dir build/native --output-on-failure -j 3.
+252/252 PASS; exact real elapsed time 690.70 seconds. No timeouts and no
+isolated timeout reruns required. Raw evidence: work/mission1/r2-ctest-full.log.
+The pre-run pending checkpoint is 439c1479; corrected fixture is be527959.
+
+Final diff whitespace check passes; branch remains codex/play-strife-drundar.
+Only the four task source/test files and this forced-added report changed.
+The optional untracked mission1_real.gd.uid remains untouched. All changes
+are committed locally; no push/PR or prohibited worktree/process action.
+No private payload, decoded identifier inventory, or private path is tracked.
+Restoration is no longer an automatic attachment phase. The unestablished
+0xa78 operation remains Unknown: all door entry diagnostics refuse regardless
+of its bytes, rather than pretending a polarity check is evidenced. Existing
+native explicit restoration tests remain; stopped automatic Strife attachment
+does not claim object adoption or mission readiness.
+
+Coordination 2026-10-27: PSD-R1-1 and PSD-R1-2 implementation complete;
+Release, full native suite, both Mission 1 Godot variants, unchanged trace
+and wave-33 67/68-step journey boundaries verified. Final report commit is
+HEAD returned to the parent.
