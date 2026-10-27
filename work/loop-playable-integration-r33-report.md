@@ -95,3 +95,11 @@ Isolated rerun (recorded by the orchestrator, 2026-10-26 15:15, after the job's 
 ## Recovery completion
 
 2026-10-26: requested remaining gates executed with milestone commits; no full CTest rerun. Recovery changes only this tracked report. All four audited tips and `264150c3` remain ancestors. `git diff --check 6dbc3369..HEAD` passes; raw logs/captures stay ignored. No push, PR, branch creation, private-disc write, sibling-worktree edit, or process-name termination.
+
+## Loading implementation follow-up: diagnosis (2026-10-26)
+
+Verified clean `codex/playable-integration` at `7aa582aa`. Wave 32 already ended both full journeys with exit 1 (53/54 steps), ending at `player_death: blocked_death_reload`. The unchanged wrapper returns 1 for any nonzero variant exit or missing result; wave 33's exit 1 alone is not a regression. The rendered 900-second timeout with no result is a regression.
+
+Confirmed liveness defect: `_wait_loading_present()` directly awaits `RenderingServer.frame_post_draw` without a competing deadline. `_advance_present()` requests the next redraw only after a post-draw signal, so it cannot recover a renderer that stops emitting that signal. This wait has no refusal path even while SceneTree processing continues (as the retained process sample reports). The precise OS/window condition that suppressed the old run's signals remains Unknown; no accessibility bypass or unrelated process operation is justified. A host deadline must report refusal, never count a missing signal as a present.
+
+Pinned `research-loading@3ba61c7`, `docs/loading-transitions.md:95-105,197-209,228-230`, and PASS `native-loading-r1-fix2.md` require deferred calls, equipment readiness, applicable peers and four-store stocking. Script attachment is observable but is not deferred-call completion. No exposed runtime equipment/peer/store completion service establishes these gates; offline mode does not waive store work. Implement only observable state and retain explicit unknown prerequisite refusal. Host wall-clock deadlines are client liveness policy, not invented retail timing constants.
