@@ -1,20 +1,92 @@
-STATUS: MORE — implementation in progress; pending full CTest.
+STATUS: MORE — reviewed implementation; full gates in progress.
 
-Assigned base: 66e529727407dc7c0016cd286c36ac4b36649ba9.
-Research: research-loading-readiness@9dd4904603ae0d8a46e57454cf5c84b1f25c8fd9,
-`docs/loading-readiness.md`; audited PASS in `audits/research-loading-readiness.md`.
+## Scope and pinned evidence
 
-Implemented native one-pass observation, explicit offline peer/network-save bypass,
-exact addressed store applicability, and conservative published equipment subset.
-Unknown model/I/O publication, stock generation/RNG, online services and card
-persistence retain explicit refusals. Full verification pending.
+Assigned worktree/branch only: `play-loading-readiness` / `codex/play-loading-readiness`.
+Initial commit `c8339a1a0f8d4f53e94b26c6de334d492a6f2f89`; verified base
+`66e529727407dc7c0016cd286c36ac4b36649ba9` is an ancestor.
+Research pin `research-loading-readiness@9dd4904603ae0d8a46e57454cf5c84b1f25c8fd9`;
+`audits/research-loading-readiness.md` verdict PASS. References below are to
+`docs/loading-readiness.md` at that exact pin. The pin was verified live.
+No original-executable probes rerun here; those remain the research's evidence.
 
-Gates: pending full CTest (this note committed before execution), Release build,
-Godot dev matrix, both journeys, FULL_TRACE verification.
+## Per-condition review and implementation
 
-Review checkpoint (2026-10-27): pinned research and PASS audit reviewed. Fixed
-scene attachment failure overriding controller readiness; added attachment and
-launch-revocation regressions. Focused native script-command cases PASS 3/3
-(0.42 s). Release native and main extension builds PASS with -j 4. Initial
-Godot setup failed on absent auxiliary texture extension; building both auxiliary
-extensions before retry. Pending full CTest; this checkpoint precedes execution.
+- Deferred: lines 11-37 document a single returned pass and queue promotion,
+  not an empty-queue barrier. `Host::run_start` records completion only after
+  start/post-action/deferred execution returns without fault/refusal. Script load
+  resets the observation; current fault/refusal invalidates it. This boolean is
+  an authored observation, not an invented original flag/address. Runtime AMX
+  tests exercise self-deferral, actual queue promotion, absence of an extra pass,
+  script replacement, unsupported-command refusal and absent-machine fault.
+- Peer: lines 91-95 authorize only explicit offline mode with live byte
+  `0x402791 == 0`. `start_single_player` grants that mode; `receive_launch`
+  revokes it. Default sparse zero does not grant offline status. Native tests
+  exercise absent grant, explicit grant, nonzero live mode, and launch revocation
+  even while memory still contains zero. Online readiness remains unavailable;
+  no peer-count/stall-counter success fallback is implemented (lines 97-113).
+- Equipment PARTIAL: lines 41-53 supply count `0x4d8ae0`, player base
+  `0x4dcec8`, player record index `+0x3c8`, record base `0x4d8af0`,
+  equipment `+0x43f0`, 17 slots, definition category `+0x1c`, categories
+  5-8 pending, and the category 0/2/3 environment skip using `0x41b69d`,
+  `0x44fe08 & 0x10000000`. The adapter accepts only its supported explicitly
+  offline one-player/record-zero domain, with every required byte explicitly
+  published by real runtime memory writes. Sparse defaults/executable bytes
+  cannot certify publication. Null players and all-empty slots can be observed;
+  slot-3 selection, generic index/model lookup, specialized paths and I/O remain
+  refused (lines 48-79). Pointer presence alone never establishes model readiness.
+  These are conservative client restrictions, not claims about original limits.
+  Tests mutate production Host memory and distinguish missing slot publication,
+  all 17 empty slots, null player, all four direct-pending categories,
+  environment skip/removal, and specialized/generic refusals.
+- Warm-up: lines 81-87 establish the 1501-frame threshold, correcting the former
+  1500 comparison in both helper and transition. Existing assertions now verify
+  1500 still waits and 1501 reaches the documented escape. Terrain/equipment
+  pending at escape remains an explicit client refusal, never resource success.
+- Store PARTIAL: lines 117-138 supply four identifier addresses
+  `0x554678`, `0x554680`, `0x554688`, `0x554698`. Values are read from the
+  owner-selected executable at runtime. Only four exact nonmatches certify
+  no applicable stock job. Any match refuses unknown stock generation/RNG;
+  missing destination/executable, empty strings and read exceptions refuse.
+  Native tests cover four match refusals, four nonmatches and read failure.
+  There is no unconditional four-store job and no no-op generation success.
+- Save PARTIAL: lines 140-152 establish a separate network-only pre-load gate.
+  The same explicit offline/live-zero condition bypasses only that gate.
+  The adapter does not claim a card save or persistence. Nonoffline state refuses
+  unbound card services. The native test retains offline bypass with nonzero busy
+  byte `0x4f8f2c`, distinguishing bypass from an invented save-complete condition.
+- Bridge/scene: lines 154-163 require observable applicable prerequisites.
+  Native optionals become unavailable fields, never guessed booleans. `ok`
+  requires the deferred observation, known equipment pending state, peer/store/save
+  satisfaction. Equipment pending itself is handled by the warm-up loop.
+  Follow-up `5d61344c` also makes failed scene script attachment force `ok=false`;
+  tests distinguish a ready controller from an actually attached scene.
+
+## Remaining explicit refusals
+
+Unpublished player/equipment state; slot-3 selection and model identity/publication;
+actual specialized/I/O completion; matching transition stock generation and RNG;
+onoffline peer/card services; save persistence; unsupported destination scripts.
+Native synthetic state and successful fixtures do not establish live campaign
+acceptance. No success fallback, test/fixture/baseline relaxation or private
+resource identifier was added.
+
+## Verification checkpoints
+
+`c8339a1a` already committed a pending-full-CTest note. `5d61344c` committed the
+review fixes and renewed pending-full-CTest note before the new aggregate run.
+Release configure/build and main extension build PASS (`-j 4`). Focused CTest
+script commands 3/3 PASS, 0.42 s. Auxiliary texture/animation Release builds PASS
+(`-j 4`). Initial Godot launches failed because the texture library was absent;
+local builds resolved setup and loading present then passed 19/19 headless.
+Full CTest running with `-j 3`; exact final count/time and isolated reruns pending.
+Godot matrix, both journeys and FULL_TRACE pending.
+
+Ignored raw evidence: `work/loading-r1-*.log`, `work/loading-r1-matrix/`,
+`work/loading-r1-playthrough/`. Tooling is staged under ignored
+`work/loading-r1-tools/`; matrix diagnostic/isolation helpers are read from the
+existing matrix-errors tooling, with execution rooted in this assigned worktree.
+
+2026-10-27: review and requested gates resumed locally; no push/PR, no process-name
+termination, no edits to research, integration or other worktrees; private input
+is read-only. No durable memory update requested or performed.
