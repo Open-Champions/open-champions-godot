@@ -59,3 +59,16 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - FULL_TRACE **36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**, unchanged. No baseline changed. Same fresh full-combat log.
 
 - Extra wave-33 loading/audio/identity/moves/death/present-adapter cases **9/9 PASS**, strict log inspection including rendered identity, death and present cases. `extra-matrix/results.json`.
+
+## Full scripted journey
+
+Command: `python3 tools/run_loop_playthrough.py --godot "$GODOT_BIN" --game-folder "$RTA_DISC" --out work/playable-wave35/playthrough`. Unchanged driver, acceptance and timeout; serial headless/rendered.
+
+| Variant | Steps | Exit | Ending | Pickup | Log errors | Captures |
+| --- | --- | --- | --- | --- | --- | --- |
+| Headless | 80 | 1 | player_death refused; saved_level_reloaded=false | **10→11**, produced/walked/picked_up | 0 | 0 |
+| Rendered | 81 | 1 | player_death refused; saved_level_reloaded=false | **10→11**, produced/walked/picked_up | 0 | 38 |
+
+Matches wave 34's 80/81 steps and pickup. Both pass 22/22 combat-input assertions, one death, one loot call, 11 shared loot draws, one generated consumable, 26 walking ticks and zero retry kills/diagnostic retry placements. Existing initial diagnostic placement remains labelled; no normal-route combat acceptance. Six refusal kinds each; one ObjectDB exit-leak warning each; no strict log errors. Wrapper exit 1 retains the unsupported full-journey acceptance boundary. Disc file counts **994 before / 994 after**.
+
+Inspected actual rendered `05-fight-attempt.png`: visible fight presentation and diagnostic label report one loot item and one picked up. This is not original-client pixel parity; script retains rendered_pickup_verified=false, wrapper pickup_verified=true. Existing unsupported script-trigger stop, dead-Creature departure/checkpoint refusal, loading prerequisites and unsuccessful saved-level reload remain explicit. No new journey, RNG, fixture or baseline changes. Evidence ignored under `playthrough/` and `playthrough.out`.
