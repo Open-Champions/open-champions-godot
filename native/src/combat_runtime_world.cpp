@@ -484,6 +484,19 @@ void World::State::destroy(Address a) {
     retired.push_back(std::move(objects.at(a)));
     objects.erase(a);
     adopted_props.erase(adopted);
+    // adopt_prop aliases the host owner's three heads. Its destructor has
+    // cleared their links; retire those exact cache entries before treating
+    // the freed allocation as combat-owned storage. Never retire another
+    // owner's head by address alone.
+    for (unsigned k = 0; k < 3; ++k) {
+      const auto cached = heads.find(a + 4 * k);
+      if (cached != heads.end() && cached->second == &owner->heads[k]) {
+        if (cached->second->next)
+          throw Error("destroyed adopted prop retains a handle");
+        links.erase(cached->second);
+        heads.erase(cached);
+      }
+    }
     forget_heads(a, a + extent);
     retire();
     return;

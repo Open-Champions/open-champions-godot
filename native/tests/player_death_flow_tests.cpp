@@ -248,8 +248,15 @@ void campaign_freeze_binding() {
       world.write(D::WIPE_COUNTDOWN, 2, timer);
       world.write(D::DEAD_COUNTDOWNS, 2, timer);
       world.write(0x41b4fc, 4, 17);
+      // Invalid startup now correctly stops Fight::tick. Preserve that
+      // refusal, then exercise its actual installed death callbacks through
+      // the synthetic World's tick, without claiming a valid campaign start.
       fight.tick(0);
-      check(!fight.failed(), "campaign tick contains unsupported death freeze");
+      check(fight.failed() && world.read(D::WIPE_COUNTDOWN, 2) == timer &&
+                world.read(D::DEAD_COUNTDOWNS, 2) == timer,
+            "failed campaign startup cannot tick or mutate countdowns");
+      world.tick();
+      check(fight.failed(), "death binding cannot revive refused campaign startup");
       if (freeze == 1 || freeze == 2 || freeze == 4) {
         check(world.read(0x41b4f4) == 0, "offline freeze with pause clear");
         check(fight.death_error().find("offline controller-out/warm-up freeze unsupported") != std::string::npos,
@@ -258,7 +265,7 @@ void campaign_freeze_binding() {
               "refused freeze leaves wipe countdown and menu lockout unchanged");
         check(world.read(D::DEAD_COUNTDOWNS, 2) == timer,
               "refusal stops before the separate slot gate");
-        fight.tick(0);
+        world.tick();
         check(world.read(D::WIPE_COUNTDOWN, 2) == timer && world.read(0x41b4fc) == 17 &&
                   world.read(D::DEAD_COUNTDOWNS, 2) == timer,
               "subsequent ticks preserve refused freeze state");

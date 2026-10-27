@@ -811,8 +811,13 @@ void levelup_vectors() {
   invalid.level = 5;
   no_rules.adopt(invalid);
   Ledger imported;
-  imported.adopt_record(no_rules.record_bytes(), {}, {},
-                        [](std::uint32_t) -> std::uint8_t { return 0; });
+  // No definitions in this fixture, but live adoption still requires the
+  // two executable stack stems. Authored nonempty strings, like the vendor
+  // fixture above; these are not captured retail data.
+  const auto imported_byte = [](std::uint32_t at) -> std::uint8_t {
+    return at == 0x5385e0u || at == 0x538660u ? 'x' : 0;
+  };
+  imported.adopt_record(no_rules.record_bytes(), {}, {}, imported_byte);
   imported.set_xp_rules(table, formulas);
   const auto before_imported = imported.save();
   invalid.level = 81;
