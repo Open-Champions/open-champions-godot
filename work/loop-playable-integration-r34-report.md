@@ -74,3 +74,9 @@ After pending commit `17499ff0`, full CTest completed **250/253 PASS**, **915.50
 
 - Native integration fixes: adopted Chest destruction now removes cached aliases only when each points to that exact destroyed host owner's cleared head; shared heads are never moved into combat ownership or retired by address alone. The existing Chest lifetime test covers destruction, retained handles, immediate pool reuse and replacement ownership. Menu level-up import fixture supplies two authored nonempty stack stems required by the retained vendor adoption guard; refusal checks remain. Death fixture preserves failed-start/no-mutation assertions, then drives the synthetic World with the actual installed campaign death callbacks; all controller-out/warm-up, pause, countdown and HUD refusal assertions remain. This verifies callback binding, not successful gameplay after invalid startup.
 - Native fix Release build PASS; focused **3/3 PASS**, 1.58 s: menus-exact, player-death-flow, pickups. `native-fixes-build.log`, `native-fixes-focused.log`. No assertion, fixture baseline or production refusal weakened. Full CTest on this runtime change remains pending.
+
+- Universal rebuild after exact Chest-head cache fix: **8/8 configure/build exits 0**, both GDExtension and level-texture debug/release, arm64;x86_64, parallelism 4 (`extension-builds-final.out`).
+
+## Pending final full CTest record
+
+Final full CTest on runtime `0e4c886a` is **PENDING**, not started at this commit. Initial full run's 250/253 and the three focused fixes remain distinct. No timeout occurred in the initial run.
