@@ -13,6 +13,7 @@ signal loading_start_submitted
 const TextHud = preload("res://ui/text_hud.gd")
 const FightEnemies = preload("res://real_data/real_fight_enemies.gd")
 const MissionMenuView = preload("res://ui/mission_menu_view.gd")
+const QuestJournal = preload("res://ui/quest_journal.gd")
 var real: Node
 var real_player: RefCounted
 var fight_enemies: RefCounted
@@ -22,6 +23,7 @@ var imported_appearance: Array = []
 var imported_record: Dictionary = {}
 # The level script's setInfo, help box and bust panel (docs/STRINGS.md).
 var text_hud: Control
+var quest_journal: Control
 var text_sources := {}
 var real_folder: FileDialog
 var real_recipes: FileDialog
@@ -69,6 +71,10 @@ func _ready() -> void:
 		viewport.add_child(text_hud)
 		death_fade = load("res://ui/death_fade.gd").new()
 		viewport.add_child(death_fade)
+		quest_journal = QuestJournal.new()
+		quest_journal.set_anchors_preset(Control.PRESET_FULL_RECT)
+		viewport.add_child(quest_journal)
+		quest_journal.visible = false
 	real_folder = FileDialog.new()
 	real_folder.file_mode = FileDialog.FILE_MODE_OPEN_DIR
 	real_folder.access = FileDialog.ACCESS_FILESYSTEM
@@ -94,6 +100,7 @@ func _ready() -> void:
 	_add_action("real_recipes", "Skill recipe JSON…", func(): open_dialog(real_recipes))
 	_add_action("real_lights", "Level lights JSON…", func(): open_dialog(real_lights))
 	_add_action("npc_leave", "Leave stalled dialog", leave_stalled_dialog)
+	_add_action("quest_journal", "Quest journal", toggle_quest_journal)
 	real_level_choice = OptionButton.new()
 	real_level_choice.disabled = true
 	real_level_choice.add_item("Game-folder level", -1)
@@ -203,6 +210,7 @@ func open_game_folder(path: String) -> bool:
 	if text_hud != null: text_hud.configure(real, controller, inspector)
 	if mission_menu_panel != null:
 		mission_menu_panel.configure(real, controller, inspector, real.hud_font_bytes())
+	if quest_journal != null: quest_journal.configure(real, controller, inspector)
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	if npc_dialog != null:
 		npc_dialog.set_font(real.dialog_font())
@@ -732,6 +740,8 @@ func _apply_level_change() -> bool:
 
 # The use button and the dialog's pad words, taken at the next ready tick.
 func handle_input_event(event: InputEvent) -> bool:
+	if frontend != null and frontend.active(): return super.handle_input_event(event)
+	if game_menus != null and game_menus.open: return super.handle_input_event(event)
 	if _level_change_loading: return true
 	if controller != null and mission_menu_panel != null and not mission_menu_panel.assets_valid:
 		var refused_menu: Dictionary = controller.script_mission_menu_state()
@@ -753,6 +763,11 @@ func handle_input_event(event: InputEvent) -> bool:
 				_refresh_mission_menu()
 			return true
 		return true
+	if event is InputEventKey and event.pressed and not event.echo and controller != null:
+		var journal_key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if journal_key == KEY_Q and _journal_input_eligible():
+			toggle_quest_journal()
+			return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
 		if TALK_KEYS.has(key) and controller.script_level_request().get("ok", false):
@@ -764,6 +779,24 @@ func handle_input_event(event: InputEvent) -> bool:
 				controller.dialog_press(int(TALK_KEYS[key]))
 				return true
 	return super.handle_input_event(event)
+
+func _journal_input_eligible() -> bool:
+	return quest_journal != null and controller != null and real != null and not real.disc_dir.is_empty() \
+		and real.current >= 0 and session_started and play_mode and not paused and not stopped \
+		and menu != null and not menu.visible and frontend != null and not frontend.active() \
+		and game_menus != null and not game_menus.open and not _component_modal_open() \
+		and not terrain_dialog.visible and not asset_dialog.visible and not model_dialog.visible \
+		and not save_dialog.visible and not load_dialog.visible and not real_folder.visible \
+		and not real_recipes.visible and not real_lights.visible and not mission_menu_panel.visible \
+		and not controller.dialog_status().get("open", false) \
+		and not controller.text_hud().get("help_open", false)
+
+func toggle_quest_journal() -> void:
+	if quest_journal == null or (not quest_journal.visible and not _journal_input_eligible()): return
+	quest_journal.visible = not quest_journal.visible
+	if quest_journal.visible:
+		quest_journal.step_frame()
+		if not quest_journal.refusal.is_empty(): status_label.text = quest_journal.refusal
 
 func start_play() -> void:
 	if level_script != null and level_script.button_pressed and real != null and real.current >= 0:

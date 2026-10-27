@@ -421,6 +421,34 @@ void test_single_player() {
   check(host.campaign().record(0).quest_count == 1, "addQuest writes the one player's quest list");
 }
 
+// quest-log.md sections 1 and 4: completion and the next unlock are separate
+// script entries. A quest row is removed at turn-in; it is not a completed row.
+void test_quest_command_sequence() {
+  auto built = build_calls({
+      {"opening", {{"setv", {2000, 1}}, {"setMissionAvailable", {1, 1}},
+                    {"addQuest", {2100, 2200}}}},
+      {"turnin", {{"removeQuest", {2100}}, {"grantMission", {1}}, {"newWorld", {2300}}}},
+      {"hub_next", {{"setMissionAvailable", {2, 1}}}},
+  }, {{2000, "step"}, {2100, "TitleKey"}, {2200, "BodyKey"}, {2300, "hub"}});
+  sc::Host host;
+  host.start_single_player();
+  plant(host, built);
+  auto &campaign = host.campaign();
+  check(host.run("opening") == sc::Stop::Complete, "opening quest commands complete");
+  check(host.variables().quest_get("step") == 1 && campaign.mission_available(1),
+        "opening sets variable and first mission availability");
+  check(campaign.record(0).quest_count == 1 && campaign.record(0).quests[0].title[0] == 'T',
+        "opening stores the title/body key pair");
+  check(host.run("turnin") == sc::Stop::Complete, "turn-in quest commands complete");
+  check(campaign.record(0).quest_count == 0 && campaign.mission_complete(1),
+        "turn-in removes the active row and completes mission one");
+  check(host.variables().memory.cstr(0x41b6d0) == "hub",
+        "documented world request queues the same-act hub return");
+  check(!campaign.mission_available(2), "mission two is not unlocked by completion alone");
+  check(host.run("hub_next") == sc::Stop::Complete && campaign.mission_available(2),
+        "separate hub action unlocks mission two");
+}
+
 // A newly created player has no established current HP/mana in the research.
 // The script host must not turn its zero-initialized storage into a fake read.
 void test_unknown_player_currents() {
@@ -1472,6 +1500,7 @@ int main(int argc, char **argv) {
   test_seed_refused_without_session_seed();
   test_offline_seed_policy();
   test_single_player();
+  test_quest_command_sequence();
   test_unknown_player_currents();
   test_got_item_sound_unknown_currents();
   test_check_alive_which_unknown_currents();

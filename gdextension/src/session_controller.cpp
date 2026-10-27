@@ -1885,6 +1885,8 @@ Dictionary ChampionsSessionController::script_mission_menu_state() const {
     out["evil"] = bool(campaign.evil());
     out["network"] = campaign.network();
     out["chooser"] = int64_t(campaign.chooser());
+    out["first_story_complete"] = bool(campaign.mission_complete(1));
+    out["second_story_available"] = bool(campaign.mission_available(2));
     out["first_story_available"] = bool(campaign.mission_available(1));
     out["pending"] = String::utf8(menu.pending.c_str());
     Array rows;
