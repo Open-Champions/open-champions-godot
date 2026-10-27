@@ -104,8 +104,13 @@ func run() -> void:
 			for tick in range(8):
 				scene.advance_once()
 				await process_frame
-			await RenderingServer.frame_post_draw
-			root.get_texture().get_image().save_png(out.path_join("destination-%d.png" % branch))
+			# Same static-view capture path as the integration journey: force
+			# a real draw instead of awaiting a signal that may never recur.
+			RenderingServer.force_draw()
+			var image := root.get_texture().get_image()
+			check(image != null and not image.is_empty(), "rendered destination image available")
+			if image != null and not image.is_empty():
+				check(image.save_png(out.path_join("destination-%d.png" % branch)) == OK, "rendered capture saved")
 		results.append(row)
 	var summary := {"checks": checks, "failures": failures, "levels": results}
 	var file := FileAccess.open(out.path_join("result.json"), FileAccess.WRITE)
