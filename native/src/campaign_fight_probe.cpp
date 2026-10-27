@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   std::string root, level_name = "valor";
   unsigned ticks = 600, attack_every = 30, shared_seed = 17;
   bool walk = false, near_boar = false, weak = false, near_weakest = false, near_minotaur = false, ai_check = false, death_check = false;
-  bool starting_only = false, near_chest = false, use = false;
+  bool starting_only = false, near_chest = false, use = false, counts_only = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--game" && i + 1 < argc) root = argv[++i];
@@ -112,6 +112,7 @@ int main(int argc, char **argv) {
     else if (a == "--near") near_boar = true;
     else if (a == "--weak") weak = true;
     else if (a == "--near-weakest") near_weakest = true;
+    else if (a == "--counts-only") counts_only = true;
     else if (a == "--near-minotaur") near_minotaur = true;
     else if (a == "--ai-check") ai_check = true;
     else if (a == "--death-check") death_check = true;
@@ -177,6 +178,8 @@ int main(int argc, char **argv) {
       exe->string(exe->word(0x501200)), CF::Fight::player_animation_lump(*exe, model_index)};
   const auto pickup_lumps = CF::Fight::pickup_resource_lumps(*exe);
   lumps.insert(lumps.end(), pickup_lumps.begin(), pickup_lumps.end());
+  for (const auto def : {0x4ff260u, 0x500a88u, 0x500960u})
+    lumps.push_back(exe->string(exe->word(def)));
   for (const auto &name : lumps)
     if (files.count(lower(name))) {
       const auto bytes = read_file(files.at(lower(name)));
@@ -237,6 +240,20 @@ int main(int argc, char **argv) {
         break;
       }
   const auto start_error = fight.start(start);
+  if (counts_only) {
+    std::array<unsigned,4> counts{};
+    for (const auto &e : fight.enemies()) {
+      if (e.kind == "clockworkcutter") ++counts[0];
+      if (e.kind == "clockworkhammer") ++counts[1];
+      if (e.kind == "Droid") ++counts[2];
+      if (e.kind == "IronGuardian") ++counts[3];
+    }
+    for (unsigned t = 0; t < ticks && !fight.failed(); ++t) fight.tick(0);
+    std::cout << "mission2_counts=" << counts[0] << ',' << counts[1] << ',' << counts[2] << ',' << counts[3]
+              << " ticks=" << fight.counts().ticks << " start_failures=" << !start_error.empty()
+              << " runtime_failures=" << fight.failed() << " refusal_kinds=" << fight.refusals().size() << '\n';
+    return !start_error.empty() || fight.failed();
+  }
   if (near_weakest) {
     const CF::EnemyView *weakest = nullptr;
     const auto all = fight.enemies();
@@ -331,6 +348,11 @@ int main(int argc, char **argv) {
     }
   }
   const auto before = fight.enemies();
+  std::map<std::string, unsigned> class_counts;
+  for (const auto &e : before) ++class_counts[e.kind];
+  unsigned class_index = 0;
+  for (const auto &kv : class_counts)
+    std::cout << "hostile_class " << class_index++ << " count=" << kv.second << "\n";
   std::map<CF::Address, float> hp_before;
   for (const auto &e : before) hp_before[e.address] = as_float(e.hp);
   double hp0 = 0;

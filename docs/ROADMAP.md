@@ -281,3 +281,8 @@ Round 6 executes poison gas, disease corpses, the multi-fire hit and end, SmokeG
 combat-ctors round 2 (research-combat-ctors-2 5b92837) runs AntQueen_run in every state with pickFlyDest, Skeleton_isEnemy, the take-damage slots, the AntQueen/Skeleton/Soul/Fire/LooseFire/poison-gas destructors and the fire entry of a touch; the AntQueen is back in the Full fight (slot 4). Skeleton_run past states 0 and 1, allyInLineOfFire, onNearbyEvent, GutChunk_ctor and the death path stay refused.
 
 The mounted Horsemen ([HORSEMEN_MOUNT.md](HORSEMEN_MOUNT.md), research `t3/research-horsemen-mount` 338d459) are ported: the Nightmare mount's constructor, set-state rider table, run, contact slots and charge picker replay 1,101 research-model cases exactly. Level load builds all four Rider variants with their observed named MiniBoss mounts and reciprocal handles, as well as a placed Nightmare. The play scene does not yet tick the pair; its run-list order remains a host decision.
+
+The [mission 2 hostile boundary](MISSION2_HOSTILES.md) adds Clockwork cutter/hammer,
+Droid and IronGuardian numeric constructors and measured tick, damage and death
+dispatches to the factory and shared campaign World. Loaded animation/holder
+services, unexecuted AI, boss spawning and quest/portal completion remain refused.

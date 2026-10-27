@@ -26,3 +26,6 @@ Pending. Live arena match stays refused; native/synthetic success is not campaig
 
 - Arena merge commit `14e8f820`.
 - Horsemen: retained hud_view and exactly one loaded/catalogue declaration each; combined all runtime link dependencies. Reviewed automatic runtime merges: audited property occurrence/null-list/key refusals, name registration/removal, explicit missing display-name service refusal and opt-in mount initialization coexist with newer integration services and destruction handling. No actor-lifetime algorithm introduced here; shared helper from mission-2 follows next.
+
+- Horsemen merge commit `d553d0fe`.
+- Mission-2: retained Chest and mission-2 dispatch and adoption; retained shared seed/starting/Chest probe flags plus counts-only flag, and both pickup and mission-2 resource lumps. Campaign and mission-2 registries delegate reconciliation/registration to the single audited actor_lifetime.hpp helper; mission-2 additionally checks authority identity. No duplicate lifetime algorithm retained.

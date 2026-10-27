@@ -1,7 +1,16 @@
-# The first real enemy fight: one shared World with the session Player and the
-# WarBoar-family actors the level factory finishes. Included by the native tree
-# and by the GDExtension after script_commands_targets.cmake.
+# Shared campaign World with the session Player, WarBoar family and bounded
+# mission-2 actors. Included by the native tree and by the GDExtension after
+# script_commands_targets.cmake.
 include_guard(GLOBAL)
+add_library(champions-mission2-actors "${CMAKE_CURRENT_LIST_DIR}/src/mission2_actors.cpp")
+target_include_directories(champions-mission2-actors PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_link_libraries(champions-mission2-actors PUBLIC champions-campaign-actors champions-arena-modes)
+set_target_properties(champions-mission2-actors PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(champions-mission2-actors PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-mission2-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
 set(CHAMPIONS_FIGHT_ARCHIVE "")
 if(TARGET champions-model)
     list(APPEND CHAMPIONS_FIGHT_ARCHIVE champions-model)
@@ -20,7 +29,7 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
         "${CMAKE_CURRENT_LIST_DIR}/src/pickups.cpp")
     target_include_directories(champions-campaign-fight PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
     target_link_libraries(champions-campaign-fight PUBLIC
-        champions-script-commands champions-campaign-actors champions-player-services
+        champions-script-commands champions-campaign-actors champions-mission2-actors champions-player-services
         champions-combat-runtime champions-creature-anim champions-player-state champions-items
         ${CHAMPIONS_FIGHT_ARCHIVE})
     set_target_properties(champions-campaign-fight PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -49,6 +58,9 @@ if(BUILD_TESTING AND TARGET champions-campaign-actors AND TARGET champions-comba
     add_test(NAME campaign-fight-adopt COMMAND champions-campaign-fight-adopt-tests)
 endif()
 if(BUILD_TESTING AND TARGET champions-campaign-fight)
+    add_executable(champions-mission2-actors-tests "${CMAKE_CURRENT_LIST_DIR}/tests/mission2_actors_tests.cpp")
+    target_link_libraries(champions-mission2-actors-tests PRIVATE champions-mission2-actors champions-combat-runtime)
+    add_test(NAME mission2-actors COMMAND champions-mission2-actors-tests)
     add_executable(champions-campaign-fight-boundary-tests
         "${CMAKE_CURRENT_LIST_DIR}/tests/campaign_fight_boundary_tests.cpp")
     target_link_libraries(champions-campaign-fight-boundary-tests PRIVATE champions-campaign-fight)

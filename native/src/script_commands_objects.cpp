@@ -570,7 +570,9 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // captured. Definition names come from the selected executable, never the
   // capture's returned pointers. This verifies the native resource service
   // separately from the still-unported actor execution.
-  if ((outcome.constructor() == 0x2ba03c || outcome.constructor() == 0x288fdc) && creature_builder_)
+  if (creature_builder_ && (outcome.constructor() == 0x2ba03c || outcome.constructor() == 0x288fdc ||
+      outcome.constructor() == 0x24e124 || outcome.constructor() == 0x27b840 ||
+      outcome.constructor() == 0x27a00c))
     return build_creature_family(record, outcome, c, props);
   if (outcome.constructor() == 0x2ba03c || outcome.constructor() == 0x288fdc) {
     const bool boar = outcome.constructor() == 0x2ba03c;
@@ -1008,15 +1010,21 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
 // WarBoar / WarBoarSmall (constructor 0x2ba03c; research t3/research-campaign-combat
 // 328b072, handoff rounds 2-8). Order as in the original: GameObject_ctor (one
 // shared draw), the executed base Creature_ctor with max-HP argument 10.0 and
-// class definition 0x502f80, then the class part (creature_builder_). Every
-// service the class part needs that the research does not establish makes the
-// builder throw, which leaves the object a labelled stub with its draw made.
+// the selected class definition, then the class part (creature_builder_).
+// Mission-2 constructors use the same chain (research-mission2 ffff9a7).
+// A thrown class-part refusal leaves a labelled stub with its draw made. A
+// bounded actor may retain its numeric constructor and record the remaining
+// loaded-service refusals separately (mission2_actors).
 Host::Build Host::build_creature_family(const level_flow::Record &record,
                                         const level_factory::Outcome &outcome, std::uint32_t c,
                                         const std::vector<std::string> &props) {
   namespace AM = arena_monsters;
   const bool minotaur=outcome.constructor()==0x288fdc;
-  const std::uint32_t definition=minotaur?0x501200:0x502f80;
+  // mission2-enemies.md ffff9a7: all four use this same base chain with
+  // placeholder 10 HP, then their own class definition and constructor.
+  const auto ctor = outcome.constructor();
+  const std::uint32_t definition = ctor == 0x24e124 ? 0x4ff260 :
+      ctor == 0x27b840 ? 0x500a88 : ctor == 0x27a00c ? 0x500960 : minotaur ? 0x501200 : 0x502f80;
   constexpr Raw BOAR_MAX_HP_ARGUMENT = 0x41200000; // 10.0 (monsters-2.md WarBoar)
   if (!external_seed_) {
     counts_.build_refusals["no session seed"] += 1;
@@ -1087,7 +1095,8 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
     if (self != c)
       throw Refused("GameObject_ctor on another block");
     auto list = std::make_shared<std::vector<std::string>>(props);
-    obj = variables_->new_object({}, 0, pos, 0, minotaur?"8Minotaur":"7WarBoar", list, c, outcome.size);
+    obj = variables_->new_object({}, 0, pos, 0, minotaur ? "8Minotaur" : ctor == 0x2ba03c ? "7WarBoar" : record.cls,
+                                 list, c, outcome.size);
     const std::pair<std::uint32_t, std::uint64_t> words[] = {
         {0x00, 0}, {0x04, 0}, {0x08, 0}, {0x48, VT_GAMEOBJECT}, {0x1c, RADIUS_24},
         {0x20, HEIGHT_72}, {0x0c, 0}, {0x10, pos[0]}, {0x14, pos[1]}, {0x18, pos[2]},
@@ -1186,6 +1195,7 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
     request.class_name = record.cls;
     request.small = record.cls.compare(0, 12, "WarBoarSmall") == 0;
     request.address = c;
+    request.constructor = ctor;
     request.angle = record.angle;
     request.object = obj.get();
     obj->type_name=record.cls;

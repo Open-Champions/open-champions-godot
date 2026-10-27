@@ -22,6 +22,7 @@ using Address = combat_runtime::Address;
 
 struct EnemyView {
   Address address = 0;
+  std::string kind;
   bool small = false, minotaur = false, dead = false, ai_frozen = false;
   // Runtime-only resource identifiers and visibility, for rest-pose display.
   std::string model_lump, model_entry, texture_entry;
