@@ -57,3 +57,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - Full synthetic combat PASS: **2,645 checks, 0 failures** (four additional HUD assertions from audited native-hud work; wave 33 had 2,641). Strict log gate accepts the fresh output. `matrix/playable_wave_smoke_full_combat.log`.
 
 - FULL_SAVE_LOAD PASS: **300/300 presentations**, continued/uninterrupted presentation hashes identical (`cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`). Same fresh full-combat log.
+
+- FULL_TRACE PASS unchanged: **36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**. No trace baseline or fixture changed. Same fresh full-combat log.
