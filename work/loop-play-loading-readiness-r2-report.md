@@ -1,4 +1,10 @@
-STATUS: MORE — PLR2-1 review complete; revision Godot/journey gates running; live arrival remains refused.
+STATUS: MORE — PLR2-1 fix verified; all requested revision gates complete; inherited UI diagnostic and live arrival refusals remain.
+
+## Historical round-2 implementation and pre-fix gates
+
+The following checkpoint history predates the independent PLR2-1 test review at
+the end of this report. Pending statements in this history are superseded by
+that review; the 718.00 s CTest result is pre-fix.
 
 Assigned branch verified clean at 3278e618 before work.
 Research pin: research-loading-readiness@d6f035fab6bb5cbe66f5c72a55a1a6aef05ee8df,
@@ -228,5 +234,41 @@ the fixed revision: **251/251 PASS, 665.72 s**, no timeouts, as recorded by
 `00cf5f51` in `work/plr2-fix-ctest.log`. The older 718.00 s result above belongs
 to the pre-fix revision and is not evidence for `960835de`.
 
-Fresh remaining gates are running under `work/plr2-verify-*`; final results
-will replace this pending checkpoint before completion.
+Fresh revision gates completed under ignored `work/plr2-verify-*`:
+
+- Strict isolated Godot dev matrix with captures: **58/61 PASS**, exit 1.
+  Failures: private disc case missing its required input, native-FX capture missing
+  the isolated relative output directory, and inherited UI diagnostic. Isolated
+  supplemental runs supply the input/output prerequisites: both setup failures
+  PASS; rendered identity/death/loading-present cases also PASS (5/5 total).
+  Final public coverage is **62/63 clean**; private disc separately PASS.
+  Evidence: `work/plr2-verify-matrix/results.json`,
+  `work/plr2-verify-additional/results.json` and corresponding logs.
+- `ui_layout_smoke` remains a strict failure: `hud_text_glyphs` expected five
+  arguments, called with four via `callv`. Confirmed the same four-argument call
+  in base `3278e618:godot/tests/ui_layout_smoke.gd:84`. Exit zero does not make
+  the diagnostic clean. No diagnostic allowlist or test was changed.
+- FULL_TRACE **36,402 bytes**, SHA-256
+  **`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**,
+  exact required baseline. FULL_SAVE_LOAD **300/300**, matching continued and
+  uninterrupted presentation hashes; full combat **2,641 checks, zero failures**.
+  Evidence: `work/plr2-verify-matrix/playable_wave_smoke_full_combat.log`.
+- Unchanged `tools/run_loop_playthrough.py`: headless **67 steps / exit 1**,
+  rendered **68 steps / exit 1**, both result JSON files written, neither timeout.
+  **0/43 captures**, six refusal kinds each. Arrival **37/38**: script attached,
+  two loading frames, `loading_ready=false`, zero audio-handoff errors, same
+  deferred/equipment diagnostic quoted above. Each ends at
+  `player_death: blocked_death_reload`, 239 native clip steps, respawn false.
+  No additional peer/store/save barrier observed. Both logs have zero script or
+  engine ERROR diagnostics and one ObjectDB exit-leak warning each. Input file
+  count **994 before / 994 after** (counts only, not a content-integrity hash).
+  Evidence: `work/plr2-verify-playthrough/run-summary.json`, both result JSON
+  files and logs. Wrapper exit 1 truthfully retains the two journey refusals.
+- Inspected the fresh rendered destination capture: stopped session with disabled
+  Resume. No playable handoff or live resource/art acceptance is established.
+  Captures, raw logs, private input and helper scripts remain ignored/uncommitted.
+
+No native, Godot, fixture or baseline edits were needed. Only this report changed.
+All requested execution is complete; STATUS MORE retains unresolved live arrival
+and resource authority plus the inherited strict UI failure. No push or PR.
+Final whitespace and staged-content checks PASS; no private data or paths added.
