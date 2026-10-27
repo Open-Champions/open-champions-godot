@@ -261,6 +261,7 @@ int main() {
     }
     // Expectations come from original VM observations, not fixture execution:
     // research-strife-drundar@3216e7b0 tools/difftest_strife_drundar.py:421-461.
+    for (unsigned inhibit : {0u, 1u})
     for (a::Cell saved : {0, 1, 2, -1, a::Cell(-2147483647-1)}) {
       auto f=drundar(); sc::Host h;
       check(h.load(f.image(36,20)),"predicate fixture loads");
@@ -272,12 +273,12 @@ int main() {
       h.variables().quest_set(key,saved);
       const auto stored=h.variables().quest_get(key); // production signed-byte persistence clamps inputs
       check((stored==0)==(saved==0),"stored value preserves researched branch class");
-      h.variables().memory.write(0x50605c,{1,0,0,0});
+      h.variables().memory.write(0x50605c,{std::uint8_t(inhibit),0,0,0});
       const auto stop=h.run_mission1_entry(0xa3c);
       const auto &sites=h.mission1_sites_reached();
       check(sites.count(0xa68)==1,"real diagnostic dispatches persistent read");
       check(stop==(saved==0?sc::Stop::Refused:sc::Stop::Complete),"original zero-only branch polarity");
-      check(h.variables().memory.word(0x50605c)==1u,"door predicate preserves incoming save inhibit");
+      check(h.variables().memory.word(0x50605c)==inhibit,"door predicate preserves incoming save inhibit");
       check(!sites.count(0xaa0) && !sites.count(0xacc),"no clear or cutscene dispatch on refusal or nonzero skip");
       check(!sites.count(0xb00) && h.variables().quest_get(key)==stored,"no persistent write; saved value unchanged");
       if(saved==0) check(h.last_fault().find("unsupported door sequence")!=std::string::npos,"effect refusal remains explicit");
