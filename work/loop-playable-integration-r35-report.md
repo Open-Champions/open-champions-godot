@@ -49,3 +49,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - Universal GDExtension and level-texture debug/release libraries **PASS**, 8/8 configure/build exits 0, arm64;x86_64, Release, parallelism 4. `build-results.json` and `extension-builds.out`. Debug extension rebuilt before sweep launch; no stale extension gate credited.
 
 - Private sweep `w35-off`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w35-off-s{0,28,56,84}.{json,log}`.
+
+- Strict Godot dev matrix **54/54 PASS**, including six graphical captures; strict diagnostic gate, isolated user directories, no allowlist. `matrix/results.json`.
