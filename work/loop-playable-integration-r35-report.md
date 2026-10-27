@@ -16,7 +16,7 @@ Assigned clean `codex/playable-integration` at wave-34-verified `a68504da`. Read
 
 ## Non-merge code changes
 
-None.
+Post-merge correction: automatic arena overlap duplicated creature_on_death declaration/definition. Removed duplicate declaration and unguarded adopt.cpp definition; retained api.cpp implementation with Full/nonplayer/creature guards and identical model call. Initial Release build failed at duplicate declaration; no checks weakened.
 
 ## Gates and evidence
 
@@ -29,3 +29,7 @@ Pending. Live arena match stays refused; native/synthetic success is not campaig
 
 - Horsemen merge commit `d553d0fe`.
 - Mission-2: retained Chest and mission-2 dispatch and adoption; retained shared seed/starting/Chest probe flags plus counts-only flag, and both pickup and mission-2 resource lumps. Campaign and mission-2 registries delegate reconciliation/registration to the single audited actor_lifetime.hpp helper; mission-2 additionally checks authority identity. No duplicate lifetime algorithm retained.
+
+| `codex/native-arena` | `486d5769` | `native-arena-r4.md` | `14e8f820` | roadmap, simulation libraries |
+| `codex/native-horsemen` | `bbaf93df` | `native-horsemen-r7.md` | `d553d0fe` | fixture declarations, runtime links |
+| `codex/port-mission2-hostiles` | `8595fcf5` | `port-mission2-hostiles-r2.md` | `ab8a0607` | fight and probe additive overlaps |

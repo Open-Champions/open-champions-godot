@@ -171,9 +171,5 @@ void World::creature_turn_to_target(Address a) { s_->actor(a); s_->model.turn_to
 void World::creature_flee_from_target(Address a, Raw kind) {
   s_->actor(a); s_->model.flee_from_target(a, kind);
 }
-void World::creature_on_death(Address a, Raw quiet) {
-  s_->actor(a);
-  s_->model.slot28_on_death(a, quiet);
-}
 std::size_t World::stub_box_skips() const { return s_->stub_box_skips; }
 } // namespace champions::simulation::rta::combat_runtime

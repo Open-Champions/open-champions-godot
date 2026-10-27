@@ -354,7 +354,6 @@ public:
   void arena_task_visit(arena_match::Services, Raw pressed = 0,
                         Raw confirm = 0, Raw cancel = 0);
   void arena_reset_scores();
-  void creature_on_death(Address, Raw quiet = 0); // base 0x10beb8 only
   // Bind the owner-supplied .vif hulls at a PhProp's resource pointer. Checks
   // every active mesh bit before publishing bytes to the owned World memory.
   void bind_prop_model(Address prop, champions::Bytes vif);
