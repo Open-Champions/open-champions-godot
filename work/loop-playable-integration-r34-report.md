@@ -135,3 +135,5 @@ Comparison with `4d6cb8e3`: no campaign format callback there; Full libc_sprintf
 Clean pre-fix reproduction now completed: headless 80 / rendered 81 steps, both exit 1, pickup 10→10, no drop, zero log errors; four retry kills / five diagnostic placements. This is the restored committed script, distinct from the earlier rejected pursuit candidate. Evidence `pickup-clean-repro/`.
 
 **Pending before full CTest:** fresh build, focused tests, full `ctest -j 3` with isolated timeout reruns, rebuilt GDExtension, strict Godot dev matrix / FULL_TRACE, and clean committed headless/rendered journey. No gate success is claimed at this checkpoint.
+
+- Implementation milestone `51d73589`: fresh Release configure/build PASS (`-j 3`); focused pickups/items/loot/formatter suite **7/7 PASS**, 38.45 s (`pickup-review-{configure,build,focused}.log`). Both universal macOS GDExtension targets rebuilt PASS with parallelism 1 (`pickup-extension-{debug,release}.log`). Full CTest `-j 3` and strict Godot matrix have now started; their results remain pending.
