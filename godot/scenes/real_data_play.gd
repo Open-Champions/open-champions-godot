@@ -629,6 +629,9 @@ func _loading_prerequisite_state() -> Dictionary:
 			"error": "Script attachment observed; deferred-call completion, equipment, peer and four-store readiness remain unavailable."}
 	var state: Dictionary = controller.call("loading_prerequisite_state")
 	state["script_attached"] = last_level_script_attached and state.get("script_attached", false)
+	if not state.script_attached:
+		state["ok"] = false
+		state["error"] = "Loading script attachment unavailable. " + str(state.get("error", ""))
 	if not state.get("ok", false): return state
 	for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete", "save_gate_ready"]:
 		if not state.get(field) is bool:

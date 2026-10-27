@@ -11,3 +11,10 @@ persistence retain explicit refusals. Full verification pending.
 
 Gates: pending full CTest (this note committed before execution), Release build,
 Godot dev matrix, both journeys, FULL_TRACE verification.
+
+Review checkpoint (2026-10-27): pinned research and PASS audit reviewed. Fixed
+scene attachment failure overriding controller readiness; added attachment and
+launch-revocation regressions. Focused native script-command cases PASS 3/3
+(0.42 s). Release native and main extension builds PASS with -j 4. Initial
+Godot setup failed on absent auxiliary texture extension; building both auxiliary
+extensions before retry. Pending full CTest; this checkpoint precedes execution.

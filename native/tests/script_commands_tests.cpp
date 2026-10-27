@@ -703,6 +703,9 @@ void test_receive_launch() {
   rec.mode = 1;
   rec.cm1 = 4;
   host.receive_launch(rec);
+  check(!host.loading_readiness("synthetic_destination").peers_ready &&
+            !host.loading_readiness("synthetic_destination").save_gate_ready,
+        "launch reception revokes explicit offline grant even with zero mode memory");
   auto &memory = host.variables().memory;
   check(memory.word(0x4f719c) == 0xfffffffeu && memory.u8(0x4f8408) == 30, "difficulty is signed; kill limit");
   check(memory.word(0x4f711c) == 0 && memory.word(0x4f7120) == 1 && memory.word(0x4f7124) == 0, "mode 1: B only");
