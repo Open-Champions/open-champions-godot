@@ -270,6 +270,8 @@ int main() {
       check(h.adopt_objects(blob.data(),blob.size()),"predicate fixture adopts");
       const auto key=h.mission1_contract()->door_flag;
       h.variables().quest_set(key,saved);
+      const auto stored=h.variables().quest_get(key); // production signed-byte persistence clamps inputs
+      check((stored==0)==(saved==0),"stored value preserves researched branch class");
       h.variables().memory.write(0x50605c,{1,0,0,0});
       const auto stop=h.run_mission1_entry(0xa3c);
       const auto &sites=h.mission1_sites_reached();
@@ -277,7 +279,7 @@ int main() {
       check(stop==(saved==0?sc::Stop::Refused:sc::Stop::Complete),"original zero-only branch polarity");
       check(h.variables().memory.word(0x50605c)==(saved==0?0u:1u),"only zero clears save inhibit");
       check(sites.count(0xaa0)==(saved==0?1u:0u) && sites.count(0xacc)==(saved==0?1u:0u),"zero reaches clear and refused cutscene; nonzero skips both");
-      check(!sites.count(0xb00) && h.variables().quest_get(key)==saved,"no persistent write after refused cutscene");
+      check(!sites.count(0xb00) && h.variables().quest_get(key)==stored,"no persistent write after refused cutscene");
       if(saved==0) check(h.last_fault().find("untraced script call or effect body")!=std::string::npos,"effect refusal remains explicit");
     }
     // Replacement and removal (authored PROC padding) must fail inspection.

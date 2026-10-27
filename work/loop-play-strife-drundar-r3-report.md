@@ -30,3 +30,9 @@ negative controls, not claims about game content.
 Pending full CTest: this checkpoint is committed before invoking the full
 ctest --test-dir build/native --output-on-failure -j 3 gate.
 Release, focused, full suite, Godot, journey and trace results follow.
+
+Focused first run exposed an assertion comparing minimum signed 32-bit input
+with the persisted signed byte. Production quest_set clamps storage; the test
+now independently checks that storage preserves the researched zero/nonzero
+class and remains unchanged across the diagnostic. No persistence behavior or
+predicate expectation changed; all five input cases retained.
