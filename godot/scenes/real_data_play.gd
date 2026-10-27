@@ -38,6 +38,7 @@ var gate_destination_choice: OptionButton
 var _gate_menu_was_open := false
 var loading_layer: CanvasLayer
 var loading_display: Control
+var mission_menu_target := -1
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
@@ -174,6 +175,43 @@ func _update_menu() -> void:
 		mode_label.text = "Play mode · walk-in Triggers; physical use and gate travel require live object and campaign state."
 		if raw_observation.get("fight_player_ready", false):
 			mode_label.text = "Play mode · WASD moves · J attack / combo · K hold guard · U guard move · L heavy request · 1/2 ability slots. WarBoar sight, chase, attacks and hit reactions are active. Bodies use rest poses.\nStarting equipment uses the native inventory; E uses nearby loot or chests; heavy and abilities need learned records (refused_unknown). Minotaur construction refuses unbound Creature_init bounds. Enemy damage, held-part physics, path searches, Gold, physical dialog use and gate travel remain refused."
+		var scripts: Dictionary = controller.script_command_counts()
+		if scripts.get("requires_complete_commands", false):
+			mode_label.text = "Mission 2 · objectives incomplete; unsupported commands stop the mission script."
+			if scripts.get("script_stopped", false):
+				mode_label.text += " " + str(scripts.get("last_refusal", "Script stopped."))
+
+func mission_menu_select_story(mission: int) -> bool:
+	var state: Dictionary = controller.script_mission_menu_state()
+	var available := bool(state.get("first_story_available", false)) if mission == 1 else bool(state.get("second_story_available", false))
+	if mission == 2 and not str(state.get("second_story_refusal", "")).is_empty():
+		status_label.text = "Mission selection refused: " + str(state.second_story_refusal)
+		return false
+	if mission not in [1, 2] or not state.get("open", false) or not available:
+		status_label.text = "Mission selection refused: this story mission is locked."
+		return false
+	mission_menu_target = mission - 1
+	return true
+
+func mission_menu_frame() -> Dictionary:
+	var state: Dictionary = controller.script_mission_menu_state()
+	if not state.get("open", false): return state
+	var pad := 0
+	if mission_menu_target >= 0 and int(state.get("state", -1)) == 2:
+		if int(state.get("column", -1)) != 0:
+			mission_menu_target = -1
+			status_label.text = "Mission selection refused: the story column is not selected."
+		elif int(state.get("row", -1)) > mission_menu_target: pad = 0x1000
+		elif int(state.get("row", -1)) < mission_menu_target: pad = 0x4000
+		else:
+			pad = 0x40
+			mission_menu_target = -1
+	state = controller.script_mission_menu_tick(pad, -1)
+	_refresh_mission_menu()
+	if not state.get("ok", false): status_label.text = "Mission selection refused: " + str(state.get("error", "unsupported input"))
+	if state.get("launched", false): _queue_level_change()
+	return state
+
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -261,6 +299,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	if level_script != null and level_script.button_pressed:
 		status_label.text += " Level script running." if scripted else " Level script refused."
+	_show_script_refusal()
 	return true
 
 func restore_default_actor() -> void:
@@ -594,8 +633,15 @@ func attach_level_script(carry_campaign := false) -> bool:
 	last_level_script_attached = bool(result.get("ok", false))
 	if result.get("ok", false): _refused_level_request = ""
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
+	_show_script_refusal()
 	_refresh_exit_targets()
 	return result.get("ok", false)
+
+func _show_script_refusal() -> void:
+	if controller == null: return
+	var state: Dictionary = controller.script_command_counts()
+	if state.get("requires_complete_commands", false) and state.get("script_stopped", false):
+		status_label.text = "Mission 2 script stopped: " + str(state.get("last_refusal", "unsupported behavior"))
 
 func _refresh_exit_targets() -> void:
 	if real_exit_choice == null or controller == null: return
@@ -607,6 +653,7 @@ func _refresh_exit_targets() -> void:
 			(" · walk-in refused" if target.has("walk_in_refusal") else \
 			(" · E/use" if target.get("physical_use", false) else \
 			(" · selected-object diagnostic" if target.get("script_action", false) else " · arrival/prompt only")))
+		if target.has("refusal"): suffix = " · refused: " + str(target.refusal)
 		real_exit_choice.add_item("%s #%d%s" % [kind, int(target.index), suffix], int(target.index))
 	_refresh_gate_destinations()
 
@@ -649,13 +696,12 @@ func _refresh_mission_menu() -> void:
 		status_label.text = "Mission art refused: " + mission_menu_panel.last_error
 
 func _process(_delta: float) -> void:
+	if controller != null and mission_menu_panel != null and mission_menu_panel.assets_valid and controller.script_mission_menu_state().get("open", false):
+		held_commands = 0
+		_last_clock_usec = Time.get_ticks_usec()
+		if automatic_steps: mission_menu_frame()
+		return
 	super._process(_delta)
-	if mission_menu_panel == null or not mission_menu_panel.visible or controller == null: return
-	var state: Dictionary = controller.script_mission_menu_state()
-	# State 6 reads an external fade value that this client cannot supply yet.
-	if int(state.get("state", -1)) in [0, 1, 4, 5]:
-		controller.script_mission_menu_tick(0, 0)
-		_refresh_mission_menu()
 
 func _queue_level_change() -> void:
 	if _level_change_queued or _level_change_loading: return
@@ -718,6 +764,9 @@ func _apply_level_change() -> bool:
 	_level_change_queued = false
 	if _level_change_loading or controller == null or real == null: return false
 	var pending: Dictionary = controller.script_level_request()
+	if pending.has("error"):
+		status_label.text = "Level change refused: " + str(pending.error)
+		return false
 	if not pending.get("queued", false): return false
 	var requested: String = str(pending.get("name", ""))
 	if requested == _refused_level_request: return false
@@ -815,7 +864,7 @@ func handle_input_event(event: InputEvent) -> bool:
 			if MISSION_KEYS.has(mission_key):
 				var menu_state: Dictionary = controller.script_mission_menu_state()
 				if int(menu_state.get("state", -1)) == 2:
-					menu_state = controller.script_mission_menu_tick(int(MISSION_KEYS[mission_key]), 0)
+					menu_state = controller.script_mission_menu_tick(int(MISSION_KEYS[mission_key]), -1)
 					if int(menu_state.get("state", -1)) == 5:
 						status_label.text = "Mission transition refused: external fade completion is unavailable."
 				_refresh_mission_menu()
@@ -828,6 +877,11 @@ func handle_input_event(event: InputEvent) -> bool:
 			return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if controller.script_mission_menu_state().get("open", false):
+			if key in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+				var state: Dictionary = controller.script_mission_menu_state()
+				mission_menu_select_story(int(state.get("row", -1)) + 1)
+			return true
 		if key == KEY_E and controller.world_use(): return true
 		if TALK_KEYS.has(key) and controller.script_level_request().get("ok", false):
 			var open: bool = controller.dialog_status().get("open", false)
@@ -902,6 +956,7 @@ func _observe(result: Dictionary) -> void:
 		status_label.text = "Gate open · choose a discovered destination in the menu."
 	elif int(controller.script_use_status().get("uses", 0)) > 0 and not controller.dialog_status().get("open", false):
 		status_label.text = "Nearby level action used."
+	_show_script_refusal()
 	if real.world == null: return
 	real.world.observe(raw_observation)
 	var extra: String = real.world.label()

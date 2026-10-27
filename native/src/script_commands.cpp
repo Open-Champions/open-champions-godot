@@ -384,11 +384,13 @@ void Host::install() {
 
 // A refusal has no answer. When the script goes on to use the answer, the
 // entry stops here instead of running on an invented 0.
-void Host::refuse(std::size_t index, amx::Machine &machine) {
+void Host::refuse(std::size_t index, amx::Machine &machine, const char *reason) {
   counts_.refused[index] += 1;
-  if (result_used(machine)) {
+  last_refusal_ = std::string("refused ") + kRows[index].name;
+  if (reason) last_refusal_ += std::string(": ") + reason;
+  if (complete_commands_ || result_used(machine)) {
     counts_.stopped[index] += 1;
-    throw RefusedResult(std::string("refused ") + kRows[index].name);
+    throw RefusedResult(last_refusal_);
   }
 }
 
@@ -456,6 +458,20 @@ amx::NativeMap Host::command_map() {
       // The dialog built-ins run only while dialog is attached; item and quest
       // handlers retain their own routing and refusal rules.
       const bool dialog_route = dialog_cmd && dialog_attached_;
+      // Mission-2 research 047adfe leaves newWorld(0)'s destination
+      // Unknown. Address zero can contain a readable string in an AMX
+      // image; that is not evidence for the null call's runtime target.
+      // Do not dispatch it, nor the inferred boss-music path, in this mode.
+      if (complete_commands_ &&
+          ((std::strcmp(kRows[i].name, "newWorld") == 0 && machine.cell(machine.params + 4) == 0) ||
+           (inferred_route(kRows[i].name) &&
+            machine.cell(machine.params + (cflag ? 8 : 4)) == 0))) {
+        counts_.callee_refusals += 1;
+        refuse(i, machine, cflag || selected_form(kRows[i].name)
+                              ? "boss-music playback is inferred"
+                              : "null destination is Unknown in mission-2 research");
+        return 0;
+      }
       if (!player_currents_known_ &&
           needs_player_current(kRows[i].name,
                                static_cast<std::int32_t>(variables_->memory.word(script_items::G_NUM_PLAYERS)),
@@ -1078,6 +1094,7 @@ bool Host::load(const amx::ByteVector &image) {
   waiting_ = false;
   faulted_ = false;
   refusal_stopped_ = false;
+  last_refusal_.clear();
   counted_wait_ = false;
   counted_complete_ = false;
   last_value_ = 0;

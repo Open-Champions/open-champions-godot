@@ -3,6 +3,7 @@
 #include "champions/frame_clock.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/campaign_fight.hpp"
+#include "champions/mission_menu_table.hpp"
 #include "champions/combat_play.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
 #include "champions/core_state.hpp"
@@ -74,6 +75,7 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  std::optional<champions::simulation::rta::quests::ActTables> script_act_tables_;
   std::string fight_level_;
   void reset_fight();
   void start_fight(const champions::simulation::rta::session_control::Observation &);
