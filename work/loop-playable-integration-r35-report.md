@@ -39,3 +39,5 @@ Pending. Live arena match stays refused; native/synthetic success is not campaig
 ## Pending full CTest record
 
 Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, not started at this commit. Result will be recorded separately; any timeout will be rerun alone and both results retained.
+
+- native-ai: **PASS**, exit 0, 1.88 s. Counts-only output: `No probe summary`. Labelled diagnostic placement/hit; no normal-route or respawn claim. Evidence `native-ai.log`.
