@@ -1203,6 +1203,107 @@ void test_wait_then_complete() {
   check(host.counts().faults == 0, "deferred execution does not fault");
 }
 
+// Evidence: research-loading-readiness@9dd49046:docs/loading-readiness.md:
+// 11-37 (one pass),41-87 (equipment),91-113 (offline),117-152 (dispatch/save).
+// Authored AMX bodies execute in the production Host and mutate its real memory.
+void test_loading_readiness() {
+  sc::Host host;
+  check(!host.loading_readiness("synthetic_destination").peers_ready,
+        "default zero memory is not an explicit offline session");
+  auto built = build_calls({{"start", {{"addDeferedCall", {2000}}}},
+                            {"later", {{"setv", {2200, 1}}, {"addDeferedCall", {2000}}}}},
+                           {{2000, "later"}, {2200, "flag"}});
+  plant(host, built);
+  host.start_single_player();
+  check(!host.loading_readiness("synthetic_destination").deferred_complete,
+        "script attachment alone cannot complete deferred loading");
+  host.run_prestart();
+  host.run_start();
+  auto state = host.loading_readiness("synthetic_destination");
+  check(state.deferred_complete && host.queue().count == 1 && host.queue().queued == 0,
+        "one pass promotes real queue without requiring it empty");
+  check(host.variables().quest_get("flag") == 0,
+        "loading readiness observation never executes an extra deferred pass");
+  host.on_ready_tick();
+  check(host.variables().quest_get("flag") == 1 && host.queue().count == 1 &&
+            host.loading_readiness("synthetic_destination").deferred_complete,
+        "self-deferring supported body survives queue promotion");
+  check(state.peers_ready == true && state.save_gate_ready == true,
+        "explicit offline mode bypasses only peer and network-save barriers");
+  check(!state.equipment_pending && !state.stores_complete,
+        "unpublished equipment and absent executable refuse");
+  auto &m = host.variables().memory;
+  m.byte(0x402791, 1);
+  check(!host.loading_readiness("synthetic_destination").peers_ready &&
+            !host.loading_readiness("synthetic_destination").save_gate_ready,
+        "live nonzero mode revokes offline bypass");
+  m.byte(0x402791, 0);
+  m.byte(0x4f8f2c, 255);
+  check(host.loading_readiness("synthetic_destination").save_gate_ready == true,
+        "offline busy bypass is independent of card busy, not a save claim");
+  // Publish actual runtime player/record/slot fields; implicit sparse zeros refuse.
+  m.word(0x4dcec8, 0x100000);
+  m.word(0x100000 + 0x3c8, 0);
+  for (unsigned i = 0; i < 16; ++i) m.word(0x4d8af0 + 0x43f0 + 4*i, 0);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "one missing slot publication refuses");
+  m.word(0x4d8af0 + 0x43f0 + 4*16, 0);
+  check(host.loading_readiness("synthetic_destination").equipment_pending == false,
+        "all seventeen explicitly empty equipment slots require no models");
+  m.word(0x4d8af0 + 0x43f0, 0x110000);
+  m.word(0x110000, 0x120000);
+  for (unsigned category = 5; category <= 8; ++category) {
+    m.byte(0x120000 + 0x1c, category);
+    check(host.loading_readiness("synthetic_destination").equipment_pending == true,
+          "documented direct-pending category floors warmup");
+  }
+  m.byte(0x120000 + 0x1c, 1);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "unbound generic item-index/model service refuses instead of succeeding");
+  m.byte(0x120000 + 0x1c, 2);
+  m.byte(0x41b69d, 0);
+  m.word(0x44fe08, 0x10000000);
+  check(host.loading_readiness("synthetic_destination").equipment_pending == false,
+        "published category/environment skip requires no model job");
+  m.word(0x44fe08, 0);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "environment guard removal restores model refusal");
+  m.word(0x4d8af0 + 0x43f0, 0);
+  m.word(0x4d8af0 + 0x43f0 + 3*4, 0x110000);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "specialized slot selection remains unavailable");
+  m.word(0x4dcec8, 0);
+  check(host.loading_readiness("synthetic_destination").equipment_pending == false,
+        "explicit null player is skipped");
+  champions::simulation::rta::level_factory::Executable exe;
+  exe.string = [](std::uint32_t address) {
+    return std::string("synthetic_stock_") + std::to_string(address);
+  };
+  host.set_executable(exe);
+  check(host.loading_readiness("synthetic_destination").stores_complete == true,
+        "four observed nonmatches require no stock call");
+  for (const auto address : {0x554678u,0x554680u,0x554688u,0x554698u})
+    check(!host.loading_readiness(exe.string(address)).stores_complete,
+          "every matching identifier refuses unknown generation/RNG");
+  exe.string = [](std::uint32_t) -> std::string { throw std::runtime_error("unreadable"); };
+  host.set_executable(exe);
+  check(!host.loading_readiness("synthetic_destination").stores_complete,
+        "failed identifier read cannot become a nonstore bypass");
+  plant(host, built);
+  check(!host.loading_readiness("synthetic_destination").deferred_complete,
+        "script replacement invalidates the previous loading pass");
+  sc::Host refused;
+  auto unsupported = build_calls({{"start", {{"givePlayerRandom", {2000}}}}}, {{2000,"synthetic"}});
+  plant(refused, unsupported);
+  refused.run_start();
+  check(!refused.loading_readiness("synthetic_destination").deferred_complete,
+        "swallowed unsupported commands cannot certify the loading pass");
+  sc::Host absent;
+  absent.run_start();
+  check(!absent.loading_readiness("synthetic_destination").deferred_complete,
+        "faulted absent machine cannot certify loading");
+}
+
 void test_prestart_before_objects() {
   auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
   sc::Host host;
@@ -1494,6 +1595,7 @@ int main(int argc, char **argv) {
   test_object_level_exit();
   test_refusals();
   test_wait_then_complete();
+  test_loading_readiness();
   test_prestart_before_objects();
   test_stub_objects();
   test_refused_result_stops_entry();

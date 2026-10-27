@@ -63,7 +63,8 @@ static func strip_positions(frame: int) -> Vector2i:
 
 static func warmup_remaining(remaining: int, terrain_busy: bool,
 		equipment_pending: bool, displayed: int) -> int:
-	if displayed >= 1500: return 0
+	# research-loading-readiness@9dd49046:docs/loading-readiness.md:81-87.
+	if displayed >= 1501: return 0
 	if terrain_busy: return WARMUP_PRESENTS
 	var next := maxi(remaining - 1, 0)
 	return maxi(next, 3) if equipment_pending else next

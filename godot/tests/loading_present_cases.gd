@@ -31,8 +31,8 @@ func run() -> void:
 	for attached in [false, true]:
 		host.last_level_script_attached = attached
 		var state: Dictionary = host._loading_prerequisite_state()
-		expect(not state.ok and state.script_attached == attached, "attachment observed without readiness promotion")
-		for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"]:
+		expect(not state.ok and state.script_attached == false, "attachment observed without readiness promotion")
+		for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete", "save_gate_ready"]:
 			expect(not state.has(field) and field in state.unavailable, "unknown prerequisite remains unknown: " + field)
 	host.free()
 	if DisplayServer.get_name() != "headless":

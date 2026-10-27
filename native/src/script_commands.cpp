@@ -1048,6 +1048,7 @@ bool Host::load(const amx::ByteVector &image) {
   machine_.reset();
   variables_->script_machine.reset();
   level_started_ = false;
+  loading_deferred_complete_ = false;
   waiting_ = false;
   faulted_ = false;
   refusal_stopped_ = false;
@@ -1210,6 +1211,8 @@ Stop Host::run_prestart() { return enter_level("preStart"); }
 // docs/mainloop.md step 7). That run promotes what start queued, so it runs
 // on the first ready tick.
 Stop Host::run_start() {
+  loading_deferred_complete_ = false;
+  const auto refused_before = counts_.refused;
   const auto stop = enter_level("start");
   if (stop == Stop::Fault || stop == Stop::Refused)
     return stop;
@@ -1220,10 +1223,103 @@ Stop Host::run_start() {
     variables_->run_post_action();
     machine_->budget = session::SCRIPT_BUDGET;
     variables_->run_deferred();
+    // One returned pass, including back-to-front promotion, is sufficient.
+    // research-loading-readiness@9dd49046:docs/loading-readiness.md:11-37.
+    loading_deferred_complete_ = !faulted_ && !refusal_stopped_ &&
+                                 counts_.refused == refused_before;
   } catch (const std::exception &error) {
     remember(error);
   }
   return classify();
+}
+
+// All addresses/conditions below: research-loading-readiness@9dd49046,
+// docs/loading-readiness.md (line ranges beside each operation).
+Host::LoadingReadiness Host::loading_readiness(const std::string &destination) const {
+  LoadingReadiness out;
+  out.deferred_complete = loading_deferred_complete_ && !faulted_ && !refusal_stopped_;
+  if (!out.deferred_complete)
+    out.refusals.push_back("Deferred loading pass absent, faulted or refused commands.");
+  const auto &m = variables_->memory;
+  // 91-95,140-152: explicit offline setup AND the live mode byte equals zero.
+  // Sparse memory's default zero alone cannot establish a session's mode.
+  if (loading_offline_session_ && m.read(0x402791) == 0) {
+    out.peers_ready = true;
+    out.save_gate_ready = true; // gate bypass only; no persistence claim
+  } else {
+    out.refusals.push_back("Peer readiness unavailable: session not explicitly offline.");
+    out.refusals.push_back("Network save gate unavailable: card service unbound.");
+  }
+  // 117-138: exact identifiers come from the selected executable, never literals.
+  if (!exe_ || !exe_->string || destination.empty()) {
+    out.refusals.push_back("Store applicability unavailable: executable or destination absent.");
+  } else {
+    try {
+      bool match = false;
+      for (const auto address : {0x554678u, 0x554680u, 0x554688u, 0x554698u}) {
+        const auto identifier = exe_->string(address);
+        if (identifier.empty()) throw std::runtime_error("empty stock identifier");
+        match = match || destination == identifier;
+      }
+      if (!match) out.stores_complete = true;
+      else out.refusals.push_back("Applicable transition stock generation/RNG unavailable.");
+    } catch (const std::exception &) {
+      out.refusals.push_back("Store applicability unavailable: identifier read failed.");
+    }
+  }
+  // 41-53: only explicitly published runtime fields may establish null players
+  // or empty equipment. Default sparse zeros and executable initial bytes cannot.
+  const auto published = [&m](std::uint32_t address, std::size_t size) {
+    for (std::size_t i = 0; i < size; ++i) {
+      bool found = false;
+      for (const auto &write : m.writes)
+        if (address + i >= write.first &&
+            std::uint64_t(address) + i < std::uint64_t(write.first) + write.second) {
+          found = true; break;
+        }
+      if (!found) return false;
+    }
+    return true;
+  };
+  bool known = published(0x4d8ae0, 4), pending = false;
+  // The host's supported session is single-player only; no guessed record bound.
+  if (known && loading_offline_session_ && m.word(0x4d8ae0) == 1) {
+    const auto slot = 0x4dcec8u;
+    known = published(slot, 4);
+    if (known && m.word(slot)) {
+      const auto player = m.word(slot);
+      known = published(player + 0x3c8, 4);
+      // This host only publishes record 0, never arbitrary unchecked offsets.
+      known = known && m.word(player + 0x3c8) == 0;
+      for (unsigned i = 0; known && i < 17; ++i) {
+        const auto at = 0x4d8af0u + 0x43f0u + i * 4;
+        known = published(at, 4);
+        if (!known || !m.word(at)) continue;
+        const auto item = m.word(at);
+        known = published(item, 4);
+        if (!known) break;
+        const auto definition = m.word(item);
+        known = definition && published(definition + 0x1c, 1);
+        if (!known) break;
+        const auto category = m.read(definition + 0x1c);
+        // 48-50: slot 3's selected-definition skip precedes category dispatch.
+        // Its specialized selection is unbound, so refuse rather than guess.
+        if (i == 3) { known = false; break; }
+        if (category >= 5 && category <= 8) { pending = true; continue; }
+        // 52-53: environment guard requires both observed runtime globals.
+        if (category == 0 || category == 2 || category == 3) {
+          if (published(0x41b69d, 1) && published(0x44fe08, 4) &&
+              m.read(0x41b69d) == 0 && (m.word(0x44fe08) & 0x10000000u)) continue;
+        }
+        // 55-79: item-index resolution, specialized models and I/O publication
+        // have no loading binding. Never infer ready from an item pointer.
+        known = false;
+      }
+    }
+  } else known = false;
+  if (known) out.equipment_pending = pending;
+  else out.refusals.push_back("Equipment readiness unavailable: runtime player/slot/model publication or specialized I/O unbound.");
+  return out;
 }
 
 // The Script task runs on every simulated tick (docs/script.md 2.4 and 2.6),

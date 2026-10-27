@@ -386,6 +386,14 @@ public:
   // first ready tick. A queued deferred name is a wait.
   Stop run_prestart();
   Stop run_start();
+  // research-loading-readiness@9dd49046:docs/loading-readiness.md:11-37,
+  // 41-87,91-113,117-152. Optional means unobservable/unsupported, never ready.
+  struct LoadingReadiness {
+    bool deferred_complete = false;
+    std::optional<bool> equipment_pending, peers_ready, stores_complete, save_gate_ready;
+    std::vector<std::string> refusals;
+  };
+  LoadingReadiness loading_readiness(const std::string &destination) const;
   // One simulated ready tick: the Script task runs the front half, then
   // promotes the back. It runs with an empty queue too.
   void on_ready_tick();
@@ -636,6 +644,8 @@ private:
   std::vector<Spawn> spawns_;
   std::uint64_t portal_trigger_requests_ = 0;
   bool level_started_ = false;
+  bool loading_deferred_complete_ = false;
+  bool loading_offline_session_ = false;
   bool waiting_ = false;
   bool faulted_ = false;
   bool refusal_stopped_ = false;
