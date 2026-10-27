@@ -12,18 +12,18 @@ inline int require_campaign_act_transfer(Host &previous, const quests::ActTables
                                          const std::string &destination, bool imported) {
   const auto current = previous.campaign().act();
   if (current < 0 || std::size_t(current) >= tables.names.size())
-    throw std::runtime_error("Campaign act is unbound; mission-2 act transfer is refused.");
+    throw std::runtime_error("Campaign act is unbound; act transfer is refused.");
   const auto next = quests::find_act(destination, current, tables.names);
   if (next < 0) throw std::runtime_error("Destination has no documented campaign act.");
   if (imported)
-    throw std::runtime_error("Imported inventory carry into mission 2 is unverified.");
+    throw std::runtime_error("Imported inventory carry across this act transfer is unverified.");
   const auto &memory = previous.variables().memory;
   if (memory.s32(script_items::G_NUM_PLAYERS) != 1)
-    throw std::runtime_error("Mission-2 act transfer supports one local player.");
+    throw std::runtime_error("Act transfer supports one local player.");
   for (int bag = 0; bag < script_items::BAGS; ++bag)
     if (memory.u32(script_items::bag_count_at(0, bag)) != 0 ||
         !previous.campaign().record(0).bags[std::size_t(bag)].empty())
-      throw std::runtime_error("Mission-2 entry with inventory is refused: live bag carry and flag-39 migration are unported.");
+      throw std::runtime_error("Act transfer with inventory is refused: live bag carry and flag-39 migration are unported.");
   return next;
 }
 
@@ -35,6 +35,17 @@ inline std::string mission2_story_destination(const quests::Campaign &campaign) 
   if (name != "innovat1")
     throw std::runtime_error("Mission-2 alternate story entry is Unknown in the research.");
   return name;
+}
+
+// research-quests@7efd3ce docs/quests.md:266-277,285-298. A table
+// miss is not an act change; current-act prefix matches take precedence.
+inline bool campaign_entry_requires_transfer(const Host &previous,
+                                             const quests::ActTables &tables,
+                                             const std::string &destination,
+                                             bool mission2) {
+  const auto source = previous.campaign().act();
+  const auto found = quests::find_act(destination, source, tables.names);
+  return mission2 || (found >= 0 && found != source);
 }
 
 struct CampaignEntry {
@@ -49,11 +60,11 @@ inline CampaignEntry prepare_campaign_entry(Host &next, Host *previous,
                                              const quests::ActTables &tables,
                                              const std::string &level, bool mission2,
                                              bool imported) {
-  next.campaign().set_acts(tables.names);
-  next.level().acts = tables.flow;
   CampaignEntry out;
-  if (previous && mission2) {
+  if (previous && campaign_entry_requires_transfer(*previous, tables, level, mission2)) {
     const auto destination = require_campaign_act_transfer(*previous, tables, level, imported);
+    next.campaign().set_acts(tables.names);
+    next.level().acts = tables.flow;
     next.level().act = previous->campaign().act();
     next.level().pending.request(level);
     level_flow::ChangeOptions options;
@@ -65,6 +76,8 @@ inline CampaignEntry prepare_campaign_entry(Host &next, Host *previous,
     out.changed = change.act_changed;
     out.reset = change.reset_act;
   } else {
+    next.campaign().set_acts(tables.names);
+    next.level().acts = tables.flow;
     int act = previous ? previous->campaign().act() : quests::find_act(level, -1, tables.names);
     // A hub name is shared by acts. An imported character without a carried
     // act cannot establish which one, so leave it unbound for the guard.
