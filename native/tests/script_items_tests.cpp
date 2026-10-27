@@ -702,7 +702,19 @@ int main(int argc, char **argv) {
   const std::string contract((std::istreambuf_iterator<char>(contract_in)), std::istreambuf_iterator<char>());
   check(sha_field(contract, "policy") == si::POLICY, "contract policy");
   check(sha_field(contract, "lines") == std::to_string(v.lines), "vector line count matches the contract");
-  const auto image = v.image;
+  auto image = v.image;
+  // Authored pointer lists at the documented image addresses. Unlike the
+  // existing script vectors, these exercise the runtime consumable binding.
+  for (unsigned list = 0; list < 2; ++list) {
+    const auto base = list ? 0x402730u : 0x402708u;
+    for (unsigned k = 0; k <= 9; ++k) {
+      const auto at = 0x1000000u + list * 0x1000 + k * 64;
+      const auto pointer = k < 9 ? at : 0;
+      for (unsigned b = 0; b < 4; ++b) image[base + 4 * k + b] = std::uint8_t(pointer >> (8 * b));
+      const auto name = std::string(list ? "fixture_heal_" : "fixture_mana_") + std::to_string(k);
+      for (unsigned b = 0; b <= name.size(); ++b) image[at + b] = b < name.size() ? name[b] : 0;
+    }
+  }
   auto tables = si::image_tables([&image](std::uint32_t at, std::size_t n) {
     std::vector<std::uint8_t> out(n);
     for (std::size_t k = 0; k < n; ++k) {
@@ -711,6 +723,10 @@ int main(int argc, char **argv) {
     }
     return out;
   });
+  check(tables->mana_potions.size() == 9 && tables->heal_potions.size() == 9,
+        "image loader retains all nine names in each potion list");
+  check(tables->mana_potions.at(8) == "fixture_mana_8" && tables->heal_potions.at(0) == "fixture_heal_0",
+        "potion names follow image pointers and preserve largest-first order");
   std::map<std::string, int> ran;
   for (const auto &c : v.cases) {
     ran[c.kind] += 1;

@@ -255,6 +255,19 @@ void hosts() {
     refused([&] { player::format_name("unknown%s", 1); }, "unknown format conversion refused");
     refused([&] { player::format_name("two%d%d", 1); }, "extra format conversion refused");
     refused([&] { player::format_name(std::string(64, 'x'), 1); }, "resource name host bound enforced");
+    // Non-player addressed format: no World string-range copy is involved.
+    const std::string image = "fixture_drop%d";
+    const auto reader = [&](std::uint32_t a) -> std::uint8_t {
+      if (a < 0x532688 || a > 0x532688 + image.size()) throw std::out_of_range("image address");
+      return a == 0x532688 + image.size() ? 0 : image.at(a - 0x532688);
+    };
+    check(player::format_name_from_image(reader, 0x532688, 3) == "fixture_drop3",
+          "shared formatter reads non-player format from image");
+    refused([&] { player::format_name_from_image(reader, 0x532687, 3); }, "unmapped image format refuses");
+    refused([&] { player::format_name_from_image([](auto) { return 'x'; }, 0x532688, 3); },
+            "unterminated image format still refuses at host bound");
+    refused([&] { player::format_name_from_image([](auto) { return 0; }, 0x532688, 3); },
+            "empty image format still refuses");
   }
   {
     namespace M = champions::simulation::rta::campaign_fight;

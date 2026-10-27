@@ -24,4 +24,22 @@ inline std::string format_name(const std::string &format,
     throw std::invalid_argument("player name format: result exceeds host resource-name bound");
   return out;
 }
+
+// The shared callback also serves creature/PhProp call sites outside the
+// Player literal ranges (research-combat-ctors-3 9ff6ae0,
+// docs/spec/gut-chunk.md section 4, PhProp format 0x532688).
+// Resolve their addressed formats from the selected
+// executable, rather than interpreting absent sparse World bytes as a string.
+// Reader failures propagate; syntax and the 64-byte host bound stay enforced.
+template <class ImageByteReader>
+inline std::string format_name_from_image(ImageByteReader read, std::uint32_t address,
+                                         std::optional<std::int32_t> value) {
+  std::string text;
+  for (unsigned k = 0; k < 64; ++k) {
+    const auto c = read(address + k);
+    if (!c) break;
+    text += char(c);
+  }
+  return format_name(text, value);
+}
 } // namespace champions::simulation::rta::player

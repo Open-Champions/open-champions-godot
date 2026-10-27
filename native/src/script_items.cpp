@@ -293,6 +293,18 @@ std::shared_ptr<items::Tables> image_tables(const ImageReader &read) {
     }
   };
   auto t = std::make_shared<items::Tables>();
+  // research-loot-drop 77c2f70, data-tables.md section 1 / items.md 7.5:
+  // nine names, largest first, followed by a null pointer (4-byte entries).
+  // Read through the selected image; never supply substitute descriptors.
+  for (const auto &list : {std::pair<std::uint32_t, std::vector<std::string> *>{0x402708, &t->mana_potions},
+                           {0x402730, &t->heal_potions}}) {
+    for (unsigned k = 0; k <= 9; ++k) {
+      const auto name = u32(list.first + 4 * k);
+      if (!name) break;
+      if (k == 9) throw Refused("potion name table has no terminator within documented rows");
+      list.second->push_back(str(name));
+    }
+  }
   for (int preset = 0; preset < 2; ++preset) {
     auto &rows = preset ? t->presets : t->defs;
     for (std::uint32_t a = preset ? items::A_PRESETS : items::A_DEFS; u32(a); a += 0x40) {

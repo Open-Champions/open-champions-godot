@@ -355,13 +355,9 @@ struct Fight::Impl {
     };
     base.format_name = [this](Address format, std::optional<Raw> value) -> Raw {
       if (!format_scratch) throw C::Unsupported("player name format: scratch storage not bound");
-      std::string text;
-      for (unsigned i = 0; i < 64; ++i) {
-        const auto c = read(format + i, 1);
-        if (!c) break;
-        text += char(c);
-      }
-      const auto name = player::format_name(text, value
+      if (!exe) throw C::Unsupported("player name format: executable not bound");
+      const auto name = player::format_name_from_image(
+          [this](Address a) { return exe->byte(a); }, format, value
           ? std::optional<std::int32_t>{std::int32_t(*value)} : std::optional<std::int32_t>{});
       for (std::size_t i = 0; i <= name.size(); ++i)
         world->write(format_scratch + Address(i), 1, i < name.size() ? std::uint8_t(name[i]) : 0);
