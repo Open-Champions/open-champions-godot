@@ -426,6 +426,9 @@ void Host::advance_first_level_items(const std::string &level_name,
 }
 
 void Host::start_single_player() {
+  // research-loading-readiness@9dd49046:docs/loading-readiness.md:91-95.
+  loading_offline_session_ = true;
+  variables_->memory.byte(0x402791, 0);
   // docs/script-session.md section 2.
   variables_->memory.word(0x4d8ae0, 1u);
   // Difficulty is initialized once by Host from script_items::DIFFICULTY_IMAGE.
@@ -433,6 +436,7 @@ void Host::start_single_player() {
 }
 
 void Host::receive_launch(const net_launch::Record &record0) {
+  loading_offline_session_ = false; // receiving launch is not an offline grant
   const auto got = net_launch::launch_receive(record0);
   auto &memory = variables_->memory;
   memory.word(script_items::G_DIFFICULTY, got.difficulty);

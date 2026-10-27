@@ -74,8 +74,9 @@ func _initialize() -> void:
 	expect(Display.warmup_remaining(4, true, false, 12) == 10 and
 		Display.warmup_remaining(3, false, true, 12) == 3 and
 		Display.warmup_remaining(3, false, false, 12) == 2 and
-		Display.warmup_remaining(10, true, false, 1500) == 0,
-		"terrain reset, pending equipment floor and 1500-present escape")
+		Display.warmup_remaining(10, true, false, 1500) == 10 and
+		Display.warmup_remaining(10, true, false, 1501) == 0,
+		"terrain reset, pending equipment floor and 1501-present escape")
 	var terrain := TerrainStream.new()
 	terrain.wanted = PackedInt32Array([1, 2])
 	terrain.resident = {1: []}

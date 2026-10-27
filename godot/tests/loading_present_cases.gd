@@ -2,6 +2,12 @@ extends SceneTree
 
 const Present = preload("res://real_data/loading_present.gd")
 const Host = preload("res://scenes/real_data_play.gd")
+class ReadyController extends RefCounted:
+	func loading_prerequisite_state() -> Dictionary:
+		return {"ok": true, "script_attached": true, "deferred_complete": true,
+			"equipment_pending": false, "peers_ready": true,
+			"stores_complete": true, "save_gate_ready": true}
+
 signal synthetic_post_draw
 var checks := 0
 var failures := 0
@@ -31,9 +37,14 @@ func run() -> void:
 	for attached in [false, true]:
 		host.last_level_script_attached = attached
 		var state: Dictionary = host._loading_prerequisite_state()
-		expect(not state.ok and state.script_attached == attached, "attachment observed without readiness promotion")
-		for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"]:
+		expect(not state.ok and state.script_attached == false, "attachment observed without readiness promotion")
+		for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete", "save_gate_ready"]:
 			expect(not state.has(field) and field in state.unavailable, "unknown prerequisite remains unknown: " + field)
+	host.controller = ReadyController.new()
+	host.last_level_script_attached = false
+	expect(not host._loading_prerequisite_state().ok, "failed attachment overrides controller readiness")
+	host.last_level_script_attached = true
+	expect(host._loading_prerequisite_state().ok, "complete observed prerequisites accepted")
 	host.free()
 	if DisplayServer.get_name() != "headless":
 		# Reproduce a live SceneTree with no renderer post-draw events.

@@ -107,6 +107,7 @@ struct ChampionsSessionController::PendingTerrain {
 };
 
 void ChampionsSessionController::_bind_methods() {
+  ClassDB::bind_method(D_METHOD("loading_prerequisite_state"), &ChampionsSessionController::loading_prerequisite_state);
   ADD_SIGNAL(MethodInfo("play_audio_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
   ADD_SIGNAL(MethodInfo("combat_visual_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
   ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture", "animated_fixture", "full_fixture"),
@@ -1944,6 +1945,40 @@ Dictionary ChampionsSessionController::script_command_counts() const {
     result["dialog"] = dialog_count_dict(scripts_->dialog_counts());
   return result;
 }
+Dictionary ChampionsSessionController::loading_prerequisite_state() const {
+  Dictionary out;
+  out["ok"] = false;
+  out["script_attached"] = bool(scripts_);
+  Array unavailable;
+  if (!scripts_) {
+    for (const auto *field : {"deferred_complete", "equipment_pending", "peers_ready", "stores_complete", "save_gate_ready"})
+      unavailable.push_back(field);
+    out["error"] = "Loading script host unavailable.";
+  } else {
+    const auto state = scripts_->loading_readiness(fight_level_);
+    out["deferred_complete"] = state.deferred_complete;
+    const auto field = [&](const char *name, std::optional<bool> value) {
+      if (value) out[name] = *value;
+      else unavailable.push_back(name);
+    };
+    field("equipment_pending", state.equipment_pending);
+    field("peers_ready", state.peers_ready);
+    field("stores_complete", state.stores_complete);
+    field("save_gate_ready", state.save_gate_ready);
+    String reason;
+    for (const auto &refusal : state.refusals) {
+      if (!reason.is_empty()) reason += " ";
+      reason += String(refusal.c_str());
+    }
+    out["error"] = reason;
+    out["ok"] = state.deferred_complete && state.equipment_pending.has_value() &&
+        state.peers_ready.value_or(false) && state.stores_complete.value_or(false) &&
+        state.save_gate_ready.value_or(false);
+  }
+  out["unavailable"] = unavailable;
+  return out;
+}
+
 Dictionary ChampionsSessionController::script_story_status() const {
   Dictionary out;
   out["ok"] = bool(scripts_);

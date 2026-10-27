@@ -307,6 +307,7 @@ public:
   godot::Dictionary script_command_counts() const;
   // Counts-only campaign and script boundary for a live story-level probe.
   godot::Dictionary script_story_status() const;
+  godot::Dictionary loading_prerequisite_state() const;
   godot::Dictionary script_level_request() const;
   godot::Dictionary script_mission_menu_state() const;
   godot::Dictionary script_mission_menu_tick(int64_t pad_bits, int64_t fade);

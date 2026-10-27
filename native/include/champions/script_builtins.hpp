@@ -31,6 +31,8 @@ struct Memory {
   explicit Memory(creature_hp::Memory &shared) : canonical(&shared) {}
   Backing under;
   std::vector<std::pair<std::uint32_t, std::size_t>> writes;
+  // Explicit runtime stores only, including shared World stores; never backing defaults.
+  bool published(std::uint32_t address, std::size_t size) const;
   Page &page(std::uint32_t index);
   const std::map<std::uint32_t, std::uint8_t> &nonzero_bytes() const;
   std::uint8_t read(std::uint32_t) const;

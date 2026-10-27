@@ -740,11 +740,15 @@ func _loading_prerequisite_state() -> Dictionary:
 			"unavailable": ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"],
 			"error": "Script attachment observed; deferred-call completion, equipment, peer and four-store readiness remain unavailable."}
 	var state: Dictionary = controller.call("loading_prerequisite_state")
+	state["script_attached"] = last_level_script_attached and state.get("script_attached", false)
+	if not state.script_attached:
+		state["ok"] = false
+		state["error"] = "Loading script attachment unavailable. " + str(state.get("error", ""))
 	if not state.get("ok", false): return state
-	for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"]:
+	for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete", "save_gate_ready"]:
 		if not state.get(field) is bool:
 			return {"ok": false, "error": "Loading prerequisite state incomplete: " + field}
-	if not state.deferred_complete or not state.peers_ready or not state.stores_complete:
+	if not state.deferred_complete or not state.peers_ready or not state.stores_complete or not state.save_gate_ready:
 		return {"ok": false, "error": "Deferred script, peer or store loading work is not complete."}
 	return state
 
@@ -821,12 +825,12 @@ func _apply_level_change() -> bool:
 			var readiness := _loading_terrain_state()
 			if not readiness.get("ok", false):
 				return _refuse_loaded_transition(requested, str(readiness.get("error", "Loading readiness unavailable.")))
-			if displayed >= 1500 and readiness.get("busy", false):
+			if displayed >= 1501 and readiness.get("busy", false):
 				return _refuse_loaded_transition(requested, "Terrain still busy at the documented warm-up escape.")
 			var prerequisites := _loading_prerequisite_state()
 			if not prerequisites.get("ok", false):
 				return _refuse_loaded_transition(requested, str(prerequisites.get("error", "Loading prerequisites unavailable.")))
-			if displayed >= 1500 and prerequisites.equipment_pending:
+			if displayed >= 1501 and prerequisites.equipment_pending:
 				return _refuse_loaded_transition(requested, "Equipment still pending at the documented warm-up escape.")
 			warmup = LoadingDisplay.warmup_remaining(warmup, bool(readiness.get("busy", false)), prerequisites.equipment_pending, displayed)
 	else:

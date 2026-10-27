@@ -1,6 +1,7 @@
 #include "champions/amx.hpp"
 #include "champions/core_arithmetic.hpp"
 #include "champions/core_state.hpp"
+#include "champions/combat_runtime.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/campaign_entry.hpp"
@@ -733,6 +734,9 @@ void test_receive_launch() {
   rec.mode = 1;
   rec.cm1 = 4;
   host.receive_launch(rec);
+  check(!host.loading_readiness("synthetic_destination").peers_ready &&
+            !host.loading_readiness("synthetic_destination").save_gate_ready,
+        "launch reception revokes explicit offline grant even with zero mode memory");
   auto &memory = host.variables().memory;
   check(memory.word(0x4f719c) == 0xfffffffeu && memory.u8(0x4f8408) == 30, "difficulty is signed; kill limit");
   check(memory.word(0x4f711c) == 0 && memory.word(0x4f7120) == 1 && memory.word(0x4f7124) == 0, "mode 1: B only");
@@ -1238,6 +1242,286 @@ void test_wait_then_complete() {
   check(host.counts().faults == 0, "deferred execution does not fault");
 }
 
+// Evidence: research-loading-readiness@9dd49046:docs/loading-readiness.md:
+// 11-37 (one pass),41-87 (equipment),91-113 (offline),117-152 (dispatch/save).
+// Authored AMX bodies execute in the production Host and mutate its real memory.
+void test_loading_readiness() {
+  sc::Host host;
+  check(!host.loading_readiness("synthetic_destination").peers_ready,
+        "default zero memory is not an explicit offline session");
+  auto built = build_calls({{"start", {{"addDeferedCall", {2000}}}},
+                            {"later", {{"setv", {2200, 1}}, {"addDeferedCall", {2000}}}}},
+                           {{2000, "later"}, {2200, "flag"}});
+  plant(host, built);
+  host.start_single_player();
+  check(!host.loading_readiness("synthetic_destination").deferred_complete,
+        "script attachment alone cannot complete deferred loading");
+  host.run_prestart();
+  host.run_start();
+  auto state = host.loading_readiness("synthetic_destination");
+  check(state.deferred_complete && host.queue().count == 1 && host.queue().queued == 0,
+        "one pass promotes real queue without requiring it empty");
+  check(host.variables().quest_get("flag") == 0,
+        "loading readiness observation never executes an extra deferred pass");
+  host.on_ready_tick();
+  check(host.variables().quest_get("flag") == 1 && host.queue().count == 1 &&
+            host.loading_readiness("synthetic_destination").deferred_complete,
+        "self-deferring supported body survives queue promotion");
+  check(state.peers_ready == true && state.save_gate_ready == true,
+        "explicit offline mode bypasses only peer and network-save barriers");
+  check(!state.equipment_pending && !state.stores_complete,
+        "unpublished equipment and absent executable refuse");
+  auto &m = host.variables().memory;
+  m.byte(0x402791, 1);
+  check(!host.loading_readiness("synthetic_destination").peers_ready &&
+            !host.loading_readiness("synthetic_destination").save_gate_ready,
+        "live nonzero mode revokes offline bypass");
+  m.byte(0x402791, 0);
+  m.byte(0x4f8f2c, 255);
+  check(host.loading_readiness("synthetic_destination").save_gate_ready == true,
+        "offline busy bypass is independent of card busy, not a save claim");
+  // Publish actual runtime player/record/slot fields; implicit sparse zeros refuse.
+  m.word(0x4dcec8, 0x100000);
+  m.word(0x100000 + 0x3c8, 0);
+  for (unsigned i = 0; i < 16; ++i) m.word(0x4d8af0 + 0x43f0 + 4*i, 0);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "one missing slot publication refuses");
+  m.word(0x4d8af0 + 0x43f0 + 4*16, 0);
+  check(host.loading_readiness("synthetic_destination").equipment_pending == false,
+        "all seventeen explicitly empty equipment slots require no models");
+  m.word(0x4d8af0 + 0x43f0, 0x110000);
+  m.word(0x110000, 0x120000);
+  for (unsigned category = 5; category <= 8; ++category) {
+    m.byte(0x120000 + 0x1c, category);
+    check(host.loading_readiness("synthetic_destination").equipment_pending == true,
+          "documented direct-pending category floors warmup");
+  }
+  m.byte(0x120000 + 0x1c, 1);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "unbound generic item-index/model service refuses instead of succeeding");
+  m.byte(0x120000 + 0x1c, 2);
+  m.byte(0x41b69d, 0);
+  m.word(0x44fe08, 0x10000000);
+  check(host.loading_readiness("synthetic_destination").equipment_pending == false,
+        "published category/environment skip requires no model job");
+  m.word(0x44fe08, 0);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "environment guard removal restores model refusal");
+  m.word(0x4d8af0 + 0x43f0, 0);
+  m.word(0x4d8af0 + 0x43f0 + 3*4, 0x110000);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,
+        "specialized slot selection remains unavailable");
+  m.word(0x4dcec8, 0);
+  check(host.loading_readiness("synthetic_destination").equipment_pending == false,
+        "explicit null player is skipped");
+  champions::simulation::rta::level_factory::Executable exe;
+  exe.string = [](std::uint32_t address) {
+    return std::string("synthetic_stock_") + std::to_string(address);
+  };
+  host.set_executable(exe);
+  check(host.loading_readiness("synthetic_destination").stores_complete == true,
+        "four observed nonmatches require no stock call");
+  for (const auto address : {0x554678u,0x554680u,0x554688u,0x554698u})
+    check(!host.loading_readiness(exe.string(address)).stores_complete,
+          "every matching identifier refuses unknown generation/RNG");
+  exe.string = [](std::uint32_t) -> std::string { throw std::runtime_error("unreadable"); };
+  host.set_executable(exe);
+  check(!host.loading_readiness("synthetic_destination").stores_complete,
+        "failed identifier read cannot become a nonstore bypass");
+  plant(host, built);
+  check(!host.loading_readiness("synthetic_destination").deferred_complete,
+        "script replacement invalidates the previous loading pass");
+  sc::Host refused;
+  auto unsupported = build_calls({{"start", {{"givePlayerRandom", {2000}}}}}, {{2000,"synthetic"}});
+  plant(refused, unsupported);
+  refused.run_start();
+  check(!refused.loading_readiness("synthetic_destination").deferred_complete,
+        "swallowed unsupported commands cannot certify the loading pass");
+  sc::Host absent;
+  absent.run_start();
+  check(!absent.loading_readiness("synthetic_destination").deferred_complete,
+        "faulted absent machine cannot certify loading");
+}
+
+// d6f035fa:docs/loading-arrival-r2.md:11-43: authored scripts run the production
+// VM/queue; discriminate per-entry errors, promotion and native fault stops.
+void test_loading_r2_deferred() {
+  for (const auto &body : std::vector<std::vector<Call>>{
+         {{".HALT",{4}}}, {{".HALT",{27}}}, {{".HALT",{-1}}},
+         {{".CONST.pri",{2}}, {".BOUNDS",{1}}},
+         {{".CONST.pri",{1}}, {".ZERO.alt",{}}, {".SDIV",{}}}}) {
+    sc::Host host;
+    auto b=build_calls({{"start",{}},{"bad",body},
+                       {"after",{{"setv",{2200,7}},{"addDeferedCall",{2000}}}}},
+                      {{2000,"after"},{2200,"r2_flag"}});
+    plant(host,b);
+    host.variables().queue_deferred("bad");
+    host.variables().queue_deferred("missing_authored_entry");
+    host.variables().queue_deferred("after");
+    host.variables().run_deferred(); // promote fixture queue, execute nothing
+    auto before=host.queue().flip;
+    host.run_start();
+    check(host.variables().quest_get("r2_flag")==7,
+          "VM error and missing entry continue to following actual side effect");
+    check(host.loading_readiness("synthetic_destination").deferred_complete &&
+          host.queue().flip==before+1 && host.queue().count==1 && host.queue().queued==0,
+          "returned deferred pass promotes once with nonempty front after VM error");
+    check(!host.faulted(),"VM-reported deferred error is not a native fault");
+  }
+  sc::Host host;
+  auto b=build_calls({{"start",{}},{"bad",{{".SYSREQ.C",{999}}}},
+                     {"after",{{"setv",{2200,7}}}}},{{2200,"r2_flag"}});
+  plant(host,b);
+  host.variables().queue_deferred("bad"); host.variables().queue_deferred("after");
+  host.variables().run_deferred();
+  auto before=host.queue(); host.run_start();
+  check(host.faulted() && !host.loading_readiness("synthetic_destination").deferred_complete &&
+        host.variables().quest_get("r2_flag")==0 && host.queue().count==before.count &&
+        host.queue().flip==before.flip,
+        "unbound native stops following entry and promotion in production Host");
+}
+
+void test_loading_r2_equipment() {
+  {
+    auto authority=std::make_shared<champions::simulation::rta::WorldAuthority>();
+    sc::Host shared(authority);
+    champions::simulation::rta::combat_runtime::World world(authority,{});
+    const auto player=world.spawn_player(0,{});
+    auto &runtime=shared.equipment_loading();
+    check(runtime.published(player+0x3c8,4) && runtime.published(0x4dcec8,4),
+          "actual combat World player publication is visible through Host memory");
+    runtime.publish_player(player,0);
+    check(authority->memory.load(0x4dcec8,4)==player,
+          "publication slice updates actual shared runtime record");
+    check(!runtime.published(0x200000,4),"sparse shared default is never publication");
+  }
+  // All values below are authored fixture locations/content. Original fields:
+  // d6f035fa:docs/loading-arrival-r2.md:58-144 (citations grouped per operation).
+  sc::Host host; auto &m=host.variables().memory; auto &e=host.equipment_loading();
+  auto refuses=[&](auto call) {try {call();return false;}catch(const a::HostFault &){return true;}};
+  for(unsigned index=0;index<2;++index) {
+    const auto p=0x100000u+index*0x1000, r=0x4d8af0u+index*0x4c30;
+    m.byte(p+0x462,1); m.word(r+0x43d8,0xabc);
+    e.publish_player(p,index);
+    check(m.word(p+0x3c8)==index && m.word(r+0x43d8)==0xabc,
+          "display-only writes index without publishing record pointer");
+    m.byte(p+0x462,0); e.publish_player(p,index);
+    check(m.word(r+0x43d8)==p,"actual player pointer publishes into correct record");
+    for(auto slot:{3u,4u,9u,10u,11u,12u,13u}) {
+      e.publish_slot(index,slot,0x110000);
+      check(m.word(r+0x43f0+4*slot)==0x110000,"selected equip slot publishes actual item");
+    }
+  }
+  check(refuses([&]{e.publish_player(0x200000,0);}),"missing display-only state refuses publication");
+  const std::vector<unsigned> slots={3,4,9,10,11,12,13};
+  const std::vector<unsigned> bases={0x866648,0x8659e8,0x865ca8,0x865b48,0x865e08,0x865f68,0x8660c8};
+  for(unsigned i=0;i<slots.size();++i)
+    for(unsigned index=0;index<2;++index)
+      check(e.cache(slots[i],index)==bases[i]+index*0x58,"all seven addressed cache routes and both indices");
+  check(!e.cache(0,0) && !e.cache(4,2),"generic and unexecuted cache domains refuse");
+  m.word(0x4d8ae0,1); m.byte(0x506040,0);
+  check(e.header()==0x535c08,"single-player header with zero override");
+  m.byte(0x506040,1); check(e.header()==0x535bf8,"header override is independent of network mode");
+  m.byte(0x506040,0); m.word(0x4d8ae0,2);
+  check(e.header()==0x535bf8,"two-player header selection");
+  // 101-128: submission and polling write actual memory, never readiness flags.
+  // Original scanner's young/valid cache controls, exercised on all routes.
+  for(unsigned i=0;i<slots.size();++i) for(unsigned index=0;index<2;++index) {
+    auto cache=*e.cache(slots[i],index);
+    m.word(cache,0x160000);m.word(cache+0x4c,0x80);
+    m.store(cache+10,2,0);m.word(0x44fdd0,103);
+    if (i==0 && index==0)
+      check(refuses([&]{e.lookup(cache,"authored_route");}),"absent request-frame publication refuses");
+    m.word(0x4ef3f0,100);
+    auto pair=e.lookup(cache,"authored_route");
+    check(!pair.ready && !pair.base && !pair.model,"young specialized route remains pending without I/O fabrication");
+    m.string(cache+12,"authored_route");m.store(cache+10,2,1);
+    check(refuses([&]{e.lookup(cache,"authored_route");}),"valid route without usable resource validation refuses");
+    m.word(0x160000,0x1234);m.word(0x160080,0x5678);
+    e.valid_resource=[&](unsigned b,unsigned model){return m.word(b)==0x1234 && m.word(model)==0x5678;};
+    pair=e.lookup(cache,"authored_route");
+    check(pair.ready && pair.base==0x160000 && pair.model==0x160080,"specialized route publishes actual validated pointer pair");
+    e.valid_resource={};
+  }
+  m.word(0x44fdd0,104);
+  auto c=bases[1]; const unsigned metadata=0x140000, base=0x150000;
+  m.word(c,base); m.store(c+8,2,0); m.store(c+10,2,0);
+  m.word(metadata+4,2); m.store(metadata+10,2,1); m.word(metadata+12,4);
+  m.byte(c+0x54,0); m.byte(c+0x56,0);
+  check(refuses([&]{e.submit(c,metadata,100,true,false);}) && m.u16(c+8)==0,
+        "unbound actual transfer refuses without fabricated submission");
+  for(unsigned route=0;route<3;++route) {
+    m.store(c+8,2,0);m.byte(c+0x54,route==0);m.byte(c+0x56,route==1);
+    unsigned submissions=0;
+    e.transfer=[&](const auto &read) {
+      ++submissions;
+      check(read.source==(route==0?0x535d10u:route==1?0x535d20u:0x535d30u) &&
+            read.destination==base && read.completion==0x4ef3e8 && read.offset==0x1000 && read.size==0x1800,
+            "specialized source and metadata offset/size are exact");
+    };
+    e.submit(c,metadata,100,false,false); e.submit(c,metadata,100,true,true);
+    check(submissions==0 && m.u16(c+8)==0,"young cache and busy disc do not submit");
+    e.submit(c,metadata,100,true,false); e.submit(c,metadata,100,true,false);
+    check(submissions==1 && m.word(0x7c25b0)==1 && m.word(0x7c25b4)==102 &&
+          m.word(0x7c25b8)==3 && m.word(0x7c25bc)==base && m.read(0x4ef3e8)==0 &&
+          m.word(c+0x4c)==0x1000 && m.read(0x41bf90)==1,
+          "single submission retains exact sector request and pending completion");
+  }
+  m.byte(0x41bf91,0); e.poll(true,false);
+  check(m.read(0x4ef3e8)==0,"busy ordinary read remains pending");
+  check(refuses([&]{e.poll(false,true);}),"missing retry service refuses");
+  unsigned retries=0;e.retry=[&]{++retries;};e.poll(false,true);
+  check(retries==1 && m.read(0x4ef3e8)==0,"retry cannot certify completion");
+  e.poll(false,false);check(m.read(0x4ef3e8)==1 && m.read(0x41bf90)==0,"idle no-error poll writes completion and clears active");
+  m.byte(0x41bf90,1);m.byte(0x41bf91,1);m.byte(0x4ef3e8,0);
+  check(refuses([&]{e.poll(false,false);}),"streaming requires observed remaining bytes");
+  e.poll(false,false,1);check(!m.read(0x4ef3e8),"streaming nonzero remaining stays pending");
+  e.poll(false,false,0);check(m.read(0x4ef3e8)==1,"streaming zero remaining writes completion");
+  // 130-138: completing lookup returns zero outputs; next match returns pair.
+  m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_model");m.byte(0x4ef3e8,0);
+  auto pair=e.lookup(c,"authored_model");
+  check(!pair.ready && !pair.model && !pair.base,"pending cache has zero pointer outputs");
+  m.byte(0x4ef3e8,1);
+  check(refuses([&]{e.lookup(c,"authored_model");}) && m.u16(c+10)==0 && m.word(0x4ef3ec)==c,
+        "I/O completion without verified fixups refuses before valid/identity publication");
+  std::vector<unsigned> fixups;
+  e.fixup_base=[&](unsigned at){fixups.push_back(at);m.word(at,0x1234);};
+  e.fixup_model=[&](unsigned at){fixups.push_back(at);m.word(at,0x5678);};
+  e.valid_resource=[&](unsigned b,unsigned model){return m.word(b)==0x1234 && m.word(model)==0x5678;};
+  m.string(c+12,"authored_previous");
+  for (auto current : {100u,103u}) {
+    m.word(0x44fdd0,current);
+    pair=e.lookup(c,"authored_model");
+    check(!pair.ready && !pair.base && !pair.model && fixups.empty() &&
+          m.u16(c+8)==1 && m.read(0x4ef3e8)==1 && m.u16(c+10)==0 &&
+          m.cstr(c+12)=="authored_previous" && m.word(0x4ef3ec)==c,
+          "completed submitted request at elapsed zero/three cannot fix up or publish");
+  }
+  m.word(0x44fdd0,99);
+  check(refuses([&]{e.lookup(c,"authored_model");}) && fixups.empty() &&
+        m.u16(c+10)==0 && m.word(0x4ef3ec)==c,
+        "unestablished backwards/wrapped frame domain refuses before publication");
+  m.word(0x44fdd0,104);
+  pair=e.lookup(c,"authored_model");
+  check(!pair.ready && !pair.base && !pair.model && fixups==std::vector<unsigned>{base,base+0x1000} &&
+        m.u16(c+10)==1 && m.cstr(c+12)=="authored_model" && m.word(0x4ef3ec)==0,
+        "ordered authored transformations publish identity/valid state with zero outputs");
+  pair=e.lookup(c,"authored_model");
+  check(pair.ready && pair.base==base && pair.model==base+0x1000,"next matching lookup publishes both pointers");
+  m.word(base,0);check(refuses([&]{e.lookup(c,"authored_model");}),"stale valid bit and pointers do not certify resource data");
+  // Real Host scanner uses same cache and memory; unbound formatter still refuses.
+  host.start_single_player();
+  m.word(0x4dcec8,0x100000);m.word(0x100000+0x3c8,0);
+  for(unsigned i=0;i<17;++i)e.publish_slot(0,i,0);
+  e.publish_slot(0,4,0x110000);m.word(0x110000,0x120000);
+  m.byte(0x120000+0x1c,1);m.word(0x120000+0x30,1);m.word(0x4f85b0,1);
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,"real scanner refuses unknown formatter");
+  e.format=[](unsigned){return std::string("authored_model.ext");};m.word(base,0x1234);
+  check(host.loading_readiness("synthetic_destination").equipment_pending==false,"real scanner consumes validated matching model pair");
+  e.valid_resource={};
+  check(!host.loading_readiness("synthetic_destination").equipment_pending,"real scanner refuses unverified resource transformations");
+}
+
 void test_prestart_before_objects() {
   auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
   sc::Host host;
@@ -1538,6 +1822,9 @@ int main(int argc, char **argv) {
   mission2_host::run();
   test_refusals();
   test_wait_then_complete();
+  test_loading_readiness();
+  test_loading_r2_deferred();
+  test_loading_r2_equipment();
   test_prestart_before_objects();
   test_stub_objects();
   test_refused_result_stops_entry();
