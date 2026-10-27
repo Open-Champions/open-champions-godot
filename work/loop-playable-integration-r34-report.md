@@ -1,4 +1,4 @@
-STATUS: MORE — pickup restored 10→11 in both clean-tree journeys; matrix/trace PASS; full CTest pending; broader journey remains refused.
+STATUS: MORE — pickup repair PASS (10→11 headless/rendered); build, focused tests, CTest 253/253, Godot 54/54 and unchanged FULL_TRACE PASS; broader journey blocked by retained refusals.
 
 # Playable integration wave 34 — 2026-10-26
 
@@ -154,3 +154,9 @@ Observed root cause: missing runtime potion-pointer binding prevented consumable
 Strict Godot dev matrix **54/54 PASS**, including six graphical cases (`pickup-matrix/results.json`). Full combat **2,645 checks / 0 failures**. FULL_SAVE_LOAD **300/300**, identical presentation hashes. FULL_TRACE **unchanged 36,402 bytes / 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659**. No baseline changed.
 
 Full CTest `-j 3` remains running and is not yet a PASS. Remaining broader journey blockers retain the existing unsupported script-trigger stop, ordinary departure/checkpoint refusal for dead Creature state, and unsuccessful saved-level reload/death probe. These are separate from the now-restored pickup gate; no full-campaign acceptance is claimed.
+
+## Final native gate and disposition (2026-10-27)
+
+Full `ctest --test-dir build/native --output-on-failure -j 3` **253/253 PASS**, **797.21 s**, exit 0, no timeouts and therefore no isolated timeout rerun required (`pickup-ctest.out`). This run tests the repaired runtime from `51d73589`; subsequent commits contain report updates only. Final diff check PASS; unchanged journey, wrapper and baselines. No push, PR, branch creation, sibling worktree edits, private-data commit or process termination.
+
+Pickup binding assignment is implemented and verified, including required **10→11** in both variants. Full journey still ends refused at **80 headless / 81 rendered** steps, exit 1, saved_level_reloaded=false; existing trigger/departure/death-save boundaries remain explicit blockers to broader campaign acceptance. No missing research was filled with invented contents. No additional runtime changes were made after the verified repair.
