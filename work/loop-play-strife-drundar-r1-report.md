@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — implementation checkpoint; pending full CTest.
+STATUS: IN PROGRESS — bounded implementation verified; full CTest and rendered journey running.
 
 WIP preserved in d8d26769; verified wave 33 (66e52972) merged in e51783d0.
 Only the assigned worktree changed. No push or PR.
@@ -126,3 +126,23 @@ wave-33 loading readiness refusals are retained unchanged.
   Initial full-combat invocation incorrectly requested captures headlessly;
   the corrected rendered run above passes. Preliminary failures are not
   counted as passes. Raw logs/captures remain ignored in work/mission1/.
+
+## Additional fresh results
+
+- Native Release and extension/library Release builds use arm64 on this
+  machine; no x86_64 or Windows execution is claimed. Main extension and
+  level-texture builds passed at -j 4.
+- Headless full-combat without captures: 2,641 checks / 0 failures,
+  FULL_SAVE_LOAD 300/300 with identical continued/uninterrupted presentation
+  hashes and the unchanged trace above. The rendered full-combat run drew
+  299/300 frames, so its presentation hashes were correctly not compared;
+  its deterministic trace still matched. No comparison gate was weakened.
+- Fresh full journey headless: 67 steps, result written, six refusal kinds;
+  final blocked_death_reload. This matches wave 33's 67-step boundary,
+  preserving missing deferred/equipment/peer/four-store readiness rather
+  than promoting script attachment to a successful transition. The 22/22
+  combat-move checks pass. Mission completion/hub return remains unverified.
+- Fresh rendered Mission 1 log: mission1-rendered-verified.log, two
+  destinations, 57 checks / 0 failures. Corrected headless mission log:
+  mission1-headless.log, 53 checks / 0 failures. Both have an inherited
+  ObjectDB exit-leak warning but no SCRIPT ERROR or ERROR envelope.
