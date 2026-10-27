@@ -1,4 +1,4 @@
-STATUS: PENDING — M2H-1 implemented; Release and focused checks pass; pending full CTest.
+STATUS: PENDING — M2H-1 implemented; full CTest passes; Godot and journey gates running.
 
 Work stays on the assigned mission-2 branch. The current integration tip
 `e6ed82e6` was merged locally to reuse its audited campaign lifetime helpers
@@ -30,3 +30,9 @@ Detailed logs remain ignored under work/mission2-r2.
 Continuation checkpoint: implementation review confirms one shared lifetime helper
 implementation and all requested regression cases. Pending full CTest rerun
 with `ctest --test-dir build/native --output-on-failure -j 3` before final gates.
+
+Continuation native verification: Release rebuild PASS (2.73 s), focused CTest
+7/7 PASS (17.16 s), direct actor regression 512 checks PASS. Full CTest
+`-j 3`: 252/252 PASS in 1137.13 s (runner wall 1137.15 s); no timeout,
+no isolated retry required. Existing test limits unchanged. Initial host load
+was high; no unrelated process was stopped or modified.
