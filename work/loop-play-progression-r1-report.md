@@ -112,6 +112,9 @@ paths are retained; there is no guessed fallback or auto-unlock.
    Unknown. Need live/dead Creature, item/chest, trigger/gate and portal effects
    with the world present. Those existing refusals block the ordinary journey's
    departure and successful saved-level reload; no save fixture was weakened.
+   The native Flow reset is not proof of controller-wide jump-gate, trigger or
+   per-level-directory cache reconstruction. Those paths were not changed or
+   newly accepted as original act-reset parity by this task.
 
 No research job was launched: this implementation sub-agent records the exact
 handoff for its owner. Research files were read only. No new decoded names,
@@ -127,7 +130,10 @@ CTest invocation. No baseline, fixture, harness or pickup assertion was changed.
   completed, then a sequential verified build and focused test passed. This is
   not reported as two independent validations. Logs under ignored
   `work/progression/`; initial log: `build-initial.log`.
-- Full CTest `-j 3`: PENDING. Exact count/time and isolated timeout reruns follow.
+- Full CTest `-j 3`: **253/253 PASS**, **762.77 s**, exit **0**.
+  No timeouts, so no isolated timeout rerun was required. `player-exact` passed
+  in **62.25 s**, `session-facing-exact` in **152.58 s**, `netplay` in
+  **100.72 s**. Exact aggregate retained in `work/progression/ctest.log`.
 - Three development GDExtensions: Release / template_debug built at `-j 4`.
 - Strict Godot dev matrix: **54/54 PASS**, **149.33 s** summed case durations,
   exit 0, including six graphical cases. Errors are gated by the strict log
@@ -180,3 +186,14 @@ python3 tools/godot_matrix.py matrix --godot <local-engine> --captures --out wor
 python3 tools/run_loop_playthrough.py --godot <local-engine> --game-folder <read-only-input> --out work/progression/journey
 ```
 
+
+## Final disposition
+
+Validated runtime/test tip: `c948a935`; later commits update this report only.
+All requested technical gates were executed. Native and Godot synthetic gates
+pass; the full journeys retain their explicit non-green 80/81-step boundaries.
+This is a bounded campaign-act progression repair, not a completed playable
+campaign, next-mission unlock graph or successful real-level save/load claim.
+Missing research and remaining implementation are listed separately above.
+Final `git diff --check` passed. No baseline or pickup check changed; no private
+content committed, push/PR, sibling edit or process-name termination occurred.
