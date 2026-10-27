@@ -13,6 +13,7 @@ import json
 import pathlib
 import subprocess
 import sys
+from godot_log import error_lines
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -70,6 +71,7 @@ def main() -> int:
             code = 124
         report = dest / "result.json"
         results[name] = {"exit_code": code,
+                         "log_errors": len(error_lines((dest / "godot.log").read_text(encoding="utf-8", errors="replace"))),
                          "result_written": report.is_file(), "pickup_verified": False}
         if report.is_file():
             data = json.loads(report.read_text(encoding="utf-8"))
@@ -87,7 +89,7 @@ def main() -> int:
     (output / "run-summary.json").write_text(json.dumps(summary, indent=2) + "\n",
                                                encoding="utf-8")
     print(f"disc files: {before} before, {after} after")
-    return int(before != after or any(row["exit_code"] != 0 or not row["result_written"]
+    return int(before != after or any(row["exit_code"] != 0 or row["log_errors"] != 0 or not row["result_written"]
                                       or not row["pickup_verified"]
                                       for row in results.values()))
 

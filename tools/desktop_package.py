@@ -23,6 +23,7 @@ import tempfile
 import urllib.request
 import zipfile
 from windows_pack import verify_windows_pack
+from godot_log import require_clean_log
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = '4.5.2.stable'
@@ -130,7 +131,7 @@ def install_templates(archive, target, destination=None):
 
 
 def run_logged(command, log, timeout, cwd=None):
-    """No shell; nonzero exit and timeout are both hard failures."""
+    """No shell; nonzero exit, timeout and Godot log errors are hard failures."""
     try:
         result = subprocess.run([str(value) for value in command], cwd=cwd,
                                 capture_output=True, text=True, errors='replace', timeout=timeout, check=False)
@@ -141,6 +142,7 @@ def run_logged(command, log, timeout, cwd=None):
         raise ValueError(f'command timed out after {timeout}s; see {log}') from error
     output = result.stdout + result.stderr
     Path(log).write_text(output, encoding='utf-8')
+    require_clean_log(output, log)
     if result.returncode != 0:
         print(output[-16000:], file=sys.stderr)
     require(result.returncode == 0, f'command exited {result.returncode}; see {log}')

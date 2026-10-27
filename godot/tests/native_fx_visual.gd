@@ -5,7 +5,16 @@ extends SceneTree
 # hides what lies behind it on the left (depth from each vertex's clip w).
 const FIXTURE := '[{"site":1,"call":"particleDef_ctor","def":256,"complete":true,"size_start":6,"size_end":6,"gravity":0,"start_rgba":[128,32,16,128],"end_rgba":[128,32,16,128],"life_class":2,"kind":0,"tile":0,"callback":0},{"site":2,"call":"particleDef_ctor","def":257,"complete":true,"size_start":6,"size_end":6,"gravity":0,"start_rgba":[16,32,128,128],"end_rgba":[16,32,128,128],"life_class":2,"kind":1,"tile":0,"callback":0},{"site":3,"call":"particleDef_ctor","def":258,"complete":true,"size_start":30,"size_end":30,"gravity":0,"start_rgba":[255,255,64,128],"end_rgba":[255,255,64,128],"life_class":2,"kind":2,"tile":0,"callback":0}]'
 
+var output := ""
+
 func _initialize() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--capture-dir="):
+			output = arg.trim_prefix("--capture-dir=")
+	if DisplayServer.get_name() == "headless" or output.is_empty():
+		push_error("A graphical renderer and explicit --capture-dir are required.")
+		quit(2)
+		return
 	call_deferred("_run")
 
 func _run() -> void:
@@ -61,6 +70,7 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 	var image := viewport.get_texture().get_image()
-	var path := ProjectSettings.globalize_path("res://../work/native-fx-2-visual.png")
-	print("native FX visual capture: ", image.save_png(path), " ", path)
-	quit(0)
+	var path := output.path_join("native-fx-2-visual.png")
+	var saved := image.save_png(path)
+	print("native FX visual capture: ", saved, " ", path)
+	quit(0 if saved == OK else 1)

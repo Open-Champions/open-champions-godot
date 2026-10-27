@@ -66,6 +66,10 @@ separate validation step.
 The standalone build remains available with `cmake -S native -B build/native` and
 has no Godot dependency. Its seven CTest cases still exercise the original core.
 
+Use the [tracked development matrix and log gate](GODOT_MATRIX.md) for smoke and
+capture checks. Successful exit and PASS output are insufficient if either
+output stream contains a Godot script, engine or API error.
+
 ## Inputs and limits
 
 The browser reads files without extracting or modifying them. Keep originals
