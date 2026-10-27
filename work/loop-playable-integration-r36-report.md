@@ -47,3 +47,5 @@ Same wave-35 drivers/method with wave-36 output directories; native Release and 
 - Universal GDExtension and level-texture debug/release libraries **PASS**, 8/8 configure/build exits 0, arm64;x86_64, Release, parallelism 4. Evidence `build-results.json`, `extension-builds.out`.
 
 - Private sweep `w36-on`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w36-on-s{0,28,56,84}.{json,log}`.
+
+- Private sweep `w36-off`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w36-off-s{0,28,56,84}.{json,log}`.
