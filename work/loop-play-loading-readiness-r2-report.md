@@ -1,12 +1,13 @@
-STATUS: MORE
+STATUS: MORE — requested bounded implementation and gate runs complete; live arrival remains refused.
 
-Round 2 implementation in progress. Assigned branch verified clean at 3278e618.
+Assigned branch verified clean at 3278e618 before work.
 Research pin: research-loading-readiness@d6f035fab6bb5cbe66f5c72a55a1a6aef05ee8df,
 `docs/loading-arrival-r2.md`; research and round-1 audits PASS.
 
-Pending full CTest: Release build and full `ctest -j 3` have not run for round 2.
-Godot matrix, unchanged FULL_TRACE and both journey comparisons pending.
-No completion or playable-arrival claim.
+Full CTest: 251/251 PASS, 718.00 s, no timeouts. Godot: 62/63 public cases clean
+(one inherited UI diagnostic), private disc case separately PASS. Journeys remain
+67 headless / 68 rendered, exit 1 each; FULL_TRACE unchanged. Historical pending
+notes below retain the committed pre-gate checkpoint chronology.
 
 Implementation checkpoint: production deferred queue already has documented
 VM-error continuation; regression executes HALT, bounds/division errors, missing
@@ -119,3 +120,72 @@ Arrival step **37** has attached script, two loading frames, zero audio-handoff
 errors, `loading_ready=false`, with the same deferred/equipment refusal. Final
 step 67 is `player_death: blocked_death_reload`, 239 native clip steps, no respawn.
 Six refusal kinds, zero captures. Rendered journey/full CTest still pending.
+
+### Journey completion and visual boundary
+
+Rendered journey: **68 steps / exit 1**, **43 captures**, six refusal kinds,
+matching round 1 exactly. Arrival step **38** refuses after two loading frames;
+script attached, `loading_ready=false`, zero audio-handoff errors. Headless arrival
+is step 37 with the identical diagnostic:
+
+`Deferred loading pass absent, faulted or refused commands. Equipment readiness unavailable: runtime player/slot/model publication or specialized I/O unbound.`
+
+Both finish at `player_death: blocked_death_reload` (headless 67, rendered 68),
+239 native clip steps, respawn false. Both result JSON files were written; neither
+journey timed out. Unchanged wrapper exits 1 because both variants exit 1.
+No additional peer/store/save barrier appeared. Both logs have zero SCRIPT ERROR
+or engine ERROR diagnostics, with one ObjectDB exit-leak warning per variant.
+Input file counts: **994 before / 994 after**, counts-only, not a content hash.
+Evidence: `work/loading-r2-playthrough/run-summary.json`, both `result.json` files,
+logs and `work/loading-r2-summary.json`.
+
+Inspected actual rendered loading and destination captures. The loading-labelled
+capture shows the preceding live view. The destination capture shows a stopped
+session and disabled Resume. No playable handoff, live-model readiness or loading
+art parity is claimed. Images remain ignored/private and are not committed.
+Full combat fixture: **2,641 checks / zero failures**, separate from journey
+acceptance (`work/loading-r2-matrix/playable_wave_smoke_full_combat.log:21`).
+
+## Final gate results and disposition
+
+2026-10-27 — assigned worktree/branch only. Requested implementation and all gate
+runs completed. `STATUS: MORE` denotes unresolved live arrival/resource authority,
+not an unfinished test job. No push, PR, process-name termination, research write,
+main research checkout access or playable-integration write was performed.
+No memory update was requested or performed.
+
+- Release: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` PASS. Release extension configure/build PASS
+  (`cmake -S gdextension -B build/godot-extension -DCMAKE_BUILD_TYPE=Release`,
+  `cmake --build build/godot-extension -j 4`). Final native/extension binaries
+  include the committed implementation. Evidence: `work/loading-r2-configure.log`,
+  `work/loading-r2-build.log`, `work/loading-r2-extension-configure.log`,
+  `work/loading-r2-extension-build.log`.
+- Full CTest: `ctest --test-dir build/native --output-on-failure -j 3`:
+  **251/251 PASS, 718.00 seconds**, no failures/timeouts, no isolated timeout rerun
+  necessary. Evidence: `work/loading-r2-ctest.log:501-511`. Pending-full-CTest note
+  was committed as `00107865` before this run, and retained at `5334d44e`.
+- Godot strict public matrix: **62/63 clean** after explicitly recorded setup
+  reruns and three additional rendered cases; inherited UI argument-count ERROR
+  remains a failure. Private loading-disc gate separately PASS. Initial aggregate
+  **58/61** is preserved, not overwritten or represented as an all-pass result.
+- Full combat **2,641 checks / zero failures**; save/load **300/300**.
+- FULL_TRACE **36,402 bytes**, SHA-256
+  **`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**,
+  exact round-1 baseline; no explanation/change needed.
+- Required unchanged playthrough wrapper ran headless and rendered to written
+  results, neither timeout: **67 / 68 steps**, **exit 1 / 1**, **0 / 43 captures**,
+  six refusal kinds each. Arrival refuses at **37 / 38** with unchanged deferred
+  and equipment diagnostics; both finish **player_death: blocked_death_reload**.
+  The new function-level contracts do not establish the missing actual commands
+  or resource transformations, so no successful arrival is inferred.
+- `git diff 3278e618..HEAD --check` and final worktree diff check PASS.
+  Tracked additions contain authored code/fixtures and this report only; no game
+  payloads, private identifiers, decoded content, images, raw logs or private paths.
+  No existing assertions, tests, fixtures, baselines or diagnostic allowlists were
+  weakened. Raw gate evidence remains ignored under `work/loading-r2-*`.
+
+Local checkpoints: `00107865` pending gate note; `5334d44e` implementation and
+native regressions; `cc54eba1` matrix/trace/headless evidence. This final report
+commit records the completed aggregate/journey results. No playable campaign or
+real transformed model acceptance is claimed.
