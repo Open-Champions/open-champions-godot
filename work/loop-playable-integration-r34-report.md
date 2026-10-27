@@ -1,4 +1,4 @@
-STATUS: MORE — WAVE 34 IN PROGRESS (2026-10-26). Eight audited tips merged in order; gates pending.
+STATUS: MORE — eight audited branches integrated; completed gates green; journey BLOCKED by missing loot/pickup (headless 80 steps, inventory 10→10); rendered confirmation running.
 
 # Playable integration wave 34 — 2026-10-26
 
@@ -35,7 +35,7 @@ Native Release configure/build PASS (`cmake -S native -B build/native -DCMAKE_BU
 
 ## Full scripted journey
 
-Pending headless/rendered comparison with wave 33's 67/68 steps. Pickup must show 10→11; script-stop refusals remain explicit.
+Wave-33 baseline: 67 headless / 68 rendered steps, exit 1 at bounded readiness/death-reload refusals. Fresh wave-34 validation is blocked by lost pickup; see the final journey recovery record below. No campaign acceptance is claimed.
 
 ## Exact command families
 
@@ -90,3 +90,9 @@ Final full CTest on runtime `0e4c886a` is **PENDING**, not started at this commi
 - Private sweep `w34-off`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w34-off-s{0,28,56,84}.{json,log}`.
 
 Final full CTest (recorded by the orchestrator, 2026-10-26 ~20:55, after the job's provider stopped on a 401): `ctest --test-dir build/native --output-on-failure -j 3` on the post-fix candidate — **253/253 passed, 814.37 s** (log `work/playable-wave34/ctest-final.out`). This supersedes the first run's 250/253. The journey rerun and the audit of the integration-made fixes (30d78414..tip) are still pending. Note: an uncommitted 24-line edit to `godot/tests/loop_playthrough.gd` from the stopped job remains in the worktree for the next job to review; it is not part of this record.
+
+## Final journey recovery — 2026-10-27 (checkpoint)
+
+Reviewed the stopped job’s 24-line pursuit edit and `playthrough-followup/` first. Previous follow-up timed out headless (124) and ended rendered with signal 15, neither writing a result. Fresh wrapper execution uses `playthrough-final/`, with both variants loading the pursuit candidate before its rejection. Headless completed 80 steps / exit 1, no log errors, no captures; last step `player_death: refused`, saved_level_reloaded=false. Pickup failed: inventory 10→10, no drop, no walking/pickup; eight retry kills and nine diagnostic placements. Combat inputs passed 22/22.
+
+The pursuit candidate was discarded with `git checkout -- godot/tests/loop_playthrough.gd`: movement telemetry showed retry 8 stuck about 1,440 units away with unchanged target HP through the 3,000-cycle bound, and the final player position reached the lower Z bound. It is not a demonstrated integration fix and must not be committed as one. No checks, fixtures, combat values, RNG or production refusals changed. Fresh results describe the rejected candidate, not a green verification of the restored script. Rendered confirmation and final diagnosis follow in the next record.
