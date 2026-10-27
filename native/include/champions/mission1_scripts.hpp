@@ -1,5 +1,6 @@
 #pragma once
-// Addressed, static script contracts, research-strife-drundar 0d42d46.
+// Addressed, static script contracts, research-strife-drundar 0d42d46;
+// door predicate: 3216e7b0 tools/difftest_strife_drundar.py:399-402.
 // Identifiers live only in the selected script/object images. No constructor,
 // continuous script task, interaction or reachability is established here.
 #include "champions/amx.hpp"

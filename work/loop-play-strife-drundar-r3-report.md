@@ -36,3 +36,11 @@ with the persisted signed byte. Production quest_set clamps storage; the test
 now independently checks that storage preserves the researched zero/nonzero
 class and remains unchanged across the diagnostic. No persistence behavior or
 predicate expectation changed; all five input cases retained.
+
+Release native configure/build PASS (-j 4), extension Release build PASS (-j 4).
+Focused mission1/script-command selection: 4/4 PASS, 0.32 seconds; Mission 1
+fixture 127 checks. Initial full CTest invocation inadvertently overlapped the
+rebuild and executed the stale 122-check binary (one already-fixed assertion
+failure). It was interrupted by exact PID after verifying its cwd, preserved
+as work/mission1/r3/ctest-stale-interrupted.log, then restarted after the
+completed build/focused pass. No other worktree's process was interrupted.
