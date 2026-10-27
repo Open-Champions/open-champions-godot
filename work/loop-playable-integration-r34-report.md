@@ -55,3 +55,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - Initial strict matrix caught one composed HUD fixture error: merged level-up catalogue now loads green frames, while inherited missing-art test assumed they were absent. The negative test now explicitly removes all eleven green frames and restores them for the following positive assertions. All existing assertions retained; focused HUD smoke passes with no diagnostics (`hud-fixture-fixed.log`). Initial matrix result remains separate; final retry pending.
 
 - Full synthetic combat PASS: **2,645 checks, 0 failures** (four additional HUD assertions from audited native-hud work; wave 33 had 2,641). Strict log gate accepts the fresh output. `matrix/playable_wave_smoke_full_combat.log`.
+
+- FULL_SAVE_LOAD PASS: **300/300 presentations**, continued/uninterrupted presentation hashes identical (`cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`). Same fresh full-combat log.
