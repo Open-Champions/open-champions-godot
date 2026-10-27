@@ -8,7 +8,7 @@ extends SceneTree
 # draws the box each frame. Prints and writes aggregate counts only; never
 # part of CI. Arguments:
 #   --game-folder=DIR --cache=DIR [--summary=FILE] [--capture-dir=DIR]
-#   [--from=I] [--to=J] [--last-choice]
+#   [--from=I] [--to=J] [--last-choice] [--voice-gate-probe]
 var args := {}
 var scene: Control
 var counts := {}
@@ -47,10 +47,14 @@ func frame_counts() -> void:
 	add("draw.frames_open")
 	if not frame.get("sprites", []).is_empty(): add("draw.frames_with_box")
 	if not frame.get("glyphs", []).is_empty(): add("draw.frames_with_text")
+	if int(frame.get("speaker_glyph_quads", 0)) > 0: add("draw.frames_with_speaker")
 	add("draw.glyphs", frame.get("glyphs", []).size())
 	for why in frame.get("refusals", []): add("draw.refused " + str(why))
 	# The cursor and "more" glyph (docs/spec/dialog-gaps.md 5): quads made from the byte at 0x41b978.
 	add("draw.cursor_glyph_quads", int(frame.get("cursor_glyph_quads", 0)))
+	add("draw.speaker_glyph_quads", int(frame.get("speaker_glyph_quads", 0)))
+	check(scene.controller.text_hud().get("suppressed", false), "open dialog suppresses the HUD")
+	check(not scene.play_hud.visible and not scene.hud_round3.visible, "open dialog hides the status and auxiliary HUD layers")
 
 # Voice stream 1 as the native mixer reports it (counts only).
 # The conversation camera (docs/spec/dialog-gaps.md 2): frames with a published pose, frames
@@ -72,6 +76,31 @@ func voice_counts() -> void:
 	if int(s.get("entry_position", 0)) > 0: add("voice.frames_position_positive")
 	if int(s.get("queued", 0)) > 0: add("voice.frames_queued")
 	if int(s.get("status", 0)) & 1: add("voice.frames_playing")
+
+# Explicit test stimulus: one confirm tick with playing status and text off.
+# Both the draw and input gates must hold. Restore the live mixer observation
+# and the scene's text-on option before the measured conversation continues.
+func probe_voice_gate() -> void:
+	if not args.has("voice-gate-probe") or counts.get("probe.voice_gate", 0) != 0: return
+	var status: Dictionary = scene.controller.dialog_status()
+	if not status.get("prompt_shown", false) or status.get("closing", false): return
+	var bridge = scene.audio.bridge
+	var streams: Array = bridge.get_observation().get("streams", [])
+	if streams.size() < 2: return
+	var live: Dictionary = streams[1]
+	scene.controller.dialog_voice_state({"queue_count": 0, "status": 1, "position": 0})
+	var playing: Dictionary = scene.controller.dialog_frame(0)
+	var choices := int(status.get("counts", {}).get("choices_taken", 0))
+	scene.controller.dialog_press(0x40)
+	scene.advance_step()
+	check(int(scene.controller.dialog_status().get("counts", {}).get("choices_taken", 0)) == choices, "text-off confirm waits while voice status is playing")
+	scene.controller.dialog_voice_state({"queue_count": 0, "status": 0, "position": 0})
+	var silent: Dictionary = scene.controller.dialog_frame(0)
+	scene.controller.dialog_voice_state({"queue_count": int(live.get("queued", 0)), "status": int(live.get("status", 0)), "position": int(live.get("entry_position", 0))})
+	scene.controller.dialog_frame(1)
+	check(playing.get("ok", false) and int(playing.get("cursor_glyph_quads", 0)) == 0, "text-off prompt is hidden while voice status is playing")
+	check(silent.get("ok", false) and int(silent.get("cursor_glyph_quads", 0)) > 0, "text-off prompt appears after voice status clears")
+	add("probe.voice_gate")
 
 # A level script can open an offline help box before or during a talk. The
 # draw task owns confirmation for its 90-frame delay; advance no dialog input
@@ -106,6 +135,8 @@ func run() -> void:
 	var first := int(args.get("from", "0"))
 	var last := mini(int(args.get("to", str(scene.real.levels.size()))), scene.real.levels.size())
 	var captured := false
+	var captured_choices := false
+	var captured_closed := false
 	for index in range(first, last):
 		scene.return_to_selection()
 		for i in range(3): await process_frame
@@ -140,10 +171,15 @@ func run() -> void:
 			confirm_help()
 			for i in range(4000):
 				if not scene.controller.dialog_status().get("open", false): break
-				if i % 8 == 7: scene.controller.dialog_press(0x40)
+				# Closing waits for displayed-frame fades. Pump the view here as
+				# in the measured conversation loop, and stop confirming once
+				# an ending choice was accepted (the original can run it again).
+				await process_frame
+				if i % 8 == 7 and not scene.controller.dialog_status().get("closing", false): scene.controller.dialog_press(0x40)
 				scene.advance_step()
 				confirm_help()
 			if scene.controller.dialog_status().get("stalled", false): scene.leave_stalled_dialog()
+			if not check(not scene.controller.dialog_status().get("open", false), "previous conversation closes before a fresh talk attempt"): continue
 			if not scene.controller.dialog_talk_to(talker).get("ok", false):
 				add("talk.refused_index")
 				continue
@@ -153,23 +189,35 @@ func run() -> void:
 			var opened: bool = scene.controller.dialog_status().get("open", false)
 			add("talk.opened" if opened else "talk.not_opened")
 			var ticks := 0
-			var moved := false
 			while ticks < 4000 and scene.controller.dialog_status().get("open", false):
 				await process_frame # the view draws one dialog frame per displayed frame
 				frame_counts()
 				voice_counts()
 				camera_counts()
+				probe_voice_gate()
 				if not captured and args.has("capture-dir") and DisplayServer.get_name() != "headless" and scene.npc_dialog.frame.get("glyphs", []).size() > 40:
 					await RenderingServer.frame_post_draw
 					var image := root.get_texture().get_image()
 					if image != null and image.save_png(str(args["capture-dir"]).path_join("dialog-open.png")) == OK:
 						add("captures")
 						captured = true
+				var current: Dictionary = scene.controller.dialog_status()
+				if not captured_choices and args.has("capture-dir") and DisplayServer.get_name() != "headless" and current.get("prompt_shown", false) and int(current.get("visible_choices", 0)) > 1:
+					await RenderingServer.frame_post_draw
+					var image := root.get_texture().get_image()
+					if image != null and image.save_png(str(args["capture-dir"]).path_join("dialog-choices.png")) == OK:
+						add("captures")
+						captured_choices = true
 				var pad := 0
 				if ticks % 8 == 7: pad = 0x40
-				if args.has("last-choice") and not moved and ticks % 8 == 3: pad = 0x4000
-				if pad == 0x4000: moved = true
-				if pad == 0x40: moved = false
+				if args.has("last-choice") and int(current.get("visible_choices", 0)) > 1:
+					# Walk all the way to the last visible choice. The previous
+					# harness only moved down once and could confirm mid-blend.
+					var cursor := int(current.get("cursor", 0))
+					var target := int(current.get("cursor_target", 0))
+					if cursor != target: pad = 0
+					elif cursor + 1 < int(current.visible_choices) and current.get("prompt_shown", false): pad = 0x4000
+				if current.get("closing", false): pad = 0
 				if pad != 0: scene.controller.dialog_press(pad)
 				scene.advance_step()
 				confirm_help()
@@ -178,10 +226,22 @@ func run() -> void:
 					add("talk.stalled")
 					scene.leave_stalled_dialog()
 					break
-			if opened and not scene.controller.dialog_status().get("open", false): add("talk.closed")
+			if opened:
+				if not scene.controller.dialog_status().get("open", false):
+					add("talk.closed")
+					scene._present_npc_dialog()
+					check(scene.play_hud.visible and scene.hud_round3.visible, "closed dialog restores the HUD layers")
+					if not captured_closed and args.has("capture-dir") and DisplayServer.get_name() != "headless":
+						await process_frame
+						await RenderingServer.frame_post_draw
+						var image := root.get_texture().get_image()
+						if image != null and image.save_png(str(args["capture-dir"]).path_join("dialog-closed.png")) == OK:
+							add("captures")
+							captured_closed = true
+				else: check(false, "conversation closes within the tick limit")
 		var talk: Dictionary = scene.controller.dialog_status().get("counts", {})
 		for key in talk:
-			if key == "interact" or key == "mouth" or key == "refused_reasons":
+			if key == "interact" or key == "triggers" or key == "mouth" or key == "refused_reasons":
 				for result in talk[key]: add("dialog.%s.%s" % [key, str(result)], int(talk[key][result]))
 			else:
 				add("dialog." + str(key), int(talk[key]))

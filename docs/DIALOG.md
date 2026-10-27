@@ -80,18 +80,37 @@ host in. Without it nothing changes: the dialog built-ins stay refused and
 `dialog_isOpen` answers 0.
 
 - **Commands.** With a dialog attached, `startDialog`, `dialogRunning`,
-  `forceMutexRelease`, `activateStore` and `newWorldPost` run their binder
+  `forceMutexRelease`, `activateStore`, `newWorldPost` and the bounded talker
+  `trigger` route run their binder
   bodies instead of being refused. Their seams (`net_isLocalSlot`,
   `net_sendGameMsg`, `menuMutex_release`, `shop_openOrStock`,
   `net_closeLocalMenus`, `lump_load`, the camera calls) are answered by
   `native/src/script_dialog.cpp`. `dialog_isOpen` answers the machine for every
   command, so `activateMissionMenu` is refused while a dialog is open
   (section 6.1).
+- **Scripted talking.** `trigger(name, value)` calls slot 3 on up to 100
+  named objects through the binder. The host now connects documented base
+  `Creature_trigger` paths to the dialog machine: a display name,
+  `dialogScript` and a free menu mutex are required; facing is not tested and
+  the active player is not changed. The entire target set is checked before
+  dispatch. Unknown classes stay refused. The NPC override at `0x29eed0`
+  (`research-dialog/docs/monsters-2.md`, NPC) delegates only outside its
+  cutscene and special-level paths. This host conservatively refuses every
+  NPC trigger during a cutscene, on that level, or without a known level;
+  it does not replace the mesh/animation overrides with talking.
 - **Shared words.** The binder and the machine share `g_dialogData` 0x8e2d60,
   the swoop words 0x4fdce4 / 0x4fdce8, the `newWorldPost` buffer 0x4fdcf0, the
   pending store 0x4fdd30 and `g_scriptActivePlayer` 0x4d8ae4. They are copied
   into the binder's memory before every command and every script the machine
   runs, and back after.
+- **Speaker and HUD.** The machine's `g_hudSuppressed` byte is now mirrored
+  to the binder and HUD immediately, including opening rollback and closing
+  before the post action. `showBust` and `showCompass` cannot write their
+  panels from a choice action while the dialog is open; a post action runs
+  after the suppression is cleared. The NPC dialog draws its speaker name
+  and one box sprite. It has no portrait draw (research section 7).
+  The real-data scene applies the same word to the player-status and auxiliary
+  HUD layers and restores them after close or script detach.
 - **Messages** run at once, nested in the sender, as offline
   `net_sendGameMsg` does. Message 0 finds `<name>.dbin` in the level's lump
   under its exact name and the speaker among the host's objects named `<name>`
@@ -128,10 +147,10 @@ names (research `docs/monsters.md` class table). The host's records are
 unconstructed stubs, so the machine's view of a talker carries the flags its
 documented constructor sets: 0x20 from `Creature_ctor`, 0x1100008 for `NPC`,
 0x100000 when `showName` is present. Nothing else of the constructor is
-applied. `TestLocation` (2 records on the disc) is in no class table and is
-refused. The use button considers every documented-class object with
-`showName`; the talk-to diagnostic and the census use the ones with
-`dialogScript`.
+applied. `TestLocation` (2 talker records on the disc) reaches the factory's
+no-object fallback, so neither is a talker. The use button considers every
+documented-class object with `showName`; the talk-to diagnostic and the census
+use the ones with `dialogScript`.
 
 ## Godot
 
@@ -150,6 +169,12 @@ level script on:
   (560 x 156 texels at (35, 280), plus the row `ui_drawSprite` adds) and
   gamefontmed glyphs laid out by `champions/ui_text_layout.hpp`;
   `ui/npc_dialog_view.gd` paints them once per displayed frame, box under text.
+  The draw bridge uses the observed stream-1 status, so the text-off prompt
+  waits for the voice to finish as the run task does. `dialog_frame` supplies
+  the same text option to the next run-task input gate, so hiding the prompt
+  cannot leave confirmation enabled during the voice. `dialog_status` exposes
+  choice/cursor/prompt and speaker-length counts; `dialog_frame` separately
+  counts speaker and cursor glyphs without exposing the text in reports.
 - **Voice.** `dialog_events` hands the stream-1 calls to the native mixer:
   `<voice>.vag` is queued held with flags 0x28 (a line with no entry queues
   nothing and stays silent), `clear_hold` releases it, `audio_streamStop` stops
@@ -231,9 +256,9 @@ What the port decides from evidence and what it refuses:
   built (the forward vector of `g_cameraMatrix`, which `camera_setView` writes, is
   not stated to be that matrix verbatim). The client has one camera, the follow
   camera, camera mode 1 in the site table.
-- **Not covered by the research, still as before.** `g_uiFadeIn[0]` rises by 0.12 per
-  displayed frame (`docs/mainloop.md` step 13) but the pattern of that constant is
-  not given, so the host passes 1.0. The `NF:` text for a missing key that has
+- **Fade.** The later executed UI-text-gaps contract supplies the exact displayed-frame
+  ramp and restart (`docs/UI_TEXT_GAPS.md`). The host uses it for drawing and
+  the closing-message gate. The `NF:` text for a missing key that has
   double quotes is refused: which spelling it copies is not stated.
 - **Gates with no client system.** The props, physics props, player marker, compass,
   remote busy icon, interact prompt, spectator prompt, net message list, HUD panel,
@@ -248,13 +273,30 @@ What the port decides from evidence and what it refuses:
 - **The Godot camera** does not follow the conversation camera: the native pose
   (`dialog_camera()`, the `camera_pose` events) is published and counted, not applied
   to the Godot view.
-- **`g_uiFadeIn[0]`** and **the quoted-key `NF:` text**: see above.
+- **The quoted-key `NF:` text**: see above.
 - **`Creature_interactPrompt`**: the `talkCone` test and the hostile-creature
   test were read, not executed. The use button does not apply them.
 - Net games: only the offline machine runs (one local slot). The remote
   player's name is not drawn.
 - `creatures_freezeAll` is handed on as an event; the session's own actors are
   not frozen beyond the player-input gate.
+
+## Play-dialog regression coverage
+
+`native/tests/dialog_play_tests.hpp` adds authored script/objects/DBIN cases
+to the existing `dialog` test: a level-start trigger, mutex re-entry, hidden
+choices, the offline cursor blend, confirmation during the blend, action and
+next-node dispatch, shared HUD suppression, post-action bust display,
+no-target and unknown-target triggers, NPC override refusals and the text-off
+voice gate. The existing camera/choice-overflow refusals also check that the
+HUD gate is restored. These use the same research pins above; no game text or
+bytes are fixtures.
+
+`godot/tests/real_data_dialog.gd` counts speaker glyphs and checks HUD suppression
+on open frames. Its `--last-choice` path now waits for the cursor and moves
+through every visible row, and an unclosed conversation at the tick limit
+fails the harness. Rendered captures include the body and a multiple-choice
+prompt. Current acceptance results are recorded in `docs/PLAY_DIALOG.md`.
 
 ## Census
 

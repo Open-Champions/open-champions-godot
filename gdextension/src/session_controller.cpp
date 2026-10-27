@@ -735,6 +735,7 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       rta::script_commands::DialogInputs in;
       in.pad = dialog_pad_;
       dialog_pad_ = 0;
+      in.text_option = dialog_text_option_;
       in.fade = scripts_->ui_ramps().fade[0]; // g_uiFadeIn[0] gates message 3 (docs/ui-text-gaps.md 1)
       if (dialog_voice_) {
         in.voice.queue_count = (*dialog_voice_)[0];
@@ -1206,6 +1207,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_use_pending_ = false;
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
+    dialog_text_option_ = 1;
     // The previous host is released first, then its fight.
     scripts_ = std::move(next);
     fight_ = std::move(next_fight);
@@ -1531,6 +1533,10 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
   for (const auto &entry : c.interact)
     interact[String::utf8(entry.first.c_str())] = int64_t(entry.second);
   d["interact"] = interact;
+  Dictionary triggers;
+  for (const auto &entry : c.triggers)
+    triggers[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+  d["triggers"] = triggers;
   Dictionary mouth;
   for (const auto &entry : c.mouth)
     mouth[String::utf8(entry.first.c_str())] = int64_t(entry.second);
@@ -1689,6 +1695,12 @@ Dictionary ChampionsSessionController::dialog_status() const {
   out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
   out["talkers"] = int64_t(scripts_->talkers().size());
   out["interactables"] = int64_t(scripts_->interactables().size());
+  out["visible_choices"] = int64_t(d.visible.size());
+  out["cursor"] = d.cursor;
+  out["cursor_target"] = d.cursor_target;
+  out["prompt_shown"] = d.prompt_shown != 0;
+  out["speaker_units"] = d.name_len;
+  out["closing"] = d.closing != 0;
   out["mutex_held"] = d.mutex != 0;
   out["last_use"] = dialog_last_use_;
   out["counts"] = dialog_count_dict(scripts_->dialog_counts());
@@ -1704,6 +1716,7 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
   try {
     if (!scripts_ || !scripts_->dialog_attached())
       throw std::runtime_error("No dialog is attached to the level script.");
+    dialog_text_option_ = text_option != 0 ? 1 : 0;
     namespace T = champions::ui_text_layout;
     namespace D = rta::dialog;
     const auto &d = scripts_->dialog();
@@ -1712,8 +1725,8 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
     // The host's displayed-frame ramp supplies g_uiFadeIn[0]. The observed layout
     // supplies the cursor and "more" glyph (docs/UI_TEXT_GAPS.md).
-    const auto ops = scripts_->dialog_draw(scripts_->ui_ramps().fade[0], int(text_option),
-                                           int(scripts_->dialog_cursor_glyph()), 0);
+    const auto ops = scripts_->dialog_draw(scripts_->ui_ramps().fade[0], dialog_text_option_,
+                                           int(scripts_->dialog_cursor_glyph()), dialog_voice_ ? (*dialog_voice_)[1] : 0);
     Array sprites, glyphs, refusals;
     const auto *font = dialog_data_ && dialog_data_->font ? &*dialog_data_->font : nullptr;
     if (!ops.empty() && !font)
@@ -1728,6 +1741,7 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
       return dialog_data_->text->lookup(key);
     };
     std::int64_t cursor_quads = 0;
+    std::int64_t speaker_quads = 0;
     const auto emit = [&](int x, int y, const D::Wide &units, std::size_t count) -> std::size_t {
       if (!font)
         return 0;
@@ -1773,7 +1787,8 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
       } else if (e.kind == "wide_centered" && font) {
         const auto &v = std::get<std::vector<std::int64_t>>(a[2]);
         const D::Wide units(v.begin(), v.end());
-        emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])), units, std::size_t(num(a[3])));
+        speaker_quads += std::int64_t(emit(T::centeredXWide(*font, int(num(a[0])), units), int(num(a[1])),
+                                            units, std::size_t(num(a[3]))));
       } else if (e.kind == "ascii") {
         // text_drawAscii of "%c" with the glyph byte: one character at (x, y).
         const auto code = std::uint16_t(num(a[2]) & 0xff);
@@ -1795,6 +1810,7 @@ Dictionary ChampionsSessionController::dialog_frame(int64_t text_option) {
     out["sprites"] = sprites;
     out["glyphs"] = glyphs;
     out["cursor_glyph_quads"] = cursor_quads;
+    out["speaker_glyph_quads"] = speaker_quads;
     out["refusals"] = refusals;
     out["ok"] = true;
   } catch (const std::exception &e) {
