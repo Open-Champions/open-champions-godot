@@ -123,7 +123,17 @@ frames, zero audio-handoff errors; campaign/image carry is observed but complete
 record carry is false. Peer/store/save no longer appear as unavailable barriers.
 The driver continues explicit diagnostic branches and ends at step 67,
 `player_death: blocked_death_reload` (239 native clip steps, no respawn).
-Rendered final counts and exit statuses pending.
+Rendered journey completed **68 steps / exit 1**, 43 captures, six refusal
+kinds; headless **67 steps / exit 1**, zero captures, six refusal kinds. These
+exactly match wave 33's 67/68 totals. Both result JSON files were written; neither
+run timed out. The unchanged wrapper exits 1 because both variants exit 1.
+Rendered arrival is step **38** (headless **37**), both after two loading frames
+with the same deferred/equipment diagnostic and no audio-handoff errors. Both
+end at `player_death: blocked_death_reload`, not a completed campaign or respawn.
+Logs have zero SCRIPT ERROR/engine error diagnostics and one ObjectDB exit-leak
+warning per variant. Disc file counts are **994 before / 994 after** (a counts-only
+check, not a claim of a full input-content hash comparison). Full aggregate CTest
+still running; no native result is inferred from Godot or journey completion.
 
 Visual inspection of actual rendered journey captures: the loading-labelled
 capture shows the prior live view, while the destination capture shows the session
