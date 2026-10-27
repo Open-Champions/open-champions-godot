@@ -79,6 +79,12 @@ std::array<Address, 2> World::State::spawn_mounted_horseman(
     for (std::size_t i = 0; i <= value.size(); ++i)
       w(at + Raw(i), 1, i == value.size() ? 0 : std::uint8_t(value[i]));
   };
+  // ref_arena_monsters.py S_MINIBOSS / _prop_int, audited 338d459.
+  text(0x52fa60, "MiniBoss");
+  text(0x52fa10, "Dead"); // S_DEAD, same pin ref_arena_monsters.py:105
+  // Same pin, S_DEATHSCRIPT / S_DROPITEM and spec arena-monsters 2.5.
+  text(0x52fbf8, "deathScript");
+  text(0x52fc08, "dropitem");
   text(props.miniboss_text, "miniboss=1");
   text(props.name_text, std::string("name=") + props.name);
   w(props.list, props.miniboss_text);
@@ -127,7 +133,8 @@ std::array<Address, 2> World::State::spawn_mounted_horseman(
   return {r, m};
 }
 
-Address World::State::property_value(Address a, const std::string &key) const {
+Address World::State::property_value(Address a, const std::string &key,
+                                     Raw occurrence) const {
   actor(a);
   const auto list = u(a + 0x2c);
   if (!list)
@@ -139,6 +146,8 @@ Address World::State::property_value(Address a, const std::string &key) const {
         u(list + 8) || cstr(props.miniboss_text) != "miniboss=1" ||
         cstr(props.name_text) != std::string("name=") + props.name)
       throw Unsupported("Nightmare mount property list differs from audited 338d459");
+    // ref_objects.py props_find: these audited lists contain each key once.
+    if (occurrence != 0) return 0;
     auto lower = key;
     for (auto &c : lower)
       if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');

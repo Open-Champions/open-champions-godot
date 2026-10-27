@@ -1,5 +1,6 @@
 #include "champions/combat_runtime.hpp"
 #include "champions/combat_play.hpp"
+#include "../src/combat_runtime_internal.hpp"
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -8,7 +9,49 @@ using namespace champions::simulation::rta;
 static void check(bool yes, const char *message) {
   if (!yes) throw std::runtime_error(message);
 }
+static void test_property_callbacks() {
+  // Exercise the installed original-call adapters, not the host helpers.
+  // 338d459 ref_arena_monsters.py:107,588-589; ref_objects.py:199-233.
+  auto services = flat_fixture_services();
+  services.animation_start = [](Address, Raw, Raw, Raw, Raw) {};
+  World::State state(std::move(services), 1, Composition::Full);
+  const auto pair = state.spawn_mounted_horseman(0, Spawn{}, Spawn{});
+  const auto key = state.alloc_fixture(32); // authored key buffer, no retail address
+  auto text = [&](const std::string &value) {
+    for (unsigned i = 0; i <= value.size(); ++i)
+      state.w(key + i, 1, i == value.size() ? 0 : value[i]);
+  };
+  auto call = [&](const char *name, Address at, Raw occurrence) {
+    return number(state.model.reference_call(name,
+        {iv(pair[1]), iv(at), iv(occurrence)}));
+  };
+  check(call("obj_getPropInt", 0x52fa60, 0) == 1,
+        "original MiniBoss key address resolves occurrence zero");
+  check(call("obj_getPropInt", 0x52fa60, 1) == 0 &&
+        call("obj_getPropStr", 0x52fa60, 0) == 0x547329 &&
+        call("obj_getPropStr", 0x52fa60, 1) == 0,
+        "single MiniBoss entry has no second occurrence");
+  text("name");
+  check(call("obj_getPropStr", key, 0) == 0x547335 &&
+        call("obj_getPropStr", key, 1) == 0 &&
+        call("obj_getPropInt", key, 0) == 0 &&
+        call("obj_getPropInt", key, 1) == 0,
+        "name callback preserves pointer, atoi and occurrence semantics");
+  text("missing");
+  for (Raw occurrence : {0u, 1u, 7u})
+    check(call("obj_getPropInt", key, occurrence) == 0 &&
+          call("obj_getPropStr", key, occurrence) == 0,
+          "missing callback keys return zero regardless of occurrence");
+  text("");
+  for (const auto *name : {"obj_getPropInt", "obj_getPropStr"}) {
+    bool refused = false;
+    try { (void)call(name, key, 0); }
+    catch (const Unsupported &) { refused = true; }
+    check(refused, "unavailable callback key data refuses");
+  }
+}
 static void test_mount_properties() {
+  test_property_callbacks();
   // Expectations come from audited research 338d459, not the native table.
   const char *names[] = {"horsedisease", "horsewar", "horsepestilence", "horsedeath"};
   const Address lists[] = {0x500848, 0x500854, 0x500860, 0x50086c};

@@ -860,16 +860,23 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
           {A::CallbackResult::integer(0), A::CallbackResult::integer(0)});
     return iv(0);
   }
-  if (n == "obj_getPropStr")
-    return iv(find(ar(0)) ? property_value(ar(0), cstr(ar(1))) : 0);
-  if (n == "obj_getPropInt") {
-    if (full()) {
+  if (n == "obj_getPropStr" || n == "obj_getPropInt") {
+    // Original 0x14f4c0 / 0x14c880: argument three is an occurrence,
+    // not the host property_int helper's fallback (338d459 ref_objects.py).
+    if (full() && n == "obj_getPropInt") {
       auto *o = find(ar(0));
       if (!o || o->kind == Kind::Effect)
         return iv(0);
     }
-    const auto value = find(ar(0)) ? property_value(ar(0), cstr(ar(1))) : 0;
-    return value ? iv(Raw(objects::atoi(cstr(value)))) : a.at(2);
+    // A null list is absent independently of the key (props_find).
+    if (!find(ar(0)) || !u(ar(0) + 0x2c))
+      return iv(0);
+    const auto key = cstr(ar(1));
+    if (key.empty())
+      throw Unsupported("object property key data unavailable at " + std::to_string(ar(1)));
+    const auto value = property_value(ar(0), key, ar(2));
+    return iv(n == "obj_getPropStr" ? value :
+              value ? Raw(objects::atoi(cstr(value))) : 0);
   }
   if (n == "world_findObjectByName") {
     const auto *found = names.find_first(cstr(ar(0)));

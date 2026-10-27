@@ -158,7 +158,7 @@ struct World::State {
   Address spawn_class(const std::string &, const Spawn &);
   std::array<Address, 2> spawn_mounted_horseman(unsigned, const Spawn &,
                                                 const Spawn &);
-  Address property_value(Address, const std::string &) const;
+  Address property_value(Address, const std::string &, Raw occurrence = 0) const;
   void remove_names(Address);
   void write_table(Address table, const std::map<unsigned, Raw> *extra = nullptr);
   Address construct(Address addr, const Vec3 &pos, Kind kind);
