@@ -58,7 +58,7 @@ Same wave-35 drivers/method with wave-36 output directories; native Release and 
 
 - Strict Godot dev matrix: **54/54 PASS**, strict diagnostic inspection, isolated user directories, no allowlist. Evidence `matrix/results.json`. All six graphical cases and ui_layout_smoke pass; integrated inherited five-argument call remains intact, so no four-argument diagnostic occurred.
 
-- Extra wave-33 loading/audio/identity/moves/death/present-adapter cases: **9/9 PASS**, strict diagnostic inspection, isolated user directories, no allowlist. Evidence `extra-matrix/results.json`. 
+- Extra wave-33 loading/audio/identity/moves/death/present-adapter cases: **9/9 PASS**, strict diagnostic inspection, isolated user directories, no allowlist. Evidence `extra-matrix/results.json`.
 
 - Supplemental Mission 1 production attachment/door checks **PASS**, headless 47 checks and rendered 49 checks, zero failures, strict diagnostics. Checks include stopped-preStart no adoption/start/sites/mutation and conservative door refusal. Evidence `mission1/results.json`, ignored private counts-only inputs.
 
