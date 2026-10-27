@@ -57,3 +57,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - FULL_SAVE_LOAD **300/300 presentations**, matching continued/uninterrupted SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`. Same fresh full-combat log.
 
 - FULL_TRACE **36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**, unchanged. No baseline changed. Same fresh full-combat log.
+
+- Extra wave-33 loading/audio/identity/moves/death/present-adapter cases **9/9 PASS**, strict log inspection including rendered identity, death and present cases. `extra-matrix/results.json`.
