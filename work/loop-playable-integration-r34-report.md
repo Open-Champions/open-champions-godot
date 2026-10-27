@@ -1,4 +1,4 @@
-STATUS: MORE — pickup runtime-binding diagnosis confirmed; clean-tree journey reproduction running; fix and requested gates pending.
+STATUS: MORE — pickup restored 10→11 in both clean-tree journeys; matrix/trace PASS; full CTest pending; broader journey remains refused.
 
 # Playable integration wave 34 — 2026-10-26
 
@@ -137,3 +137,20 @@ Clean pre-fix reproduction now completed: headless 80 / rendered 81 steps, both 
 **Pending before full CTest:** fresh build, focused tests, full `ctest -j 3` with isolated timeout reruns, rebuilt GDExtension, strict Godot dev matrix / FULL_TRACE, and clean committed headless/rendered journey. No gate success is claimed at this checkpoint.
 
 - Implementation milestone `51d73589`: fresh Release configure/build PASS (`-j 3`); focused pickups/items/loot/formatter suite **7/7 PASS**, 38.45 s (`pickup-review-{configure,build,focused}.log`). Both universal macOS GDExtension targets rebuilt PASS with parallelism 1 (`pickup-extension-{debug,release}.log`). Full CTest `-j 3` and strict Godot matrix have now started; their results remain pending.
+
+## Repaired clean-tree journey and Godot gates (2026-10-27)
+
+Runtime `51d73589`, clean committed tree `983650fd` (no tracked edits during execution). Unchanged wrapper and journey script, serial headless/rendered variants; evidence `pickup-repaired-journey/` and `pickup-repaired-journey.out`.
+
+| Variant | Steps | Exit | Ending | Pickup | Log errors | Captures |
+| --- | --- | --- | --- | --- | --- | --- |
+| Headless | 80 | 1 | player_death refused; saved_level_reloaded=false | **10→11**, produced/walked/picked_up | 0 | 0 |
+| Rendered | 81 | 1 | player_death refused; saved_level_reloaded=false | **10→11**, produced/walked/picked_up | 0 | 38 |
+
+Both: one death, one loot call, 11 shared loot draws, one generated consumable, one spawned ground object and one pickup; 26 pickup walking ticks, zero retry kills / zero diagnostic retry placements. Enemy fight passes with empty missing_fight_steps and no fight failure. Neither potion lookup nor player-name-format refusal remains in enemy_fight. The existing initial diagnostic enemy placement remains; this is not normal-route combat acceptance. Disc file counts unchanged **994→994**. Script explicitly keeps rendered_pickup_verified=false (visual item parity is not established); wrapper pickup_verified=true for both. Inspected rendered `05-fight-attempt.png`: presentation shows one loot item and one picked up. No screenshot/private content committed.
+
+Observed root cause: missing runtime potion-pointer binding prevented consumable construction; the composed strict shared formatter read sparse World memory that omitted non-player format strings, interrupting PhProp construction. Both now read the selected executable. Combined repair restores the required pickup without changing combat inputs, timing, RNG, harness, refusals or baselines. No claim that either omission alone explains every historical failed roll. The older pickup branch's absent formatter and different combat timing explain why its success did not cover these composed bindings.
+
+Strict Godot dev matrix **54/54 PASS**, including six graphical cases (`pickup-matrix/results.json`). Full combat **2,645 checks / 0 failures**. FULL_SAVE_LOAD **300/300**, identical presentation hashes. FULL_TRACE **unchanged 36,402 bytes / 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659**. No baseline changed.
+
+Full CTest `-j 3` remains running and is not yet a PASS. Remaining broader journey blockers retain the existing unsupported script-trigger stop, ordinary departure/checkpoint refusal for dead Creature state, and unsuccessful saved-level reload/death probe. These are separate from the now-restored pickup gate; no full-campaign acceptance is claimed.
