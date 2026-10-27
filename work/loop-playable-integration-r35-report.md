@@ -43,3 +43,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - native-ai: **PASS**, exit 0, 1.88 s. Counts-only output: `No probe summary`. Labelled diagnostic placement/hit; no normal-route or respawn claim. Evidence `native-ai.log`.
 
 - native-death: **PASS**, exit 0, 1.13 s. Counts-only output: `death_check actors=78 ticks=600 failed=0 dead=1 zero_hp=1 wipe_timer=0 slot_timer=0 task=1 phase=1 fade=128 native_clip_started=1 native_clip_steps=239 diagnostic_hit=1 retained_record_fields=1 same_dead_body=1 reload_refused=1`. Labelled diagnostic placement/hit; no normal-route or respawn claim. Evidence `native-death.log`.
+
+- Private sweep `w35-on`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w35-on-s{0,28,56,84}.{json,log}`.
