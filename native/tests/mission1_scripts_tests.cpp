@@ -1,5 +1,5 @@
 // Authored synthetic scripts/records only. Offsets and literal predicates are
-// the public 0d42d46 contract; every identifier and all other cells are authored.
+// the public research contracts; every identifier and all other cells are authored.
 #include "champions/mission1_scripts.hpp"
 #include "champions/script_commands.hpp"
 #include <algorithm>
@@ -115,7 +115,8 @@ Fixture drundar() {
   f.call(0x89c,"setSaveInhibit",{1});
   f.call(0x8dc,"addDeferedCall",{f.text(f.entry(0x934))});
   f.call(0x9e4,"callScript",{f.text(f.entry(0xa3c))});
-  f.call(0xa68,"getv",{flag}); f.cells(0xa7c,{0x35,0xb10}); // 0xa78 is unknown, not an evidenced NOT
+  // research-strife-drundar@3216e7b0 tools/difftest_strife_drundar.py:399-402.
+  f.call(0xa68,"getv",{flag}); f.cells(0xa78,{0x54,0x35,0xb10});
   f.call(0xaa0,"setSaveInhibit",{0}); f.call(0xacc,"cutScene",{f.text("authored-cutscene")});
   f.call(0xb00,"setv",{flag,1});
   return f;
@@ -247,8 +248,8 @@ int main() {
         const auto before=host.queue().queued;
         for(unsigned i=0;i<5;++i) host.on_ready_tick();
         check(host.queue().queued==before,"continuous ticks do not execute untraced deferred work");
-        check(host.run_mission1_entry(0xa3c)==sc::Stop::Refused,"door refuses unknown predicate");
-        check(host.variables().memory.word(0x50605c)==1&&host.variables().quest_get(contract->door_flag)==0,"unknown door predicate preserves inhibit and persistence");
+        check(host.run_mission1_entry(0xa3c)==sc::Stop::Refused,"zero door value stops at unestablished cutscene");
+        check(host.variables().memory.word(0x50605c)==0&&host.variables().quest_get(contract->door_flag)==0,"zero door value clears inhibit but refuses before persistent write");
         const auto save=host.save_campaign();
         sc::Host restored;check(restored.load(image),"revisit script loads");restored.start_single_player();restored.load_campaign(save);
         for(const auto &sw:contract->switches) check(restored.variables().quest_get(sw.persistent)==1,"campaign restores each switch independently");
@@ -258,21 +259,34 @@ int main() {
       sc::Host changed;
       check(!changed.load(f.image(s?47:36,s?21:20)),"changed literal predicate refused");
     }
-    // No operation at the unestablished cell authorizes the door diagnostic.
-    // Test changed polarity and removal without pretending either is original.
-    for (auto operation : {a::Cell(0x54), a::Cell(0x2e)}) {
-      auto f=drundar(); f.cells(0xa78,{operation});
-      sc::Host h;
-      check(h.load(f.image(36,20)),"bounded contract admits unknown gap without executing it");
-      if (!h.mission1_contract()) { std::cerr << h.last_fault() << "\n"; continue; }
+    // Expectations come from original VM observations, not fixture execution:
+    // research-strife-drundar@3216e7b0 tools/difftest_strife_drundar.py:421-461.
+    for (a::Cell saved : {0, 1, 2, -1, a::Cell(-2147483647-1)}) {
+      auto f=drundar(); sc::Host h;
+      check(h.load(f.image(36,20)),"predicate fixture loads");
+      if (!h.mission1_contract()) continue;
       h.set_executable(executable());
       auto blob=objects(records(*h.mission1_contract()));
-      check(h.adopt_objects(blob.data(),blob.size()),"door mutation fixture adopts");
+      check(h.adopt_objects(blob.data(),blob.size()),"predicate fixture adopts");
+      const auto key=h.mission1_contract()->door_flag;
+      h.variables().quest_set(key,saved);
       h.variables().memory.write(0x50605c,{1,0,0,0});
-      const auto before=h.mission1_sites_reached();
-      check(h.run_mission1_entry(0xa3c)==sc::Stop::Refused,"changed or removed 0xa78 rejected by diagnostic");
-      check(h.variables().memory.word(0x50605c)==1 && h.mission1_sites_reached()==before,
-            "unknown predicate cannot dispatch even getv or clear save inhibit");
+      const auto stop=h.run_mission1_entry(0xa3c);
+      const auto &sites=h.mission1_sites_reached();
+      check(sites.count(0xa68)==1,"real diagnostic dispatches persistent read");
+      check(stop==(saved==0?sc::Stop::Refused:sc::Stop::Complete),"original zero-only branch polarity");
+      check(h.variables().memory.word(0x50605c)==(saved==0?0u:1u),"only zero clears save inhibit");
+      check(sites.count(0xaa0)==(saved==0?1u:0u) && sites.count(0xacc)==(saved==0?1u:0u),"zero reaches clear and refused cutscene; nonzero skips both");
+      check(!sites.count(0xb00) && h.variables().quest_get(key)==saved,"no persistent write after refused cutscene");
+      if(saved==0) check(h.last_fault().find("untraced script call or effect body")!=std::string::npos,"effect refusal remains explicit");
+    }
+    // Replacement and removal (authored PROC padding) must fail inspection.
+    // Required NOT: research-strife-drundar@3216e7b0 tools/difftest_strife_drundar.py:400,415.
+    for (auto operation : {a::Cell(0x55), a::Cell(0x2e)}) {
+      auto f=drundar(); f.cells(0xa78,{operation}); sc::Host h;
+      check(!h.load(f.image(36,20)),"changed or removed NOT rejected on load");
+      check(!h.mission1_contract(),"mismatched predicate never publishes contract");
+      check(h.run_mission1_entry(0xa3c)==sc::Stop::Refused && h.mission1_sites_reached().empty(),"rejected predicate cannot enter real diagnostic");
     }
     // An undocumented store inserted between the known action cells must
     // never run. The bounded adapter executes only the addressed increment.

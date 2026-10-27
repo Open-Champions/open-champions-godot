@@ -180,6 +180,8 @@ std::optional<Contract> Contract::inspect(const amx::Machine &m) {
     require(r.call(0xaa0, "setSaveInhibit", 1).arguments[0] == 0);
     r.call(0xacc, "cutScene", 1, {0});
     require(r.text(0xa68, "getv", 1) == out.door_flag);
+    // research-strife-drundar@3216e7b0 tools/difftest_strife_drundar.py:399-402.
+    r.cells(0xa78, {0x54}); // NOT, original handler 0x1403e8 (docs/strife-drundar.md:214-230).
     r.cells(0xa7c, {0x35,0xb10});
     const auto saved = r.call(0xb00, "setv", 2, {0});
     require(saved.strings.at(0) == out.door_flag && saved.arguments[1] == 1);

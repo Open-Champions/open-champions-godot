@@ -1334,10 +1334,17 @@ Stop Host::run_mission1_entry(std::uint32_t offset) {
     }
   }
   if (mission1_->level == mission1_scripts::Level::Drundar && offset == 0xa3c) {
-    // The pinned handoff does not establish the value-producing operation at
-    // 0xa78. Neither saved nor unsaved polarity is authorized by getv/JZER.
-    remember(RefusedResult("Mission 1: door predicate at 0xa78 unestablished"));
-    return Stop::Refused;
+    // research-strife-drundar@3216e7b0 docs/strife-drundar.md:214-235,
+    // tools/difftest_strife_drundar.py:415-461: getv -> NOT -> JZER.
+    // Nonzero saved values branch to 0xb10 without effects. Zero falls
+    // through; stop at the first unestablished effect, never skip it.
+    auto stop = mission1_site(0xa68);
+    if (stop != Stop::Complete) return stop;
+    if (last_value_ != 0) return Stop::Complete;
+    stop = mission1_site(0xaa0);
+    if (stop != Stop::Complete) return stop;
+    stop = mission1_site(0xacc); // cutscene body remains explicitly refused
+    return stop == Stop::Complete ? mission1_site(0xb00) : stop;
   }
   remember(RefusedResult("Mission 1: entry body outside addressed effects"));
   return Stop::Refused;
