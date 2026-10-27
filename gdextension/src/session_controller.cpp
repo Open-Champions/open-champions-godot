@@ -122,6 +122,9 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
+  ClassDB::bind_method(D_METHOD("script_mission1_status"), &ChampionsSessionController::script_mission1_status);
+  ClassDB::bind_method(D_METHOD("script_mission1_action", "action", "index"),
+                       &ChampionsSessionController::script_mission1_action, DEFVAL(int64_t(0)));
   ClassDB::bind_method(D_METHOD("script_level_request"), &ChampionsSessionController::script_level_request);
   ClassDB::bind_method(D_METHOD("script_exit_targets"), &ChampionsSessionController::script_exit_targets);
   ClassDB::bind_method(D_METHOD("script_run_exit", "index"), &ChampionsSessionController::script_run_exit);
@@ -902,8 +905,10 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     apply_text(*next);
     rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
     std::memcpy(image.data(), script.ptr(), image.size());
-    if (!next->load(image))
+    if (!next->load(image)) {
+      if (next->last_fault().find("Mission 1") == 0) throw std::runtime_error(next->last_fault());
       throw std::runtime_error("Level script image was refused.");
+    }
     // The same options word feeds the native mixer and the script's private
     // playback model. Without an options file, use the documented boot default.
     next->set_music_volume(music_volume_bits < 0
@@ -972,8 +977,11 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     if (!objects.is_empty()) {
       std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
       std::memcpy(raw.data(), objects.ptr(), raw.size());
-      next->adopt_objects(raw.data(), raw.size());
+      const bool adopted = next->adopt_objects(raw.data(), raw.size());
+      if (next->mission1_contract() && !adopted)
+        throw std::runtime_error(next->last_fault().empty() ? "Mission 1 object census or addressed links refused." : next->last_fault());
     }
+    if (next->mission1_contract()) next->restore_mission1_addressed();
     std::shared_ptr<DialogData> data;
     if (!dialog.is_empty()) {
       data = std::make_shared<DialogData>();

@@ -14,6 +14,7 @@ include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/script_items_targets.cmake")
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/strings_targets.cmake")
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/ui_text_gaps_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/mission1_scripts.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp")
@@ -52,6 +53,9 @@ endif()
 endif()
 
 if(BUILD_TESTING AND TARGET champions-archive)
+    add_executable(champions-mission1-scripts-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/mission1_scripts_tests.cpp")
+    target_link_libraries(champions-mission1-scripts-tests PRIVATE champions-script-commands)
+    add_test(NAME mission1-scripts COMMAND champions-mission1-scripts-tests)
     add_executable(champions-script-commands-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_commands_tests.cpp")
     target_link_libraries(champions-script-commands-tests PRIVATE champions-script-commands)
     if(MSVC)

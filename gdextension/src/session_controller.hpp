@@ -220,6 +220,10 @@ public:
                                         const godot::PackedByteArray &world = godot::PackedByteArray(),
                                         const godot::Dictionary &resource_lumps = godot::Dictionary());
   godot::Array combat_resource_lump_names() const;
+  godot::Dictionary script_mission1_status() const;
+  // Explicit diagnostic entries/sites, never physical interaction or a
+  // continuous campaign route. All indices are addressed contract indices.
+  godot::Dictionary script_mission1_action(const godot::String &action, int64_t index = 0);
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,

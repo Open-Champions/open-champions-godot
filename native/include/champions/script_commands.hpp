@@ -19,6 +19,7 @@
 #include "champions/script_builtins.hpp"
 
 #include "champions/script_effects.hpp"
+#include "champions/mission1_scripts.hpp"
 
 #include "champions/script_items.hpp"
 #include "champions/resource_manager.hpp"
@@ -401,6 +402,19 @@ public:
   const Counts &counts() const { return counts_; }
   // Records a refused optional input (the host carries on without it).
   void count_refusal(const std::string &reason) { counts_.build_refusals[reason] += 1; }
+  const mission1_scripts::Contract *mission1_contract() const { return mission1_ ? &*mission1_ : nullptr; }
+  // Explicit addressed-entry probe. Refusals are resumable only by another
+  // explicit probe; the automatic Script task never continues these levels.
+  Stop run_mission1_entry(std::uint32_t offset);
+  const std::map<std::uint32_t, std::uint64_t> &mission1_sites_reached() const { return mission1_sites_reached_; }
+  // Addressed restore at 0x5e8/0x5f8 only, not a successful preStart entry.
+  bool restore_mission1_counter();
+  // Independently evaluated addressed restoration predicates/effects. Never
+  // claims that the rest of start or preStart executed or that props changed.
+  Stop restore_mission1_addressed();
+  Stop mission1_count_gate();
+  Stop mission1_bridge_request(unsigned index);
+  std::int32_t mission1_local_count() const;
   const std::vector<Spawn> &spawns() const { return spawns_; }
   level_flow::State &level() { return flow_; }
   const level_flow::State &level() const { return flow_; }
@@ -571,6 +585,7 @@ private:
   void mirror_hud();
   Cell *target_cell(std::uint32_t creature, bool create);
   void mark_built(std::uint32_t);
+  Stop mission1_site(std::uint32_t);
 
   std::shared_ptr<WorldAuthority> authority_;
   std::unique_ptr<builtins::Variables> variables_;
@@ -631,6 +646,8 @@ private:
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;
+  std::optional<mission1_scripts::Contract> mission1_;
+  std::map<std::uint32_t, std::uint64_t> mission1_sites_reached_;
   bool waiting_ = false;
   bool faulted_ = false;
   bool refusal_stopped_ = false;
