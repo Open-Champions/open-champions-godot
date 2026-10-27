@@ -618,8 +618,15 @@ func _loading_terrain_state() -> Dictionary:
 	return terrain_root.loading_state()
 
 func _loading_prerequisite_state() -> Dictionary:
-	if controller == null or not controller.has_method("loading_prerequisite_state"):
-		return {"ok": false, "error": "Deferred script, equipment, peer and store loading prerequisites have no supported state adapter."}
+	if controller == null:
+		return {"ok": false, "error": "Loading controller unavailable."}
+	if not controller.has_method("loading_prerequisite_state"):
+		# research-loading@3ba61c7:197-209: attachment precedes the
+		# deferred-call / equipment / peer / four-store barrier. Attachment
+		# is observable here; it is not evidence that those jobs completed.
+		return {"ok": false, "script_attached": last_level_script_attached,
+			"unavailable": ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"],
+			"error": "Script attachment observed; deferred-call completion, equipment, peer and four-store readiness remain unavailable."}
 	var state: Dictionary = controller.call("loading_prerequisite_state")
 	if not state.get("ok", false): return state
 	for field in ["deferred_complete", "equipment_pending", "peers_ready", "stores_complete"]:
