@@ -61,3 +61,16 @@ Same wave-35 drivers/method with wave-36 output directories; native Release and 
 - Extra wave-33 loading/audio/identity/moves/death/present-adapter cases: **9/9 PASS**, strict diagnostic inspection, isolated user directories, no allowlist. Evidence `extra-matrix/results.json`. 
 
 - Supplemental Mission 1 production attachment/door checks **PASS**, headless 47 checks and rendered 49 checks, zero failures, strict diagnostics. Checks include stopped-preStart no adoption/start/sites/mutation and conservative door refusal. Evidence `mission1/results.json`, ignored private counts-only inputs.
+
+## Full scripted journey result
+
+Unchanged `tools/run_loop_playthrough.py`, serial headless/rendered; evidence `work/playable-wave36/playthrough/` and `playthrough.out`.
+
+| Variant | Steps | Exit | Ending | Pickup | Log errors | Captures |
+| --- | --- | --- | --- | --- | --- | --- |
+| Headless | 80 | 1 | player_death refused; saved_level_reloaded=false | **10→11**, produced/walked/picked_up | 0 | 0 |
+| Rendered | 81 | 1 | player_death refused; saved_level_reloaded=false | **10→11**, produced/walked/picked_up | 0 | 38 |
+
+Matches wave 35 step counts/endpoints and required pickup. Six refusal kinds each. Zero retry kills/diagnostic retry placements; 52 pickup walking ticks versus wave 35's 26, recorded without changing harness/timing/RNG. Disc file counts **994 before / 994 after**. Existing initial diagnostic placement remains labelled; no normal-route combat or campaign acceptance. Wrapper exit 1 preserves full-journey refusal.
+
+Inspected actual rendered `05-fight-attempt.png`: fight presentation and diagnostic label show one loot item and one picked up. This is not original-client pixel parity; rendered_pickup_verified=false remains distinct from wrapper pickup_verified=true. Unsupported trigger stops, ordinary departure/checkpoint refusal for dead Creature state, loading prerequisites and unsuccessful death reload remain explicit. One ObjectDB exit-leak warning each; no strict errors. No journey, baseline, fixture or acceptance rule changed.
