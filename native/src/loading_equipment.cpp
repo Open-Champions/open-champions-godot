@@ -1,8 +1,69 @@
 #include "champions/loading_equipment.hpp"
+#include <limits>
+#include <tuple>
 
 namespace champions::simulation::rta::loading_equipment {
 namespace {
 [[noreturn]] void refuse() { throw amx::HostFault("equipment resource service or runtime publication unavailable"); }
+// All original fields/branches below: research-loading-readiness@2550d34,
+// docs/loading-arrival-r3.md. Publication/overflow checks are client restrictions.
+using Writes = std::vector<std::tuple<std::uint32_t, unsigned, std::uint32_t>>;
+std::uint32_t address(std::uint32_t base, std::uint32_t offset) {
+  if (offset > std::numeric_limits<std::uint32_t>::max()-base) refuse();
+  return base+offset;
+}
+std::uint32_t field(builtins::Memory &m, std::uint32_t base, unsigned off, unsigned size) {
+  auto a=address(base,off);
+  if (size-1 > std::numeric_limits<std::uint32_t>::max()-a || !m.published(a,size)) refuse();
+  return a;
+}
+Writes texture(builtins::Memory &m, std::uint32_t b) {
+  Writes out;
+  // :11-16: guard, relative table, marker and relocated header.
+  if (m.word(field(m,b,0x1c,4))) return out;
+  auto relative=m.word(field(m,b,0x10,4));
+  auto table=address(b,relative);
+  field(m,b,0xa,2);
+  auto flags=m.u16(field(m,b,8,2)); // :18-20: unsigned flags and early branches.
+  out={{b+0x10,4,table},{b+0xa,2,0xa7fb},{b+0x1c,4,0xffffffff}};
+  if ((flags&1) || !(flags&0x100)) return out;
+  // :22-29: table first word, signed inclusive rectangles, terminator,
+  // per-cell relocation, accumulator and low-halfword store.
+  out.emplace_back(field(m,table,0,4),4,address(b,m.word(table)));
+  auto cursor=address(table,4);
+  std::uint32_t total=0x48;
+  while (m.s8(field(m,cursor,0,1))!=-1) {
+    field(m,cursor,0,4);
+    auto columns=m.s8(cursor+2)-m.s8(cursor)+1;
+    auto rows=m.s8(cursor+3)-m.s8(cursor+1)+1;
+    total+=6+(rows*0x800*columns)/128;
+    cursor=address(cursor,4);
+    for (int row=0;row<rows;++row) for (int col=0;col<columns;++col) {
+      field(m,cursor,0,4);
+      out.emplace_back(cursor,4,address(b,m.word(cursor)));
+      cursor=address(cursor,4);
+    }
+  }
+  out.emplace_back(field(m,b,6,2),2,static_cast<std::uint32_t>(total)&0xffff);
+  return out;
+}
+Writes model(builtins::Memory &m, std::uint32_t b) {
+  Writes out;
+  // :31-40: signed count fallback, signed width + 1, consecutive words;
+  // no guard: deliberate second application adds the resource base again.
+  int n=m.s8(field(m,b,0x26,1));
+  if (n<=0) { n=1; out.emplace_back(b+0x26,1,1); }
+  auto width=m.s8(field(m,b,0x12,1))+1;
+  for(int i=0;i<n*width;++i) {
+    auto a=field(m,b,0x28+4*i,4);
+    out.emplace_back(a,4,address(b,m.word(a)));
+  }
+  return out;
+}
+void apply_writes(builtins::Memory &m, const Writes &out) {
+  for (auto [a,n,v]:out) m.store(a,n,v);
+}
+
 std::uint32_t record(unsigned index) {
   // d6f035fa:docs/loading-arrival-r2.md:58-73. Client bounds to executed indices.
   if (index > 1) refuse();
@@ -109,8 +170,16 @@ Runtime::Pair Runtime::lookup(std::uint32_t c, const std::string &identity) {
   require(0x4ef3ec,4);
   if (m.word(0x4ef3ec)!=c) refuse(); // client ownership guard, not original rule
   auto requested=m.cstr(0x8667a8); require(0x8667a8,requested.size()+1);
-  if (!base || model<base || !fixup_base || !fixup_model || !valid_resource) refuse();
-  fixup_base(base); fixup_model(model);
+  if (!base || model<base || !valid_resource) refuse();
+  if (fixup_base || fixup_model) {
+    if (!fixup_base || !fixup_model) refuse();
+    fixup_base(base); fixup_model(model);
+  } else {
+    // 2550d34:docs/loading-arrival-r3.md:49-55: ordered pair, once before
+    // publication. Preflight both resources so a refusal cannot poison the guard.
+    auto first=texture(m,base), second=loading_equipment::model(m,model);
+    apply_writes(m,first); apply_writes(m,second);
+  }
   if (!valid_resource(base,model)) refuse();
   m.string(c+0xc,requested); m.store(c+0xa,2,1); m.word(0x4ef3ec,0);
   return {}; // completing call has zero outputs; only next matching lookup publishes

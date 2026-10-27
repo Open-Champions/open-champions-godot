@@ -1487,6 +1487,72 @@ void test_loading_r2_equipment() {
   check(!host.loading_readiness("synthetic_destination").equipment_pending,"real scanner refuses unverified resource transformations");
 }
 
+// Original-backed expectations: research-loading-readiness@2550d34:
+// docs/loading-arrival-r3.md:11-55. All bytes and identities are authored.
+void test_loading_r3_resources() {
+  for (unsigned flags : {0u,1u,0x100u,0x101u})
+  for (unsigned guard : {0u,1u,0xffffffffu})
+  for (int count : {-128,-1,0,1,2,7,127})
+  for (int width : {-1,0,5}) {
+    sc::Host host;
+    auto &m=host.variables().memory;
+    auto &e=host.equipment_loading();
+    const unsigned b=0x180000, model=b+0x200, c=*e.cache(4,0);
+    m.write(b,std::vector<std::uint8_t>(0x1200,0));
+    m.store(b+8,2,flags);m.word(b+0x1c,guard);m.word(b+0x10,0x40);
+    m.word(b+0x40,0x180);
+    // Signed endpoints (-1,2)..(1,3): six inclusive cells.
+    m.byte(b+0x44,255); // -1 is reserved terminator: use (-2,2)..(0,3).
+    m.byte(b+0x44,254);m.byte(b+0x45,2);m.byte(b+0x46,0);m.byte(b+0x47,3);
+    for(unsigned i=0;i<6;++i)m.word(b+0x48+4*i,0x100+4*i);
+    m.byte(b+0x60,255);
+    m.byte(model+0x26,count);m.byte(model+0x12,width);
+    int n=count>0?count:1, words=n*(width+1);
+    for(int i=0;i<words;++i)m.word(model+0x28+4*i,0x20+i);
+    auto expected=m.read(b,0x1200);
+    auto put=[&](unsigned off,unsigned value,unsigned size=4){
+      for(unsigned i=0;i<size;++i)expected[off+i]=(value>>(8*i))&255;
+    };
+    if(!guard) {
+      put(0x10,b+0x40);put(0xa,0xa7fb,2);put(0x1c,0xffffffff);
+      if(!(flags&1) && (flags&0x100)) {
+        put(0x40,b+0x180);put(6,0x48+6+96,2);
+        for(unsigned i=0;i<6;++i)put(0x48+4*i,b+0x100+4*i);
+      }
+    }
+    if(count<=0)put(0x226,1,1);
+    for(int i=0;i<words;++i)put(0x228+4*i,model+0x20+i);
+    m.word(c,b);m.word(c+0x4c,0x200);m.store(c+8,2,1);m.store(c+10,2,0);
+    m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
+    m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
+    e.valid_resource=[&](unsigned x,unsigned y){return x==b && y==model && m.read(b,0x1200)==expected;};
+    auto pair=e.lookup(c,"authored_pair");
+    check(!pair.ready && m.read(b,0x1200)==expected && m.u16(c+10)==1 && m.word(0x4ef3ec)==0,
+          "real loading fixups match whole authored pair before publication");
+    pair=e.lookup(c,"authored_pair");
+    check(pair.ready && pair.base==b && pair.model==model && m.read(b,0x1200)==expected,
+          "matching rescan does not relocate model twice");
+  }
+  // Missing texture/model fields and relocation overflow refuse without publishing
+  // or mutating either resource. Safety restrictions, not original malformed rules.
+  for(unsigned mode=0;mode<4;++mode) {
+    sc::Host host;auto &m=host.variables().memory;auto &e=host.equipment_loading();
+    unsigned b=0x180000, c=*e.cache(4,0), model=b+0x200;
+    if(mode!=0)m.write(b,std::vector<std::uint8_t>(0x100,0));
+    if(mode>=2)m.write(model,std::vector<std::uint8_t>(0x100,0));
+    if(mode==2)m.word(b+0x10,0xffffffff);
+    if(mode==3) {m.byte(model+0x26,1);m.byte(model+0x12,0);m.word(model+0x28,0xffffffff);}
+    auto before=m.read(b,0x300);
+    m.word(c,b);m.word(c+0x4c,0x200);m.store(c+8,2,1);m.store(c+10,2,0);
+    m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
+    m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
+    e.valid_resource=[](unsigned,unsigned){return true;};
+    bool refused=false;try {e.lookup(c,"authored_pair");}catch(const a::HostFault &){refused=true;}
+    check(refused && m.read(b,0x300)==before && !m.u16(c+10) && m.word(0x4ef3ec)==c,
+          "incomplete/overflow resource pair refuses atomically");
+  }
+}
+
 void test_prestart_before_objects() {
   auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
   sc::Host host;
@@ -1781,6 +1847,7 @@ int main(int argc, char **argv) {
   test_loading_readiness();
   test_loading_r2_deferred();
   test_loading_r2_equipment();
+  test_loading_r3_resources();
   test_prestart_before_objects();
   test_stub_objects();
   test_refused_result_stops_entry();
