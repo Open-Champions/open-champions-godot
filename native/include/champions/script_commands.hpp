@@ -343,7 +343,9 @@ public:
                                  std::optional<bool> hud_lmp_resident = std::nullopt);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Only the five currently constructed Creature subclasses participate.
-  // These are native raw fields specified independently of the writer difftest; load services such as
+  // Independently specified native raw-field companion: the in-memory HP
+  // words are distinct from the original writer's serialized HP fraction.
+  // Layout: research-save-world e7d8972 docs/creatures.md:131. Load services such as
   // corpse animation and motion are deliberately outside this API.
   std::vector<level_object_state::Record> save_built_object_fields() const;
   std::size_t restore_built_object_fields(const std::vector<level_object_state::Record> &);

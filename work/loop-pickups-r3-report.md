@@ -137,7 +137,7 @@ identity, loot/drop/inventory/service observations, and then requires the
 specific unsupported-action/trap refusal with all observations unchanged.
 The run cases have an unguarded supported control that really completes at
 animation status 0x80 and leaves the run list. Fixtures trace to
-research-pickups `9911a6b` section 2 and research-loot-drop `77c2f70` section 3;
+research-pickups `9911a6b` section 2 and research-loot-drop `77c2f70` section 4;
 owner token, one-tick animation and initial balance remain authored inputs.
 `93c7f5a1` corrects the old helper-only assertion labels so those labels no
 longer claim production ordering or action-loop execution.

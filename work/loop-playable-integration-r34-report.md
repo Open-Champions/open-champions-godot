@@ -31,7 +31,7 @@ All eight requested tips integrated through full `git merge --no-ff` in the requ
 
 ## Gates and evidence
 
-Runtime candidate: `30d78414`; native Release build running. Remaining gates pending.
+Native Release configure/build PASS (`cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`, `cmake --build build/native -j 4`); logs `configure.log`, `build.log`. PSF2-1 API comment distinguishes the independently specified native raw HP words from the writer HP fraction, with the audited in-memory layout citation. PP4-1 section reference corrected in fixture and owner report. Remaining gates pending.
 
 ## Full scripted journey
 
