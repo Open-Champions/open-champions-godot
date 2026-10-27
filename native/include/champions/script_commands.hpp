@@ -6,6 +6,7 @@
 // counted refusal. The composition census stays the 9649e6b table.
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
+#include "champions/hub_offers.hpp"
 #include "champions/ui_text_gaps.hpp"
 #include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
@@ -484,6 +485,8 @@ public:
   // ---- NPC dialog (docs/DIALOG.md) ----
   void attach_dialog(DialogLevel level, DialogServices services);
   bool dialog_attached() const { return dialog_attached_; }
+  bool bounded_hub_dialog() const { return bool(hub_offers_); }
+  int bounded_hub_start() const { return hub_offer_start_; }
   const dialog::Dialog &dialog() const { return dialog_; }
   const DialogCounts &dialog_counts() const { return dialog_counts_; }
   // Objects this level lets the player talk to: a documented creature class
@@ -674,6 +677,11 @@ private:
   amx::Cell last_value_ = 0;
   std::string last_fault_;
   bool dialog_attached_ = false;
+  std::optional<hub_offers::Binding> hub_offers_;
+  bool hub_opening_ = false;
+  int hub_offer_start_ = -1;
+  int hub_action_mission_ = 0;
+  bool hub_action_running_ = false;
   std::optional<dialog_gaps::View> camera_view_;
   std::optional<DialogCameraPose> camera_pose_;
   std::uint32_t box_word_ = 0;

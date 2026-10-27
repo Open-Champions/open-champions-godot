@@ -69,6 +69,9 @@ std::string head(const std::exception &e) {
 } // namespace
 
 void Host::attach_dialog(DialogLevel level, DialogServices services) {
+  hub_offers_.reset();
+  hub_opening_ = false;
+  hub_offer_start_ = -1;
   dialog_level_ = std::move(level);
   dialog_services_ = std::move(services);
   dialog_files_.clear();
@@ -271,6 +274,11 @@ void Host::dialog_pull() {
   dialog_.next_world = mem.cstr(NEXT_WORLD);
   dialog_.store_pending = mem.read(STORE_PENDING);
   dialog_.active_player = s32(mem.word(ACTIVE_PLAYER));
+  // research-mission-unlocks@950b2538 docs/spec/mission-unlocks.md:120-125;
+  // tools/difftest_mission_unlocks.py:175-178 identifies the recall byte.
+  // Previously these remained the dialog Host's default false values.
+  dialog_host_.recall = mem.read(0x41b51d);
+  dialog_host_.mission_menu = campaign_->menu_open();
 }
 
 // script_runByName from the machine: node and choice conditions, actions,
@@ -279,6 +287,41 @@ std::int32_t Host::dialog_run_script(const std::string &name, bool) {
   dialog_counts_.scripts_run += 1;
   if (!machine_)
     return dialog::MISSING_ENTRY;
+  // Only the structurally bound hub dialog uses this bounded implementation.
+  // Generic dialogs keep their script VM; no identity is inferred from a name.
+  if (hub_offers_ && (hub_opening_ || dialog_.is_open())) {
+    for (std::size_t i=0; i<hub_offers_->conditions.size(); ++i)
+      if (hub_offers_->conditions[i]==name) return hub_offers_->evaluate(i,*variables_) ? 1 : 0;
+    // An action must be the actual current visible choice, never a direct grant.
+    if (!dialog_.node || dialog_.cursor<0 || std::size_t(dialog_.cursor)>=dialog_.visible.size())
+      throw dialog::Refused("hub action outside an admitted choice");
+    const int node=*dialog_.node;
+    const auto &choice=dialog_.nodes.at(std::size_t(node)).choices.at(
+        std::size_t(dialog_.visible.at(std::size_t(dialog_.cursor))));
+    if (choice.action!=name || dialog_host_.recall || dialog_host_.mission_menu)
+      throw dialog::Refused("hub offer admission suppressed");
+    const int current=hub_offers_->start(*variables_);
+    // :88-92: only the admitted 1 -> 2 -> 3 first-offer traversal.
+    // :99-118: second offer is node 7 after earlier-priority branches fail.
+    // :113: node 8 choice 1 closes, without a grant.
+    if (hub_offer_start_==1 && (node==1 || node==2 || node==3) && current==1)
+      hub_action_mission_=node==3 ? 1 : 0;
+    else if (hub_offer_start_==7 && node==7 && current==7) hub_action_mission_=2;
+    else if (node==8 && dialog_.cursor==1) hub_action_mission_=0;
+    else throw dialog::Refused("hub action beyond documented first/second offers is Unknown");
+  }
+  struct ActionScope {
+    Host &host; bool previous, complete;
+    explicit ActionScope(Host &h):host(h),previous(h.hub_action_running_),complete(h.complete_commands_) {
+      host.hub_action_running_=bool(h.hub_offers_ && h.dialog_.is_open());
+      // An ignored unknown service must not become a successful offer fallback.
+      if (host.hub_action_running_) host.complete_commands_=true;
+    }
+    ~ActionScope(){
+      host.hub_action_running_=previous; host.hub_action_mission_=0;
+      host.complete_commands_=complete;
+    }
+  } scope(*this);
   dialog_push();
   machine_->budget = session::SCRIPT_BUDGET;
   amx::Address result = -1;
@@ -387,6 +430,16 @@ void Host::dialog_message(const dialog::Bytes &msg) {
       // The draw hands word 0x4fe538 straight to ui_drawSprite, which reads the
       // texture's size first: with the word 0 that is address 0 (section 4).
       dialog_gaps::box_sprite_reads(box_word_);
+      hub_offers_ = machine_ ? hub_offers::Binding::match(*machine_, file->second) : std::nullopt;
+      hub_offer_start_ = -1;
+      // Admission must precede predicate dispatch, including its create-zero reads.
+      if (hub_offers_ && !dialog_host_.recall && !dialog_host_.mission_menu)
+        hub_offer_start_ = hub_offers_->start(*variables_);
+      struct OpeningScope {
+        bool &flag;
+        explicit OpeningScope(bool &f):flag(f){flag=true;}
+        ~OpeningScope(){flag=false;}
+      } opening(hub_opening_);
       if (dialog_.on_open(dialog_host_, msg, file->second, dialog_level_.level)) {
         dialog_counts_.opens += 1;
         dialog_stalled_ = false;

@@ -4,6 +4,7 @@
 // the inputs asked for, every state field and every object.
 #include "champions/dialog.hpp"
 #include "dialog_host_tests.hpp"
+#include "hub_offer_host_tests.hpp"
 #include "dialog_play_tests.hpp"
 #include <cstdlib>
 #include <fstream>
@@ -743,6 +744,7 @@ int main(int argc, char **argv) {
   test_contract(argv[2], count_lines(argv[1]));
   test_quirks();
   run_host_tests(check, where);
+  hub_offer_host_tests::run(check, where);
   dialog_play_tests::run(check, where);
   std::cout << "dialog: " << checks << " checks, " << failures << " failed\n";
   return failures ? 1 : 0;

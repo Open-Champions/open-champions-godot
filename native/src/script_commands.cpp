@@ -545,6 +545,17 @@ amx::NativeMap Host::command_map() {
           }
         }
       } dialog_sync(*this, dialog_attached_, dialog_route);
+      // research-mission-unlocks@950b2538 docs/spec/mission-unlocks.md:88-113.
+      // Execute the supplied original action through the production binder; only
+      // the documented (mission, on) write is admitted in this bounded dialog.
+      if (hub_action_running_ && std::strcmp(kRows[i].name,"setMissionAvailable")==0 &&
+          (hub_action_mission_==0 || machine.cell(machine.params+4)!=hub_action_mission_ ||
+           machine.cell(machine.params+8)!=1)) {
+        counts_.executed[i]-=1;
+        counts_.refused[i]+=1;
+        counts_.stopped[i]+=1;
+        throw RefusedResult("refused hub availability write outside documented offer");
+      }
       std::optional<amx::Address> result;
       try {
         result = function(machine, params);
@@ -1088,6 +1099,11 @@ void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
 }
 
 bool Host::load(const amx::ByteVector &image) {
+  hub_offers_.reset();
+  hub_offer_start_=-1;
+  hub_opening_=false;
+  hub_action_running_=false;
+  hub_action_mission_=0;
   machine_.reset();
   variables_->script_machine.reset();
   level_started_ = false;
