@@ -16,3 +16,7 @@ Preserved and finished the two interrupted source edits after checking pinned re
   $GODOT_CPP_DIR, $GODOT and $GAME_FOLDER instead of host/private roots.
 
 Regression tests and gates pending. No live-match support is implied.
+
+## Full CTest (recorded by the orchestrator, 2026-10-26 ~20:55)
+
+The job's provider stopped on a 401 while its full run continued: `ctest --test-dir build/native --output-on-failure -j 3` on `cba64f24` — **216/216 passed, 840.58 s** (log `work/native-arena-r4-ctest-full.log`), including player-exact. Arena Godot tests, FULL_TRACE and the remaining report sections are still to be completed by the next job.
