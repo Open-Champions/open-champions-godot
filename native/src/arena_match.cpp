@@ -160,7 +160,10 @@ void Model::prepare_wave() {
   put(LIVE_COUNT, 0, 2);
   auto walk = services_.walk;
   walk([&](Address obj) {
-    switch (save_action(get(obj + 12), get(obj + 0x312, 2))) {
+    const auto flags = get(obj + 12);
+    // d4f58da ref_arena_match_core.save_wave_visit: non-creatures have no state.
+    if (!(flags & 0x20)) return;
+    switch (save_action(flags, get(obj + 0x312, 2))) {
     case SaveAction::Skip: return;
     case SaveAction::Destroy: { auto fn = services_.destroy; fn(obj); return; }
     case SaveAction::Save: break;
@@ -280,7 +283,9 @@ void Model::visit(Raw pressed, Raw confirm, Raw cancel) {
     put(LIVE_COUNT, 0, 2);
     auto walk = services_.walk;
     walk([&](Address obj) {
-      if (blocks_wave(get(obj + 12), get(obj + 0x312, 2)))
+      const auto flags = get(obj + 12);
+      // d4f58da ref_arena_match_core.empty_wave_visit: flags guard the state read.
+      if ((flags & 0x68) == 0x20 && blocks_wave(flags, get(obj + 0x312, 2)))
         put(LIVE_COUNT, get(LIVE_COUNT, 2) + 1, 2);
     });
     if (!get(LIVE_COUNT, 2)) {

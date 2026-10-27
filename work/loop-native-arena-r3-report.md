@@ -58,16 +58,16 @@ No fixed Goblin gold/XP award or final mode-B victory condition was invented.
 
 ## Commands and files
 
-- `python3 tools/generate_arena_match_vectors.py /Users/syndicatemike/Projects/champions-re-wt/research-arena-match`
+- `python3 tools/generate_arena_match_vectors.py $RESEARCH_ARENA_MATCH`
 - `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`; `cmake --build build/native -j 4`
 - `ctest --test-dir build/native -j 3 --output-on-failure -R '^(arena-match-host|arena-match-exact|combat-runtime-2-host|combat-runtime-3-host)$'`
 - `ctest --test-dir build/native -j 3 --output-on-failure`
 - `ctest --test-dir build/native -j 1 --output-on-failure -R '^player-exact$'`
 - `ctest --test-dir build/native -j 1 --output-on-failure -R '^session-facing-exact$'`
-- Godot source/build pairs: `gdextension` / `build/godot-extension`, `gdextension/creature_anim` / `build/creature-godot`, `gdextension/level_texture` / `build/godot-level-texture`. Each configured with `-DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug -DGODOT_CPP_DIR=/Users/syndicatemike/Projects/open-champions/worktrees/integration/work/deps/godot-cpp` and built with `--config Release --parallel 2`. Final targets: `champions-archive-extension`, `champions-creature-animation`, `champions-level-texture-preview` respectively.
+- Godot source/build pairs: `gdextension` / `build/godot-extension`, `gdextension/creature_anim` / `build/creature-godot`, `gdextension/level_texture` / `build/godot-level-texture`. Each configured with `-DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug -DGODOT_CPP_DIR=$GODOT_CPP_DIR` and built with `--config Release --parallel 2`. Final targets: `champions-archive-extension`, `champions-creature-animation`, `champions-level-texture-preview` respectively.
 - `python3 work/native-arena-r3/run-godot-current.py` (45 existing dev commands)
 - `python3 work/native-arena-r3/run-sweep.py` (four `--all --levels=0 --ticks=60 --scripts` slices: `0/28`, `28/56`, `56/84`, `84/111`)
-- `python3 tools/run_loop_playthrough.py --godot /Users/syndicatemike/Projects/open-champions/worktrees/integration/work/runtime/Godot.app/Contents/MacOS/Godot --game-folder /Users/syndicatemike/Projects/open-champions/private-validation/rta-disc`
+- `python3 tools/run_loop_playthrough.py --godot $GODOT --game-folder $GAME_FOLDER`
 
 Changed: arena-match header/source; combat runtime API/world/services/defence
 adapters and internal declarations; additive native CMake targets; synthetic
