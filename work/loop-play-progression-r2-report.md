@@ -25,3 +25,19 @@ unknown later actions, create-zero reads and mission-menu/save publication.
 A counts-only private read-only binding probe found exactly 1 matching supplied
 resource and 0 invalid bindings/state controls. This is constructed-state
 binding evidence, not physical reachability or actual played completion.
+
+Menu-lifetime correction: Campaign's menu_open flag persists after cancellation;
+the dialog admission bridge now uses the existing Godot menu's active-lifetime
+condition (no pending destination, not completed state-4 fade). A production
+cancel-and-reopen regression passes. Focused native 2/2 PASS, 1.80 s.
+The first full CTest was intentionally interrupted during review of this edge
+case (verified worktree CTest PID only, SIGINT, exit 130). It is not a completed
+gate. Its log remains ctest-interrupted-menu-review.log. Full CTest is PENDING
+again before the corrected candidate's invocation; no test/baseline was weakened.
+
+Additional private read-only probe: actual supplied script and matched dialog,
+synthetic speaker/service binding, 40 first/second choice paths across five
+supported rows, both initial raw bytes 0/2 and both choices: 40 grants, zero
+invalid/stalled paths. Production native VM and binder, with campaign save state.
+Source/log are ignored under work/progression-r2/binding-probe.cpp and
+action-probe.log. No physical NPC or first-act completion claim follows.

@@ -210,6 +210,20 @@ inline void run(Check check,std::string &where) {
     check(host.variables().quest_vars()==vars && !host.campaign().mission_available(2),
           "hub: admission suppressors neither create quest variables nor grant");
   }
+  {
+    sc::Host host; fixture.load_into(host,check);
+    host.variables().memory.byte(host.variables().mission_byte(0,1,1),3);
+    host.campaign().open_menu(0);
+    for(int i=0;i<17;++i)host.tick_mission_menu(0);
+    host.tick_mission_menu(q::BTN_CIRCLE);
+    for(int i=0;i<17;++i)host.tick_mission_menu(0);
+    check(host.campaign().menu().state==4 && host.campaign().menu().counter<=0,
+          "hub: production cancel completes menu run task");
+    open(host);
+    check(host.dialog().node==7,"hub: cancelled menu no longer suppresses the next dialog");
+    confirm(host);
+    check(host.campaign().mission_available(2),"hub: offer choice works after menu cancellation");
+  }
   // Admission/state is rechecked at the choice, not cached at opening.
   for(int control=0;control<3;++control) {
     sc::Host host; fixture.load_into(host,check);

@@ -278,7 +278,13 @@ void Host::dialog_pull() {
   // tools/difftest_mission_unlocks.py:175-178 identifies the recall byte.
   // Previously these remained the dialog Host's default false values.
   dialog_host_.recall = mem.read(0x41b51d);
-  dialog_host_.mission_menu = campaign_->menu_open();
+  // menu_open records that a menu was created, even after its run task ends.
+  // Use the same lifetime as script_mission_menu_state (existing menu machine,
+  // research-quests@7efd3ce docs/quests.md section 4); a cancelled menu must
+  // not suppress every subsequent conversation.
+  const auto &menu=campaign_->menu();
+  dialog_host_.mission_menu = campaign_->menu_open() && menu.pending.empty() &&
+                             !(menu.state==4 && menu.counter<=0);
 }
 
 // script_runByName from the machine: node and choice conditions, actions,
