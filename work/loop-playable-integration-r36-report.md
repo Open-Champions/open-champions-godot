@@ -57,3 +57,5 @@ Same wave-35 drivers/method with wave-36 output directories; native Release and 
 - FULL_TRACE **PASS unchanged**, 36,402 bytes / SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline changed. These three gates use `matrix/playable_wave_smoke_full_combat.log`.
 
 - Strict Godot dev matrix: **54/54 PASS**, strict diagnostic inspection, isolated user directories, no allowlist. Evidence `matrix/results.json`. All six graphical cases and ui_layout_smoke pass; integrated inherited five-argument call remains intact, so no four-argument diagnostic occurred.
+
+- Extra wave-33 loading/audio/identity/moves/death/present-adapter cases: **9/9 PASS**, strict diagnostic inspection, isolated user directories, no allowlist. Evidence `extra-matrix/results.json`. 
