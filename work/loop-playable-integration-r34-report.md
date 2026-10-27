@@ -59,3 +59,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - FULL_SAVE_LOAD PASS: **300/300 presentations**, continued/uninterrupted presentation hashes identical (`cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`). Same fresh full-combat log.
 
 - FULL_TRACE PASS unchanged: **36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`**. No trace baseline or fixture changed. Same fresh full-combat log.
+
+- Strict Godot dev matrix: first run **53/54 PASS**, only the corrected missing-green-art fixture failed; isolated affected retry **1/1 PASS**. All 54 cases now pass, including six graphical captures and ui_layout_smoke with its corrected five-argument call. Extra wave-33 suites **9/9 PASS** with strict log inspection: loading display/audio, identity (headless/rendered), campaign moves, death (headless/rendered), and loading-present/partial-adapter (headless/rendered). No caught error was allowlisted or ignored; no SCRIPT ERROR remains in successful logs. Evidence `matrix/results.json`, `matrix-retry/results.json`, `extra-matrix/results.json`.
