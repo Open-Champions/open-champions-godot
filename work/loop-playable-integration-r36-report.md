@@ -1,4 +1,4 @@
-STATUS: MORE — WAVE 36 GATES PENDING (2026-10-27). Three audited tips integrated; no playable campaign acceptance claimed.
+STATUS: MORE — WAVE 36 VERIFIED (2026-10-27). Three audited tips integrated; native CTest 257/257, strict Godot 54/54 plus 9/9, combat/save-load/unchanged FULL_TRACE, both 111-level private sweeps and probes PASS. Journey matches wave 35 at 80/81 steps with pickup 10→11 and explicit death-reload refusal. No non-merge source changes.
 
 # Playable integration wave 36 — 2026-10-27
 
@@ -20,19 +20,19 @@ Assigned clean `codex/playable-integration` at wave-35-verified `0d28998e`. Read
 
 ## Non-merge code changes
 
-None at merge checkpoint. Any later source correction will be listed separately.
+None. Source changes are exclusively incoming audited work and the conflict resolutions listed above; no post-merge source correction was necessary.
 
 ## Gates and evidence
 
-Native Release build running, parallelism 4. Other requested gates pending.
+All requested gates executed and recorded below. Initial pending checkpoints remain historical records, superseded by the final results. Native/synthetic success is not campaign acceptance.
 
 ## Pending full CTest record
 
-Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, not started at this checkpoint. Result will be committed separately; any timeout will be rerun alone and both results retained.
+Full `ctest --test-dir build/native --output-on-failure -j 3` was **PENDING**, not started at checkpoint `4b6aebd4`. Result is recorded separately below; there were no timeouts.
 
 ## Full scripted journey
 
-Pending; compare wave 35 80/81 steps, inventory 10→11. Full progression, unknown arrival command list/resource transformations, continuous Mission 1 execution and successful death reload remain refused/unverified.
+Initial checkpoint was pending; final result below matches wave 35 80/81 steps, inventory 10→11. Full progression, unknown arrival command list/resource transformations, continuous Mission 1 execution and successful death reload remain refused/unverified.
 
 ## Exact command families
 
@@ -78,3 +78,9 @@ Inspected actual rendered `05-fight-attempt.png`: fight presentation and diagnos
 ## Full CTest result record
 
 After pending checkpoint `4b6aebd4`, full `ctest --test-dir build/native --output-on-failure -j 3` on merged runtime `27fbd8af` completed **257/257 PASS**, **796.34 s**, exit 0. No timeout, therefore no isolated timeout rerun required. Evidence `work/playable-wave36/ctest.out`. One new Mission 1 native test accounts for the increase from wave 35's 256. No assertion, fixture or baseline weakened. This separate result record supersedes the earlier pending state.
+
+## Remaining boundaries and final disposition
+
+All three requested full no-ff merges committed in order; none aborted or omitted. All audited tips are ancestors of HEAD. No source change beyond conflict resolution. Unknown arrival command list, unverified resource transformations, full campaign unlock sequencing, continuous Mission 1 execution/physical objectives, live arena/PvP, normal-route mission-2 combat, unsupported trigger continuation, dead-Creature checkpoint/departure and successful death reload remain refused/unverified. No values or behavior invented. Walking-tick increase is observed, not attributed to an unproved single cause; no FULL_TRACE change occurred.
+
+Final ancestry, no-unmerged-path, ignored-evidence and `git diff --check 0d28998e..HEAD` checks PASS. Journey and trace/baseline files unchanged. Private disc file count 994→994; counts-only tracked summaries, raw logs/captures remain ignored. No push, PR, branch creation, private-disc write, sibling worktree edits or process termination. Only authorized local commits; final tree clean after report commit.
