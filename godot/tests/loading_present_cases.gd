@@ -36,6 +36,11 @@ func run() -> void:
 			expect(not state.has(field) and field in state.unavailable, "unknown prerequisite remains unknown: " + field)
 	host.free()
 	if DisplayServer.get_name() != "headless":
+		# Reproduce a live SceneTree with no renderer post-draw events.
+		RenderingServer.render_loop_enabled = false
+		expect(not await Present.wait(self, RenderingServer.frame_post_draw, 0.05),
+			"disabled rendering refuses instead of waiting for a signal forever")
+		RenderingServer.render_loop_enabled = true
 		# force_draw performs a real render, as in the journey capture helper.
 		create_timer(0.02).timeout.connect(func(): RenderingServer.force_draw())
 		expect(await Present.wait(self, RenderingServer.frame_post_draw), "actual renderer draw observed")
