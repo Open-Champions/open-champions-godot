@@ -53,3 +53,5 @@ Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, no
 - Strict Godot dev matrix **54/54 PASS**, including six graphical captures; strict diagnostic gate, isolated user directories, no allowlist. `matrix/results.json`.
 
 - Full synthetic combat **2,645 checks, 0 failures**. `matrix/playable_wave_smoke_full_combat.log`.
+
+- FULL_SAVE_LOAD **300/300 presentations**, matching continued/uninterrupted SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`. Same fresh full-combat log.
