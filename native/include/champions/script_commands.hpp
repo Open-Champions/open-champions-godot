@@ -17,6 +17,7 @@
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
+#include "champions/loading_equipment.hpp"
 
 #include "champions/script_effects.hpp"
 
@@ -393,7 +394,8 @@ public:
     std::optional<bool> equipment_pending, peers_ready, stores_complete, save_gate_ready;
     std::vector<std::string> refusals;
   };
-  LoadingReadiness loading_readiness(const std::string &destination) const;
+  LoadingReadiness loading_readiness(const std::string &destination);
+  loading_equipment::Runtime &equipment_loading() { return *equipment_loading_; }
   // One simulated ready tick: the Script task runs the front half, then
   // promotes the back. It runs with an empty queue too.
   void on_ready_tick();
@@ -644,6 +646,7 @@ private:
   std::vector<Spawn> spawns_;
   std::uint64_t portal_trigger_requests_ = 0;
   bool level_started_ = false;
+  std::unique_ptr<loading_equipment::Runtime> equipment_loading_;
   bool loading_deferred_complete_ = false;
   bool loading_offline_session_ = false;
   bool waiting_ = false;

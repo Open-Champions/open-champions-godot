@@ -232,6 +232,7 @@ Host::Host(std::shared_ptr<WorldAuthority> authority)
     return std::array<std::uint32_t, 3>{memory.word(obj->addr + 0x10), memory.word(obj->addr + 0x14),
                                         memory.word(obj->addr + 0x18)};
   };
+  equipment_loading_ = std::make_unique<loading_equipment::Runtime>(variables_->memory);
   install();
   bind_campaign();
   items_ = std::make_unique<script_items::Service>(*variables_);
@@ -1235,7 +1236,7 @@ Stop Host::run_start() {
 
 // All addresses/conditions below: research-loading-readiness@9dd49046,
 // docs/loading-readiness.md (line ranges beside each operation).
-Host::LoadingReadiness Host::loading_readiness(const std::string &destination) const {
+Host::LoadingReadiness Host::loading_readiness(const std::string &destination) {
   LoadingReadiness out;
   out.deferred_complete = loading_deferred_complete_ && !faulted_ && !refusal_stopped_;
   if (!out.deferred_complete)
@@ -1270,16 +1271,7 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination) c
   // 41-53: only explicitly published runtime fields may establish null players
   // or empty equipment. Default sparse zeros and executable initial bytes cannot.
   const auto published = [&m](std::uint32_t address, std::size_t size) {
-    for (std::size_t i = 0; i < size; ++i) {
-      bool found = false;
-      for (const auto &write : m.writes)
-        if (address + i >= write.first &&
-            std::uint64_t(address) + i < std::uint64_t(write.first) + write.second) {
-          found = true; break;
-        }
-      if (!found) return false;
-    }
-    return true;
+    return m.published(address,size);
   };
   bool known = published(0x4d8ae0, 4), pending = false;
   // The host's supported session is single-player only; no guessed record bound.
@@ -1304,15 +1296,29 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination) c
         const auto category = m.read(definition + 0x1c);
         // 48-50: slot 3's selected-definition skip precedes category dispatch.
         // Its specialized selection is unbound, so refuse rather than guess.
-        if (i == 3) { known = false; break; }
+        if (i == 3) { known = false; break; } // selection remains unverified (r2:68-73)
         if (category >= 5 && category <= 8) { pending = true; continue; }
         // 52-53: environment guard requires both observed runtime globals.
         if (category == 0 || category == 2 || category == 3) {
           if (published(0x41b69d, 1) && published(0x44fe08, 4) &&
               m.read(0x41b69d) == 0 && (m.word(0x44fe08) & 0x10000000u)) continue;
         }
-        // 55-79: item-index resolution, specialized models and I/O publication
-        // have no loading binding. Never infer ready from an item pointer.
+        // d6f035fa:docs/loading-arrival-r2.md:75-97: specialized scanner routes.
+        // Slot 3 selection above remains unknown; other routes require actual
+        // formatter output and published environment/definition fields.
+        const auto cache = loading_equipment::Runtime::cache(i, 0);
+        if (cache && published(0x4f85b0,4) && m.word(0x4f85b0) != 0 &&
+            published(definition+0x30,4) && m.word(definition+0x30) != 0 &&
+            equipment_loading_->format) {
+          try {
+            auto identity = equipment_loading_->format(definition);
+            if (identity.size() < 4) throw amx::HostFault("equipment identifier too short");
+            identity.resize(identity.size()-4);
+            pending = !equipment_loading_->lookup(*cache, identity).ready || pending;
+            continue;
+          } catch (const std::exception &) { known = false; break; }
+        }
+        // 9dd49046:docs/loading-readiness.md:55-79: generic lookup still unbound.
         known = false;
       }
     }

@@ -15,6 +15,7 @@ include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/strings_targets.cmake")
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/ui_text_gaps_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/loading_equipment.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
@@ -53,7 +54,7 @@ endif()
 
 if(BUILD_TESTING AND TARGET champions-archive)
     add_executable(champions-script-commands-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_commands_tests.cpp")
-    target_link_libraries(champions-script-commands-tests PRIVATE champions-script-commands)
+    target_link_libraries(champions-script-commands-tests PRIVATE champions-script-commands champions-combat-runtime)
     if(MSVC)
         target_compile_options(champions-script-commands-tests PRIVATE /W4 /utf-8 /fp:strict)
     else()

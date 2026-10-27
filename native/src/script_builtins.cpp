@@ -517,6 +517,17 @@ std::string Memory::cstr(std::uint32_t address,std::size_t limit) const {
   }
   throw amx::HostFault("unterminated memory string");
 }
+bool Memory::published(std::uint32_t address, std::size_t size) const {
+  if (std::uint64_t(address)+size > UINT64_C(0x100000000)) return false;
+  for (std::size_t i=0;i<size;++i) {
+    bool found=canonical && canonical->bytes().count(address+std::uint32_t(i));
+    for (const auto &w:writes)
+      if (std::uint64_t(address)+i>=w.first &&
+          std::uint64_t(address)+i<std::uint64_t(w.first)+w.second) {found=true;break;}
+    if (!found) return false;
+  }
+  return true;
+}
 void Memory::write(std::uint32_t address,const std::vector<std::uint8_t> &data) {
   if(data.empty()) return;
   if (canonical) {
@@ -2148,6 +2159,9 @@ amx::Address Variables::run_script(const std::optional<std::string> &name) {
   try {
     const auto result=machine->execute(found.second,{},entry_pri);
     restore();
+    // research-loading-readiness@d6f035fa:docs/loading-arrival-r2.md:20-35:
+    // VM errors terminate this entry, but its result cell is still returned.
+    // HostFault escapes instead; it must stop the queue before promotion.
     return result.second.value_or(0);
   } catch(...) { restore(); throw; }
 }
@@ -2159,6 +2173,9 @@ void Variables::queue_deferred(const std::string &name) {
     memory.string(DEFER_NAMES+half*64*0x50+std::uint32_t(queued)*0x50,name);
   }
 }
+// research-loading-readiness@d6f035fa:docs/loading-arrival-r2.md:11-43:
+// Ignore returned entry/VM results, promote once on return (front may be nonempty).
+// Native faults propagate before promotion; never continue an unsupported effect.
 void Variables::run_deferred() {
   std::int64_t index=0;
   while(index<amx::s32(memory.word(DEFER_COUNT))) {
