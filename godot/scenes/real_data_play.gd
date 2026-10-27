@@ -6,6 +6,7 @@ extends "res://scenes/play_flow.gd"
 const RealData = preload("res://real_data/real_data.gd")
 const RealText = preload("res://real_data/real_text.gd")
 const RealPlayer = preload("res://real_data/real_player.gd")
+const LoadingPresent = preload("res://real_data/loading_present.gd")
 const LoadingDisplay = preload("res://real_data/loading_display.gd")
 signal loading_started
 signal loading_start_submitted
@@ -595,9 +596,17 @@ func _queue_level_change() -> void:
 	_level_change_queued = true
 	call_deferred("_apply_level_change")
 
-func _wait_loading_present() -> void:
-	if DisplayServer.get_name() == "headless": await get_tree().process_frame
-	else: await RenderingServer.frame_post_draw
+func _wait_loading_present() -> bool:
+	if DisplayServer.get_name() == "headless":
+		await get_tree().process_frame
+		return true
+	loading_display.queue_redraw()
+	return await LoadingPresent.wait(get_tree(), RenderingServer.frame_post_draw)
+
+func _require_loading_present(requested: String) -> bool:
+	if await _wait_loading_present(): return true
+	return _refuse_loaded_transition(requested,
+		"Loading presentation timed out waiting for an actual renderer post-draw signal.")
 
 func _loading_terrain_state() -> Dictionary:
 	if real == null or terrain_root == null:
@@ -627,6 +636,8 @@ func _refuse_loaded_transition(requested: String, reason: String) -> bool:
 	automatic_steps = false
 	_level_change_loading = false
 	stop_session()
+	loading_display.refusal = reason
+	push_warning("Level transition refused: " + reason)
 	status_label.text = "Level transition refused: " + reason
 	return false
 
@@ -666,14 +677,15 @@ func _apply_level_change() -> bool:
 		return false
 	# The start slice submits its five tinted sprites on each of three presents.
 	loading_start_submitted.emit()
-	for i in range(3): await _wait_loading_present()
+	for i in range(3):
+		if not await _require_loading_present(requested): return false
 	loading_display.phase = "loading"
 	loading_display.queue_redraw()
 	loading_started.emit()
 	# The session owns input while the display and readiness warm-up run.
 	# Loading itself is synchronous in this client; frames around it remain
 	# observable, while actual concurrent renderer-thread timing is unverified.
-	await _wait_loading_present()
+	if not await _require_loading_present(requested): return false
 	var was_playing: bool = play_mode and session_started and not stopped
 	var changed := load_real_level(destination, true, real.current_qualified,
 		str(pending.get("entrance", "")), requested)
@@ -682,7 +694,7 @@ func _apply_level_change() -> bool:
 		var warmup := LoadingDisplay.WARMUP_PRESENTS
 		var displayed := 0
 		while warmup > 0:
-			await _wait_loading_present()
+			if not await _require_loading_present(requested): return false
 			displayed += 1
 			var readiness := _loading_terrain_state()
 			if not readiness.get("ok", false):
@@ -702,7 +714,8 @@ func _apply_level_change() -> bool:
 	if changed:
 		loading_display.phase = "blank"
 		loading_display.queue_redraw()
-		for i in range(LoadingDisplay.BLANK_FIELDS): await _wait_loading_present()
+		for i in range(LoadingDisplay.BLANK_FIELDS):
+			if not await _require_loading_present(requested): return false
 		loading_display.begin_fade()
 		# The first normal frame and control opportunity follow the blank fields.
 		# The colour offset recovers on subsequent presents, not simulation ticks.
