@@ -146,3 +146,26 @@ wave-33 loading readiness refusals are retained unchanged.
   destinations, 57 checks / 0 failures. Corrected headless mission log:
   mission1-headless.log, 53 checks / 0 failures. Both have an inherited
   ObjectDB exit-leak warning but no SCRIPT ERROR or ERROR envelope.
+
+## Full journey comparison (fresh wrapper invocation)
+
+Command: tools/run_loop_playthrough.py with the read-only owner-selected
+folder and Godot 4.5.2, outputs under ignored work/mission1/journeys.
+
+| Variant | Wave 33 | This branch | Exit | Result | Captures |
+| --- | --- | --- | --- | --- | --- |
+| Headless | 67 steps | 67 steps | 1 | written | 0 |
+| Rendered | 68 steps | 68 steps | 1 | written | 43 |
+
+Both report six refusal kinds and zero SCRIPT ERROR / ERROR envelopes.
+Wrapper wall time: 429.59 s. Disc file count is 994 before and 994 after.
+The wrapper returns 1: full gameplay is BLOCKED, not a successful mission
+playthrough. Readiness (deferred/equipment/peer/four-store), physical
+interaction, unsupported combat/Gold and death checkpoint reload remain
+explicit boundaries. Final row in both variants is blocked_death_reload.
+This branch retains the verified wave-33 endpoint and does not bypass it.
+The separate two-destination Mission 1 diagnostics establish only the bounded
+addressed effects described above, not reachability through this journey.
+
+Native full CTest still running: 251/252 passed; netplay is the sole
+remaining case. No timeout/failure observed at this checkpoint.
