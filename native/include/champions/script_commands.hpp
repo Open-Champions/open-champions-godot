@@ -17,6 +17,7 @@
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
+#include "champions/level_object_state.hpp"
 
 #include "champions/script_effects.hpp"
 
@@ -337,6 +338,11 @@ public:
   void advance_first_level_items(const std::string &level_name,
                                  std::optional<bool> hud_lmp_resident = std::nullopt);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
+  // Only the five currently constructed Creature subclasses participate.
+  // These are native raw fields specified independently of the writer difftest; load services such as
+  // corpse animation and motion are deliberately outside this API.
+  std::vector<level_object_state::Record> save_built_object_fields() const;
+  std::size_t restore_built_object_fields(const std::vector<level_object_state::Record> &);
   // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
   // The ELF image starts this presentation word at zero. Replacement hosts
@@ -631,6 +637,13 @@ private:
   std::map<std::uint32_t, StubInfo> stub_info_;
   bool monster_level_bound_ = false;
   std::vector<std::uint32_t> record_addresses_;
+  struct BuiltRecord {
+    std::uint32_t ordinal, address;
+    std::string cls;
+    std::array<std::uint32_t, 3> position;
+    std::uint16_t angle;
+  };
+  std::vector<BuiltRecord> built_records_;
   Counts counts_;
   bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;

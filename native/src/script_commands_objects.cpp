@@ -9,6 +9,7 @@
 #include "champions/terrain_file.hpp"
 #include <cstring>
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -105,7 +106,110 @@ struct Refused : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+bool live_creature_hp(std::uint32_t raw) {
+  float hp;
+  static_assert(sizeof(hp) == sizeof(raw), "Creature HP is a 32-bit float");
+  std::memcpy(&hp, &raw, sizeof(hp));
+  return hp > 0.0f;
+}
+
 } // namespace
+
+std::vector<level_object_state::Record> Host::save_built_object_fields() const {
+  std::vector<level_object_state::Record> result;
+  auto &m = variables_->memory;
+  auto put = [](level_object_state::Bytes &out, std::uint32_t word) {
+    for (unsigned i = 0; i != 4; ++i) out.push_back(std::uint8_t(word >> (8 * i)));
+  };
+  constexpr std::uint64_t masks[5] = {0x1000000ull, 0x100000000ull,
+                                      0x400000ull, 0x800000ull,
+                                      0x2000000000000ull};
+  for (const auto &built : built_records_) {
+    const auto live = variables_->world->objects.find(built.address);
+    if (live == variables_->world->objects.end() || !live->second || !live->second->alive)
+      throw std::runtime_error("deleted built-object save policy is unverified");
+    level_object_state::Record record;
+    record.ordinal = built.ordinal;
+    record.cls = built.cls;
+    record.position = built.position;
+    record.angle = built.angle;
+    const auto c = built.address;
+    if (!live_creature_hp(m.word(c + 0x228)))
+      throw std::runtime_error("dead built-Creature save state is unverified");
+    put(record.fields, m.word(c + 0xe8));
+    put(record.fields, m.word(c + 0x228));
+    put(record.fields, m.word(c + 0x22c));
+    const auto raw_flags = std::uint64_t(m.word(c + 0xa8)) |
+                           (std::uint64_t(m.word(c + 0xac)) << 32);
+    std::uint32_t bits = 0;
+    for (unsigned i = 0; i != 5; ++i)
+      if (raw_flags & masks[i]) bits |= 1u << i;
+    if (m.u8(c + 0x231) & 1u) bits |= 1u << 5;
+    if (m.s16(c + 0x312)) bits |= 1u << 6;
+    put(record.fields, bits);
+    if (bits & (1u << 6)) put(record.fields, std::uint32_t(m.s16(c + 0x312)));
+    result.push_back(std::move(record));
+  }
+  return result;
+}
+
+std::size_t Host::restore_built_object_fields(
+    const std::vector<level_object_state::Record> &records) {
+  // Validate the complete matching set before changing any memory. Missing
+  // constructors remain an explicit refusal, not a fabricated object.
+  if (records.size() != built_records_.size())
+    throw std::runtime_error("saved built-object count differs from the loaded level");
+  for (std::size_t i = 0; i != records.size(); ++i) {
+    const auto &r = records[i];
+    const auto &b = built_records_[i];
+    if (r.ordinal != b.ordinal || r.cls != b.cls ||
+        r.position != b.position || r.angle != b.angle ||
+        (r.fields.size() != 16 && r.fields.size() != 20))
+      throw std::runtime_error("saved built-object identity or field layout differs");
+    const auto bits = std::uint32_t(r.fields[12]) |
+                      (std::uint32_t(r.fields[13]) << 8) |
+                      (std::uint32_t(r.fields[14]) << 16) |
+                      (std::uint32_t(r.fields[15]) << 24);
+    if (bits & ~0x7fu || ((bits & 0x40u) != 0) != (r.fields.size() == 20))
+      throw std::runtime_error("invalid saved Creature flag fields");
+    if (!live_creature_hp(std::uint32_t(r.fields[4]) |
+                          (std::uint32_t(r.fields[5]) << 8) |
+                          (std::uint32_t(r.fields[6]) << 16) |
+                          (std::uint32_t(r.fields[7]) << 24)))
+      throw std::runtime_error("dead built-Creature restore state is unverified");
+    if (r.fields.size() == 20) {
+      const auto charm = std::uint16_t(r.fields[16]) | (std::uint16_t(r.fields[17]) << 8);
+      const auto sign = (charm & 0x8000u) ? 0xffu : 0u;
+      if (!charm || r.fields[18] != sign || r.fields[19] != sign)
+        throw std::runtime_error("invalid saved Creature charm timer");
+    }
+  }
+  auto &m = variables_->memory;
+  auto word = [](const level_object_state::Bytes &v, std::size_t at) {
+    return std::uint32_t(v[at]) | (std::uint32_t(v[at + 1]) << 8) |
+           (std::uint32_t(v[at + 2]) << 16) | (std::uint32_t(v[at + 3]) << 24);
+  };
+  constexpr std::uint64_t masks[5] = {0x1000000ull, 0x100000000ull,
+                                      0x400000ull, 0x800000ull,
+                                      0x2000000000000ull};
+  for (std::size_t i = 0; i != records.size(); ++i) {
+    const auto c = built_records_[i].address;
+    const auto &v = records[i].fields;
+    m.word(c + 0xe8, word(v, 0));
+    m.word(c + 0x228, word(v, 4));
+    m.word(c + 0x22c, word(v, 8));
+    const auto bits = word(v, 12);
+    auto raw_flags = std::uint64_t(m.word(c + 0xa8)) |
+                     (std::uint64_t(m.word(c + 0xac)) << 32);
+    for (unsigned bit = 0; bit != 5; ++bit)
+      raw_flags = (raw_flags & ~masks[bit]) | ((bits & (1u << bit)) ? masks[bit] : 0);
+    m.word(c + 0xa8, std::uint32_t(raw_flags));
+    m.word(c + 0xac, std::uint32_t(raw_flags >> 32));
+    m.byte(c + 0x231, std::uint8_t((m.u8(c + 0x231) & ~1u) | ((bits >> 5) & 1u)));
+    m.w16(c + 0x312, bits & 0x40u ? word(v, 16) : 0);
+  }
+  return records.size();
+}
 
 level_factory::Executable executable_view(std::shared_ptr<const arena_modes::Executable> exe) {
   if (!exe)
@@ -389,6 +493,8 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
       record_addresses_[index] = address;
     if (result == Build::Built) {
       counts_.objects_built += 1;
+      built_records_.push_back({std::uint32_t(index), address, record.cls,
+                                record.position, record.angle});
       continue;
     }
     if (result == Build::NotBuilt) {

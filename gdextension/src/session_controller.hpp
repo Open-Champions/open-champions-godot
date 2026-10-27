@@ -8,6 +8,7 @@
 #include "champions/core_state.hpp"
 #include "champions/combat_play_effects.hpp"
 #include "champions/level_play.hpp"
+#include "champions/level_object_state.hpp"
 #include "champions/native_save.hpp"
 #include "champions/play_fixture_save.hpp"
 #include "champions/player_state.hpp"
@@ -24,6 +25,7 @@
 #include <godot_cpp/variant/variant.hpp>
 #include <array>
 #include <godot_cpp/variant/array.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <map>
@@ -119,6 +121,9 @@ private:
   bool gate_clear_next_tick_ = false;
   std::uint32_t gate_arrival_seed_ = 0;
   std::string gate_prompt_refusal_;
+  champions::simulation::rta::level_object_state::Directory level_states_;
+  std::size_t restored_object_fields_ = 0;
+  std::string level_object_key_;
   // Presentation word retained when an opt-in level script host is replaced.
   std::uint32_t script_fade_ = 0;
   bool ui_frame_driven_ = false;
@@ -262,6 +267,10 @@ public:
                                         const godot::PackedByteArray &world = godot::PackedByteArray(),
                                         const godot::Dictionary &resource_lumps = godot::Dictionary());
   godot::Array combat_resource_lump_names() const;
+  godot::Dictionary save_level_object_directory(const godot::String &qualified_key);
+  godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes,
+                                                const godot::String &required_key = godot::String());
+  godot::Dictionary level_object_state_status() const;
   // The use button for slot 0, taken at the next ready tick (Player_interact).
   godot::Dictionary dialog_use();
   godot::Array hub_service_targets() const;

@@ -306,6 +306,77 @@ int main(int argc, char **argv) {
                                      " != " + std::to_string(want));
         }
         check(seed.state == hex(c[7]), where + " shared seed");
+        // Independently specified native raw-field layout. docs/creatures.md:131
+        // establishes the two in-memory HP words at +0x228/+0x22c; the original
+        // writer in docs/save-world.md emits one HP fraction instead. The s16
+        // charm is sign-extended; adjacent s16 root is not in this companion.
+        auto &memory = host.variables().memory;
+        memory.word(address + 0xe8, 0x12345678);
+        memory.word(address + 0x228, 0x3f800000);
+        memory.word(address + 0x22c, 0x40000000);
+        memory.word(address + 0xa8, 0x01800000);
+        memory.word(address + 0xac, 0x00000001);
+        memory.byte(address + 0x231, 1);
+        memory.w16(address + 0x312, 0xffff);
+        memory.w16(address + 0x314, 9);
+        const auto saved_fields = host.save_built_object_fields();
+        const rta::level_object_state::Bytes expected{
+            0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x80, 0x3f,
+            0x00, 0x00, 0x00, 0x40, 0x6b, 0x00, 0x00, 0x00,
+            0xff, 0xff, 0xff, 0xff};
+        check(saved_fields.size() == 1 && saved_fields[0].fields == expected,
+              where + " exact alive Creature native raw-field layout");
+        memory.word(address + 0xe8, 0);
+        memory.word(address + 0x228, 0);
+        memory.word(address + 0x22c, 0);
+        memory.word(address + 0xa8, 0);
+        memory.word(address + 0xac, 0);
+        memory.byte(address + 0x231, 0);
+        memory.w16(address + 0x312, 0);
+        memory.w16(address + 0x314, 0x1234);
+        check(host.restore_built_object_fields(saved_fields) == 1 &&
+                  host.save_built_object_fields()[0].fields == expected &&
+                  memory.u16(address + 0x312) == 0xffff &&
+                  memory.u16(address + 0x314) == 0x1234,
+              where + " restored Creature fields");
+        memory.w16(address + 0x312, 0);
+        const auto no_charm = host.save_built_object_fields();
+        const rta::level_object_state::Bytes expected_no_charm{
+            0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x80, 0x3f,
+            0x00, 0x00, 0x00, 0x40, 0x2b, 0x00, 0x00, 0x00};
+        check(no_charm[0].fields == expected_no_charm,
+              where + " root timer alone omits charm field");
+        memory.w16(address + 0x312, 5);
+        check(host.restore_built_object_fields(no_charm) == 1 &&
+                  memory.u16(address + 0x312) == 0 &&
+                  memory.u16(address + 0x314) == 0x1234,
+              where + " absent charm clears only charm timer");
+        for (const std::uint32_t dead_hp : {0u, 0xc1c80000u}) {
+          memory.word(address + 0x228, dead_hp);
+          bool dead_save_refused = false;
+          try { (void)host.save_built_object_fields(); }
+          catch (const std::runtime_error &) { dead_save_refused = true; }
+          check(dead_save_refused, where + " dead Creature save refused");
+        }
+        memory.word(address + 0x228, 0x3f800000);
+        auto dead_record = saved_fields;
+        dead_record[0].fields[4] = 0;
+        dead_record[0].fields[5] = 0;
+        dead_record[0].fields[6] = 0;
+        dead_record[0].fields[7] = 0;
+        bool dead_restore_refused = false;
+        try { (void)host.restore_built_object_fields(dead_record); }
+        catch (const std::runtime_error &) { dead_restore_refused = true; }
+        check(dead_restore_refused && memory.word(address + 0x228) == 0x3f800000 &&
+                  memory.u16(address + 0x314) == 0x1234,
+              where + " dead Creature restore refused without mutation");
+        auto *live = host.variables().world->objects.at(address);
+        live->alive = false;
+        bool deleted_refused = false;
+        try { (void)host.save_built_object_fields(); }
+        catch (const std::runtime_error &) { deleted_refused = true; }
+        live->alive = true;
+        check(deleted_refused, where + " deleted Creature is refused");
         ++built;
       } else {
         check(c[5] == "stub" && counts.objects_unbuilt == 1 && counts.objects_built == 0,
@@ -580,6 +651,28 @@ int main(int argc, char **argv) {
         check(!built && class_host.counts().build_refusals.count(reason) == 1,
               cls + " has a counted constructor refusal");
     }
+    check(built > 200 && stubs > 0, "case coverage");
+    rta::level_object_state::Directory directory;
+    for (unsigned i = 0; i != 10; ++i)
+      check(directory.store("hub_" + std::to_string(i), {{i, "Creature", {1, 2, 3}}}),
+            "directory readable slot");
+    check(directory.store("hub_4", {{4, "Creature", {9}}}) &&
+              directory.count() == 10 && directory.lookup("hub_4") &&
+              directory.lookup("hub_4")->records[0].fields[0] == 9,
+          "duplicate rewrites its existing directory slot");
+    check(!directory.store("hub_10", {{10, "Creature", {4}}}) &&
+              !directory.store("hub_11", {{11, "Creature", {5}}}) &&
+              directory.lookup("hub_10") == nullptr && directory.lookup("hub_9") != nullptr,
+          "ten readable slots and write-only overflow");
+    check(directory.overflow_gap() && directory.overflow_gap()->key == "hub_10" &&
+              directory.overflow_gap()->records[0].ordinal == 11,
+          "overflow gap retains first name and aliases later body");
+    const auto encoded = directory.encode();
+    const auto decoded = rta::level_object_state::Directory::decode(encoded);
+    check(decoded.count() == 10 && decoded.lookup("hub_9") &&
+              decoded.lookup("hub_9")->records[0].ordinal == 9 &&
+              decoded.overflow_gap() && decoded.overflow_gap()->records[0].ordinal == 11,
+          "directory roundtrip");
     std::cout << "PASS level-objects: " << checks << " checks, " << built << " built, " << stubs
               << " stubs\n";
     return 0;
