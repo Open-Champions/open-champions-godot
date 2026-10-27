@@ -1,4 +1,4 @@
-STATUS: IMPLEMENTED — pending focused verification and full CTest.
+STATUS: DONE — researched predicate implemented; requested gates completed.
 
 Research pin: research-strife-drundar@3216e7b0d9a779060c51648637646e6b49019732.
 All citations below are relative to that research checkout at that revision.
@@ -62,3 +62,22 @@ Godot / trace / journey gates (work/mission1/r3/):
 - No SCRIPT ERROR or ERROR envelopes in final Godot logs. Existing ObjectDB
   exit leak warnings persist. Baseline and journey tools are unchanged.
 - Full CTest remains running. No timeout observed at this checkpoint.
+
+
+Final full CTest: 252/252 PASS, exact real elapsed 685.31 seconds,
+ctest --test-dir build/native --output-on-failure -j 3. No timeout occurred;
+no isolated timeout rerun required. Final log: work/mission1/r3/ctest-full.log.
+The pending-full-CTest note was committed in 9c7cf913 before invocation.
+Corrected fixture checkpoint: 6def088e. The interrupted stale-binary invocation
+is disclosed above and is not counted as the final suite result.
+
+Final review: git diff --check b1255ff2 PASS. Only five source/test files and
+this forced-added report changed. PSD-R1-1 production attachment code remains
+unchanged. No game data, decoded private names, private paths, baseline changes
+or journey changes committed. The stray untracked UID is untouched. Work stayed
+on codex/play-strife-drundar; no push, PR, prohibited worktree edit or process-name
+termination. Cutscene completion, actual door persistence and passability remain
+explicitly unestablished; zero stops at the cutscene refusal.
+
+Coordination 2026-10-27: implementation and all requested bounded gates complete.
+Final report commit is HEAD returned to the parent.
