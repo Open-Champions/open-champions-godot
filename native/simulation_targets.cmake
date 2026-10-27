@@ -237,19 +237,31 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
 # Isolated campaign WarBoar/Minotaur actor boundary; no play-scene binding.
 add_library(champions-campaign-actors "${CHAMPIONS_SIMULATION_ROOT}/src/campaign_actors.cpp")
+target_sources(champions-campaign-actors PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/minotaur.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/warboar_ai.cpp")
 target_include_directories(champions-campaign-actors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 # The GDExtension compiles the same archive/resource-manager sources as
 # champions-archive-binding-core and sets CHAMPIONS_ACTORS_ARCHIVE to it.
 if(NOT CHAMPIONS_ACTORS_ARCHIVE)
   set(CHAMPIONS_ACTORS_ARCHIVE champions-archive)
 endif()
-target_link_libraries(champions-campaign-actors PUBLIC champions-objects champions-creature-hp ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
+target_link_libraries(champions-campaign-actors PUBLIC champions-objects champions-creature-hp champions-arena-monsters ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
 if(MSVC)
     target_compile_options(champions-campaign-actors PRIVATE /W4 /utf-8 /fp:strict)
 else()
     target_compile_options(champions-campaign-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-campaign-actors)
+# Bounded blood1 Kobold variants and WarWraith; World-owned, no scene binding.
+add_library(champions-blood1-actors "${CHAMPIONS_SIMULATION_ROOT}/src/blood1_actors.cpp")
+target_include_directories(champions-blood1-actors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-blood1-actors PUBLIC champions-objects champions-creature-hp ${CHAMPIONS_ACTORS_ARCHIVE} champions-combat)
+if(MSVC)
+    target_compile_options(champions-blood1-actors PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-blood1-actors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-blood1-actors)
 
 # AntQueen, Skeleton and Soul constructors, set-states and run prologues
 # (research-combat-ctors e9777eb) on the arena model.

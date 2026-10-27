@@ -50,6 +50,7 @@ void ChampionsSessionController::bind_text_methods() {
   ClassDB::bind_method(D_METHOD("ui_frame"), &ChampionsSessionController::ui_frame);
   ClassDB::bind_method(D_METHOD("set_ui_frame_driver", "driven"), &ChampionsSessionController::set_ui_frame_driver);
   ClassDB::bind_method(D_METHOD("text_key_units", "key"), &ChampionsSessionController::text_key_units);
+  ClassDB::bind_method(D_METHOD("text_lookup", "key"), &ChampionsSessionController::text_lookup);
   ClassDB::bind_method(D_METHOD("help_frame", "confirm"), &ChampionsSessionController::help_frame);
 }
 
@@ -154,6 +155,20 @@ Dictionary ChampionsSessionController::text_hud() const {
   } catch (const std::exception &e) {
     return text_failure(e);
   }
+}
+
+Dictionary ChampionsSessionController::text_lookup(const String &key) const {
+  Dictionary out;
+  out["ok"] = false;
+  if (!scripts_ || !scripts_->has_text()) return out;
+  try {
+    const auto request = std::string(key.utf8().get_data());
+    const auto address = scripts_->text().find(request);
+    if (!address) return out;
+    out["ok"] = true;
+    out["units"] = units(scripts_->text().text_at(address));
+  } catch (const std::exception &e) { return text_failure(e); }
+  return out;
 }
 
 // An offline help box pauses the game until it is confirmed (docs/strings.md

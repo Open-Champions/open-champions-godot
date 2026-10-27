@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -157,6 +158,12 @@ class ChampionsFrontendService : public RefCounted {
     out["exit_code"] = flow_->last_exit_code();
     out["gated_music"] = flow_->gated_music();
     out["ability_remaining"] = flow_->ability_remaining();
+    if (flow_->screen() == F::Screen::CharClass || flow_->screen() == F::Screen::CharAppearance) {
+      const int preview_model = flow_->screen() == F::Screen::CharClass
+                                    ? F::carousel_model(flow_->cursor()) : flow_->character().model;
+      out["preview_model"] = preview_model;
+      out["preview_body_code"] = String::utf8(F::body_code_of_model(preview_model));
+    }
     out["error"] = String::utf8(flow_->last_error().c_str());
     const auto &c = flow_->character();
     Dictionary ch;
@@ -169,8 +176,15 @@ class ChampionsFrontendService : public RefCounted {
     ch["acknowledged"] = c.acknowledged;
     ch["stat_points"] = c.stat_points;
     ch["skill_points"] = c.skill_points;
+    ch["skill_points_known"] = c.skill_points_known;
     ch["imported"] = c.imported;
     ch["base_known"] = c.base_known;
+    ch["appearance_known"] = c.appearance_known;
+    Array base, spent;
+    for (auto v : c.base) base.push_back(v);
+    for (auto v : c.spent) spent.push_back(v);
+    ch["base"] = base;
+    ch["spent"] = spent;
     Array stats;
     for (auto v : c.stats())
       stats.push_back(v);
@@ -203,6 +217,10 @@ protected:
     ClassDB::bind_method(D_METHOD("boot", "options_file"), &ChampionsFrontendService::boot);
     ClassDB::bind_method(D_METHOD("view"), &ChampionsFrontendService::view);
     ClassDB::bind_method(D_METHOD("layout"), &ChampionsFrontendService::layout);
+    ClassDB::bind_method(D_METHOD("set_card_cache", "metadata", "headers", "count", "scroll_base"),
+                         &ChampionsFrontendService::set_card_cache);
+    ClassDB::bind_method(D_METHOD("set_card_preview", "header_index", "debug_time"),
+                         &ChampionsFrontendService::set_card_preview);
     ClassDB::bind_method(D_METHOD("frame", "buttons", "stick_x", "stick_y"), &ChampionsFrontendService::frame, DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("set_name", "name"), &ChampionsFrontendService::set_name);
     ClassDB::bind_method(D_METHOD("load_class_start_stats", "executable_path"), &ChampionsFrontendService::load_class_start_stats);
@@ -262,6 +280,22 @@ public:
                    static_cast<std::uint8_t>(stick_y));
     });
   }
+  Dictionary set_card_cache(const PackedByteArray &metadata, const PackedByteArray &headers,
+                            int64_t count, int64_t scroll_base) {
+    return guarded([&] {
+      if (count < 0 || count > std::numeric_limits<int>::max() || scroll_base < 0 ||
+          scroll_base > std::numeric_limits<int>::max())
+        throw F::Refusal("card count or scroll is outside int range");
+      flow_->set_card_cache(bytes_of(metadata), bytes_of(headers), int(count), int(scroll_base));
+    });
+  }
+  Dictionary set_card_preview(int64_t header_index, bool debug_time) {
+    return guarded([&] {
+      if (header_index < 0 || header_index > std::numeric_limits<int>::max())
+        throw F::Refusal("card preview index is outside int range");
+      flow_->set_card_preview(int(header_index), debug_time);
+    });
+  }
   Dictionary set_name(const String &name) { return guarded([&] { flow_->set_name(text_of(name)); }); }
 
   // g_classStartStats 0x4ef400, seven rows of four s32, read from the user's
@@ -298,6 +332,7 @@ public:
         c.gold = int(result.get("gold", 0));
         c.stat_points = int(result.get("stat_points", 0));
         c.skill_points = int(result.get("skill_points", 0));
+        c.skill_points_known = result.has("skill_points");
         Array stats = result.get("base_stats", Array());
         for (int i = 0; i < 4 && i < stats.size(); ++i)
           c.base[static_cast<std::size_t>(i)] = int(stats[i]);

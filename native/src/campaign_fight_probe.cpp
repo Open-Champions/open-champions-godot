@@ -9,6 +9,7 @@
 #include "champions/session_control.hpp"
 #include "champions/terrain_file.hpp"
 #include <cctype>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -59,7 +60,7 @@ R::Raw raw_of(float f) {
 int main(int argc, char **argv) {
   std::string root, level_name = "valor";
   unsigned ticks = 600, attack_every = 30;
-  bool walk = false, near_boar = false, weak = false, near_weakest = false;
+  bool walk = false, near_boar = false, weak = false, near_weakest = false, near_minotaur = false, ai_check = false, death_check = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--game" && i + 1 < argc) root = argv[++i];
@@ -70,6 +71,9 @@ int main(int argc, char **argv) {
     else if (a == "--near") near_boar = true;
     else if (a == "--weak") weak = true;
     else if (a == "--near-weakest") near_weakest = true;
+    else if (a == "--near-minotaur") near_minotaur = true;
+    else if (a == "--ai-check") ai_check = true;
+    else if (a == "--death-check") death_check = true;
     else { std::cerr << "usage: champions-campaign-fight-probe --game DIR [--level NAME] [--ticks N] [--attack-every K] [--walk] [--near (DIAGNOSTIC: start 40 units from a boar)] [--near-weakest (DIAGNOSTIC: like --near, at the boar with the lowest hit points)] [--weak (DIAGNOSTIC: set HP 1.0 on boars within 400 units to exercise the death path)]\n"; return 2; }
   }
   if (root.empty() || !fs::is_directory(root)) { std::cerr << "need --game DIR\n"; return 2; }
@@ -121,7 +125,8 @@ int main(int argc, char **argv) {
   host.start_single_player();
   host.set_executable(R::script_commands::executable_view(exe));
   const unsigned model_index = 11;
-  std::vector<std::string> lumps{"warboar.lmp", "minotaur.lmp", CF::Fight::player_animation_lump(*exe, model_index)};
+  std::vector<std::string> lumps{exe->string(exe->word(0x502f80)),
+      exe->string(exe->word(0x501200)), CF::Fight::player_animation_lump(*exe, model_index)};
   for (const auto &name : lumps)
     if (files.count(lower(name))) {
       const auto bytes = read_file(files.at(lower(name)));
@@ -160,9 +165,10 @@ int main(int argc, char **argv) {
   start.hp = raw_of(100.f);
   for (const auto &o : objs)
     if (o.cls == "Player1") { start.position = o.position; start.facing = o.angle; break; }
-  if (near_boar)
+  if (near_boar || near_minotaur)
     for (const auto &o : objs)
-      if (o.cls.compare(0, 7, "WarBoar") == 0) {
+      if ((near_boar && o.cls.compare(0, 7, "WarBoar") == 0) ||
+          (near_minotaur && o.cls.compare(0,8,"Minotaur")==0)) {
         start.position = o.position;
         start.position[0] = R::sub(start.position[0], R::from_int(40));
         start.facing = 0;
@@ -181,6 +187,65 @@ int main(int argc, char **argv) {
       start.position = spot;
     }
   }
+  if (ai_check) {
+    // Counts only. Move the diagnostic player near a real level boar after
+    // 120 ticks, without writing enemy state, target, stats or animation.
+    // This proves native integration, not an unassisted campaign route.
+    const auto initial = fight.enemies();
+    const auto selected = std::min_element(initial.begin(),initial.end(),[](const auto &a,const auto &b) {
+      return R::lt(a.hp,b.hp);
+    });
+    std::map<CF::Address, R::Vec3> positions;
+    for (const auto &e : initial) positions[e.address] = e.position;
+    std::set<CF::Address> wander, chase, attack, moved, reaction, retreat;
+    unsigned near_ticks = 0, active_ticks = 0, target_ticks = 0, visible_ticks = 0;
+    std::size_t inert = 0, no_target = 0, player_enemies = 0;
+    const auto player_address = CF::Address(fight.world().read(R::combat_runtime::PLAYERS + 0x43d8));
+    for (const auto &e : initial) {
+      inert += fight.world().read(e.address + 0x231,1) != 0;
+      no_target += (fight.world().read(e.address + 0xa8,8) & UINT64_C(0x4000000)) != 0;
+      if (player_address) player_enemies += fight.world().enemy(e.address,player_address) != 0;
+    }
+    bool placed = false;
+    for (unsigned t = 0; t < ticks && !fight.failed(); ++t) {
+      if (t == 120 && !initial.empty()) {
+        auto spot = selected->position;
+        spot[0] = R::sub(spot[0], R::from_int(40));
+        placed = fight.place_player(spot, 0).empty();
+      }
+      fight.tick(0);
+      if (placed && !initial.empty() && player_address) {
+        const auto a = selected->address;
+        const auto p = fight.player().position;
+        const R::Vec3 enemy_pos{R::Raw(fight.world().read(a + 0x10)),R::Raw(fight.world().read(a + 0x14)),R::Raw(fight.world().read(a + 0x18))};
+        const auto dx = R::sub(p[0],enemy_pos[0]), dy = R::sub(p[1],enemy_pos[1]), dz = R::sub(p[2],enemy_pos[2]);
+        near_ticks += R::lt(R::add(R::add(R::mul(dx,dx),R::mul(dy,dy)),R::mul(dz,dz)),R::from_int(250000));
+        active_ticks += (fight.world().read(a + 0xa8,8) >> 63) != 0;
+        target_ticks += fight.world().target(a + 0x234) != 0;
+        visible_ticks += fight.world().can_see(a,player_address,0,0x7fff,0,0,R::from_int(300)) != 0;
+      }
+      for (const auto &e : fight.enemies()) {
+        if (e.state == 1) wander.insert(e.address);
+        if (e.state == 3) chase.insert(e.address);
+        if (e.state >= 6 && e.state <= 10) attack.insert(e.address);
+        if (e.state == 18) reaction.insert(e.address);
+        if (e.state == 16) retreat.insert(e.address);
+        if (e.position[0] != positions[e.address][0] || e.position[1] != positions[e.address][1]) moved.insert(e.address);
+      }
+    }
+    const auto &n = fight.counts();
+    std::cout << "AI_CHECK diagnostic_placement=" << placed << " boars=" << initial.size()
+              << " ticks=" << n.ticks << " wandered=" << wander.size() << " chased=" << chase.size()
+              << " attacked=" << attack.size() << " moved=" << moved.size()
+              << " reactions=" << reaction.size() << " retreats=" << retreat.size()
+              << " state_changes=" << n.boar_state_changes << " attack_entries=" << n.boar_attack_entries
+              << " hit_events=" << n.boar_hit_events << " failed=" << fight.failed() << "\n";
+    std::cout << "AI_INPUTS inert=" << inert << " no_target=" << no_target << " player_enemies=" << player_enemies
+              << " near_ticks=" << near_ticks << " active_ticks=" << active_ticks << " target_ticks=" << target_ticks
+              << " visible_ticks=" << visible_ticks << "\n";
+    for (const auto &kv : fight.refusals()) std::cout << "refusal count=" << kv.second << ": " << kv.first << "\n";
+    return !fight.failed() && placed && !chase.empty() && !attack.empty() ? 0 : 1;
+  }
   if (std::getenv("FIGHT_DEBUG")) {
     auto &w = fight.world();
     std::cout << "debug flags=" << std::hex << w.read(0x4d8af0 + 0x43d8) << " numplayers=" << std::dec << w.read(0x4d8ae0)
@@ -190,8 +255,11 @@ int main(int argc, char **argv) {
   std::cout << "authority memory backing bytes=" << authority->memory.bytes().size() << "\n";
   const auto &c = host.counts();
   std::cout << "records built=" << c.objects_built << " unbuilt=" << c.objects_unbuilt << " not_created=" << c.objects_not_created
-            << " fight_actors=" << fight.counts().actors_built << " start_error=" << (start_error.empty() ? "none" : start_error) << "\n";
-  for (const auto &kv : c.build_refusals) std::cout << "  build refusal x" << kv.second << ": " << kv.first << "\n";
+            << " fight_actors=" << fight.counts().actors_built
+            << " minotaurs=" << fight.counts().minotaurs_built
+            << " start_error=" << (start_error.empty() ? "none" : start_error) << "\n";
+  if (!death_check)
+    for (const auto &kv : c.build_refusals) std::cout << "  build refusal x" << kv.second << ": " << kv.first << "\n";
   // Ticks: J pressed for one tick every attack_every ticks.
   if (weak) {  // probe-only: exercise the death path on boars the player can reach
     for (const auto &e : fight.enemies()) {
@@ -205,8 +273,27 @@ int main(int argc, char **argv) {
   for (const auto &e : before) hp_before[e.address] = as_float(e.hp);
   double hp0 = 0;
   for (const auto &e : before) hp0 += as_float(e.hp);
-  std::cout << "enemies=" << before.size() << " total_hp=" << hp0 << "\n";
+  if (!death_check) std::cout << "enemies=" << before.size() << " total_hp=" << hp0 << "\n";
+  const auto original_player = fight.world().read(R::combat_runtime::PLAYERS + 0x43d8);
+  auto retained_record = [&] {
+    // Documented bags/equipment ranges, XP, Gold and mana. Compare only;
+    // private record bytes and hashes are never printed.
+    std::vector<std::uint64_t> out;
+    for (unsigned off : {0x5cu, 0xc0u, 0xe4u})
+      out.push_back(fight.world().read(R::combat_runtime::PLAYERS + off));
+    for (unsigned off = 0x130; off < 0x130 + 3 * 0x1208; ++off)
+      out.push_back(fight.world().read(R::combat_runtime::PLAYERS + off, 1));
+    for (unsigned off = 0x43f0; off < 0x4440; ++off)
+      out.push_back(fight.world().read(R::combat_runtime::PLAYERS + off, 1));
+    return out;
+  };
+  std::vector<std::uint64_t> retained_before;
+  bool diagnostic_queued = false;
   for (unsigned t = 0; t < ticks && !fight.failed(); ++t) {
+    if (death_check && t == 90 && !before.empty()) {
+      retained_before = retained_record();
+      diagnostic_queued = fight.diagnostic_lethal_hit().empty();
+    }
     std::uint32_t cmd = 0;
     if (walk && t < ticks / 2) cmd |= R::session_control::POS_X;
     if (attack_every && (t % attack_every) < 6) cmd |= R::session_control::DAMAGE;
@@ -231,20 +318,52 @@ int main(int argc, char **argv) {
   for (const auto &e : after) { hp1 += as_float(e.hp); dead += e.dead; }
   {
     std::size_t damaged = 0;
+    std::size_t minotaur_damaged=0,minotaur_dead=0,minotaur_active=0,minotaur_targeted=0;
+    std::map<unsigned,std::size_t> minotaur_states;
     float lowest = 1e30f, most_lost = 0;
     for (const auto &e : after) {
       const float now = as_float(e.hp), was = hp_before[e.address];
-      if (now < was) {
+      if(e.minotaur){
+        minotaur_damaged+=now<was;minotaur_dead+=e.dead;minotaur_states[e.state]+=1;
+        minotaur_active += fight.world().read(e.address+0xa8,8)>>63;
+        minotaur_targeted += fight.world().target(e.address+0x234)!=0;
+      }
+      if (now < was && !death_check) {
         ++damaged;
-        std::cout << "damaged boar: " << (e.small ? "small" : "large") << " hp " << was << " -> " << now << " max " << as_float(e.max_hp) << " dead=" << e.dead << "\n";
+        if(!e.minotaur)std::cout << "damaged boar: " << (e.small ? "small" : "large") << " hp " << was << " -> " << now << " max " << as_float(e.max_hp) << " dead=" << e.dead << "\n";
       }
       lowest = std::min(lowest, now);
       most_lost = std::max(most_lost, was - now);
     }
-    std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
+    if (!death_check) {
+      std::cout << "boars damaged=" << damaged << " lowest_hp=" << lowest << " most_hp_lost_by_one=" << most_lost << "\n";
+      std::cout << "minotaurs damaged=" << minotaur_damaged << " dead=" << minotaur_dead
+                << " active=" << minotaur_active << " targeted=" << minotaur_targeted
+                << " hit_requests=" << fight.counts().minotaur_hit_requests
+                << " held_part_requests=" << fight.counts().held_part_requests << "\n";
+      for(const auto &state:minotaur_states)
+        std::cout << "minotaur_state=" << state.first << " count=" << state.second << "\n";
+    }
   }
   const auto player = fight.player();
   const auto &n = fight.counts();
+  if (death_check) {
+    const auto death = fight.death_view();
+    const bool retained = retained_before == retained_record();
+    const bool same_body = original_player == fight.world().read(R::combat_runtime::PLAYERS + 0x43d8);
+    std::cout << "death_check actors=" << after.size() << " ticks=" << n.ticks
+              << " failed=" << fight.failed() << " dead=" << (player.action_state == 4)
+              << " zero_hp=" << (player.hp == 0) << " wipe_timer=" << death.wipe_countdown
+              << " slot_timer=" << death.dead_countdown
+              << " task=" << death.running << " phase=" << death.phase << " fade=" << death.fade
+              << " native_clip_started=" << death.animation_started << " native_clip_steps=" << death.animation_steps
+              << " diagnostic_hit=" << diagnostic_queued << " retained_record_fields=" << retained
+              << " same_dead_body=" << same_body << " reload_refused=" << !death.refusal.empty() << '\n';
+    // This is a bounded death/refusal check, not successful respawn evidence.
+    return fight.failed() || !diagnostic_queued || player.action_state != 4 || player.hp != 0 ||
+        death.wipe_countdown != 0 || !death.running || death.phase != 1 || death.fade != 128 ||
+        !death.animation_started || !death.animation_steps || !retained || !same_body || death.refusal.empty();
+  }
   std::cout << "ticks=" << n.ticks << " failed=" << fight.failed() << " error=" << fight.error() << "\n"
             << "player present=" << player.present << " pos=(" << as_float(player.position[0]) << "," << as_float(player.position[1]) << "," << as_float(player.position[2]) << ")"
             << " hp=" << as_float(player.hp) << " action=" << player.action_state << " class=" << player.weapon_class << " gold=" << player.gold << "\n"

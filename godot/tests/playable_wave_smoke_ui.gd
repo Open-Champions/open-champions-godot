@@ -58,7 +58,7 @@ func extra_panels() -> void:
 		payload[offset + 3] = 128
 	payload.resize(5 * 2048)
 	write(dat, payload)
-	scene.actions.inventory.pressed.emit()
+	scene.actions.inventory_pictures.pressed.emit()
 	check(scene.paused and inventory.visible and scene._component_modal_open(), "inventory menu is a paused real modal")
 	inventory.index_dialog.file_selected.emit(hdr)
 	inventory.data_dialog.file_selected.emit(dat)

@@ -15,6 +15,9 @@ Evidence pins:
 | t3/research-saves | 8d43286 | `docs/save-format.md` (the 760-byte options image, card states, save latch) |
 | t3/research-combat-ctors | e9777eb | `docs/spec/music-volume.md` (slider, commit, boot copy; ported as `music_volume.hpp`) |
 | t3/research-menus-layout | dc458d5 | `docs/frontend-layout.md`, `tools/ref_frontend_layout.py`, `tools/ref_frontend_screens.py` (draw calls, fonts, layers, tints, menu sounds, the first-theme gate) |
+| t3/research-save-screen | 9c2b941 | `docs/save-screen.md` (slot-list tile frame, indexed rows, BCD date and clock formatter calls, and completed-slot header-backed preview fields; `research-save-screen-r2-fix.md` audit PASS) |
+| t3/research-char-create | b6dda4e | `docs/spec/character-creation.md` (13 carousel rows, seven starting-stat rows, keyboard initialization, record handoff bounds; audited PASS) |
+| t3/research-player-model / t3/research-appearance | 7f13899 / e088796 | Body codes, selection lumps, appearance resource requests; constructor checks only |
 
 Status words are the research's: **Executed**, **Observed**, **Ran** (seen on the
 emulator), **Inferred**, **Unknown**.
@@ -38,17 +41,33 @@ submission first.
 | Title | `FRONTEND.LMP/title.tex` at (141,15), layer 5, tint 0x80808080, states 0-4 only | Executed |
 | Publisher logo | `SOELOGO.LMP/soe_splash_url.tex` (192,330) and `soe_splash.tex` (64,50), layer 3, tint 0x80808080 | Executed |
 | Footer, message box, slot list, character, name entry | the research's small-font layer-6 batches, colours and text anchors; the research word is carried verbatim in `Draw.colour`. Only the slot-list batch sets `Draw.settled` for known fade. The Godot host paints its authored placeholder text at a readable Host opacity, separate from the research alpha. Message-box backing style, layer and inflation are Host choices. Phase-3 colours follow the call order of `PLAYERSEL_PHASES` (header and description 0x0A316864, points row 0x08325D18, stat rows 0x08585E5D, selected 0x0068C7CC). Label text is a host choice | Executed positions, Host text |
+| Save/load tile frame | `memcard_slotList`'s settled fixture passes (61,126,519,97) to the wrapper, which submits the style-2 `INTERFAC.LMP/tile*.tex` frame at (60,122,521,105), layer 6. The nine pieces are loaded from the selected disc at run time. The fixture tint 0x7f616369 is retained for this captured state; fade interpolation and exact retail pixels remain Unknown | Executed frame submission / Observed art names |
 | Menu sounds | move `menu_main_toggle.anm`, select `menu_main_accept.anm`, back `menu_main_back.anm` (FX.LMP) are requested at the documented triggers and counted by the host (`sounds`) | Executed ids |
 | First theme | `mx_maintheme_l.vag` flags 1 goes through the one music-volume gate (0x3d4ccccc), also for the credits handoff (flags 3) | Executed |
 
 Cursor and highlight: the list cursor is the style-0 frame above for row 0. The slot-list
-highlight rectangle (66,133)-(574,152) is Inferred by the research; the host draws it
-for the selected slot. The import row rectangle (108,101)-(298,118) is documented but
+rectangle (66,133)-(574,152) follows the selected-row word in the fixture, but its
+retail highlight role and cursor bounds are Inferred; this client does not paint it
+without a card directory. The import row rectangle (108,101)-(298,118) is documented but
 is not drawn by this host. No other cursor
 is documented. Animation: the only documented timed behaviours (logo 240 frames, film
 press after 30 frames, credits scroll one unit per call with the +2/+2 shadow pass and
 the alpha points at y = 448/400/224) are flow or one-line fixture facts; fades are not
 curved in the research, so none is drawn.
+
+The save/load screen keeps its file chooser actions in a labelled host area below
+the documented frame. No PS2 card directory or cached save headers are bound by
+the normal host flow, so the card rows, selected-slot preview, date/clock values
+and confirmation prompts stay absent there. A caller may explicitly supply a
+card cache to `Flow::set_card_cache` / `ChampionsFrontendService.set_card_cache`.
+The bounded 16-byte metadata and 0x70-byte header strides, five visible row
+anchors, numbered markers, the save-only first free row, `%d/%d/%d` BCD date and tested 12-hour clocks then
+paint with the disc small font. An explicitly selected header supplies raw
+player count, difficulty index and play seconds at the preview anchors; their
+labels are visibly Host because localized text and general minute formatting
+are not established. Real directory timestamps, card capacity, level/class
+text, locale and retail pixel parity remain unverified. The saved confirmation is
+also a labelled host layout because its frame art is not established.
 
 Still a labelled host layout (the research lists them Unknown): class art, the 3D
 model pose and the per-race animations, appearance art, the options value bars and
@@ -56,6 +75,12 @@ knobs, card rows with real file data, the intro film picture, the credits data
 layout, the Exit prompt and options-load prompt. The sound clips are not voiced: the
 research captured resource names only, not the clips' sample tables, mix level or
 group volume (0x41bac8).
+
+The class and appearance host screens show the selected model's `bodyv1` texture
+from the user's `SELECT.LMP` at run time, with opaque RGB as in the existing
+model viewer. This is a labelled disc asset preview,
+not the original 3D carousel camera or a rendered appearance variant. The
+original selection path and complete confirm/cancel walk remain unverified.
 
 ## What is not in the research
 
@@ -70,10 +95,10 @@ None of the following is documented, so the flow refuses it or the host labels i
 - Credits (`credits_run` not read). The state-14 "save config?" prompt.
 - Option entries other than music at index 1. The commit model covers music only.
 - Character creation:
-  - which models the class page shows, and in which order;
-  - the appearance choices and their defaults;
+  - the 13 carousel positions are known: `0,11,10,0,1,2,3,4,5,6,7,8,9`; focus timing and final camera image are unverified;
+  - the appearance choices and their defaults are Unknown; the host refuses individual choices and labels its one continuing default route;
   - removing an ability point;
-  - the name grid's characters (the host keyboard types);
+  - the name grid's 26 lowercase letters and ten digits are established, but the 28 extended glyph identities and editing/acceptance branches are Unknown; the host keyboard types under the record's 31-byte maximum;
   - skill points at creation;
   - starting gear (`player_giveStartingItems` has no table).
 - Card browser screens and slot lists. Host file choosers stand in for them.
@@ -92,7 +117,7 @@ None of the following is documented, so the flow refuses it or the host labels i
 | Film | a press after 30 frames | Observed |
 | Front end | `frontend_start` clears `g_paused`; the session's `game_addCoreTasks` copies image +0x08 to `g_musicVolume` and applies it; `mx_maintheme_l.vag` is queued | Observed / Executed |
 | Main → Game type → Players → Mode → Difficulty | states 0, 1, 2, 4, 3 in that order; first entries only; `g_numPlayers` 1, `g_difficultyIdx` 1 | Ran |
-| Character pages 1–4 | class from model (`player_initNewCharacter`); 20 ability points must be spent and right adds one; name `char[0x20]`; class start stats are read at run time from the user's executable at 0x4ef400 | Observed / Ran |
+| Character pages 1–4 | audited 13-position carousel and seven starting-stat rows; class from model (`player_initNewCharacter`); host's 20-point route preserves the one Ran class-6 example; name `char[0x20]`; start stats are read at run time from the user's executable at 0x4ef400 and refused unless they match the audited table | Observed / Ran / host for unverified branches |
 | Done | `playerSel_finish` queues `hub`. A created character starts at 500 gold, level 1 and acknowledged level 1 | Observed |
 | Options | music: type-4 slider, 1/120 steps, clamped to 0..1. The repeat timer gains 0x3e4fdef8 per call, so the first four calls are idle, and it resets when the cursor moves. A change previews `mx_maintheme_l.vag` (front end) or `mx_main_l.vag` (pause) through gated `music_playGlobal(…, 0x41)` when stream 2 is idle; `music_applyVolume` runs every call. Circle leaves through `config_commitOptions`; pause leaves query, then commit. Triangle opens card state 10 (choice 1 cancels; choice 2 loads and copies the 17 scalars, not +0x00 and not the button rows) | Executed / Observed |
 | Load | `memcard_requestLoad` stores `g_inFrontend`. Native session saves (`.ocplay` / `.ocnsave`) or a PS2 slot import; a slot import asks for its saved level | host + Executed import |

@@ -377,10 +377,58 @@ void reference_cases() {
   auto event = t.run({{1, v(12, 18, 0)}, {2, v(13, 18, 0)}});
   CHECK(event.entry == std::optional<std::string>("go") && event.active == 1);
   CHECK(!t.run({{0, v(12, 18, 0)}}).entry);
-  CHECK(!t.run({{0, v(0, 0, 0)}}, true).entry);
-  event = t.run({{0, v(0, 0, 0)}});
+  event = t.run({{0, v(0, 0, 0)}}, true);
   CHECK(event.entry == std::optional<std::string>("notgo") && !event.active);
+  CHECK(!t.run({{0, v(0, 0, 0)}}).entry);
   CHECK(Trigger(0, 0, -5, -4, "go").contains(v(-5, 4, 0)));
+  Trigger edged(0, 0, 10, 10, "exit");
+  TriggerParams params;
+  params.on_only = true;
+  params.off_only = true; // read second, so off wins
+  params.timeout = 2;
+  std::vector<std::string> dispatch;
+  auto linked = [&](bool on) { dispatch.push_back(on ? "on" : "off"); };
+  auto script = [&](const std::string &name, unsigned slot) {
+    dispatch.push_back(name + std::to_string(slot));
+    return 1;
+  };
+  edged.run_exact({{1, v(1, -1, 7)}, {0, v(2, -2, 8)}}, false, &params, linked, script);
+  CHECK(dispatch == std::vector<std::string>({"off", "notexit0"}));
+  CHECK(edged.slot == 0 && !edged.inside && edged.delay == 8);
+  for (int n = 7; n >= 0; --n) {
+    edged.run_exact({}, false, &params, linked, script);
+    CHECK(edged.delay == n);
+  }
+  CHECK(dispatch.size() == 2);
+  edged.slot = 42;
+  edged.run_exact({{0, v(2, -2, 0)}}, true, &params, linked, script);
+  CHECK(edged.slot == -1 && dispatch.size() == 2 && !edged.inside);
+  params = {};
+  params.on_only = true;
+  params.need_script_hit = true;
+  auto miss = [](const std::string &, unsigned) { return 0; };
+  edged.run_exact({{0, v(2, -2, 0)}}, false, &params, linked, miss);
+  CHECK(!edged.inside && edged.delay == 0);
+  params.need_script_hit = false;
+  edged.run_exact({{0, v(2, -2, 0)}}, false, &params, linked, script);
+  CHECK(!edged.inside && edged.delay == -1);
+  unsigned searches = 0;
+  auto search = [&](const Vec3 &at, Raw spread, Raw radius, bool any) {
+    CHECK(at == v(3, 4, 5) && spread == f(36) && radius == f(24) && any);
+    ++searches;
+    return v(float(searches), 4, 5);
+  };
+  std::uint32_t arrival_seed = 7;
+  auto arrival = portal_arrival(true, false, 2, v(3, 4, 5), arrival_seed, 1, search);
+  CHECK(arrival.rank == 3 && searches == 2 && arrival.positions.size() == 2);
+  CHECK(arrival.positions[0] == v(1, 4, 5) && arrival.positions[1] == v(2, 4, 5));
+  auto seed1 = 7u * 0x19660du + 0x3c6ef35fu;
+  auto seed2 = seed1 * 0x19660du + 0x3c6ef35fu;
+  CHECK(arrival.seed == seed2 && arrival.facing ==
+        std::vector<std::uint16_t>({std::uint16_t(seed1 >> 16), std::uint16_t(seed2 >> 16)}));
+  arrival_seed = 7;
+  CHECK(portal_arrival(true, true, 2, v(3, 4, 5), arrival_seed, 1, search).rank == 1);
+  CHECK(searches == 2);
   CHECK(push_trigger_allowed({}));
   CHECK(!push_trigger_allowed({1, 0, 1}));
   GateList g;
@@ -570,6 +618,18 @@ void robustness_and_state() {
   }));
   CHECK(push.deleted && actions == push.actions);
   CHECK(!push.interact(false, {}));
+  const std::vector<UseCandidate> nearby{{10, v(3, 4, 0), 0},
+                                          {11, v(2, 0, 0), 0x100000},
+                                          {12, v(-2, 0, 0), 0x100000},
+                                          {13, v(1, 0, 0), 0x100000}};
+  CHECK(nearest_use_candidate(v(0, 0, 0), nearby) == 13);
+  CHECK(nearest_use_candidate(v(0, 0, 0),
+                              {{11, v(2, 0, 0), 0x100000},
+                               {12, v(-2, 0, 0), 0x100000}}) == 11);
+  CHECK(!nearest_use_candidate(v(0, 0, 0), {{10, v(0, 0, 0), 0}}));
+  CHECK(use_query_contains_centre(v(0, 0, 0), v(-48, 48, 60)));
+  CHECK(!use_query_contains_centre(v(0, 0, 0), v(-48.01f, 0, 0)));
+  CHECK(!use_query_contains_centre(v(0, 0, 0), v(0, 0, -0.01f)));
   world_queries::LevelData data;
   data.heightfields.push_back({});
   data.elements.push_back(
@@ -889,7 +949,9 @@ void integration() {
   CHECK(state.travel.confirm("aab", "aa", state.gates));
   for (int i = 0; i < 179; ++i)
     CHECK(!adapter.advance_ready());
-  CHECK(state.pending.name.empty());
+  CHECK(state.travel.ticks == 180 && state.pending.name.empty());
+  CHECK(!adapter.advance_ready());
+  CHECK(state.travel.ticks == 181 && state.pending.name.empty());
   CHECK(adapter.advance_ready());
   CHECK(state.pending.name == "aab" && state.travel.ticks == 181);
   CHECK(!adapter.advance_ready());

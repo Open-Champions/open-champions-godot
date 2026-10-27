@@ -51,6 +51,23 @@ int class_of_model(int model) {
   return classes[model];
 }
 
+int carousel_model(int position) {
+  // t3/research-char-create b6dda4e, table +8, both pinned seeds.
+  static constexpr int order[CAROUSEL_POSITIONS] = {0, 11, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  if (position < 0 || position >= CAROUSEL_POSITIONS)
+    throw Refusal("carousel position is outside 0..12");
+  return order[position];
+}
+
+const char *body_code_of_model(int model) {
+  // t3/research-player-model 7f13899, body table 0x4ebbb8.
+  static const char *const codes[MODELS] = {"bm", "bf", "wem", "wef", "hem", "hef",
+                                             "em", "ef", "dem", "def", "vm", "im"};
+  if (model < 0 || model >= MODELS)
+    throw Refusal("model index is outside 0..11");
+  return codes[model];
+}
+
 const char *class_word(int class_index) {
   static const char *const words[CLASSES] = {"barbarian", "cleric", "shadowknight", "ranger",
                                              "wizard", "berserker", "shaman"};
@@ -165,10 +182,40 @@ void Flow::sound(menu_sound which) {
 
 void Flow::go(Screen next, int cursor) {
   screen_ = next;
+  card_cache_supplied_ = false;
+  card_metadata_.clear();
+  card_headers_.clear();
+  card_count_ = 0;
+  card_scroll_base_ = 0;
+  card_preview_index_ = -1;
+  card_debug_time_ = false;
   cursor_ = cursor;
   frames_ = 0;
   slider_timer_ = 0;
   error_.clear();
+}
+
+void Flow::set_card_cache(std::vector<std::uint8_t> metadata,
+                          std::vector<std::uint8_t> headers, int count, int scroll_base) {
+  if (screen_ != Screen::LoadGame && screen_ != Screen::SaveGame)
+    throw Refusal("card cache requires the save or load screen");
+  (void)layout::visible_card_rows(metadata, headers, count, scroll_base,
+                                  screen_ == Screen::SaveGame);
+  card_metadata_ = std::move(metadata);
+  card_headers_ = std::move(headers);
+  card_count_ = count;
+  card_scroll_base_ = scroll_base;
+  card_cache_supplied_ = true;
+  card_preview_index_ = -1;
+  card_debug_time_ = false;
+}
+
+void Flow::set_card_preview(int header_index, bool debug_time) {
+  if (!card_cache_supplied_)
+    throw Refusal("selected card preview requires a supplied card cache");
+  (void)layout::card_preview(card_headers_, card_count_, header_index);
+  card_preview_index_ = header_index;
+  card_debug_time_ = debug_time;
 }
 
 bool Flow::in_frontend() const {
@@ -193,6 +240,13 @@ void Flow::set_net_game(bool net) {
 }
 
 void Flow::set_class_start_stats(const std::array<std::array<std::int32_t, 4>, CLASSES> &rows) {
+  // t3/research-char-create b6dda4e, table 0x4ef400, both pinned seeds.
+  static constexpr std::array<std::array<std::int32_t, 4>, CLASSES> observed{{
+      {{35, 20, 25, 35}}, {{26, 36, 27, 26}}, {{28, 30, 27, 30}},
+      {{28, 25, 35, 27}}, {{23, 39, 25, 28}}, {{32, 22, 31, 30}},
+      {{26, 37, 24, 28}}}};
+  if (rows != observed)
+    throw Refusal("class start stats do not match the audited RTA US v2.00 table");
   start_stats_ = rows;
   start_known_ = true;
 }
@@ -452,8 +506,9 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       // No menu sound here: PLAYERSEL_SOUNDS belongs to phase 1 (import selection),
       // and class selection has no phase of its own (REFUSED, docs/FRONTEND.md).
       character_ = Character{};
-      character_.model = cursor_;
-      character_.class_index = class_of_model(cursor_);
+      selected_carousel_position_ = cursor_;
+      character_.model = carousel_model(cursor_);
+      character_.class_index = class_of_model(character_.model);
       if (start_known_) {
         character_.base = start_stats_[static_cast<std::size_t>(character_.class_index)];
         character_.base_known = true;
@@ -464,8 +519,10 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     }
     break;
   case Screen::CharAppearance:
-    if (confirm) go(Screen::CharAbility);
-    else if (pressed & CANCEL) go(Screen::CharClass, character_.model);
+    move_cursor(repeat);
+    if (confirm && cursor_ == 0) go(Screen::CharAbility);
+    else if (pressed & CONFIRM) error_ = "appearance choice refused: reachable value is Unknown";
+    else if (pressed & CANCEL) go(Screen::CharClass, selected_carousel_position_);
     break;
   case Screen::CharAbility:
     move_cursor(repeat);
@@ -725,14 +782,18 @@ std::vector<Entry> Flow::entries() const {
     out.push_back(entry("ok", "Saved", "the \"saved\" box of memcard_saveScreen sub-state 4 (Executed)"));
     break;
   case Screen::CharClass:
-    for (int m = 0; m < MODELS; ++m) {
+    for (int p = 0; p < CAROUSEL_POSITIONS; ++p) {
+      const int m = carousel_model(p);
       const int c = class_of_model(m);
       out.push_back(entry("model", "Model " + std::to_string(m) + " - " + class_word(c),
-                          "player_initNewCharacter model -> class (Observed); class word Inferred"));
+                          "carousel table 0x4fbc00 +8/+9 (Observed); class word Inferred"));
     }
     break;
   case Screen::CharAppearance:
-    out.push_back(entry("default", "Default appearance", "the default was taken in the rig route (Ran)"));
+    out.push_back(entry("continue", "Continue (default route)", "one default route Ran; menu choices Unknown"));
+    for (const char *field : {"Hair style", "Hair/beard colour", "Beard style", "Body skin variant"})
+      out.push_back(entry("unknown", std::string(field) + " (Unknown)", "record appearance field Observed; menu choice Unknown", false,
+                          "reachable choice and selected value are not established"));
     break;
   case Screen::CharAbility: {
     const auto s = character_.stats();
@@ -822,19 +883,20 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("The normal pause menu has no save entry; a save screen opens from a savepoint, script saveGame or the host. A card error leaves latch 0x4f8f28 at 1.");
     break;
   case Screen::CharClass:
-    n.push_back("Which models the page shows, and in which order, is not documented; all twelve are listed in model order. Triangle imports a PS2 character (page 8 sheet).");
+    n.push_back("The observed 13-position carousel order is 0,11,10,0..9. Exact on-screen focus movement and preview camera remain Unknown. Triangle imports a PS2 character (page 8 sheet).");
     n.push_back("Refused: class selection has no phase of its own in the research (phase 1 is import selection), so it plays no menu sound and draws no phase-1 text; the page footer is Host.");
     if (!start_known_)
       n.push_back("Class start stats g_classStartStats 0x4ef400 are read from the user's executable; none is loaded, so rows show spent points only.");
     break;
   case Screen::CharAppearance:
-    n.push_back("Appearance bytes record +0x20 s8[4] (-1 = none): the page's choices and default values are not documented, so they are not set.");
+    n.push_back("Appearance bytes record +0x20 s8[4] (-1 = none): reachable choices, selected values and handoff are Unknown. The host permits the one default-route continuation without claiming appearance parity.");
     break;
   case Screen::CharAbility:
     n.push_back("Right adds one point to the row (Ran). Removing a point is not documented. 20 points must be spent before leaving.");
     break;
   case Screen::CharName:
-    n.push_back("The name grid is 10 columns (Ran); its characters are not documented, so the host keyboard types the name.");
+    n.push_back("The initialized name grid has 10 columns and 64 glyphs: 26 lowercase letters, ten digits and 28 unidentified high-bit glyphs (Executed). Editing, case toggle, trim and DONE branches are Unknown; the host keyboard types under the record's 31-byte limit.");
+    n.push_back("The full menu confirm/cancel handoff, character kind, first object-present recalc and finish transition remain unverified. The host creates only the documented fields and marks appearance and skill points Unknown.");
     n.push_back("Starting gear (player_giveStartingItems, 323 descriptor calls by class and model, no table) is refused. Skill points at creation are not documented; 0 is kept.");
     break;
   case Screen::Playing:

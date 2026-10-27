@@ -32,7 +32,8 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          G_SKILL_TABLE = 0x41b170, G_BTN_ATTACK = 0x41b980,
                          G_TIMED_MODIFIERS = 0x537c08, FIXTURE_BASE = 0x10000,
                          STACK_HEAD = 0x8000, VT_GAMEOBJECT = 0x5122a8,
-                         VT_PROJECTILE = 0x5120b8, VT_MISSILE = 0x50e5a0,
+                         VT_PROJECTILE = 0x5120b8, VT_DISEASEBOLT = 0x5183d8,
+                         VT_MISSILE = 0x50e5a0,
                          VT_THROWN = 0x50e470, VT_HOLYSTRIKE = 0x51a078,
                          VT_SPARKS = 0x50e998, VT_LIGHTEFFECT = 0x50e198,
                          VT_SPELL_WAVE = 0x51c330, MISSILE_SIZE = 0x1c8,
@@ -122,6 +123,10 @@ struct World::State {
   std::array<std::uint8_t, 32> music{};
   std::map<Address, std::vector<Cast>> queued_casts;
   std::map<int, Address> skill_objects;
+  // Constructor-verified PhProp model pointers. Binding replaces the current
+  // pointer with a World-owned fixture extent, never writes to a resource hint.
+  std::map<Address, Address> prop_model_pointers;
+  std::map<Address, unsigned> fixture_extents;
   std::vector<std::pair<Raw, Raw>> exp_awards;
   std::size_t stub_box_skips = 0;
   // Class virtual bodies ported outside the arena model, by function address
@@ -169,6 +174,8 @@ struct World::State {
   Address alloc_fixture(unsigned);
   Address spawn(const Spawn &, bool, unsigned, int, int);
   Address spawn_class(const std::string &, const Spawn &);
+  std::array<Address, 2> spawn_mounted_horseman(unsigned, const Spawn &,
+                                                const Spawn &);
   void write_table(Address table, const std::map<unsigned, Raw> *extra = nullptr);
   Address construct(Address addr, const Vec3 &pos, Kind kind);
   void link(Address, Address, Address);
@@ -364,6 +371,10 @@ struct World::State {
                       Raw facing);
   void holystrike_run(Address);
   void holystrike_hit(Address, Address);
+  Raw diseasebolt_cast(Address skill, Raw level, Address caster, const Vec3 &,
+                       Raw facing);
+  void diseasebolt_run(Address);
+  void diseasebolt_hit(Address, Address);
   Address b_alloca(Raw size);
   Address b_local_vec(const Vec3 &);
   Raw shockoffire_cast(Address skill, Raw level, Address caster, Address pos,

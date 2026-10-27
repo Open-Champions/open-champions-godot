@@ -197,6 +197,91 @@ void host() {
   }
   {
     Host h;
+    auto chunk = h.w->spawn_gut_chunk({0, 0, 0}, 2, 0);
+    std::vector<std::uint8_t> vif(0x40 + 64 * 24);
+    vif[0x25] = 4;
+    for (unsigned i = 0; i < 24; ++i)
+      vif[0x40 + i] = std::uint8_t(i - 12);
+    h.w->bind_prop_model(chunk, {vif.data(), vif.size()});
+    const auto model = h.w->read(chunk + 0x4c);
+    check(model != 0xA10000 && h.w->read(C::Address(model) + 0x25, 1) == 4 &&
+              h.w->read(C::Address(model) + 0x40, 1) == std::uint8_t(-12),
+          "the PhProp model pointer resolves an owned signed VIF hull");
+    // This authored stationary case does not need the unbound horizontal
+    // terrain sweep service. The hull loop and remaining tick still execute.
+    h.w->write(chunk + 0x1bc, 4, 0);
+    h.w->write(chunk + 0x1c0, 4, 0);
+    h.ground = ONE;
+    h.w->run_actor(chunk);
+    check(h.w->read(chunk + 0x228) == ONE,
+          "the completed prop tick records the supplied terrain height");
+    vif[0x25] = 0;
+    bool refused = false;
+    try { h.w->bind_prop_model(chunk, {vif.data(), vif.size()}); }
+    catch (const champions::FormatError &) { refused = true; }
+    check(refused && h.w->read(C::Address(model) + 0x25, 1) == 4,
+          "a missing disc hull refuses without replacing the bound model");
+    check(h.w->read(chunk + 0x4c) == model,
+          "invalid hull leaves the owned destination selected");
+    vif[0x25] = 4;
+    bool truncated = false;
+    try { h.w->bind_prop_model(chunk, {vif.data(), 0x40 + 23}); }
+    catch (const champions::FormatError &) { truncated = true; }
+    check(truncated && h.w->read(chunk + 0x4c) == model,
+          "a truncated hull refuses without replacing the owned destination");
+    auto other = h.creature({0, 0, 0});
+    bool wrong_actor = false;
+    try { h.w->bind_prop_model(other, {vif.data(), vif.size()}); }
+    catch (const C::Unsupported &) { wrong_actor = true; }
+    check(wrong_actor, "an unrelated actor cannot bind a prop model");
+    constexpr C::Address foreign = 0xA10000;
+    h.w->write(foreign, 4, 0x12345678);
+    h.w->write(chunk + 0x4c, 4, foreign);
+    bool wrong_pointer = false;
+    try { h.w->bind_prop_model(chunk, {vif.data(), vif.size()}); }
+    catch (const C::Unsupported &) { wrong_pointer = true; }
+    check(wrong_pointer && h.w->read(foreign) == 0x12345678,
+          "a modified model destination is refused before writing");
+  }
+  {
+    Host h;
+    h.w->write(0x4f7120, 4, 1); // Mode B is selected by the caller.
+    h.w->begin_arena_intro();
+    check(h.w->read(0x5038c8, 2) == 180 && h.w->read(0x503890) == 1,
+          "wave intro begins with the observed lock and 180 visits");
+    for (unsigned visit = 0; visit < 180; ++visit) {
+      h.w->arena_intro_visit();
+      check(h.w->read(0x5038c8, 2) == 179 - visit &&
+                h.w->read(0x503890) == 1 &&
+                h.w->read(0x41b4fc) == 1 && h.w->read(0x41b500) == 1,
+            "each positive intro visit preserves all three locks");
+    }
+    h.w->arena_intro_visit();
+    check(h.w->read(0x5038c8, 2) == 0xffff &&
+              h.w->read(0x503890) == 0 &&
+              h.w->read(0x41b4fc) == 0 && h.w->read(0x41b500) == 0,
+          "visit 181 releases the creature state gate");
+  }
+  {
+    world_queries::LevelData data;
+    data.tg_w = data.tg_h = 1;
+    data.grid = {{0}};
+    world_queries::HeightField field;
+    field.w = field.h = 1;
+    field.samples = {0};
+    data.heightfields.push_back(field);
+    data.elements.push_back(world_queries::make_element(
+        0, -100, -100, 100, 100, 0, 0, 0, 0, 0, 32767, 0));
+    world_queries::Level terrain(data);
+    auto services = C::with_terrain({}, terrain);
+    check(services.raycast({0, 0, from_int(5)}, {from_int(20), 0, 0},
+                           3, ONE) == MINUS_ONE,
+          "selected terrain gives the clear-line ray answer, not a zero stub");
+    check(services.height_below({0, 0, from_int(5)}, from_int(4)) == 0,
+          "sight and movement services share the same selected terrain");
+  }
+  {
+    Host h;
     auto target = h.creature({from_int(8), 0, 0});
     h.w->write(target + 0x2e0, 2, 0x20);
     h.w->write(target + 0x24, 4, 0x1000);

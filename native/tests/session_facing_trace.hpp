@@ -5,19 +5,19 @@
 #include "session_turn_trace.hpp"
 namespace champions::test::facing_trace {
 using namespace session_trace;
-inline std::string control(const R::session_control::Snapshot &s) {
-  auto base = s;
-  base.session.turning.reset();
-  base.config.facing.reset();
+inline std::string control(R::session_control::Snapshot s) {
   const auto &f = s.config.facing;
-  return sequence({recovery_trace::control(base),
-                   f ? sequence({n(unsigned(f->policy)), n(f->initial.rate),
-                                 n(f->initial.angular_velocity),
-                                 n(f->initial.slow), n(f->mode)})
-                     : "_",
-                   s.session.turning
-                       ? session_turn_trace::turning(*s.session.turning)
-                       : "_"});
+  auto facing = f ? sequence({n(unsigned(f->policy)), n(f->initial.rate),
+                             n(f->initial.angular_velocity),
+                             n(f->initial.slow), n(f->mode)})
+                  : "_";
+  auto turning = s.session.turning
+                     ? session_turn_trace::turning(*s.session.turning)
+                     : "_";
+  s.session.turning.reset();
+  s.config.facing.reset();
+  return sequence({recovery_trace::control(std::move(s)), std::move(facing),
+                   std::move(turning)});
 }
 inline R::session_control::Config config(unsigned f, unsigned v,
                                          bool recovery) {

@@ -27,6 +27,10 @@ def main() -> int:
     parser.add_argument("--godot", type=pathlib.Path, required=True)
     parser.add_argument("--game-folder", type=pathlib.Path, required=True)
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "work/playthrough")
+    parser.add_argument("--blood1-only", action="store_true",
+                        help="stop after the first story destination branch")
+    parser.add_argument("--blood1-choice-evil", action="store_true",
+                        help="follow the researched alternate blood1 dialog edges")
     args = parser.parse_args()
     godot = args.godot.resolve(strict=True)
     disc = args.game_folder.resolve(strict=True)
@@ -45,6 +49,10 @@ def main() -> int:
                    f"--game-folder={disc}", f"--out={dest}"]
         if name == "rendered":
             command.append("--rendered")
+        if args.blood1_only:
+            command.append("--blood1-only")
+        if args.blood1_choice_evil:
+            command.append("--blood1-choice-evil")
         try:
             with (dest / "godot.log").open("w", encoding="utf-8") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,

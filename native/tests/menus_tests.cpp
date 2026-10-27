@@ -1,10 +1,13 @@
 #include "champions/menus.hpp"
+#include "champions/items.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 using namespace champions::menus;
@@ -72,6 +75,14 @@ void cursor_vectors() {
   expect(grid_address(0x2000, 9, 0) == 0, "grid past column");
   expect(grid_address(0x2000, 0, 75) == 0, "grid past row");
   expect(grid_address(0x2000, 8, 74) == 0x2000 + 8 * GRID_COL + 74 * GRID_ROW, "grid corner");
+  expect(page_grid_address(0x2000, 1, 0, 0) == 0x2000 + PAGE_BYTES, "page-one hover stride");
+  expect(page_grid_address(0x2000, 2, 0, 0) == 0x2000 + 2 * PAGE_BYTES, "page-two hover stride");
+  expect(first_cell_bag_address(PLAYER, 1) == PLAYER + BAG_ITEMS + BAG_STRIDE,
+         "page-one action bag stride");
+  expect(first_cell_bag_address(PLAYER, 2) == PLAYER + BAG_ITEMS + 2 * BAG_STRIDE,
+         "page-two action bag stride");
+  expect(page_grid_address(0x2000, 3, 0, 0) == 0 && first_cell_bag_address(PLAYER, 3) == 0,
+         "stat pages have no item cell");
   expect(cursor_cell(80, 80 + 17 + 4 * 32, 100) == std::make_pair(4, 0), "column 4");
   const auto hit = hit_cell(0, 0, 1);
   expect(cursor_cell(0, hit.x0, hit.y0) == std::make_pair(0, 1), "hit cell row");
@@ -109,6 +120,10 @@ void action_vectors() {
   for (const auto &row : rows)
     expect(item_action(row.mode, row.edge, row.equipped, row.holdable, row.masks) == row.want,
            "item action");
+  expect(inventory_grid_tint(false, false, false) == 0x20445558u, "free item underlay");
+  expect(inventory_grid_tint(false, true, false) == 0x20000080u, "blocked item underlay");
+  expect(inventory_grid_tint(false, true, true) == 0x20445558u, "flag-41 blocked underlay");
+  expect(inventory_grid_tint(true, true, false) == 0x20008000u, "equipped wins blocked");
 }
 
 void layout_vectors() {
@@ -152,18 +167,198 @@ void layout_vectors() {
 
 void ledger_vectors() {
   {
+    Ledger shop;
+    const auto initial = shop.bag_count(0);
+    expect(shop.press(0, CROSS_CONFIRM.shop) == Action::Buy, "fixture shop buy action");
+    expect(shop.gold() == 441 && shop.bag_count(0) == initial + 1,
+           "100 value buy truncates to 59 and inserts in player bag");
+    const auto sold = hit_cell(0, 0, 2);
+    shop.set_cursor(sold.x0, sold.y0);
+    expect(shop.press(1, CROSS_CONFIRM.shop) == Action::Sell, "fixture shop sell action");
+    expect(shop.gold() == 445 && shop.bag_count(0) == initial,
+           "100 value sell credits 4 and removes from player bag");
+  }
+  {
     Ledger book;
     expect(book.gold() == 500 && book.bag_count(0) == 2 && book.skill_points() == 4, "seed");
     expect(book.stat_points() == 3 && book.level() == 5 && book.acknowledged() == 4, "seed points");
     expect(book.press(2, 0x40) == Action::Equip && book.equipment_index(0) == 0, "equip");
+    expect(book.record_word(0x43f0) == PLAYER + BAG_ITEMS, "equip writes player record pointer");
     expect(book.press(2, 0x40) == Action::Unequip && book.equipment_index(0) == -1, "unequip");
+    expect(book.record_word(0x43f0) == 0, "unequip clears player record pointer");
+  }
+  {
+    Ledger authored;
+    champions::simulation::rta::items::Tables tables;
+    for (int i = 0; i < 2; ++i) {
+      auto def = std::make_shared<champions::simulation::rta::items::Definition>();
+      def->addr = champions::simulation::rta::items::A_DEFS + static_cast<std::uint32_t>(i) * 64;
+      def->name = i == 0 ? "blade" : "charm";
+      def->price = 10;
+      def->slot = i;
+      def->category = 0;
+      tables.defs.push_back(def);
+    }
+    const auto page_tables = tables;
+    std::unordered_map<std::uint32_t, std::uint8_t> image;
+    const auto image_word = [&](std::uint32_t at, std::uint32_t value) {
+      for (unsigned byte = 0; byte < 4; ++byte)
+        image[at + byte] = static_cast<std::uint8_t>(value >> (byte * 8));
+    };
+    const auto image_string = [&](std::uint32_t at, const std::string &value) {
+      for (std::size_t byte = 0; byte < value.size(); ++byte)
+        image[at + static_cast<std::uint32_t>(byte)] = static_cast<std::uint8_t>(value[byte]);
+      image[at + static_cast<std::uint32_t>(value.size())] = 0;
+    };
+    for (int index = 0; index < 2; ++index) {
+      const auto at = champions::simulation::rta::items::A_DEFS + static_cast<std::uint32_t>(index) * 64;
+      const auto name_at = 0x3f7000u + static_cast<std::uint32_t>(index) * 0x10u;
+      image_word(at, name_at);
+      image_string(name_at, index == 0 ? "blade" : "charm");
+    }
+    image[champions::simulation::rta::items::A_DEFS + 64 + 0x1c] = 1;
+    image_string(0x5385e0u, "throw");
+    image_string(0x538660u, "throw");
+    const auto image_byte = [&](std::uint32_t at) -> std::uint8_t {
+      const auto found = image.find(at);
+      return found == image.end() ? 0 : found->second;
+    };
+    Ledger copied;
+    copied.adopt_record(authored.record_bytes(), std::move(tables), {}, image_byte);
+    expect(copied.press(2, 0x40) == Action::Equip &&
+           copied.record_word(0x43f0) == PLAYER + BAG_ITEMS, "imported record equip pointer");
+    expect(copied.press(2, 0x40) == Action::Unequip &&
+           copied.record_word(0x43f0) == 0, "imported record unequip pointer");
+    reject([&] { copied.press(0, CROSS_CONFIRM.shop); }, "unknown live stock refuses purchase");
+    expect(copied.frame("shop").sprites.size() == 1, "shop submits only the pinned-tint sprite");
+    expect(copied.record_word(0xe4) == 500, "refused stock does not debit gold");
+    expect(copied.press(1, CROSS_CONFIRM.shop) == Action::Sell &&
+           copied.gold() == 501 && copied.bag_count(0) == 1,
+           "live sale credits the imported record and removes one item");
+    reject([&] { copied.press(2, 0x10); }, "live drop refuses missing world placement");
+    auto page_record = authored.record_bytes();
+    const auto put_word = [&](std::size_t at, std::uint32_t value) {
+      for (int byte = 0; byte < 4; ++byte)
+        page_record[at + static_cast<std::size_t>(byte)] = static_cast<std::uint8_t>(value >> (byte * 8));
+    };
+    for (int bag = 1; bag < 3; ++bag) {
+      const auto base = static_cast<std::size_t>(bag) * BAG_STRIDE;
+      put_word(BAG_COUNT + base, 1);
+      for (std::size_t byte = 0; byte < ITEM_SIZE; ++byte)
+        page_record[BAG_ITEMS + base + byte] = page_record[BAG_ITEMS + byte];
+    }
+    Ledger pages;
+    pages.adopt_record(page_record, page_tables, {}, image_byte);
+    std::array<std::vector<IconSize>, BAGS> page_sizes;
+    for (int bag = 0; bag < BAGS; ++bag)
+      page_sizes[bag].assign(static_cast<std::size_t>(pages.bag_count(bag)), {32, 0, true});
+    pages.build_display_grid(page_sizes);
+    pages.set_page(1);
+    const auto page_one = pages.frame("inventory");
+    expect(page_one.rects.size() == 67 && page_one.frames.size() == 1 &&
+           page_one.selected_texts.empty(), "page-one display copies draw two occupied cells");
+    expect(std::none_of(page_one.gaps.begin(), page_one.gaps.end(), [](const Gap &gap) {
+      return std::string(gap.id) == "inventory-page-grid" ||
+             std::string(gap.id) == "inventory-grid-footprint";
+    }), "page-one display grid is ready");
+    expect(pages.press(2, 0x40) == Action::Equip &&
+           pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 1),
+           "page-one first-cell action uses bag stride");
+    expect(pages.press(2, 0x40) == Action::Unequip, "page-one unequip");
+    pages.set_page(2);
+    const auto page_two = pages.frame("inventory");
+    expect(page_two.rects.size() == 67 && page_two.frames.size() == 1,
+           "page-two display copies draw two occupied cells");
+    expect(pages.press(2, 0x40) == Action::Equip &&
+           pages.record_word(0x43f0) == first_cell_bag_address(PLAYER, 2),
+           "page-two first-cell action uses bag stride");
+    pages.set_cursor(49, 100);
+    reject([&] { pages.press(2, 0x40); }, "page-two other action cell stays refused");
+    page_sizes[1][0] = {32, 0};
+    pages.build_display_grid(page_sizes);
+    pages.set_page(1);
+    const auto tall = pages.frame("inventory");
+    expect(tall.rects.size() == 65 && tall.frames.empty() &&
+           std::any_of(tall.gaps.begin(), tall.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-grid-footprint" &&
+                    gap.column == 0 && gap.row == 0;
+           }), "unverified runtime footprint is labelled in its cell and not drawn");
+    page_sizes[1][0] = {32, 32, true};
+    pages.build_display_grid(page_sizes);
+    expect(pages.frame("inventory").rects.size() == 65,
+           "positive height refuses even if one-row evidence is asserted");
+    page_sizes[1][0] = {16, 0, true};
+    pages.build_display_grid(page_sizes);
+    const auto unusual = pages.frame("inventory");
+    expect(unusual.rects.size() == 65 && unusual.icons.empty() &&
+           std::any_of(unusual.gaps.begin(), unusual.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-grid-footprint" &&
+                    gap.column == 0 && gap.row == 0;
+           }), "unverified intermediate width is refused");
+    auto next_row_record = page_record;
+    for (int slot = 1; slot < 6; ++slot)
+      for (std::size_t byte = 0; byte < ITEM_SIZE; ++byte)
+        next_row_record[BAG_ITEMS + BAG_STRIDE + static_cast<std::size_t>(slot) * ITEM_SIZE + byte] =
+            next_row_record[BAG_ITEMS + BAG_STRIDE + byte];
+    for (int byte = 0; byte < 4; ++byte)
+      next_row_record[BAG_COUNT + BAG_STRIDE + byte] = static_cast<std::uint8_t>(6u >> (8 * byte));
+    Ledger packed;
+    packed.adopt_record(next_row_record, page_tables, {}, image_byte);
+    page_sizes[1] = {{0, 0, true}, {32, 0, true}, {0, 0, true},
+                     {64, 0, true}, {0, 0, true}, {32, 0, true}};
+    packed.build_display_grid(page_sizes);
+    packed.set_page(1);
+    const auto packed_frame = packed.frame("inventory");
+    const auto row_one = hit_cell(80, 0, 1);
+    expect(packed_frame.rects.size() == 75 &&
+           packed_frame.rects[73].x0 == row_one.x0 &&
+           packed_frame.rects[73].y0 == row_one.y0 &&
+           packed.display_bag_slot(1, 0, 1) == 5 &&
+           packed.display_bag_slot(1, 1, 1) == 5 &&
+           packed.display_bag_slot(1, 8, 0) == -1,
+           "two-column item moves to next display row");
+    page_sizes[1][1] = {32, 32, true};
+    packed.build_display_grid(page_sizes);
+    const auto partial = packed.frame("inventory");
+    expect(packed.display_bag_slot(1, 0, 0) == 0 &&
+           packed.display_bag_slot(1, 1, 0) == -1 &&
+           partial.rects.size() == 66 &&
+           std::any_of(partial.gaps.begin(), partial.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-grid-footprint" &&
+                    gap.column == 1 && gap.row == 0;
+           }), "verified preceding cell survives unknown footprint; later cells refuse");
+    auto stack_tables = page_tables;
+    stack_tables.defs[0]->name = "throwing-dart";
+    image_string(0x3f7000u, "throwing-dart");
+    auto stack_record = authored.record_bytes();
+    stack_record[BAG_ITEMS + 4] = 25;
+    stack_record[BAG_ITEMS + 5] = 0;
+    Ledger stack;
+    stack.adopt_record(stack_record, stack_tables, {}, image_byte);
+    // Independent contract: value 25*10=250; the 0x3d4ccccc float factor
+    // makes trunc((250*20)/25*factor) = 9, rather than decimal 0.05's 10.
+    // The two name-matched stems also make drop remove min(25,20), leaving 5.
+    const auto stack_action = stack.press(1, CROSS_CONFIRM.shop);
+    expect(stack_action == Action::Sell && stack.gold() == 509 &&
+           stack.bag_count(0) == 2 && stack.record_bytes()[BAG_ITEMS + 4] == 5,
+           "name-matched stack sale credits nine and removes twenty");
+    image[0x538660u] = 0;
+    Ledger unsafe;
+    reject([&] { unsafe.adopt_record(stack_record, stack_tables, {}, image_byte); },
+           "empty sale stem refuses before any live credit");
+    expect(unsafe.gold() == 500, "refused live stem never credits gold");
   }
   {
     Ledger book;
     const auto row = hit_cell(0, 0, 1);
     book.set_cursor(row.x0, row.y0);
     expect(book.press(2, 0x40) == Action::Drag && book.dragging() && book.bag_count(0) == 2, "drag");
-    expect(book.frame("inventory").texts.size() == 2, "drag does not copy");
+    const auto drag_frame = book.frame("inventory");
+    expect(drag_frame.texts.size() == 2, "drag does not copy");
+    expect(drag_frame.held_icons.empty() &&
+           std::any_of(drag_frame.gaps.begin(), drag_frame.gaps.end(), [](const Gap &gap) {
+             return std::string(gap.id) == "inventory-drag-picture";
+           }), "fixture without picture association labels drag refusal");
   }
   {
     Ledger book;
@@ -173,7 +368,25 @@ void ledger_vectors() {
   {
     Ledger book;
     expect(book.press(0, 0x80) == Action::Buy && book.gold() == 441 && book.bag_count(0) == 3, "buy");
-    expect(book.frame("shop").texts.at(0).text == "stock", "stock cell");
+    const auto shop_frame = book.frame("shop");
+    expect(shop_frame.texts.size() == 3 && shop_frame.texts[0].x == 160 &&
+           shop_frame.texts[0].y == 203 && shop_frame.texts[1].y == 243 &&
+           shop_frame.texts[2].text == "stock", "shop choice positions and fixture stock cell");
+    expect(shop_frame.sprites.size() == 1 && shop_frame.sprites[0].tint == 0x80808080u &&
+           shop_frame.draw_order.size() == 3 &&
+           !shop_frame.draw_order[0].text && shop_frame.draw_order[0].index == 0 &&
+           shop_frame.draw_order[0].layer == 0 && shop_frame.draw_order[0].submission == 0 &&
+           shop_frame.draw_order[1].text && shop_frame.draw_order[1].index == 0 &&
+           shop_frame.draw_order[1].layer == 0 && shop_frame.draw_order[1].submission == 1 &&
+           shop_frame.draw_order[2].text && shop_frame.draw_order[2].index == 1 &&
+           shop_frame.draw_order[2].layer == 0 && shop_frame.draw_order[2].submission == 2,
+           "research shop submissions retain layer and order");
+    bool refused_buy_sell_tint = false, refused_front_tint = false;
+    for (const auto &gap : shop_frame.gaps) {
+      refused_buy_sell_tint |= std::string(gap.id) == "shop-buysell-tint";
+      refused_front_tint |= std::string(gap.id) == "shop-front-tint";
+    }
+    expect(refused_buy_sell_tint && refused_front_tint, "unpinned shop tints remain refusals");
   }
   {
     Ledger book;
@@ -259,7 +472,22 @@ void ledger_vectors() {
   {
     Ledger book;
     const auto drawn = book.frame("inventory");
-    expect(!drawn.texts.empty() && drawn.texts[0].x == 17 && drawn.texts[0].y == 89, "name on hit cell");
+    expect(!drawn.texts.empty() && drawn.texts[0].x == 17 && drawn.texts[0].y == 89 &&
+           drawn.texts[0].colour == 0x80464646u, "documented small-font base colour");
+    expect(drawn.sprites.size() == 22 && drawn.sprites[0].resource == "inventrybox3.tex" &&
+           drawn.sprites[3].resource == "inventryboxend.tex", "bounded zero-state box sequence");
+    expect(drawn.sprites[20].resource == "mousecursor.tex" && drawn.sprites[21].resource == "mousecursor.tex" &&
+           drawn.sprites[20].layer == 7 && drawn.sprites[21].layer == 7 &&
+           drawn.sprites[20].tint == 0x80808080u && drawn.sprites[21].tint == 0x34000000u,
+           "two documented cursor copies");
+    expect(drawn.rects.size() >= 65 && drawn.rects[0].colour == 0x01000000u &&
+           drawn.rects[64].colour == 0x7f000000u, "scrollbar gradient");
+    expect(drawn.selected_texts.size() == 1 && drawn.selected_texts[0].colour == 0x805c2913u,
+           "selected small-font colour");
+    expect(drawn.frames.size() == 1 && drawn.frames[0].x == 135 && drawn.frames[0].y == 230 &&
+           drawn.frames[0].width == 223 && drawn.frames[0].height == 77 &&
+           drawn.frames[0].style == 6 && drawn.frames[0].tint == 0x80000000u,
+           "observed selected weapon detail frame");
     expect(!drawn.rects.empty() && drawn.rects[0].y0 == 413, "scrollbar");
     const auto stats = book.frame("stats");
     expect(stats.texts.at(0).text == "5" && stats.texts.at(0).x == 160 && stats.texts.at(0).centred, "level line");

@@ -265,15 +265,42 @@ void character_vectors() {
   for (int i = 0; i < 5; ++i)
     tap(f, CROSS);
   expect(f.screen() == Screen::CharClass, "at class page");
-  expect(f.entries().size() == 12, "twelve models");
-  std::array<std::array<std::int32_t, 4>, CLASSES> rows{};
-  for (int c = 0; c < CLASSES; ++c)
-    rows[static_cast<std::size_t>(c)] = {c * 10 + 1, c * 10 + 2, c * 10 + 3, c * 10 + 4};
+  expect(f.entries().size() == 13, "thirteen carousel positions");
+  const std::array<int, CAROUSEL_POSITIONS> order{{0, 11, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}};
+  const std::array<int, CAROUSEL_POSITIONS> classes{{0, 6, 5, 0, 0, 3, 3, 1, 1, 4, 4, 2, 2}};
+  for (int p = 0; p < CAROUSEL_POSITIONS; ++p)
+    expect(carousel_model(p) == order[static_cast<std::size_t>(p)] &&
+           class_of_model(carousel_model(p)) == classes[static_cast<std::size_t>(p)] &&
+           f.entries()[static_cast<std::size_t>(p)].label.find("Model " + std::to_string(order[static_cast<std::size_t>(p)])) == 0,
+           "audited carousel row");
+  expect(std::string(body_code_of_model(11)) == "im", "model 11 body resource code");
+  reject([&] { (void)carousel_model(13); }, "out-of-range carousel position refused");
+  const std::array<std::array<std::int32_t, 4>, CLASSES> rows{{
+      {{35, 20, 25, 35}}, {{26, 36, 27, 26}}, {{28, 30, 27, 30}},
+      {{28, 25, 35, 27}}, {{23, 39, 25, 28}}, {{32, 22, 31, 30}},
+      {{26, 37, 24, 28}}}};
+  auto wrong = rows;
+  wrong[6][0] = 27;
+  reject([&] { f.set_class_start_stats(wrong); }, "unmatched stat table refused");
   f.set_class_start_stats(rows);
-  for (int i = 0; i < 10; ++i)
-    tap(f, DOWN);
+  for (int i = 0; i < 3; ++i) tap(f, DOWN);
   tap(f, CROSS);
-  expect(f.character().model == 10 && f.character().class_index == 5, "model 10 is class 5");
+  expect(f.character().model == 0, "duplicated carousel position selects model 0");
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::CharClass && f.cursor() == 3,
+         "cancel returns to the selected duplicate position");
+  tap(f, UP);
+  tap(f, UP);
+  tap(f, UP);
+  tap(f, DOWN); // the second carousel position is model 11, class 6
+  tap(f, CROSS);
+  expect(f.character().model == 11 && f.character().class_index == 6 &&
+         f.character().base == rows[6], "model 11, class 6 starts with the audited row");
+  tap(f, DOWN);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::CharAppearance && f.last_error().find("Unknown") != std::string::npos,
+         "unverified appearance option refused");
+  tap(f, UP);
   tap(f, CROSS);
   expect(f.screen() == Screen::CharAbility, "ability page");
   tap(f, CROSS);
@@ -281,7 +308,7 @@ void character_vectors() {
   for (int i = 0; i < 25; ++i)
     tap(f, RIGHT);
   expect(f.ability_remaining() == 0, "20 spent, extra ignored");
-  expect(f.character().stats()[0] == 51 + 20, "first row takes the points");
+  expect(f.character().stats()[0] == 26 + 20, "class 6 strength row takes the points");
   tap(f, CROSS);
   expect(f.screen() == Screen::CharName, "name page");
   tap(f, DOWN);
@@ -291,6 +318,10 @@ void character_vectors() {
   f.set_name("Host");
   tap(f, CROSS);
   expect(f.screen() == Screen::Playing && f.character_ready(), "character finished");
+  expect(f.character().name == "Host" && f.character().stats() == std::array<std::int32_t, 4>{{46, 37, 24, 28}} &&
+         !f.character().appearance_known && f.character().gold == 500 && f.character().level == 1 &&
+         f.character().acknowledged == 1 && !f.character().skill_points_known,
+         "created record keeps known fields and labels appearance and skill points Unknown");
   bool hub = false;
   for (const auto &r : f.take_requests())
     hub = hub || (r.kind == "start_play" && r.arg == "hub");
@@ -305,7 +336,7 @@ void character_vectors() {
     a.stats[i] = f.character().stats()[static_cast<std::size_t>(i)];
   ledger.adopt(a);
   expect(ledger.gold() == 500 && ledger.level() == 1 && ledger.acknowledged() == 1, "ledger adopts init values");
-  expect(ledger.base_stat(0) == 71 && ledger.bag_count(0) == 0, "ledger stats and empty bag");
+  expect(ledger.base_stat(0) == 46 && ledger.bag_count(0) == 0, "ledger stats and empty bag");
   expect(ledger.equipment_index(0) == -1, "ledger equipment empty");
   a.level = 200;
   reject([&] { ledger.adopt(a); }, "level over s8 refused");
@@ -592,6 +623,32 @@ void layout_screen_vectors() {
   f.frame(CROSS);
   f.frame(0);
   expect(f.screen() == Screen::Main, "main menu");
+  auto check_card_art = [](const Scene &s) {
+    bool frame = false, title = false, false_slot = false;
+    for (const auto &d : s.draws) {
+      frame = frame || (d.kind == Draw::Kind::Frame && d.evidence == Evidence::Executed &&
+                        d.x == 60 && d.y == 122 && d.w == 521 && d.h == 105 &&
+                        d.layer == 6 && d.style == 2 && d.colour == 0x7f616369);
+      title = title || (d.kind == Draw::Kind::Text && d.x == 320 && d.y == 110 &&
+                        d.font == Font::Small && d.evidence == Evidence::Host);
+      false_slot = false_slot || (d.kind == Draw::Kind::Rect ||
+                                  (d.kind == Draw::Kind::Text && d.y >= 128 && d.y <= 213));
+    }
+    expect(s.host_layout && frame && title && !false_slot,
+           "card screen paints executed art and refuses fabricated slot rows");
+  };
+  {
+    Flow load = to_main();
+    tap(load, DOWN);
+    tap(load, CROSS);
+    expect(load.screen() == Screen::LoadGame, "load screen opened from main");
+    check_card_art(load.layout());
+    Flow save = to_main();
+    save.attach_play();
+    save.request_save();
+    expect(save.screen() == Screen::SaveGame, "save screen opened from play");
+    check_card_art(save.layout());
+  }
   {
     const auto s = f.layout();
     expect(!s.host_layout && has_resource(s, "title.tex") && count_kind(s, Draw::Kind::Frame) == 3 &&
@@ -758,6 +815,120 @@ void layout_screen_vectors() {
   }
 }
 
+void card_cache_vectors() {
+  std::vector<std::uint8_t> metadata(8 * 16, 0), headers(8 * 0x70, 0);
+  const std::uint8_t hours[5] = {0x00, 0x11, 0x12, 0x13, 0x23};
+  const std::uint8_t minutes[5] = {0x05, 0x10, 0x00, 0x25, 0x59};
+  const char *clocks[5] = {"12:05am", "11:10am", "12:00pm", "1:25pm", "11:59pm"};
+  for (int r = 0; r < 5; ++r) {
+    metadata[16 * (r + 2) + 3] = hours[r];
+    metadata[16 * (r + 2) + 2] = minutes[r];
+    metadata[16 * (r + 2) + 6] = 0x01;
+    metadata[16 * (r + 2) + 5] = 0x09;
+    metadata[16 * (r + 2) + 7] = 0x26;
+    headers[0x70 * (r + 2)] = static_cast<std::uint8_t>(r + 1);
+  }
+  headers[2 * 0x70 + 0x64] = 59;
+  headers[2 * 0x70 + 0x6a] = 1;
+  headers[2 * 0x70 + 0x6c] = 1;
+  metadata[3] = 0x12;
+  metadata[2] = 0x00;
+  metadata[6] = 0x01;
+  metadata[5] = 0x09;
+  metadata[7] = 0x26;
+  const auto rows = layout::visible_card_rows(metadata, headers, 8, 2, false);
+  expect(rows.size() == 5, "card cache exposes five visible rows");
+  for (int r = 0; r < 5; ++r)
+    expect(rows[static_cast<std::size_t>(r)].index == r + 2 &&
+               rows[static_cast<std::size_t>(r)].y == 128 + 17 * r &&
+               rows[static_cast<std::size_t>(r)].metadata_offset == std::size_t(16 * (r + 2)) &&
+               rows[static_cast<std::size_t>(r)].header_offset == std::size_t(0x70 * (r + 2)) &&
+               rows[static_cast<std::size_t>(r)].populated &&
+               rows[static_cast<std::size_t>(r)].number == std::to_string(r + 3) + "." &&
+               rows[static_cast<std::size_t>(r)].date == "1/9/2026" &&
+               rows[static_cast<std::size_t>(r)].clock == clocks[r],
+           "nonzero scroll uses observed strides, row numbers, date and clock boundaries");
+  const auto sparse = layout::visible_card_rows(metadata, headers, 1, 0, false);
+  expect(sparse.size() == 5 && sparse[0].populated && !sparse[1].populated &&
+             sparse[4].number == "5." && sparse[4].date.empty(),
+         "nonzero count keeps numbered markers beyond populated cache rows");
+  const auto save_free = layout::visible_card_rows(metadata, headers, 1, 0, true);
+  expect(save_free.size() == 5 && save_free[1].new_save &&
+             save_free[1].number == "2." && !save_free[2].new_save,
+         "save marks only the first free row");
+  const auto empty_save = layout::visible_card_rows({}, {}, 0, 0, true);
+  expect(empty_save.size() == 5, "empty save keeps five numbered rows");
+  for (int r = 0; r < 5; ++r)
+    expect(empty_save[static_cast<std::size_t>(r)].index == r &&
+               empty_save[static_cast<std::size_t>(r)].y == 128 + 17 * r &&
+               empty_save[static_cast<std::size_t>(r)].number == std::to_string(r + 1) + "." &&
+               empty_save[static_cast<std::size_t>(r)].new_save == (r == 0) &&
+               !empty_save[static_cast<std::size_t>(r)].populated &&
+               empty_save[static_cast<std::size_t>(r)].date.empty() &&
+               empty_save[static_cast<std::size_t>(r)].clock.empty(),
+           "empty save numbers all five rows and marks only row one as free");
+  expect(layout::visible_card_rows({}, {}, 0, 0, false).empty(),
+         "empty load has no rows");
+  const auto preview = layout::card_preview(headers, 8, 2);
+  expect(preview.header_offset == 2 * 0x70 && preview.play_seconds == 59 &&
+             preview.player_count == 1 && preview.difficulty_index == 1,
+         "selected header exposes verified preview fields");
+  reject([&] { (void)layout::visible_card_rows(metadata, headers, 8, 9, false); }, "unavailable scroll refused");
+  reject([&] { (void)layout::visible_card_rows(metadata, std::vector<std::uint8_t>(7 * 0x70), 8, 2, false); },
+         "short header cache refused");
+  auto bad = metadata;
+  bad[2 * 16 + 3] = 0x2a;
+  reject([&] { (void)layout::visible_card_rows(bad, headers, 8, 2, false); }, "invalid BCD clock refused");
+  reject([&] { (void)layout::card_preview(headers, 8, 8); }, "unavailable preview header refused");
+
+  Flow load = to_main();
+  tap(load, DOWN);
+  tap(load, CROSS);
+  load.set_card_cache(metadata, headers, 8, 2);
+  load.set_card_preview(2, true);
+  int clocks_drawn = 0;
+  int frame_at = -1, last_clock_at = -1, draw_at = 0;
+  int numbers_drawn = 0, dates_drawn = 0;
+  bool players = false, difficulty = false, debug_seconds = false;
+  for (const auto &d : load.layout().draws) {
+    if (d.role == "slot-list tile frame (settled fixture)")
+      frame_at = draw_at;
+    if (d.role == "supplied card clock") {
+      expect(d.kind == Draw::Kind::Text && d.font == Font::Small && d.x == 487 &&
+                 d.y == 128 + 17 * clocks_drawn && d.text == clocks[clocks_drawn],
+             "supplied clock uses the executed text anchor");
+      last_clock_at = draw_at;
+      ++clocks_drawn;
+    }
+    if (d.role == "supplied card number") {
+      expect(d.x == 77 && d.y == 128 + 17 * numbers_drawn &&
+                 d.text == std::to_string(numbers_drawn + 3) + ".", "numbered row anchor");
+      ++numbers_drawn;
+    }
+    if (d.role == "supplied card date") {
+      expect(d.x == 365 && d.y == 128 + 17 * dates_drawn && d.text == "1/9/2026", "date row anchor");
+      ++dates_drawn;
+    }
+    players = players || (d.role == "preview player count (header field)" && d.x == 320 && d.y == 247 && d.text == "1");
+    difficulty = difficulty || (d.role == "preview difficulty index (header field)" && d.x == 320 && d.y == 264 && d.text == "index 1");
+    debug_seconds = debug_seconds || (d.role == "debug play seconds (minute display unverified)" && d.x == 320 && d.y == 281 && d.text == "59s");
+    ++draw_at;
+  }
+  expect(clocks_drawn == 5, "supplied cache paints five clocks only");
+  expect(numbers_drawn == 5 && dates_drawn == 5 && players && difficulty && debug_seconds,
+         "supplied cache paints numbered dates and labelled preview fields");
+  expect(last_clock_at >= 0 && last_clock_at < frame_at,
+         "reverse layer painter places supplied clocks over the frame");
+  load.set_card_preview(2, false);
+  bool debug_off = true;
+  for (const auto &d : load.layout().draws)
+    debug_off = debug_off && d.role != "debug play seconds (minute display unverified)";
+  expect(debug_off, "debug time line absent when debug byte is clear");
+  tap(load, CIRCLE);
+  expect(load.screen() == Screen::Main, "leaving load clears the supplied cache");
+  reject([&] { load.set_card_cache(metadata, headers, 8, 2); }, "card cache outside card screen refused");
+}
+
 // The first theme obeys music_playGlobal's gate; the flags stay 1 (research dc458d5).
 void theme_gate_vectors() {
   const struct {
@@ -802,6 +973,7 @@ int main() {
   notes_vectors();
   layout_geometry_vectors();
   layout_screen_vectors();
+  card_cache_vectors();
   theme_gate_vectors();
   std::cout << "PASS frontend " << checks << " checks\n";
   return 0;

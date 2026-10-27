@@ -334,10 +334,30 @@ struct GateTravel {
   bool tick(Pending &); // 180 ready ticks after confirm; never on render frames
   void arrived();       // integration calls on first ready tick after placement
 };
+struct GateArrival {
+  int rank = 0;
+  std::vector<Vec3> positions;
+  std::vector<std::uint16_t> facing;
+  std::uint32_t seed = 0;
+};
+GateArrival portal_arrival(bool travelling, bool fixed_destination,
+                           unsigned players, const Vec3 &portal,
+                           std::uint32_t &shared_seed, int previous_rank,
+                           const FindSpot &);
 struct TriggerPlayer {
   unsigned slot;
   Vec3 position;
 };
+// Player_interact 0x1b26b8-0x1b27e0: the box query supplies candidates in
+// grid order. Preserve that order for equal distances.
+struct UseCandidate {
+  std::size_t record = 0;
+  Vec3 position{};
+  std::uint32_t flags = 0;
+};
+bool use_query_contains_centre(const Vec3 &player, const Vec3 &candidate);
+std::optional<std::size_t> nearest_use_candidate(
+    const Vec3 &player, const std::vector<UseCandidate> &query_results);
 struct TriggerEvent {
   std::optional<std::string> entry;
   std::optional<unsigned> active;
@@ -346,14 +366,24 @@ struct TriggerState {
   std::int32_t delay;
   bool inside;
 };
+struct TriggerParams {
+  bool on_only = false, off_only = false, need_script_hit = false;
+  std::int32_t timeout = 0;
+};
 struct Trigger {
   Vec3 min{}, max{};
   std::string script;
   bool inside = false;
   std::int32_t delay = 0; // persisted, scheduling owned by Session
+  std::int32_t slot = -1; // +0x68; reset before recall suppression
   Trigger(Raw x, Raw y, std::int32_t w, std::int32_t h, std::string t);
   bool contains(const Vec3 &) const;
   TriggerEvent run(const std::vector<TriggerPlayer> &, bool recall = false);
+  TriggerEvent run_exact(
+      const std::vector<TriggerPlayer> &, bool recall,
+      const TriggerParams *linked,
+      const std::function<void(bool)> &linked_actions,
+      const std::function<int(const std::string &, unsigned)> &script_run);
   TriggerState save() const;
   void restore(TriggerState);
 };

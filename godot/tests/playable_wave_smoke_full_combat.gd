@@ -51,6 +51,9 @@ func continuation_cases() -> void:
 	var o: Dictionary = scene.raw_observation
 	check(o.get("full_enabled", false) and o.combat_policy == "rta-full-combat-fixture-v1", "explicit Full selection: versioned policy")
 	check(fx.full and o.effects.drawing and actor(0).kind == "Player" and actor(1).kind == "Skelight", "scene bridge attached; player and Skelights")
+	check(actor(0).has("locomotion_speed_raw") and actor(0).has("locomotion_blend_raw")
+		and actor(0).has("weapon_animation_class") and actor(0).has("player_model_index"),
+		"Full player publishes executed locomotion and record selection cells")
 	check(scene.actions.combat_attack.visible and not scene.actions.combat_hit.visible, "Full pad buttons replace the round-1 hit event")
 	check(scene.save_methods == ["save_file"], "the Full fixture advertises the fixture continuation")
 
@@ -58,8 +61,21 @@ func continuation_cases() -> void:
 	step()
 	check(scene.raw_observation.ready_ticks == 0, "first submission has no ready tick")
 	var x0: float = actor(0).position.x
-	for i in range(40): step(1) # D: stick +x
+	for i in range(40):
+		step(1) # D: stick +x
+		if i == 2:
+			var blend_raw: int = int(actor(0).locomotion_blend_raw)
+			check(blend_raw != 0 and blend_raw != 0x3f800000
+				and int(actor(0).locomotion_walk_weight_raw) == blend_raw,
+				"mode-0 walk weight equals the rising blend before saturation")
+			var probe: Dictionary = scene.controller.probe_full_walk_weight_test()
+			check(probe.get("ok", false) and int(probe.get("expected_weight_raw", 0)) == blend_raw
+				and int(probe.get("observed_weight_raw", 0)) == blend_raw,
+				"walk observation reads weight when synthetic life differs")
 	check(actor(0).position.x > x0 + 40.0, "the stick walks the player along +x (executed Player_move)")
+	check(int(actor(0).locomotion_speed_raw) != 0 and int(actor(0).locomotion_blend_raw) != 0
+		and int(actor(0).locomotion_walk_weight_raw) != 0,
+		"executed stick walk publishes nonzero speed and blend cells")
 	await capture("full-01-walk")
 	var hp0: float = actor(1).hp
 	var hits := 0
@@ -169,6 +185,53 @@ func continuation_cases() -> void:
 	print("FULL_TRACE ", JSON.stringify({"sha256": full_trace_drawn.sha256_text(), "bytes": full_trace_drawn.length(), "renderer": DisplayServer.get_name()}))
 	check(fx.refusals.is_empty() or not "game camera refused" in fx.refusals, "game camera derived from the scene camera")
 	print("PLAYABLE_FULL_COMBAT_RESULT ", JSON.stringify({"effects": scene.raw_observation.effects, "refusals": fx.refusals, "runs": fx.last_runs}))
+	# Separate opt-in spell fixture after FULL_TRACE, so the established trace
+	# continues to measure its original scenario without a spell selection.
+	start_full()
+	check(scene.actions.combat_spell_select.visible and scene.actions.combat_spell_cast.disabled,
+		"Full fixture shows spell selection before casting")
+	scene.actions.combat_spell_select.pressed.emit()
+	check(scene.raw_observation.get("combat_spell_selected", false) and not scene.actions.combat_spell_cast.disabled,
+		"spell button selects Disease Bolt in the live scene: %s / %s / %s" % [scene.raw_observation.get("combat_spell_selected", false), scene.actions.combat_spell_cast.disabled, scene.status_label.text])
+	var spell_save := directory.path_join("full-spell-selected.ocplay")
+	check(scene.save_session_file(spell_save), "selected spell fixture continuation saves")
+	check(scene.load_session_file(spell_save), "selected spell fixture continuation loads")
+	scene.resume_session()
+	check(scene.raw_observation.get("combat_spell_selected", false) and not scene.actions.combat_spell_cast.disabled,
+		"selected spell and cast control survive fixture continuation")
+	if not output.is_empty(): await capture("full-spell-selected")
+	var mana_before: float = scene.raw_observation.combat_mana
+	var hp_before: float = actor(1).hp
+	step() # lockstep's initial no-ready submission
+	key(KEY_U, true)
+	key(KEY_U, false)
+	for i in range(3):
+		step()
+		check(actor(0).state != 5 and not tick_has("diseasebolt_spawn"),
+			"released ability A does not admit a later cast")
+	key(KEY_U, true)
+	var spell_admitted := false
+	var bolt_spawned := false
+	var bolt_hit := false
+	for i in range(50):
+		step()
+		spell_admitted = spell_admitted or actor(0).state == 5
+		if tick_has("diseasebolt_spawn"):
+			key(KEY_U, false)
+		bolt_spawned = bolt_spawned or tick_has("diseasebolt_spawn")
+		bolt_hit = bolt_hit or tick_has("diseasebolt_hit")
+		if tick_has("diseasebolt_spawn"):
+			check(scene.raw_observation.combat_mana < mana_before, "cast spends mana after animation admission")
+		if bolt_hit: break
+	check(spell_admitted, "held ability A enters documented cast state 5")
+	check(bolt_spawned and bolt_hit and actor(1).hp < hp_before,
+		"scene input spawns Disease Bolt and damages a Full-fixture enemy")
+	check(scene.stopped and "unverified destructor" in scene.status_label.text,
+		"projectile expiry stops the fixture with its explicit research refusal")
+	print("PLAY_SPELLS_SCENE ", JSON.stringify({"selected": true, "spawned": bolt_spawned,
+		"hit": bolt_hit, "mana_spent": scene.raw_observation.combat_mana < mana_before,
+		"fixture_hp_lost": actor(1).hp < hp_before}))
+	if not output.is_empty(): await capture("full-spell-hit")
 
 	scene.full_choice.button_pressed = false
 	scene.combat_choice.button_pressed = false

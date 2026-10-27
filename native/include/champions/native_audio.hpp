@@ -239,6 +239,9 @@ public:
   // Both read g_musicVolume and queue nothing below the gate 0x3d4ccccc.
   bool music_play_global(const std::string &name, std::uint32_t flags);
   bool music_play_level(const std::string &name, std::uint32_t flags);
+  // game_loadLevel: first case-sensitive enttag entry in directory order,
+  // otherwise a stream-2 stop. Recall leaves the current queue untouched.
+  bool handoff_level_entry(bool recall);
   bool play_menu_music(bool wait_for_current);
   static std::optional<std::string> boss_music_name(const std::string &creature_type,
                                                     const std::string &object_name);
@@ -272,6 +275,9 @@ public:
   // mainloop_pollAmbientAudio, once per displayed frame; draw is 0..7199.
   // The amb_ poll reads g_drawFrame and does not advance it.
   bool poll_level(std::uint32_t cosmetic_draw);
+  // Use the documented countdown and g_drawFrame cadence without fabricating
+  // a cosmetic RNG draw. Refuse before the poll that would consume one.
+  bool poll_level_without_cosmetic();
   void advance_draw_frame() { draw_frame_ = (draw_frame_ + 1) & 0xffffffffu; }
   // audio_streamStop: clear the queue and the active name. The volume word stays.
   void stream_stop(std::size_t stream);

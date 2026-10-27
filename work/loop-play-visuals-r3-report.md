@@ -1,0 +1,22 @@
+STATUS: PARTIAL — explicit idle and walk clips from the selected owner's disc render as distinct poses, but automatic player playback is refused because the real level session does not expose a verified weapon-animation class or original action state.
+
+# Play visuals round 3 — 2026-10-23
+
+Branch `codex/play-visuals`, base `fc82db9`. Research: `t3/research-player-anim` `f6dfb13` and `t3/research-player-model` `7f13899`. I read the animation research audit before editing or committing: `VERDICT: PASS`, 0 high, 0 medium, 1 low. The low finding concerns an absolute local path in the research report; no flagged behavior was ported.
+
+## Implementation and boundary
+
+- `godot/real_data/real_player.gd` retains the selected body bytes, all 111 ordered run-time clip slots and the model's traced animation archive path. `draw_selected_pose` accepts only an explicit weapon class 0..7 and role 0..12. It loads the named `.anm` from the owner's disc on request, uses the existing native bounded skinning bridge, draws the posed class body, and returns a refusal on missing or invalid input. `restore_rest_pose` returns to the prior mesh. No game bytes or clip-name table are tracked.
+- `godot/tests/loop_playthrough.gd` samples explicit class-0 idle and walk roles at tick 1.0 as a diagnostic input. It checks a change in mesh vertices in both modes, and rendered viewport pixels in the graphical mode. The five screenshots remain under ignored `work/` only. The rendered frame labels explicitly say these are diagnostic samples, not the equipped class.
+- The native `ChampionsAnimationDispatch` already has the four persistent cells, locomotion blend, action selector, and track runtime. This round does not connect it to real level play: that session uses authored dry movement, and its selected character record does not contain the equipped weapon class, attack state, or original hit/death transition. Reading a zero-initialized host field or mapping a damage counter to a specific original reaction would invent behavior. Therefore no automatic idle/walk/run, attack, hit, death, timing or transition parity is claimed. The normal play scene keeps its static rest pose.
+
+## Verification
+
+- Godot 4.5.2 editor import: pass. Relevant arm64 CTest after building missing animation test binaries: `ctest --test-dir build/native --output-on-failure -j 3 -R '^(creature-anim-api|creature-anim-exact|skinning-positions|model-texture-bind)$'`: 4/4 pass. The two creature animation executables are Mach-O arm64. The first attempt had two missing test binaries; the Release target build resolved that, and the rerun passed.
+- `python3 work/play-visuals/r3-run-godot-matrix.py`: 54/54 exited 0. Headless synthetic Full combat: 2,620 checks, zero failures, `FULL_TRACE` 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, unchanged from round 2.
+- `zsh work/play-visuals/r3-run-sweep.sh`: scripts-on 111 tried / 111 loaded / 111 played, 230 checks passed, zero failures or refusal kinds. The owner disc contains 994 files after verification.
+- `Godot --headless --path godot --script res://tests/player_model_real.gd -- --game-folder="$D"`: 24/24 bodies drawn and textured across two selection archives with authored appearance.
+- `Godot [--headless] --path godot --script res://tests/loop_playthrough.gd -- --game-folder="$D" --out="$O" --visual-only`: both modes exit 0. The class body is visible; explicit idle and walk samples differ at 33,084 mesh corners. Rendered viewport changes at 2,008 sampled pixels; the actor itself changes 2,046 sampled pixels versus an actor-hidden frame. Final idle and walk images were visually inspected under `work/play-visuals/r3-visual-rendered-final/` and show distinct full-body poses. Here `$D` was the read-only owner disc and `$O` was an ignored `work/` output directory.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`, `cmake --build build/native -j 4`, then `ctest --test-dir build/native --output-on-failure -j 3`: Release configure/build passed; **231/231 CTest passed** in 1,620.85 seconds. The last `netplay` case passed in 236.70 seconds. The full run retains the initial focused CTest missing-binary attempt as a separate, resolved result.
+
+No push or PR. The next gate is an owned play-session record and dispatch path for the weapon class, Player_run action state and transitions. A rendered automatic idle→move→stop, attack→move, hit→death and weapon-swap comparison is still required before calling the requested player animation implemented.

@@ -139,6 +139,8 @@ func run() -> void:
 		add("fx.full_fixture_available" if scene.play_capabilities.get("full_fixture_available", false) else "fx.full_fixture_unavailable")
 	add("hud.play_art_loaded", int(scene.hud_art_counts.get("loaded", 0)))
 	add("hud.play_art_refused", int(scene.hud_art_counts.get("refused", 0)) + int(scene.hud_art_counts.get("missing", 0)))
+	add("hud.extras_green_loaded", int(scene.hud_extras_counts.get("loaded", 0)))
+	add("hud.extras_green_refused", int(scene.hud_extras_counts.get("refused", 0)))
 	add("hud.play_font_loaded" if scene.hud_font_loaded else "hud.play_font_missing")
 	await hud_art()
 	var wanted := int(args.get("levels", "3"))

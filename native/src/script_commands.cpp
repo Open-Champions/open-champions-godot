@@ -144,7 +144,8 @@ std::array<std::uint32_t, 3> vec_of(const builtins::Variables::ServiceValue &val
 // d4987fd executed the table, wstr_format and their HUD state
 // (docs/strings.md), which the host runs through champions-strings with the
 // game's own table (register_text). selectSetCFlag
-// is the one partial row routed: its bit-0 path reaches
+// and the guarded trigger(portal,0) request are partial rows routed here.
+// selectSetCFlag's bit-0 path reaches
 // creature_startBossMusic, whose name selector is executed and whose stop and
 // queue bodies are inferred from research-audio 6b08886 (counted in
 // Counts::inferred). setCFlag takes the same path through the quest route.
@@ -155,7 +156,7 @@ bool routed_command(const char *name) {
       "followPlayer",      "startMusic",          "endMusic",           "selectSetCFlag",
       "setInfo",           "addHelpMessage",      "addHelpMessageF",    "showBust",
       "showCompass",       "newWorld",            "newWorldAlways",    "simpleNewWorld",
-      "newWorldParameter", "setEntrance",
+      "newWorldParameter", "setEntrance", "trigger",
   };
   for (const char *item : names)
     if (std::strcmp(item, name) == 0)
@@ -255,6 +256,10 @@ void Host::mark_built(std::uint32_t address) {
   if (authority_) authority_->register_factory(address);
 }
 Host::~Host() {
+  // Remove pairs from host-owned heads before the external objects or heads
+  // are destroyed; Variables unregisters its own object nodes during teardown.
+  for (auto &entry : target_cells_)
+    variables_->world->handles.clear(*entry.second);
   // Variables unregisters external objects and their handle nodes. Their
   // host-owned list heads must still exist while that teardown runs.
   machine_.reset();
@@ -947,6 +952,14 @@ std::uint32_t Host::scene(const std::string &name,
   if (name == "virtual") {
     if (args.size() < 3)
       throw amx::HostFault("virtual argument count");
+    if (word_of(args[0]) == 3u) {
+      const auto *portal = variables_->find_first("portal");
+      const auto *object = variables_->obj_at(word_of(args[1]));
+      if (!portal || !object || portal != object || word_of(args[2]) != 0u)
+        throw amx::HostFault("unsupported portal virtual request");
+      ++portal_trigger_requests_;
+      return 0;
+    }
     if (word_of(args[0]) != 34u)
       throw amx::HostFault("undocumented virtual slot");
     fx.slot34_set_home_range(word_of(args[1]), word_of(args[2]));

@@ -35,6 +35,13 @@ func _run() -> void:
 	check(result.quests == [["opened", 7], ["door", -2]] and importer.quest_value("door") == -2, "quest table in native state")
 	check(importer.record_word(0x130) == 0x3f7710 and importer.record_word(0x43d8) == 0, "definition pointer restored, object pointer cleared")
 	check(importer.record_word(0x43f0) == 0x4d8af0 + 0x130, "equipment index restored to the live item address")
+	var player_record: PackedByteArray = importer.record_bytes()
+	check(player_record.size() == 0x4c30, "import exposes one in-memory player record")
+	var changed := player_record.duplicate()
+	for byte in range(4):
+		changed[0x43f0 + byte] = 0
+	check(importer.replace_record(changed).ok and importer.record_word(0x43f0) == 0, "menu writeback clears the imported equipment pointer")
+	check(importer.replace_record(player_record).ok and importer.record_word(0x43f0) == 0x4d8af0 + 0x130, "menu writeback restores the imported equipment pointer")
 	check(result.level_name == "crypt" and result.difficulty == 2 and result.play_time == 12345, "campaign header")
 	check(result.refusals.size() == 1 and str(result.refusals[0]).begins_with("camera:"), "camera listed as not applied")
 	var bad := image.duplicate()

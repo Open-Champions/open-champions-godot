@@ -25,6 +25,12 @@ endforeach()
 if(BUILD_TESTING)
   add_executable(champions-level-flow-tests "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_tests.cpp")
   target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow champions-objects champions-terrain-file)
+  # Keep the large authored cases separate. Apple Clang 21 spent over 26
+  # minutes in MachineCSE for this test driver at -O3. Libraries retain their
+  # normal Release optimization; only the test driver's inlining is disabled.
+  if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(champions-level-flow-tests PRIVATE "$<$<CONFIG:Release>:-fno-inline-functions;-fno-unroll-loops>")
+  endif()
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()
 

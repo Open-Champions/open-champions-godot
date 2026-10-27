@@ -805,6 +805,15 @@ bool Playback::music_play_level(const std::string &name, std::uint32_t flags) {
   return queue_music(name, flags, StreamSource::level);
 }
 
+bool Playback::handoff_level_entry(bool recall) {
+  if (recall) return true;
+  for (const auto &entry : level_.entries) {
+    if (entry.name.find("enttag") != std::string::npos)
+      return music_play_level(entry.name, 2);
+  }
+  return queue_stop(2);
+}
+
 bool Playback::play_menu_music(bool wait_for_current) {
   // frontend_run's first request reaches music_playGlobal's volume gate
   // (research-menus-layout 8f528ce); keep its original queue flags.
@@ -968,6 +977,21 @@ bool Playback::poll_level(std::uint32_t draw) {
         break;
       }
   return queued;
+}
+
+bool Playback::poll_level_without_cosmetic() {
+  if (!level_active_)
+    return false;
+  if (countdown_ == 1)
+    throw std::invalid_argument("ambient cosmetic draw unavailable");
+  --countdown_;
+  // The countdown's zero branch needs g_cosmeticSeed, which this host does
+  // not expose. Earlier polls still use the documented g_drawFrame cadence.
+  if (draw_cadence(draw_frame_) && !streams_[0].active && queues_[0].empty())
+    for (const auto &e : level_.entries)
+      if (e.name.find("amb_") != std::string::npos)
+        return queue_stream(0, e.name, 3, StreamSource::level);
+  return false;
 }
 
 // --- tick and mix -----------------------------------------------------------

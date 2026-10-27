@@ -68,6 +68,7 @@ void ChampionsNativeAudio::_bind_methods() {
   ClassDB::bind_method(D_METHOD("end_session"), &ChampionsNativeAudio::end_session);
   ClassDB::bind_method(D_METHOD("play_menu_music", "wait_for_current"), &ChampionsNativeAudio::play_menu_music);
   ClassDB::bind_method(D_METHOD("music_play_global", "name", "flags"), &ChampionsNativeAudio::music_play_global);
+  ClassDB::bind_method(D_METHOD("handoff_level_entry", "recall"), &ChampionsNativeAudio::handoff_level_entry);
   ClassDB::bind_method(D_METHOD("play_boss_music", "creature_type", "object_name"),
                        &ChampionsNativeAudio::play_boss_music);
   ClassDB::bind_method(D_METHOD("stop_boss_music"), &ChampionsNativeAudio::stop_boss_music);
@@ -75,6 +76,9 @@ void ChampionsNativeAudio::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_gated_flag_entries"), &ChampionsNativeAudio::get_gated_flag_entries);
   ClassDB::bind_method(D_METHOD("get_observation"), &ChampionsNativeAudio::get_observation);
   ClassDB::bind_method(D_METHOD("sound_tick", "cosmetic_draw"), &ChampionsNativeAudio::sound_tick);
+  ClassDB::bind_method(D_METHOD("sound_tick_without_cosmetic"), &ChampionsNativeAudio::sound_tick_without_cosmetic);
+  ClassDB::bind_method(D_METHOD("service_loader_sound_pair"), &ChampionsNativeAudio::service_loader_sound_pair);
+  ClassDB::bind_method(D_METHOD("service_session_sound_without_ambient"), &ChampionsNativeAudio::service_session_sound_without_ambient);
   ClassDB::bind_method(D_METHOD("pump_frames", "max_frames"), &ChampionsNativeAudio::pump_frames);
   ClassDB::bind_method(D_METHOD("get_last_error"), &ChampionsNativeAudio::get_last_error);
 }
@@ -306,6 +310,16 @@ bool ChampionsNativeAudio::music_play_global(const String &name, int64_t flags) 
   }
 }
 
+bool ChampionsNativeAudio::handoff_level_entry(bool recall) {
+  try {
+    last_error_ = "";
+    return model_.handoff_level_entry(recall);
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
+
 bool ChampionsNativeAudio::play_menu_music(bool wait) {
   try {
     return model_.play_menu_music(wait);
@@ -336,6 +350,7 @@ int64_t ChampionsNativeAudio::get_gated_flag_entries() const {
 
 bool ChampionsNativeAudio::sound_tick(int32_t draw) {
   try {
+    last_error_ = "";
     if (draw < 0)
       throw std::invalid_argument("cosmetic draw outside 0..7199");
     const bool queued = model_.poll_level(std::uint32_t(draw));
@@ -343,6 +358,45 @@ bool ChampionsNativeAudio::sound_tick(int32_t draw) {
     // gfx_endFrame increments g_drawFrame after the poll and sound_update.
     model_.advance_draw_frame();
     return queued;
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
+
+bool ChampionsNativeAudio::sound_tick_without_cosmetic() {
+  try {
+    last_error_ = "";
+    model_.poll_level_without_cosmetic();
+    model_.tick();
+    model_.advance_draw_frame();
+    return true;
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
+
+bool ChampionsNativeAudio::service_loader_sound_pair() {
+  try {
+    last_error_ = "";
+    // game_loadLevel invokes sound_update twice, with no ambient poll or
+    // g_drawFrame advance between those calls.
+    model_.tick();
+    model_.tick();
+    return true;
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
+
+bool ChampionsNativeAudio::service_session_sound_without_ambient() {
+  try {
+    last_error_ = "";
+    model_.tick();
+    model_.advance_draw_frame();
+    return true;
   } catch (const std::exception &e) {
     fail(e.what());
     return false;
@@ -371,6 +425,7 @@ int32_t ChampionsNativeAudio::pump_frames(int32_t maximum) {
 Dictionary ChampionsNativeAudio::get_observation() const {
   Dictionary out; Array streams, voices;
   out["tick"]=int64_t(model_.frame());
+  out["draw_frame"]=int64_t(model_.draw_frame());
   out["buffered_frames"]=int64_t(model_.buffered_frames());
   out["dropped_frames"]=int64_t(model_.dropped_frames());
   out["failed_stream_entries"]=int64_t(model_.failed_stream_entries());

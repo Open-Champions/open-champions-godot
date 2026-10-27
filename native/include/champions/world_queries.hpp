@@ -104,9 +104,10 @@ Raw terrain_height(Level &, Raw radius, const Vec3 &);
 Raw terrain_height_below(Level &, Raw radius, const Vec3 &);
 Raw terrain_height_at_point(Level &, const Vec3 &);
 Raw terrain_test_flag1(Level &, Raw radius, const Vec3 &);
-// Terrain-only ray (0x18a5c0): raw t of the first hit, or -1.0 (0xbf800000).
+// terrain_raycast 0x18a5c0: first hit parameter or -1.0. Uses the supplied
+// post-fixup WORLD, including its element flags and sample heights.
 Raw terrain_raycast(Level &, Raw max_t, const Vec3 &origin,
-                    const Vec3 &direction, Raw flags);
+                    const Vec3 &direction, std::uint32_t flags);
 SweepResult terrain_sweep_circle(Level &, Raw radius, const Vec3 &position,
                                  const Vec3 &delta, std::uint32_t mask,
                                  bool want_normal = true);

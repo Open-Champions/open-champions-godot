@@ -58,13 +58,13 @@ inline std::string recovery(const S::RecoverySnapshot &r) {
                    n(r.object_run_completed),
                    optional_number(r.task_priority)});
 }
-inline std::string observation(const S::Snapshot &s) {
-  auto base = s;
-  base.recovery.reset();
-  return sequence({creature_trace::observation(base),
-                   s.recovery ? recovery(*s.recovery) : "_"});
+inline std::string observation(S::Snapshot s) {
+  // Consume temporary snapshots instead of copying their complete histories.
+  auto extension = s.recovery ? recovery(*s.recovery) : "_";
+  s.recovery.reset();
+  return sequence({creature_trace::observation(s), std::move(extension)});
 }
-inline std::string control(const R::session_control::Snapshot &s) {
+inline std::string control(R::session_control::Snapshot s) {
   return sequence(
       {sequence({text(s.config.profile), n(unsigned(s.config.model)),
                  n(s.config.mul_bias), n(s.config.div_nearest),
@@ -73,7 +73,7 @@ inline std::string control(const R::session_control::Snapshot &s) {
                  s.config.recovery ? initial(*s.config.recovery) : "_"}),
        level_snapshot(s.initial_terrain),
        n(s.supplied_terrain),
-       observation(s.session),
+       observation(std::move(s.session)),
        n(s.actor_serial),
        n(s.actor_address),
        n(s.mover),

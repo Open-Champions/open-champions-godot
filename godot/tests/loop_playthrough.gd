@@ -17,6 +17,10 @@ const RIGHT := 0x2000
 const LEFT := 0x8000
 const START := 0x800
 const RealWorld = preload("res://real_data/real_world.gd")
+const MISSION_IMAGES := ["misswar.tex", "missinnovation.tex", "misspit.tex", "misswater.tex",
+	"misstorment.tex", "missdisease.tex", "missvalor.tex", "missfire.tex",
+	"missstorms.tex", "missfeydark.tex", "missnightmare.tex", "missfear.tex"]
+const LoadingDisplay = preload("res://real_data/loading_display.gd")
 
 var args := {}
 var scene: Control
@@ -26,6 +30,7 @@ var refusal_counts := {}
 var seen := {}
 var out_dir := ""
 var screenshots := 0
+var audit_menu_checks := true
 
 func _initialize() -> void:
 	for argument in OS.get_cmdline_user_args():
@@ -69,6 +74,7 @@ func collect(stage: String) -> void:
 		refusal(stage, key)
 
 func mark(stage: String, result: String, extra := {}) -> void:
+	if stage.begins_with("mission_menu_") and result == "refused": audit_menu_checks = false
 	collect(stage)
 	var row := {"step": stage, "result": result,
 		"fps": Engine.get_frames_per_second(),
@@ -86,12 +92,24 @@ func capture(label: String) -> void:
 	RenderingServer.force_draw()
 	var image := root.get_texture().get_image()
 	if image == null or image.is_empty():
+		if label.begins_with("10-mission-menu"): audit_menu_checks = false
 		refusal(label, "rendered viewport has no image")
 		return
 	if image.save_png(out_dir.path_join(label + ".png")) == OK:
 		screenshots += 1
 	else:
+		if label.begins_with("10-mission-menu"): audit_menu_checks = false
 		refusal(label, "screenshot write failed")
+
+func capture_player_view(label: String) -> void:
+	if DisplayServer.get_name() == "headless": return
+	for i in range(2): await process_frame
+	RenderingServer.force_draw()
+	var image: Image = scene.viewport.get_texture().get_image()
+	if image == null or image.is_empty() or image.save_png(out_dir.path_join(label + ".png")) != OK:
+		refusal(label, "player viewport capture failed")
+	else:
+		screenshots += 1
 
 # Compare two rendered viewport captures with the dialog view shown and hidden.
 # The box bounds come from docs/DIALOG.md; a nonzero count proves that its
@@ -135,6 +153,55 @@ func player_actor_pixels() -> int:
 			if shown.get_pixel(x, y) != hidden.get_pixel(x, y): changed += 1
 	return changed
 
+# Explicit diagnostic samples from the selected model's animation lump. The
+# level session does not yet expose weapon class, so row 0 is a stated test
+# input, never an inferred equipped class or automatic action transition.
+func player_pose_pixels() -> Dictionary:
+	if scene.real_player == null or not scene.real_player.body_drawn:
+		return {"ok": false, "error": "class body unavailable"}
+	var idle: Dictionary = scene.real_player.draw_selected_pose(0, 0, 1.0)
+	if not idle.get("ok", false): return idle
+	var idle_mesh: Mesh = scene.actor_visual.mesh
+	scene.asset_label.text = "Explicit class-0 idle clip sample · diagnostic pose"
+	await capture("03-player-idle")
+	await capture_player_view("03-player-idle-view")
+	var idle_image: Image
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.force_draw()
+		idle_image = scene.viewport.get_texture().get_image()
+	var walk: Dictionary = scene.real_player.draw_selected_pose(0, 1, 1.0)
+	if not walk.get("ok", false):
+		scene.real_player.restore_rest_pose()
+		scene.asset_label.text = scene.real_player.status
+		return walk
+	scene.asset_label.text = "Explicit class-0 walk clip sample · diagnostic pose"
+	await capture("03-player-walk")
+	await capture_player_view("03-player-walk-view")
+	var walk_mesh: Mesh = scene.actor_visual.mesh
+	var walk_image: Image
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.force_draw()
+		walk_image = scene.viewport.get_texture().get_image()
+	var pose_corners := 0
+	if idle_mesh.get_surface_count() == walk_mesh.get_surface_count():
+		for surface in range(idle_mesh.get_surface_count()):
+			var first: PackedVector3Array = idle_mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			var second: PackedVector3Array = walk_mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			if first.size() != second.size(): continue
+			for index in range(first.size()):
+				if first[index] != second[index]: pose_corners += 1
+	var changed := 0
+	if idle_image != null and walk_image != null and not idle_image.is_empty() \
+			and idle_image.get_size() == walk_image.get_size():
+		for y in range(0, idle_image.get_height(), 3):
+			for x in range(0, idle_image.get_width(), 3):
+				if idle_image.get_pixel(x, y) != walk_image.get_pixel(x, y): changed += 1
+	scene.real_player.restore_rest_pose()
+	scene.asset_label.text = scene.real_player.status
+	return {"ok": pose_corners > 0 and (changed > 0 or DisplayServer.get_name() == "headless"),
+		"idle_slot": int(idle.slot), "walk_slot": int(walk.slot),
+		"pose_corners": pose_corners, "pose_pixels": changed, "sample_tick": 1.0}
+
 func tap(bits: int) -> void:
 	fe.tap(bits)
 	collect("frontend")
@@ -147,11 +214,175 @@ func advance(command := 0, count := 1) -> void:
 		collect("tick")
 		scene.held_commands = 0
 
+func inside_trigger(point: Vector3, target: Dictionary) -> bool:
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	return point.x >= lo.x and point.x <= hi.x and point.y >= lo.y and point.y <= hi.y
+
+func trigger_distance(point: Vector3, target: Dictionary) -> float:
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	return maxf(maxf(lo.x - point.x, point.x - hi.x), 0.0) + \
+		maxf(maxf(lo.y - point.y, point.y - hi.y), 0.0)
+
+func walk_into_trigger(target: Dictionary, max_ticks: int) -> Dictionary:
+	var began: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+	if inside_trigger(began, target): return {"entered": false, "ticks": 0}
+	var lo: Vector3 = target.get("min", Vector3.ZERO)
+	var hi: Vector3 = target.get("max", Vector3.ZERO)
+	var moved := false
+	var entered := false
+	var ticks := 0
+	var still := 0
+	var without_progress := 0
+	var best_distance := trigger_distance(began, target)
+	while ticks < max_ticks and not scene.controller.script_level_request().get("queued", false):
+		var before: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		# Aim for the nearest point in the documented inclusive rectangle.
+		# The authored record's origin can be at a far corner of a wide Trigger.
+		var dx := clampf(before.x, lo.x, hi.x) - before.x
+		var dy := clampf(before.y, lo.y, hi.y) - before.y
+		var command := 0
+		if absf(dx) >= absf(dy) and not is_zero_approx(dx): command = 1 if dx > 0 else 2
+		elif not is_zero_approx(dy): command = 4 if dy > 0 else 8
+		elif not is_zero_approx(dx): command = 1 if dx > 0 else 2
+		advance(command)
+		ticks += 1
+		var after: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if Vector2(after.x - before.x, after.y - before.y).length() > 0.001: moved = true; still = 0
+		else: still += 1
+		if moved and not inside_trigger(before, target) and inside_trigger(after, target): entered = true
+		var distance := trigger_distance(after, target)
+		if distance < best_distance - 0.25:
+			best_distance = distance
+			without_progress = 0
+		else: without_progress += 1
+		if still >= 20 or without_progress >= 120 or scene.stopped: break
+		if command == 0 and ticks % 15 == 0 and not scene.controller.script_level_request().get("queued", false): break
+	return {"entered": entered, "ticks": ticks, "navigation_stalled": still >= 20 or without_progress >= 120}
+
+func approach_use(target: Dictionary, max_ticks: int) -> Dictionary:
+	var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+	var goal: Vector3 = target.get("position", Vector3.ZERO)
+	var best := origin.distance_to(goal)
+	var stale := 0
+	var still := 0
+	var ticks := 0
+	while ticks < max_ticks and not scene.stopped:
+		var at: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if absf(at.x - goal.x) <= 48.0 and absf(at.y - goal.y) <= 48.0 and goal.z >= at.z and goal.z <= at.z + 60.0:
+			game_key(KEY_E)
+			advance(0, 2)
+			return {"pressed": true, "ticks": ticks}
+		var command := 0
+		if absf(at.x - goal.x) > 24.0: command = 1 if at.x < goal.x else 2
+		elif absf(at.y - goal.y) > 24.0: command = 4 if at.y < goal.y else 8
+		if command == 0: break
+		advance(command)
+		ticks += 1
+		var after: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		if Vector2(after.x - at.x, after.y - at.y).length() <= 0.001: still += 1
+		else: still = 0
+		var distance: float = after.distance_to(goal)
+		if distance < best - 0.25: best = distance; stale = 0
+		else: stale += 1
+		if stale >= 600 or still >= 20: break
+	return {"pressed": false, "ticks": ticks, "navigation_stalled": stale >= 600 or still >= 20}
+
 func help_close() -> void:
 	for i in range(200):
 		if not scene.controller.text_hud().get("help_open", false): return
 		if scene.controller.help_frame(true).get("closed", false): return
 	refusal("dialog", "help box did not close in 200 frames")
+
+func move_key(code: int, pressed: bool) -> bool:
+	var event := InputEventKey.new()
+	event.keycode = code
+	event.physical_keycode = code
+	event.pressed = pressed
+	return scene.handle_input_event(event)
+
+# Exercise authored inputs through the campaign bridge, never the Full fixture
+# helpers or equipment writes. The unarmed stand-in must refuse guard/heavy.
+func campaign_moves() -> bool:
+	var checks := {}
+	var initial: Dictionary = scene.controller.get_observation()
+	if not initial.get("fight_player_ready", false):
+		mark("combat_moves", "refused", {"real_player": false})
+		return false
+	scene.release_controls()
+	advance(0, 30)
+	var edges := int(scene.raw_observation.fight_counts.attack_edges)
+	checks.attack_key = move_key(KEY_J, true)
+	for i in range(32): scene.advance_step()
+	checks.held_once = int(scene.raw_observation.fight_counts.attack_edges) == edges + 1 \
+		and int(scene.raw_observation.fight_player_action_state) == 1 \
+		and int(scene.raw_observation.fight_player_combo_step) == 0
+	var first_animation_starts := int(scene.raw_observation.fight_counts.player_animation_starts)
+	move_key(KEY_J, false)
+	scene.advance_step()
+	checks.combo_key = move_key(KEY_J, true)
+	for i in range(8): scene.advance_step()
+	checks.combo = int(scene.raw_observation.fight_player_combo_step) == 1
+	checks.combo_animation = int(scene.raw_observation.fight_counts.player_animation_starts) > first_animation_starts
+	await capture("04-combat-combo")
+	move_key(KEY_J, false)
+	advance(0, 100)
+	checks.guard_key = move_key(KEY_K, true)
+	for i in range(3): scene.advance_step()
+	checks.unarmed_guard_refused = "guard: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+		and not bool(scene.raw_observation.fight_player_blocking) \
+		and int(scene.raw_observation.fight_player_action_state) != 8
+	checks.guard_move_key = move_key(KEY_U, true)
+	scene.advance_step()
+	checks.guard_move_refused = "guard_move: unavailable" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+		and int(scene.raw_observation.fight_player_action_state) != 11
+	move_key(KEY_K, false)
+	move_key(KEY_U, false)
+	scene.advance_step()
+	var mana: float = scene.raw_observation.fight_player_mana
+	edges = int(scene.raw_observation.fight_counts.attack_edges)
+	checks.heavy_key = move_key(KEY_L, true)
+	scene.advance_step()
+	checks.heavy_refused = "heavy_attack: refused_unknown" in str(scene.raw_observation.get("fight_move_refusal", "")) \
+		and int(scene.raw_observation.fight_player_attack_kind) != 2 \
+		and int(scene.raw_observation.fight_counts.attack_edges) == edges
+	# Ordinary ready ticks can regenerate mana; a refusal cannot spend it.
+	checks.heavy_mana_not_spent = float(scene.raw_observation.fight_player_mana) >= mana
+	await capture("04-combat-refusal")
+	move_key(KEY_L, false)
+	scene.advance_step()
+	for binding in [[KEY_1, "ability_slot_1"], [KEY_2, "ability_slot_2"]]:
+		checks[binding[1] + "_key"] = move_key(binding[0], true)
+		scene.advance_step()
+		checks[binding[1] + "_refused"] = (binding[1] + ": refused_unknown") in str(scene.raw_observation.get("fight_move_refusal", "")) \
+			and int(scene.raw_observation.fight_counts.attack_edges) == edges
+		checks[binding[1] + "_mana_not_spent"] = float(scene.raw_observation.fight_player_mana) >= mana
+		move_key(binding[0], false)
+		scene.advance_step()
+	# Pause with attack still held. Resuming and pressing again must create an
+	# edge in the native mapper as well as clearing the host's command word.
+	move_key(KEY_J, true)
+	scene.advance_step()
+	edges = int(scene.raw_observation.fight_counts.attack_edges)
+	scene.set_paused(true)
+	checks.pause_releases = scene.held_commands == 0
+	scene.resume_session()
+	move_key(KEY_J, true)
+	scene.advance_step()
+	checks.resume_edge = int(scene.raw_observation.fight_counts.attack_edges) == edges + 1
+	move_key(KEY_J, false)
+	advance(0, 100)
+	var counts: Dictionary = scene.raw_observation.fight_counts
+	checks.animation_hooks = int(counts.player_animation_starts) > 0 and int(counts.player_animation_advances) > 0
+	checks.world_running = not bool(scene.raw_observation.get("fight_failed", true))
+	var passed := 0
+	for value in checks.values(): passed += int(value)
+	mark("combat_moves", "passed" if passed == checks.size() else "refused", {
+		"checks": checks.size(), "passed": passed, "observed": checks,
+		"animation_starts": counts.player_animation_starts,
+		"animation_advances": counts.player_animation_advances})
+	return passed == checks.size()
 
 func game_key(code: int) -> bool:
 	var event := InputEventKey.new()
@@ -163,12 +394,139 @@ func game_key(code: int) -> bool:
 	scene.handle_input_event(event)
 	return handled
 
+func same_player_record(before: Dictionary, after: Dictionary) -> bool:
+	if not before.get("player_ready", false) or not after.get("player_ready", false): return false
+	for key in ["name", "player_class", "gold", "experience", "level", "acknowledged_level",
+		"record_max_hp_raw", "record_max_mana_raw"]:
+		if not before.has(key) or not after.has(key) or before[key] != after[key]: return false
+	var currents_known: bool = before.get("player_record_currents_known", false)
+	if currents_known != after.get("player_record_currents_known", false): return false
+	if currents_known:
+		for key in ["record_hp_raw", "record_mana_raw"]:
+			if not before.has(key) or not after.has(key) or before[key] != after[key]: return false
+	return true
+
 func save_json() -> void:
 	var summary := {"steps": rows, "refusals": refusal_counts,
 		"screenshots": screenshots, "renderer": DisplayServer.get_name()}
 	var file := FileAccess.open(out_dir.path_join("result.json"), FileAccess.WRITE)
 	if file != null: file.store_string(JSON.stringify(summary, "  ", true) + "\n")
 	print("PLAYTHROUGH_RESULT " + JSON.stringify(summary))
+
+func walk_exit_probe() -> bool:
+	# Step 6: walk the native player into a real Trigger's inclusive x/y box.
+	var transition_before: int = scene.real.current
+	var exit_targets: Array = scene.controller.script_exit_targets()
+	var pending: Dictionary = scene.controller.script_level_request()
+	var walk_attempts := 0
+	var walked_into := false
+	var queued_by_walk := false
+	var entered_without_change := 0
+	var navigation_stalls := 0
+	var sources_examined := 1
+	var initial_source := transition_before
+	var multi_trigger_indices: Array[int] = []
+	var other_trigger_indices: Array[int] = []
+	for index in range(scene.real.levels.size()):
+		if index == initial_source: continue
+		var level: Dictionary = scene.real.levels[index]
+		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+		if objects.is_empty(): continue
+		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
+		if not inventory.get("ok", false): continue
+		var trigger_count := int(inventory.get("triggers", 0))
+		if trigger_count >= 4: multi_trigger_indices.append(index)
+		elif trigger_count > 0: other_trigger_indices.append(index)
+	var sources: Array[int] = [initial_source]
+	sources.append_array(multi_trigger_indices)
+	sources.append_array(other_trigger_indices)
+	# Probe nearby rectangles in every source before trying its farther ones.
+	# Both passes retain every eligible live Trigger without relying on a
+	# private level index or a guessed walk-in coordinate.
+	for pass_index in range(2):
+		for index in sources:
+			if index == initial_source and pass_index == 0:
+				pass
+			else:
+				if not scene.load_real_level(index, true): continue
+				scene.start_play()
+				help_close()
+				if scene.paused and scene.session_started: scene.resume_session()
+				sources_examined += 1
+				exit_targets = scene.controller.script_exit_targets()
+			pending = scene.controller.script_level_request()
+			if pending.get("queued", false): continue
+			var walk_targets: Array = exit_targets.filter(func(t): return t.get("walk_in", false))
+			if walk_targets.is_empty(): continue
+			var origin: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+			walk_targets.sort_custom(func(a, b): return trigger_distance(origin, a) < trigger_distance(origin, b))
+			var first: int = 0 if pass_index == 0 else mini(2, walk_targets.size())
+			var last: int = mini(2, walk_targets.size()) if pass_index == 0 else walk_targets.size()
+			for target in walk_targets.slice(first, last):
+				walk_attempts += 1
+				var dispatches_before := int(scene.controller.script_trigger_status().get("queued_dispatches", 0))
+				var walk: Dictionary = walk_into_trigger(target, 5000)
+				if walk.get("navigation_stalled", false): navigation_stalls += 1
+				walked_into = bool(walk.get("entered", false))
+				pending = scene.controller.script_level_request()
+				var dispatch: Dictionary = scene.controller.script_trigger_status()
+				queued_by_walk = walked_into and bool(pending.get("queued", false)) and \
+					int(dispatch.get("queued_dispatches", 0)) > dispatches_before and \
+					int(dispatch.get("queued_record", -1)) == int(target.get("index", -2)) and \
+					str(dispatch.get("queued_destination", "")) == str(pending.get("name", ""))
+				if walked_into and not pending.get("queued", false): entered_without_change += 1
+				if pending.get("queued", false) or scene.stopped: break
+			if queued_by_walk:
+				transition_before = scene.real.current
+				break
+		if queued_by_walk: break
+	var record_before: Dictionary = scene.controller.get_observation()
+	var trigger_status: Dictionary = scene.controller.script_trigger_status()
+	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var transition_ok: bool = queued_by_walk and bool(pending.get("queued", false)) and bool(await scene._apply_level_change())
+	var record_after: Dictionary = scene.controller.get_observation()
+	var start: Dictionary = scene.controller.get_terrain().get("start", {})
+	var arrived_position: Vector3 = record_after.get("position", Vector3.ZERO)
+	var marker_position: Vector3 = start.get("position", Vector3.ZERO)
+	var arrival_at_marker: bool = transition_ok and start.has("position") and \
+		arrived_position.distance_to(marker_position) < 0.01
+	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
+		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
+		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
+	mark("walk_in_exit_trigger", "changed" if record_carried and arrival_at_marker and scene.real.current != transition_before else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current,
+		"exit_targets": exit_targets.size(), "walk_attempts": walk_attempts, "walked_into": walked_into,
+		"queued_by_walk": queued_by_walk,
+		"entered_without_change": entered_without_change,
+		"navigation_stalls": navigation_stalls,
+		"trigger_samples": int(trigger_status.get("samples", 0)),
+		"trigger_dispatches": int(trigger_status.get("dispatches", 0)),
+		"trigger_queued_dispatches": int(trigger_status.get("queued_dispatches", 0)),
+		"trigger_missing": int(trigger_status.get("missing", 0)),
+		"arrival_at_marker": arrival_at_marker,
+		"arrival_pre_search": bool(start.get("pre_search", false)),
+		"arrival_rank": int(start.get("rank", 0)),
+		"sources_examined": sources_examined,
+		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
+		"campaign_image_restored": scene.last_campaign_image_restored,
+		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
+		"quest_vars_after": int(quests_after.get("vars", 0))})
+	await capture("11-walk-exit-level-change")
+	return record_carried and arrival_at_marker and scene.real.current != transition_before
+
+func load_scripted_exit_source(indices: Array[int], kind: String) -> bool:
+	for index in indices:
+		if not scene.load_real_level(index, true): continue
+		scene.start_play()
+		help_close()
+		if scene.paused and scene.session_started: scene.resume_session()
+		if not scene.controller.get_play_capabilities().get("level_script_enabled", false): continue
+		for target in scene.controller.script_exit_targets():
+			if str(target.get("kind", "")) == kind: return true
+	return false
 
 func run() -> void:
 	if not args.has("game-folder") or not args.has("out"):
@@ -218,10 +576,10 @@ func run() -> void:
 		if fe.screen() == "difficulty": tap(CROSS)
 		mark("character_class", fe.screen())
 		if fe.screen() == "char-class":
-			# The assisted Valor capture used the model-11/class-6 character.
-			# Select that documented pair through character creation; the
-			# capture's equipped club is still a separate item-state question.
-			for i in range(11): tap(DOWN)
+			# The assisted Valor capture used the model-11/class-6 character
+			# (audited carousel position 1); the capture's equipped club is
+			# still a separate item-state question.
+			tap(DOWN)
 			tap(CROSS)
 		if fe.screen() == "char-appearance": tap(CROSS)
 		if fe.screen() == "char-ability":
@@ -261,9 +619,12 @@ func run() -> void:
 		"practice_label": scene.asset_label.text.begins_with("Practice figure"),
 		"body_drawn": scene.real_player.body_drawn, "model_match": scene.real_player.model_index == int(scene.controller.get_observation().get("player_model_index", -1)),
 		"actor_visible": scene.actor_visual.visible})
+	var pose: Dictionary = await player_pose_pixels()
+	mark("player_pose_sample", "sampled" if pose.get("ok", false) else "refused", pose)
 	if args.has("visual-only"):
 		save_json()
-		quit(0 if class_mesh and (DisplayServer.get_name() == "headless" or actor_pixels > 0) else 1)
+		quit(0 if class_mesh and pose.get("ok", false) and \
+			(DisplayServer.get_name() == "headless" or actor_pixels > 0) else 1)
 		return
 	if scene.real.current < 0 and not scene.real.levels.is_empty():
 		var direct: bool = scene.load_real_level(0)
@@ -275,31 +636,45 @@ func run() -> void:
 		mark("level_script", "enabled" if scene.controller.get_play_capabilities().get("level_script_enabled", false) else "unavailable")
 	help_close()
 	if scene.paused and scene.session_started: scene.resume_session()
+	var portal_before_offer: Dictionary = scene.controller.script_run_exit(12) if scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "hub" else {"ok": false}
+	var portal_guarded: bool = portal_before_offer.get("ok", false) and int(portal_before_offer.get("portal_requests", -1)) == 0 \
+		and not scene.controller.script_mission_menu_state().get("first_story_available", true)
+	mark("hub_portal_locked", "guarded" if portal_guarded else "refused",
+		{"requests_before_offer": int(portal_before_offer.get("portal_requests", -1))})
 	var dialog: Dictionary = scene.controller.dialog_status()
+	var hub_campaign_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var hub_player_before: Dictionary = scene.controller.get_observation()
 	var talkers := int(dialog.get("talkers", 0))
 	var walk_start: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
 	var opened_dialog := false
 	var physical_attempts := 0
 	if dialog.get("ok", false) and talkers > 0 and scene.play_mode:
-		# No target coordinates are published by the client. Sweep the four
-		# movement directions and use the ordinary E key at each stop.
-		for direction in [1, 2, 4, 8]:
-			for part in range(4):
-				advance(direction, 24)
-				game_key(KEY_E)
-				advance(0, 2)
-				help_close()
-				physical_attempts += 1
-				if scene.controller.dialog_status().get("open", false):
-					opened_dialog = true
-					break
-			if opened_dialog: break
+		# One ordinary E press establishes the explicit Player_interact
+		# refusal; further navigation cannot supply its missing runtime state.
+		game_key(KEY_E)
+		advance(0, 2)
+		help_close()
+		physical_attempts = 1
+		opened_dialog = scene.controller.dialog_status().get("open", false)
+	var physical_dialog_opened := opened_dialog
+	var direct_dialog_opened := false
+	if not opened_dialog and talkers == 1 and dialog.get("ok", false):
+		# Keep the separate route diagnostic running after the Player_interact
+		# refusal. This explicit talker index is never counted as physical use.
+		var direct_talk: Dictionary = scene.controller.dialog_talk_to(0)
+		if direct_talk.get("ok", false):
+			advance(0, 2)
+			direct_dialog_opened = scene.controller.dialog_status().get("open", false)
+			opened_dialog = direct_dialog_opened
 	var walk_end: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
-	mark("walk_and_talk", "dialog_open" if opened_dialog else "refused",
+	mark("walk_and_talk", "dialog_open" if physical_dialog_opened else \
+		("physical_refused_direct_diagnostic" if direct_dialog_opened else "refused"),
 		{"talkers": talkers, "physical_use_attempts": physical_attempts,
+		"physical_dialog_opened": physical_dialog_opened, "direct_diagnostic_opened": direct_dialog_opened,
 		"walk_displacement": walk_start.distance_to(walk_end),
 		"nearest_target_known": false, "paused": scene.paused,
 		"menu_visible": scene.menu.visible})
+	var dialog_choice_completed := false
 	if opened_dialog:
 		# Opening the dialog starts a camera swoop. Its draw task returns no
 		# operations until that move has arrived; sample only a drawable frame.
@@ -337,7 +712,12 @@ func run() -> void:
 		mark("dialog_prompt", "drawn" if prompt_drawn else "unavailable",
 			{"cursor_glyph_quads": int(scene.npc_dialog.frame.get("cursor_glyph_quads", 0))})
 		if prompt_drawn: await capture("04-dialog-prompt")
+	var point_menu_refused := false
 	if opened_dialog:
+		for target in scene.controller.hub_service_targets():
+			if str(target.kind) == "Savepoint":
+				var blocked: Dictionary = scene.controller.hub_service_use(int(target.index), false)
+				point_menu_refused = not blocked.get("ok", true) and not blocked.get("request_save", true)
 		game_key(KEY_DOWN)
 		var closed := false
 		for i in range(1200):
@@ -352,11 +732,590 @@ func run() -> void:
 		var dialog_counts: Dictionary = scene.controller.dialog_status().get("counts", {})
 		for why in dialog_counts.get("refused_reasons", {}):
 			refusal("dialog", "%s count=%d" % [safe(why), int(dialog_counts.refused_reasons[why])])
-		mark("dialog_choice_close", "closed" if closed and int(dialog_counts.get("choices_taken", 0)) > 0 else "refused",
+		dialog_choice_completed = closed and int(dialog_counts.get("choices_taken", 0)) > 0
+		mark("dialog_choice_close", "closed" if dialog_choice_completed else "refused",
 			{"closed": closed, "choices_taken": int(dialog_counts.get("choices_taken", 0)),
 			"pending_levels": int(dialog_counts.get("pending_levels", 0))})
 	else:
 		mark("dialog_choice_close", "blocked_by_walk_and_talk")
+	help_close()
+	if fe.screen() == "pause": tap(START)
+	if scene.paused and scene.session_started and not scene.stopped: scene.resume_session()
+	var hub_campaign_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var hub_player_after: Dictionary = scene.controller.get_observation()
+	var hub_quest_changed := int(hub_campaign_after.get("quest_lines", -1)) == int(hub_campaign_before.get("quest_lines", -1)) + 1 \
+		and int(hub_campaign_after.get("mission_available_bits", -1)) == int(hub_campaign_before.get("mission_available_bits", -1)) + 1
+	var hub_no_debit: bool = hub_player_after.get("gold", -1) == hub_player_before.get("gold", -2) \
+		and hub_player_after.get("experience", -1) == hub_player_before.get("experience", -2)
+	mark("hub_quest_service", "applied" if hub_quest_changed and hub_no_debit else "refused",
+		{"quest_lines_added": int(hub_campaign_after.get("quest_lines", -1)) - int(hub_campaign_before.get("quest_lines", -1)),
+		"mission_bits_added": int(hub_campaign_after.get("mission_available_bits", -1)) - int(hub_campaign_before.get("mission_available_bits", -1)),
+		"gold_xp_unchanged": hub_no_debit})
+	var point_index := -1
+	var point_choice := -1
+	var service_refusals := true
+	scene.hub_services.refresh()
+	for index in range(scene.hub_services.targets.size()):
+		var target: Dictionary = scene.hub_services.targets[index]
+		if str(target.kind) == "Savepoint":
+			point_index = int(target.index)
+			point_choice = index
+		else:
+			var refused: Dictionary = scene.controller.hub_service_use(int(target.index), false)
+			service_refusals = service_refusals and not refused.get("ok", true) and not refused.get("request_save", true) \
+				and not str(refused.get("error", "")).is_empty()
+	var point_before: Dictionary = scene.controller.get_observation()
+	var point_busy: Dictionary = scene.controller.hub_service_use(point_index, true)
+	var point_bad: Dictionary = scene.controller.hub_service_use(-1, false)
+	var point_result := {"ok": false}
+	var point_saved := false
+	var hub_controls_visible := true
+	var point_path := out_dir.path_join("hub-savepoint.ocplay")
+	if point_choice >= 0:
+		scene.hub_services.choice.select(point_choice)
+		if args.has("hub-only"):
+			scene.set_paused(true)
+			await process_frame
+			scene.scene_scroll.ensure_control_visible(scene.hub_services.row)
+			await process_frame
+			var visible_bounds := Rect2(Vector2.ZERO, Vector2(root.size))
+			hub_controls_visible = visible_bounds.encloses(scene.hub_services.choice.get_global_rect()) \
+				and visible_bounds.encloses(scene.actions.hub_service.get_global_rect())
+			mark("hub_service_controls", "drawn" if hub_controls_visible else "refused",
+				{"selector_and_action_inside_viewport": hub_controls_visible})
+			await capture("04-hub-services")
+			scene.set_paused(false)
+		fe.queue_path("save_session", point_path)
+		point_result = scene.hub_services.use_selected()
+		await capture("04-savepoint-save-screen")
+		if fe.screen() == "save-game": tap(CROSS)
+		point_saved = fe.screen() == "saved" and FileAccess.file_exists(point_path)
+		if fe.screen() == "saved": tap(CROSS)
+	var point_after: Dictionary = scene.controller.get_observation()
+	var point_unchanged := true
+	for key in ["gold", "experience", "level", "record_max_hp_raw", "record_max_mana_raw", "player_record_revision"]:
+		point_unchanged = point_unchanged and point_before.has(key) and point_before.get(key) == point_after.get(key)
+	for key in ["record_hp_raw", "record_mana_raw"]:
+		point_unchanged = point_unchanged and point_before.has(key) == point_after.has(key) and point_before.get(key) == point_after.get(key)
+	# A load restores level, player, quests and position but not in-flight script
+	# state, so the reload is only exercised in the focused hub run. The full
+	# journey keeps the hub script live for the mission menu and checks the
+	# same continuation at load_and_carry and cold_load below.
+	var point_readback_live: bool = args.has("hub-only")
+	var point_loaded: bool = point_saved and (not point_readback_live or scene.load_session_file(point_path))
+	var point_readback: Dictionary = scene.controller.get_observation() if point_readback_live else point_before
+	var point_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var point_carried := point_loaded
+	for key in ["gold", "experience", "level", "record_max_hp_raw", "record_max_mana_raw", "player_class", "player_model_index"]:
+		point_carried = point_carried and point_before.has(key) and point_before.get(key) == point_readback.get(key)
+	for key in ["record_hp_raw", "record_mana_raw"]:
+		point_carried = point_carried and point_before.has(key) == point_readback.has(key) and point_before.get(key) == point_readback.get(key)
+	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
+		point_carried = point_carried and hub_campaign_after.has(key) and hub_campaign_after.get(key) == point_campaign.get(key)
+	mark("hub_savepoint", "saved" if point_saved and point_unchanged and point_carried and service_refusals else "refused",
+		{"accepted": point_result.get("ok", false), "busy_refused": not point_busy.get("ok", true),
+		"bad_index_refused": not point_bad.get("ok", true), "mutex_refused": point_menu_refused, "player_unchanged": point_unchanged,
+		"native_save_written": point_saved, "original_card_persistence": false,
+		"save_readback_matches": point_carried, "readback_in_hub": point_readback_live,
+		"other_services_refused": service_refusals})
+	if not point_saved or not point_unchanged: refusal("hub_savepoint", point_result.get("error", "savepoint flow incomplete"))
+	if not point_carried: refusal("hub_savepoint", "native continuation readback differs")
+	if not service_refusals: refusal("hub_services", "an unsupported direct service did not refuse with a diagnostic")
+	if args.has("hub-only"):
+		var alternate_index := -1
+		for index in range(scene.real.levels.size()):
+			if str(scene.real.levels[index].stem) == "hub2": alternate_index = index
+		var alternate_loaded: bool = alternate_index >= 0 and scene.load_real_level(alternate_index, true)
+		var alternate_refused := false
+		var alternate_point := false
+		if alternate_loaded:
+			scene.start_play()
+			help_close()
+			var alternate_use: Dictionary = scene.controller.dialog_use()
+			var alternate_talk: Dictionary = scene.controller.dialog_talk_to(0)
+			alternate_refused = not alternate_use.get("ok", true) and not alternate_talk.get("ok", true)
+			for target in scene.controller.hub_service_targets():
+				if str(target.kind) == "PushTrigger":
+					var alternate_action: Dictionary = scene.controller.script_run_exit(int(target.index))
+					alternate_refused = alternate_refused and not alternate_action.get("ok", true)
+				elif str(target.kind) == "Savepoint":
+					var alternate_save: Dictionary = scene.controller.hub_service_use(int(target.index), false)
+					alternate_point = alternate_save.get("ok", false) and alternate_save.get("request_save", false)
+		mark("alternate_hub_services", "bounded" if alternate_loaded and alternate_refused and alternate_point else "refused",
+			{"loaded": alternate_loaded, "unknown_routes_refused": alternate_refused, "direct_savepoint_accepted": alternate_point})
+		save_json()
+		scene.queue_free()
+		await process_frame
+		quit(0 if hub_controls_visible and hub_quest_changed and hub_no_debit and service_refusals and point_carried and point_saved and point_unchanged and point_menu_refused and not point_busy.get("ok", true) and not point_bad.get("ok", true) and alternate_loaded and alternate_refused and alternate_point else 1)
+		return
+	help_close()
+	if fe.screen() == "pause": tap(START)
+	if scene.paused and scene.session_started and not scene.stopped: scene.resume_session()
+	# The opening choice and this hub PushTrigger are checked separately in
+	# research-story-route. Exercise their native integration in this session.
+	var transition_before: int = scene.real.current
+	var at_hub: bool = transition_before >= 0 and str(scene.real.levels[transition_before].stem) == "hub"
+	var menu_before: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_1_unlock", "available" if at_hub and menu_before.get("first_story_available", false) else "refused",
+		{"at_hub": at_hub, "available": menu_before.get("first_story_available", false)})
+	# The separate rectangle Trigger requests trigger(portal, 0) once after
+	# mission 1 is offered. The target method and rendering are unverified.
+	var portal_trigger_found := false
+	for target in scene.controller.script_exit_targets():
+		if int(target.index) == 12 and str(target.kind) == "Trigger" and target.get("script_action", false):
+			portal_trigger_found = true
+			break
+	var portal_result: Dictionary = scene.controller.script_run_exit(12) if at_hub and dialog_choice_completed and menu_before.get("first_story_available", false) and portal_trigger_found else {"ok": false}
+	var portal_repeat: Dictionary = scene.controller.script_run_exit(12) if portal_result.get("ok", false) else {"ok": false}
+	var portal_request_ok: bool = portal_trigger_found and portal_result.get("ok", false) and int(portal_result.get("portal_requests", -1)) == 1 \
+		and portal_repeat.get("ok", false) and int(portal_repeat.get("portal_requests", -1)) == 0
+	mark("hub_portal_request", "requested" if portal_request_ok else "refused",
+		{"trigger_found": portal_trigger_found, "first_requests": int(portal_result.get("portal_requests", -1)),
+		"repeat_requests": int(portal_repeat.get("portal_requests", -1)), "rendering_verified": false})
+	var hub_trigger_found := false
+	for target in scene.controller.script_exit_targets():
+		if int(target.index) == 11 and str(target.kind) == "PushTrigger" and target.get("script_action", false):
+			hub_trigger_found = true
+			break
+	var menu_was_closed: bool = menu_before.get("ok", false) and not menu_before.get("open", false)
+	var trigger_result: Dictionary = scene.controller.script_run_exit(11) if at_hub and hub_trigger_found and dialog_choice_completed and menu_was_closed and not scene.controller.dialog_status().get("open", false) else {"ok": false}
+	var menu_after: Dictionary = scene.controller.script_mission_menu_state()
+	var menu_open: bool = bool(menu_after.get("ok", false) and menu_after.get("open", false))
+	var trigger_opened_menu: bool = hub_trigger_found and menu_was_closed and trigger_result.get("ok", false) and menu_open
+	var trigger_counts: Dictionary = scene.controller.script_command_counts()
+	scene._refresh_mission_menu()
+	var opening_before: Dictionary = scene.controller.script_mission_menu_state()
+	var early_key := game_key(KEY_ENTER)
+	var opening_after: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_menu_opening_gate", "checked" if early_key and int(opening_after.get("state", -1)) == int(opening_before.get("state", -2)) and not opening_after.get("pending", "") else "refused")
+	await capture("10-mission-menu-opening-gate")
+	mark("hub_trigger_mission_menu", "opened" if trigger_opened_menu else "refused",
+		{"hub_trigger_found": hub_trigger_found, "dialog_choice_completed": dialog_choice_completed,
+		"menu_was_closed": menu_was_closed, "trigger_action_ok": trigger_result.get("ok", false),
+		"trigger_error": str(trigger_result.get("error", "")),
+		"script_fault": str(trigger_result.get("script_fault", "")),
+		"script_refusal_stops": int(trigger_counts.get("refusal_stops", 0)),
+		"script_faults": int(trigger_counts.get("faults", 0)),
+		"script_executed_commands": trigger_counts.get("executed", {}),
+		"script_refused_commands": trigger_counts.get("refused", {}), "menu_open": menu_open,
+		"host_panel_visible": scene.mission_menu_panel.visible})
+	for i in range(18): await process_frame
+	var mission_art = scene.mission_menu_panel
+	var table_state: Dictionary = scene.controller.script_mission_menu_state()
+	var table_rows: Array = table_state.get("rows", [])
+	var matched_rows := 0
+	if table_rows.size() == 12:
+		for i in range(12):
+			var row: Dictionary = table_rows[i]
+			if str(row.get("image", "")).to_lower() == MISSION_IMAGES[i] and int(row.get("x", -1)) == (140 if i % 2 == 0 else 70) and int(row.get("y", -1)) == 40 + 200 * i:
+				matched_rows += 1
+	mark("mission_menu_table", "checked" if matched_rows == 12 else "refused", {"matched_rows": matched_rows})
+	mark("mission_menu_assets", "checked" if mission_art.assets_valid and mission_art.art.size() == 32 else "refused",
+		{"textures": mission_art.art.size(), "small_font": mission_art.font_texture != null})
+	await capture("10-mission-menu")
+	var unsupported := false
+	for name in ["cosmiclines.tex", "starfield.tex", "starsparkle.tex", "mainglow.tex", "amuletglow.tex", "bonusglow.tex"]:
+		if mission_art.submitted_sprites.has(name): unsupported = true
+	mark("mission_menu_unsupported_art", "checked" if not unsupported and mission_art.submitted_text_keys == ["AcceptBack"] else "refused")
+	var missing_row: Dictionary = table_state.duplicate(true)
+	missing_row.rows[0].available = false
+	mission_art.present(missing_row)
+	for i in range(2): await process_frame
+	await capture("10-mission-menu-row-zero-missing-bit")
+	mark("mission_menu_row_zero_draw", "checked" if missing_row.rows[0].draw_present and not missing_row.rows[0].available and int(mission_art.submitted_tints.get("misswar.tex", 0)) == 0x7f808080 else "refused")
+	mission_art.present(table_state)
+	var prior_art_valid: bool = mission_art.assets_valid
+	var config_refused: bool = not mission_art.configure(scene.real, scene.controller, scene.inspector, PackedByteArray())
+	scene._refresh_mission_menu()
+	await capture("10-mission-menu-art-refused")
+	var refused_before: Dictionary = scene.controller.script_mission_menu_state()
+	var refused_input := game_key(KEY_ENTER)
+	var refused_after: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_menu_art_gate", "checked" if prior_art_valid and config_refused and not mission_art.visible and refused_input and refused_before == refused_after else "refused",
+		{"input_handled": refused_input})
+	mission_art.configure(scene.real, scene.controller, scene.inspector, scene.real.hud_font_bytes())
+	scene._refresh_mission_menu()
+	for first_active in [false, true]:
+		for pause_open in [false, true]:
+			var prompt_state: Dictionary = table_state.duplicate(true)
+			prompt_state.network = true
+			prompt_state.prompt_first_active = first_active
+			prompt_state.prompt_paused = pause_open
+			mission_art.present(prompt_state)
+			for i in range(2): await process_frame
+			await capture("10-mission-menu-network-%d-%d" % [int(first_active), int(pause_open)])
+			var expected_key := "AcceptBack" if first_active else ("" if pause_open else "clientMissionSelect")
+			mark("mission_menu_network_prompt", "checked" if mission_art.submitted_text_keys == ([] if expected_key.is_empty() else [expected_key]) else "refused",
+				{"first_active": first_active, "paused": pause_open})
+	var unknown_prompt: Dictionary = table_state.duplicate(true)
+	unknown_prompt.network = true
+	mission_art.present(unknown_prompt)
+	for i in range(2): await process_frame
+	await capture("10-mission-menu-network-unknown")
+	mark("mission_menu_network_unknown", "checked" if mission_art.submitted_text_keys.is_empty() else "refused")
+	mission_art.present(table_state)
+	if DisplayServer.get_name() != "headless":
+		var menu_view = scene.mission_menu_panel
+		var actual: Dictionary = scene.controller.script_mission_menu_state()
+		var base_image := Image.load_from_file(out_dir.path_join("10-mission-menu.png"))
+		var altered: Dictionary = actual.duplicate(true)
+		var altered_rows: Array = altered.get("rows", [])
+		if altered_rows.size() == 12:
+			var second_row: Dictionary = altered_rows[1]
+			second_row.available = true
+			second_row.draw_present = true
+			menu_view.present(altered)
+			await capture("10-mission-menu-second-available")
+		menu_view.present(actual)
+		var second := Image.load_from_file(out_dir.path_join("10-mission-menu-second-available.png"))
+		var differences := 0
+		if base_image != null and second != null and base_image.get_size() == second.get_size():
+			# The documented second node is (70,240), 411x156 on a 640x448 canvas.
+			var scale := minf(float(base_image.get_width()) / 640.0, float(base_image.get_height()) / 448.0)
+			var left := int((base_image.get_width() - 640.0 * scale) * 0.5)
+			var top := int((base_image.get_height() - 448.0 * scale) * 0.5)
+			for y in range(250, 385, 8):
+				for x in range(80, 465, 8):
+					var point := Vector2i(left + int(x * scale), top + int(y * scale))
+					if base_image.get_pixelv(point) != second.get_pixelv(point): differences += 1
+		mark("mission_menu_render", "checked" if menu_view.assets_valid and menu_view.art.size() == 32 and differences > 0 else "refused",
+			{"textures": menu_view.art.size(), "locked_available_changed_samples": differences})
+	if args.has("menu-cancel-only"):
+		var cancel_handled := game_key(KEY_ESCAPE)
+		for i in range(9): await process_frame
+		var cancelled: Dictionary = scene.controller.script_mission_menu_state()
+		var cancel_ok: bool = cancel_handled and int(cancelled.get("state", -1)) == 4 and int(cancelled.get("counter", 1)) <= 0 and not cancelled.get("open", true) and not scene.mission_menu_panel.visible
+		mark("mission_menu_cancel", "checked" if cancel_ok else "refused",
+			{"handled": cancel_handled, "closed": not cancelled.get("open", true), "counter": cancelled.get("counter", 1)})
+		save_json()
+		quit(0 if cancel_ok else 1)
+		return
+	var locked_move_handled := game_key(KEY_DOWN)
+	var locked_move_state: Dictionary = scene.controller.script_mission_menu_state()
+	mark("mission_menu_locked_navigation", "checked" if locked_move_handled and int(locked_move_state.get("row", -1)) == 0 and int(locked_move_state.get("column", -1)) == 0 else "refused",
+		{"handled": locked_move_handled, "row": locked_move_state.get("row", -1), "column": locked_move_state.get("column", -1)})
+	var selected := false
+	if trigger_opened_menu:
+		var ready: Dictionary = scene.controller.script_mission_menu_state()
+		if int(ready.get("state", -1)) == 2 and ready.get("first_story_available", false):
+			var confirm_handled := game_key(KEY_ENTER)
+			var confirm: Dictionary = scene.controller.script_mission_menu_state()
+			for i in range(4): await process_frame
+			var waiting: Dictionary = scene.controller.script_mission_menu_state()
+			await capture("10-mission-menu-fade-gate")
+			mark("mission_menu_fade_gate", "checked" if confirm_handled and int(confirm.get("state", -1)) == 5 and int(waiting.get("state", -1)) == 6 and not waiting.get("pending", "") else "refused")
+			# Controlled test fade; the live client refuses until its source is ported.
+			var after_fade: Dictionary = scene.controller.script_mission_menu_tick(0, 128)
+			if after_fade.get("ok", false): after_fade = scene.controller.script_mission_menu_tick(0, 128)
+			if after_fade.get("ok", false): after_fade = scene.controller.script_mission_menu_tick(0, 128)
+			selected = after_fade.get("launched", false) and str(after_fade.get("pending", "")) == "blood1"
+	var pending: Dictionary = scene.controller.script_level_request()
+	mark("mission_1_story_request", "blood1" if selected and str(pending.get("name", "")) == "blood1" else "refused",
+		{"queued": pending.get("queued", false), "orientation": pending.get("orientation", -1)})
+	var record_before: Dictionary = scene.controller.get_observation()
+	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	if selected and DisplayServer.get_name() != "headless":
+		scene.loading_start_submitted.connect(func(): call_deferred("capture", "10-start"), CONNECT_ONE_SHOT)
+		scene.loading_started.connect(func(): call_deferred("capture", "10-loading"), CONNECT_ONE_SHOT)
+	var transition_ok: bool = selected and bool(await scene._apply_level_change())
+	var loading_frames: int = scene.loading_display.loading_frame
+	var handoff_errors: int = scene.audio.bank_errors.size() if scene.audio != null and "bank_errors" in scene.audio else -1
+	var loading_ok: bool = transition_ok and loading_frames >= 1 + LoadingDisplay.WARMUP_PRESENTS \
+		and scene.loading_display.phase == "fade" and handoff_errors == 0
+	var record_after: Dictionary = scene.controller.get_observation()
+	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
+	var mission1_still_available: bool = bool(scene.controller.script_mission_menu_state().get("first_story_available", false))
+	var record_carried: bool = transition_ok and loading_ok and scene.last_level_script_attached \
+		and scene.last_campaign_carried and scene.last_campaign_image_restored \
+		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
+		and int(record_after.get("player_class", -1)) == int(record_before.get("player_class", -2)) \
+		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
+		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
+		and int(record_after.get("level", -1)) == int(record_before.get("level", -2)) \
+		and int(record_after.get("record_max_hp_raw", -1)) == int(record_before.get("record_max_hp_raw", -2)) \
+		and int(record_after.get("record_max_mana_raw", -1)) == int(record_before.get("record_max_mana_raw", -2))
+	var at_blood1: bool = scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "blood1"
+	var markers: Array = scene.controller.script_player_markers() if at_blood1 else []
+	var markers_exact: bool = markers.size() == 3
+	if markers_exact:
+		markers_exact = int(markers[0].index) == 227 and markers[0].properties == PackedStringArray(["default=1"]) \
+			and int(markers[1].index) == 287 and markers[1].properties == PackedStringArray(["from=strife"]) \
+			and int(markers[2].index) == 298 and markers[2].properties == PackedStringArray(["from=drundar"])
+	mark("blood1_marker_records", "exact" if markers_exact else "refused",
+		{"marker_count": markers.size(), "record_indices": [227, 287, 298] if markers_exact else [],
+		"arrival_selection_verified": false})
+	var route_carried: bool = at_hub and dialog_choice_completed and trigger_opened_menu and selected \
+		and record_carried and at_blood1 and mission1_still_available and portal_guarded \
+		and portal_request_ok and markers_exact and audit_menu_checks
+	mark("blood1_arrival", "arrived" if record_carried and at_blood1 and mission1_still_available else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current,
+		"pending_script_level": pending.get("queued", false),
+		"script_attached": scene.last_level_script_attached, "campaign_carried": scene.last_campaign_carried,
+		"loading_frames": loading_frames, "loading_ready": loading_ok,
+		"loading_refusal": scene.loading_display.refusal, "audio_handoff_errors": handoff_errors,
+		"campaign_image_restored": scene.last_campaign_image_restored,
+		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
+		"quest_vars_after": int(quests_after.get("vars", 0)),
+		"mission1_still_available": mission1_still_available,
+		"mission_available_before": int(quests_before.get("mission_available_bits", 0)),
+		"mission_available_after": int(quests_after.get("mission_available_bits", 0))})
+	mark("level_change", "changed" if record_carried and at_blood1 else "refused",
+		{"level_index_before": transition_before, "level_index_after": scene.real.current})
+	await capture("10-fade-start")
+	for i in range(LoadingDisplay.FADE_PRESENTS + 2): await process_frame
+	await capture("10-level-change")
+	if args.has("route-only"):
+		save_json()
+		quit(0 if at_hub and portal_guarded and dialog_choice_completed and portal_request_ok and trigger_opened_menu and selected and record_carried and at_blood1 and markers_exact and mission1_still_available and audit_menu_checks else 1)
+		return
+	# Continue from the real hub route through the host's blood1 entries. The
+	# selected-object Trigger call is a diagnostic; physical occupancy and the
+	# 15-list schedule are separate from this probe.
+	var story: Dictionary = scene.controller.script_story_status()
+	var initial_choice_clean: bool = int(story.get("decision", -1)) == 0 and int(story.get("evil", -1)) == 0
+	mark("blood1_initial_choice_state", "clean" if initial_choice_clean else "refused",
+		{"decision": int(story.get("decision", -1)), "evil": int(story.get("evil", -1))})
+	var blood1_census: bool = at_blood1 and int(story.get("records", 0)) == 363 \
+		and int(story.get("script_entries", 0)) == 21 \
+		and int(story.get("arrival_markers", 0)) == 3 \
+		and int(story.get("walkin_triggers", 0)) == 1 \
+		and int(story.get("keyed_exits", 0)) == 2 \
+		and int(story.get("doors", 0)) == 2 \
+		and int(story.get("hostile_placements", 0)) == 140
+	mark("blood1_record_census", "matched" if blood1_census else "refused",
+		{"records": int(story.get("records", 0)), "script_entries": int(story.get("script_entries", 0)),
+		"arrival_markers": int(story.get("arrival_markers", 0)),
+		"walkin_triggers": int(story.get("walkin_triggers", 0)),
+		"keyed_exits": int(story.get("keyed_exits", 0)), "doors": int(story.get("doors", 0)),
+		"hostile_placements": int(story.get("hostile_placements", 0))})
+	var objective_ready: bool = at_blood1 and story.get("mission_1_available", false) \
+		and not story.get("mission_1_complete", true) and int(story.get("quest_lines", 0)) > 0
+	mark("blood1_initial_objective", "recorded" if objective_ready else "refused",
+		{"quest_lines": int(story.get("quest_lines", 0)),
+		"mission_1_available": story.get("mission_1_available", false),
+		"mission_1_complete": story.get("mission_1_complete", false)})
+	mark("blood1_opening_cutscene", "refused_unported_binding" if int(story.get("cutscene_refusals", 0)) > 0 else "not_requested",
+		{"cutscene_refusals": int(story.get("cutscene_refusals", 0)),
+		"actor_cleanup_refusals": int(story.get("actor_cleanup_refusals", 0)),
+		"post_action_pending": story.get("post_action_pending", false),
+		"camera_playback_verified": false})
+	var script_counts: Dictionary = scene.controller.script_command_counts()
+	var executed: Dictionary = script_counts.get("executed", {})
+	var refused: Dictionary = script_counts.get("refused", {})
+	var script_spawn_calls: int = int(executed.get("generateMonster", 0)) + int(refused.get("generateMonster", 0))
+	mark("blood1_hostile_boundary", "authored_placements_unverified" if script_spawn_calls == 0 else "unexpected_script_spawn",
+		{"script_spawn_calls": script_spawn_calls,
+		"hostile_placements": int(story.get("hostile_placements", 0)),
+		"unbuilt_objects": int(story.get("unbuilt_objects", 0)), "combat_verified": false})
+	var walkin := -1
+	var keyed: Array[int] = []
+	for target in scene.controller.script_exit_targets():
+		if str(target.get("kind", "")) == "Trigger" and target.get("script_action", false):
+			walkin = int(target.index)
+		elif str(target.get("kind", "")) == "PushTrigger" and target.get("script_action", false):
+			keyed.append(int(target.index))
+	var trigger_action: Dictionary = scene.controller.script_run_exit(walkin) if at_blood1 and walkin >= 0 else {"ok": false}
+	advance(0, 2)
+	var blood_dialog_open: bool = scene.controller.dialog_status().get("open", false)
+	mark("blood1_npc_trigger_host_action", "dialog_open" if trigger_action.get("ok", false) and blood_dialog_open else "refused",
+		{"trigger_found": walkin >= 0, "selected_object_action_ok": trigger_action.get("ok", false),
+		"dialog_open": blood_dialog_open, "physical_edge_verified": false})
+	var blood_dialog_visual := false
+	var blood_dialog_choice_ready := false
+	if blood_dialog_open:
+		for i in range(300):
+			await process_frame
+			advance()
+			var draw: Dictionary = scene.npc_dialog.frame
+			if not draw.get("sprites", []).is_empty() or not draw.get("glyphs", []).is_empty():
+				blood_dialog_visual = true
+			blood_dialog_choice_ready = scene.controller.dialog_status().get("choice_ready", false)
+			if blood_dialog_visual and blood_dialog_choice_ready: break
+	mark("blood1_dialog_visual", "drawn" if blood_dialog_visual else "unverified",
+		{"drawn": blood_dialog_visual, "font_ready": scene.npc_dialog.font_texture != null,
+		"box_ready": scene.npc_dialog.box_texture != null,
+		"choice_ready": blood_dialog_choice_ready,
+		"glyphs": scene.npc_dialog.frame.get("glyphs", []).size()})
+	await capture("11-blood1-dialog")
+	var choice_closed := false
+	if blood_dialog_open:
+		# The researched graph reaches the evil terminal through node 0's
+		# second edge, node 3's second edge, then node 4's first edge.
+		var evil_second := {0: true, 3: true}
+		var moved_nodes := {}
+		for i in range(1200):
+			await process_frame
+			help_close()
+			if scene.paused and not scene.stopped: scene.resume_session()
+			var state: Dictionary = scene.controller.dialog_status()
+			var node: int = int(state.get("node_index", -1))
+			var move_second: bool = args.has("blood1-choice-evil") and evil_second.has(node) \
+				and int(state.get("visible_choices", 0)) > 1 and state.get("choice_ready", false)
+			if move_second and not moved_nodes.has(node):
+				game_key(KEY_DOWN)
+				moved_nodes[node] = true
+			elif i % 8 == 0 and (not move_second or int(state.get("cursor", 0)) == 1):
+				game_key(KEY_ENTER)
+			advance()
+			if not scene.controller.dialog_status().get("open", false):
+				choice_closed = true
+				break
+	story = scene.controller.script_story_status()
+	# The fresh difficulty-1 campaign uses bit 1 in the decision/evil bytes.
+	# Research maps the first terminal to good and the second to evil.
+	var evil_choice_requested: bool = args.has("blood1-choice-evil")
+	var expected_evil_bit := 2 if evil_choice_requested else 0
+	var decision_made: bool = initial_choice_clean and choice_closed \
+		and int(story.get("decision", -1)) == 2 and int(story.get("evil", -1)) == expected_evil_bit
+	mark("blood1_dialog_decision", "recorded" if decision_made else "refused",
+		{"closed": choice_closed, "decision": int(story.get("decision", 0)),
+		"evil": int(story.get("evil", 0)), "quest_lines": int(story.get("quest_lines", 0)),
+		"requested_evil_choice": evil_choice_requested, "expected_evil_bit": expected_evil_bit})
+	mark("blood1_door_sequence", "refused_unported_binding" if decision_made and int(story.get("cutscene_refusals", 0)) > 1 else "not_verified",
+		{"cutscene_refusals": int(story.get("cutscene_refusals", 0)),
+		"door_refusals": int(story.get("door_refusals", 0)),
+		"post_action_pending": story.get("post_action_pending", false),
+		"live_collision_verified": false})
+	mark("blood1_revisit_door_restore", "not_exercised",
+		{"revisit_verified": false, "door_state_verified": false})
+	mark("blood1_evil_shard_post_action", "blocked_by_cutscene" if args.has("blood1-choice-evil") and story.get("post_action_pending", false) else "not_applicable" if not args.has("blood1-choice-evil") else "unverified",
+		{"post_action_pending": story.get("post_action_pending", false),
+		"item_grant_verified": false, "deferred_count_verified": false})
+	await capture("12-blood1-door-boundary")
+	var exit_action := false
+	var requested := ""
+	for index in keyed:
+		var use: Dictionary = scene.controller.script_run_exit(index) if decision_made else {"ok": false}
+		var request: Dictionary = scene.controller.script_level_request()
+		if use.get("ok", false) and request.get("queued", false):
+			exit_action = true
+			requested = str(request.get("name", ""))
+			break
+	var expected_destination := "drundar" if evil_choice_requested else "strife"
+	var keyed_destination: bool = requested == expected_destination
+	mark("blood1_keyed_exit_host_action", "queued" if exit_action and keyed_destination else "refused",
+		{"keyed_targets": keyed.size(), "selected_object_action_ok": exit_action,
+		"destination_matches_selected_branch": keyed_destination, "physical_use_verified": false})
+	var destination_request_before: Dictionary = scene.controller.script_level_request()
+	var destination_player_before: Dictionary = scene.controller.get_observation()
+	var destination_choice_before: Dictionary = scene.controller.script_story_status()
+	var exit_post_action_pending: bool = destination_request_before.get("post_action_pending", false)
+	var destination_loaded: bool = exit_action and keyed_destination and await scene._apply_level_change()
+	var at_destination: bool = destination_loaded and scene.real.current >= 0 \
+		and str(scene.real.levels[scene.real.current].stem) == expected_destination
+	var destination_state: Dictionary = scene.controller.script_story_status()
+	var destination_player_after: Dictionary = scene.controller.get_observation()
+	var destination_request_after: Dictionary = scene.controller.script_level_request()
+	var destination_script_attached: bool = at_destination and scene.last_level_script_attached \
+		and destination_state.get("ok", false) \
+		and scene.controller.get_play_capabilities().get("level_script_enabled", false) \
+		and int(destination_state.get("script_entries", 0)) > 0
+	var destination_campaign_restored: bool = at_destination and scene.last_campaign_carried \
+		and scene.last_campaign_image_restored
+	var destination_player_carried: bool = at_destination and same_player_record(destination_player_before, destination_player_after)
+	var destination_choice_carried: bool = at_destination \
+		and int(destination_state.get("decision", -1)) == int(destination_choice_before.get("decision", -2)) \
+		and int(destination_state.get("evil", -1)) == int(destination_choice_before.get("evil", -2))
+	var destination_verified: bool = at_destination and destination_script_attached \
+		and destination_campaign_restored and destination_player_carried and destination_choice_carried
+	var evil_transition_refused: bool = evil_choice_requested and exit_action and keyed_destination \
+		and exit_post_action_pending and not destination_loaded and scene.real.current >= 0 \
+		and str(scene.real.levels[scene.real.current].stem) == "blood1" \
+		and destination_request_after.get("queued", false) \
+		and str(destination_request_after.get("name", "")) == expected_destination \
+		and scene.status_label.text == "Level change refused: a pending post action cannot be carried."
+	mark("blood1_destination", "loaded" if destination_verified else "refused_pending_post_action" if evil_transition_refused else "refused",
+		{"campaign_carried": destination_campaign_restored,
+		"campaign_image_restored": at_destination and scene.last_campaign_image_restored,
+		"destination_script_attached": destination_script_attached,
+		"destination_player_carried": destination_player_carried,
+		"destination_choice_carried": destination_choice_carried,
+		"exit_post_action_pending": exit_post_action_pending,
+		"evil_transition_refused": evil_transition_refused,
+		"mission_1_complete": destination_state.get("mission_1_complete", false),
+		"completion_branch_verified": false, "hub_return_verified": false})
+	await capture("11-blood1-destination")
+	var hub_branch: Dictionary = scene.controller.script_level_request()
+	var completed_in_destination: bool = destination_verified and destination_state.get("mission_1_complete", false)
+	var hub_queued: bool = completed_in_destination and str(hub_branch.get("name", "")) == "hub"
+	var hub_loaded: bool = hub_queued and await scene._apply_level_change()
+	mark("mission_1_completion_hub_return", "returned" if hub_loaded and scene.real.current >= 0 and str(scene.real.levels[scene.real.current].stem) == "hub" else "branch_unverified",
+		{"completed_in_destination": completed_in_destination,
+		"hub_queued": hub_queued, "hub_loaded": hub_loaded,
+		"destination_counter_inputs_verified": false})
+	if args.has("blood1-only"):
+		save_json()
+		var blood1_steps_verified: bool = route_carried and initial_choice_clean and blood1_census \
+			and objective_ready and script_spawn_calls == 0 and trigger_action.get("ok", false) \
+			and blood_dialog_open and decision_made and exit_action and keyed_destination
+		var branch_verified: bool = evil_transition_refused if evil_choice_requested else destination_verified
+		quit(0 if blood1_steps_verified and branch_verified else 1)
+		return
+	# Exercise physical Trigger entry after the hub story route has reached blood1.
+	var walk_exit_ok: bool = await walk_exit_probe()
+	if args.has("walk-only"):
+		save_json()
+		quit(0 if walk_exit_ok else 1)
+		return
+	# Exercise the real-level use button boundary. A records-only object table
+	# cannot establish the live query, so action effects must stay absent.
+	var push_sources: Array[int] = []
+	var portal_sources: Array[int] = []
+	for index in range(scene.real.levels.size()):
+		var level: Dictionary = scene.real.levels[index]
+		var objects: PackedByteArray = scene.real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+		if objects.is_empty(): continue
+		var inventory: Dictionary = scene.controller.inspect_exit_records(objects)
+		if not inventory.get("ok", false): continue
+		if int(inventory.get("pushes", 0)) > 0: push_sources.append(index)
+		if int(inventory.get("portals", 0)) > 0: portal_sources.append(index)
+	var physical_refused := false
+	if load_scripted_exit_source(push_sources, "PushTrigger"):
+		var player: Dictionary = scene.controller.get_observation()
+		var before_use: int = int(scene.controller.script_use_status().get("uses", 0))
+		var before_action: Dictionary = scene.controller.script_command_counts().get("executed", {})
+		var use_request: Dictionary = scene.controller.dialog_use()
+		advance()
+		var after_use: Dictionary = scene.controller.script_use_status()
+		var after_action: Dictionary = scene.controller.script_command_counts().get("executed", {})
+		physical_refused = int(after_use.get("uses", 0)) == before_use and \
+			not use_request.get("ok", true) and str(use_request.get("error", "")).contains("Player_interact")
+		mark("push_trigger_use", "refused_expected" if physical_refused else "unsafe_dispatch",
+			{"candidate_levels": push_sources.size(), "scripted_source": true,
+			"player_ready": player.get("player_ready", false),
+			"record_health_known": player.get("player_record_currents_known", false),
+			"uses_unchanged": int(after_use.get("uses", 0)) == before_use,
+			"action_counts_before": before_action, "action_counts_after": after_action,
+			"refusal": after_use.get("refusal", use_request.get("error", ""))})
+	else:
+		mark("push_trigger_use", "blocked_no_real_source", {"candidate_levels": push_sources.size()})
+	await capture("11-push-use")
+	# Gate confirmation is visible under its own action ID. With no saved
+	# GateList or constructed destination grid, the UI and API must refuse.
+	var portal_refused := false
+	if load_scripted_exit_source(portal_sources, "Portal") or load_scripted_exit_source(portal_sources, "PortalHurt"):
+		scene._update_menu()
+		var button: Button = scene.actions.real_gate_confirm
+		var before_position: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+		var request_before: Dictionary = scene.controller.script_level_request()
+		var refusal: Dictionary = scene.controller.script_gate_confirm("unsupported")
+		var request_after: Dictionary = scene.controller.script_level_request()
+		portal_refused = button.visible and button.disabled and not refusal.get("ok", true) and \
+			str(refusal.get("error", "")).contains("constructor") and \
+			request_after.get("queued", false) == request_before.get("queued", false) and \
+			scene.controller.get_observation().get("position", Vector3.ZERO) == before_position
+		mark("portal_arrival", "refused_expected" if portal_refused else "unsafe_arrival",
+			{"candidate_levels": portal_sources.size(), "real_button_visible": button.visible,
+			"real_button_disabled": button.disabled, "request_unchanged": request_after.get("queued", false) == request_before.get("queued", false),
+			"position_unchanged": scene.controller.get_observation().get("position", Vector3.ZERO) == before_position,
+			"refusal": refusal.get("error", "")})
+	else:
+		mark("portal_arrival", "blocked_no_real_source", {"candidate_levels": portal_sources.size()})
+	await capture("12-portal-arrival")
+	if args.has("exits-only"):
+		save_json()
+		quit(0 if walk_exit_ok and physical_refused and portal_refused else 1)
+		return
 	help_close()
 	if fe.screen() == "pause": tap(START)
 	if scene.paused and scene.session_started and not scene.stopped: scene.resume_session()
@@ -380,8 +1339,16 @@ func run() -> void:
 		{"level_index": scene.real.current, "level_found": fight_level >= 0,
 		"session_started": scene.session_started,
 		"script_enabled": scene.controller.get_play_capabilities().get("level_script_enabled", false)})
+	var moves_passed := await campaign_moves()
+	if args.has("moves-only"):
+		save_json()
+		scene.queue_free()
+		scene = null
+		fe = null
+		await process_frame
+		quit(0 if moves_passed else 1)
+		return
 	var before: Dictionary = scene.controller.get_observation()
-	var level_before: int = scene.real.current
 	var hp_before := float(before.get("hp", -1.0))
 	var gold_before := int(before.get("gold", -1))
 	var actors_before: Array = before.get("fight_enemies", [])
@@ -510,12 +1477,6 @@ func run() -> void:
 	var swing_msec := Time.get_ticks_msec() - swing_start_msec
 	if target_dead: advance(0, SETTLE_TICKS)
 	var after: Dictionary = scene.controller.get_observation()
-	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
-	var saved_hp := float(after.get("hp", -1.0))
-	var saved_gold := int(after.get("gold", -1))
-	var saved_experience := int(after.get("experience", -1))
-	var saved_level := int(after.get("level", -1))
-	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	var actors_after: Array = after.get("fight_enemies", [])
 	var enemy_damaged := false
 	var enemy_died := false
@@ -631,6 +1592,28 @@ func run() -> void:
 		"factory_build_refusals": object_counts.get("build_refusals", {}),
 		"missing_fight_steps": missing_fight_steps})
 	await capture("05-fight-attempt")
+	# The first story level can have one terrain element. Select a real level
+	# with multiple elements for the save probe; the level loader supplies its
+	# WORLD collision and textured display independently of the save image.
+	var terrain_elements := int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+	if terrain_elements <= 1:
+		for index in range(scene.real.levels.size()):
+			if index == scene.real.current: continue
+			if not scene.load_real_level(index): continue
+			terrain_elements = int(scene.controller.get_play_capabilities().get("terrain_elements", 0))
+			if terrain_elements > 1:
+				if not scene.play_mode: scene.start_play()
+				break
+	mark("multi_surface_level", "loaded" if scene.real.current >= 0 and terrain_elements > 1 and scene.play_mode else "refused",
+		{"terrain_elements": terrain_elements})
+	var level_before: int = scene.real.current
+	var saved_position: Vector3 = scene.controller.get_presentation().get("current_position", Vector3.ZERO)
+	var saved_state: Dictionary = scene.controller.get_observation()
+	var saved_hp := float(saved_state.get("hp", -1.0))
+	var saved_gold := int(saved_state.get("gold", -1))
+	var saved_experience := int(saved_state.get("experience", -1))
+	var saved_level := int(saved_state.get("level", -1))
+	var saved_campaign: Dictionary = scene.controller.script_command_counts().get("campaign", {})
 	help_close()
 	if scene.controller.dialog_status().get("open", false):
 		refusal("pause", "dialog remained open before pause")
@@ -682,6 +1665,7 @@ func run() -> void:
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		quests_match = quests_match and saved_campaign.get(key, -1) == restored_campaign.get(key, -2)
 	var carried: bool = quit_ok and load_attempted and fe.screen() == "playing" and scene.real.current == level_before \
+		and int(scene.controller.get_play_capabilities().get("terrain_elements", 0)) == terrain_elements \
 		and scene.terrain_root.has_meta("level_texture_pair") \
 		and int(restored.get("gold", -1)) == saved_gold \
 		and is_equal_approx(float(restored.get("hp", -1.0)), saved_hp) \
@@ -689,6 +1673,7 @@ func run() -> void:
 		and quests_match
 	mark("load_and_carry", "restored" if carried else "refused",
 		{"screen": fe.screen(), "load_attempted": load_attempted, "status": scene.status_label.text,
+		"terrain_elements": terrain_elements,
 		"level_index_before": level_before,
 		"level_index_after": scene.real.current, "gold_before": saved_gold,
 		"gold_after": int(restored.get("gold", -1)), "hp_before": saved_hp,
@@ -696,62 +1681,6 @@ func run() -> void:
 		"experience_before": saved_experience, "experience_after": int(restored.get("experience", -1)),
 		"level_before": saved_level, "level_after": int(restored.get("level", -1))})
 	await capture("09-loaded")
-	# Step 6: the same real-level script host exposes object-record exits and
-	# pending newWorld/newWorldPost. Execute only a documented script action.
-	var transition_before: int = scene.real.current
-	var exit_targets: Array = scene.controller.script_exit_targets()
-	var pending: Dictionary = scene.controller.script_level_request()
-	var exit_attempts := 0
-	var sources_examined := 1
-	if not pending.get("queued", false):
-		for target in exit_targets:
-			if not target.get("script_action", false): continue
-			exit_attempts += 1
-			var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
-			if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
-			pending = scene.controller.script_level_request()
-			if pending.get("queued", false): break
-	# The chosen first-level dialog is allowed to leave its exit locked. Search
-	# other real levels for a documented action that actually queues newWorld;
-	# this diagnostic selection never fabricates a destination or script value.
-	if not pending.get("queued", false):
-		for index in range(scene.real.levels.size()):
-			if index == transition_before: continue
-			if not scene.load_real_level(index, true): continue
-			scene.start_play()
-			sources_examined += 1
-			exit_targets = scene.controller.script_exit_targets()
-			pending = scene.controller.script_level_request()
-			if not pending.get("queued", false):
-				for target in exit_targets:
-					if not target.get("script_action", false): continue
-					exit_attempts += 1
-					var invoked: Dictionary = scene.controller.script_run_exit(int(target.index))
-					if not invoked.get("ok", false): refusal("level_action", invoked.get("error", "script refused"))
-					pending = scene.controller.script_level_request()
-					if pending.get("queued", false): break
-			if pending.get("queued", false):
-				transition_before = index
-				break
-	var record_before: Dictionary = scene.controller.get_observation()
-	var quests_before: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var transition_ok: bool = bool(pending.get("queued", false)) and bool(scene._apply_level_change())
-	var record_after: Dictionary = scene.controller.get_observation()
-	var quests_after: Dictionary = scene.controller.script_command_counts().get("campaign", {})
-	var record_carried: bool = transition_ok and scene.last_campaign_carried and scene.last_campaign_image_restored \
-		and str(record_after.get("name", "")) == str(record_before.get("name", "")) \
-		and int(record_after.get("gold", -1)) == int(record_before.get("gold", -2)) \
-		and int(record_after.get("experience", -1)) == int(record_before.get("experience", -2)) \
-		and int(record_after.get("level", -1)) == int(record_before.get("level", -2))
-	mark("level_change", "changed" if record_carried and scene.real.current != transition_before else "refused",
-		{"level_index_before": transition_before, "level_index_after": scene.real.current,
-		"exit_targets": exit_targets.size(), "exit_actions_attempted": exit_attempts,
-		"sources_examined": sources_examined,
-		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
-		"campaign_image_restored": scene.last_campaign_image_restored,
-		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
-		"quest_vars_after": int(quests_after.get("vars", 0))})
-	await capture("10-level-change")
 	# A new scene has no in-memory WORLD/TEX save association. The load must
 	# recover the level from the selected folder and its saved identity. Remove
 	# the first scene before creating another process-lifetime audio mixer.
@@ -772,11 +1701,13 @@ func run() -> void:
 	var cold_state: Dictionary = cold.controller.get_observation()
 	var cold_campaign: Dictionary = cold.controller.script_command_counts().get("campaign", {})
 	var cold_match: bool = cold_loaded and cold.real.current == level_before and cold.terrain_root.has_meta("level_texture_pair") and \
+		int(cold.controller.get_play_capabilities().get("terrain_elements", 0)) == terrain_elements and \
 		int(cold_state.get("gold", -1)) == saved_gold and is_equal_approx(float(cold_state.get("hp", -1.0)), saved_hp) and \
 		cold.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
-	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded})
+	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded,
+		"terrain_elements": int(cold.controller.get_play_capabilities().get("terrain_elements", 0))})
 	# A displayed level with different collision must not be reused for this save.
 	var other_index := 0 if level_before != 0 else 1
 	var other_loaded: bool = cold.load_real_level(other_index)
@@ -785,11 +1716,61 @@ func run() -> void:
 		"collision differs" in str(mismatch.get("error", ""))
 	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
 		{"different_level_loaded": other_loaded})
+	# A separate, explicitly diagnostic lethal hit on the real level's Player.
+	# It queues Player_takeDamage; no HP/body/state/clip word is forced. The
+	# source is one of the live factory enemies, whose attack AI is unported.
+	var death_loaded: bool = cold.load_session_file(save_path)
+	if death_loaded:
+		cold.start_play()
+		cold.diagnostic_player_death = true
+		scene = cold
+		fe = cold.frontend
+		advance(0, 90) # let spawn/initial state settle before queuing the hit
+		var death_before: Dictionary = cold.controller.get_observation()
+		var queued: Dictionary = cold.controller.fight_diagnostic_lethal_hit()
+		# A local inventory can be open during the hit. The native death closes
+		# it immediately, then requests closure again on the wipe zero crossing.
+		cold.game_menus.open_screen("inventory")
+		advance(0, 1)
+		var entry: Dictionary = cold.controller.get_observation()
+		var menu_closed: bool = not cold.game_menus.open
+		await capture("11-player-dead")
+		advance(0, 254) # 239 countdown steps, then 15 fade steps
+		await capture("12-player-death-fade")
+		advance(0, 100)
+		var dead: Dictionary = cold.controller.get_observation()
+		var retained: bool = int(dead.get("gold", -1)) == int(death_before.get("gold", -2)) \
+			and int(dead.get("experience", -1)) == int(death_before.get("experience", -2)) \
+			and int(dead.get("level", -1)) == int(death_before.get("level", -2))
+		var sequence: bool = queued.get("ok", false) and int(entry.get("fight_player_action_state", -1)) == 4 \
+			and float(entry.get("hp", -1)) == 0.0 and int(entry.get("fight_death_countdown", -1)) == 239 \
+			and menu_closed and dead.get("fight_death_animation_started", false) \
+			and int(dead.get("fight_death_animation_steps", 0)) > 0 \
+			and int(dead.get("fight_death_countdown", -1)) == 0 and int(dead.get("fight_dead_countdown", -1)) == 0 \
+			and int(dead.get("fight_death_fade", -1)) == 128 and int(dead.get("fight_death_phase", -1)) == 1 \
+			and not str(dead.get("fight_death_error", "")).is_empty() and retained \
+			and not dead.get("fight_failed", true)
+		mark("player_death", "blocked_death_reload" if sequence else "refused",
+			{"diagnostic_lethal_hit": true, "death_sequence_verified": sequence,
+			"actors": dead.get("fight_enemies", []).size(), "menu_closed": menu_closed,
+			"hp_zero": float(dead.get("hp", -1)) == 0.0,
+			"native_clip_started": dead.get("fight_death_animation_started", false),
+			"native_clip_steps": dead.get("fight_death_animation_steps", 0),
+			"pose_rendered": dead.get("fight_death_pose_rendered", false),
+			"wipe_countdown": dead.get("fight_death_countdown", -1), "fade": dead.get("fight_death_fade", -1),
+			"phase": dead.get("fight_death_phase", -1), "record_values_retained": retained,
+			"reload_refused": not str(dead.get("fight_death_error", "")).is_empty(),
+			"respawn_completed": false})
+		await capture("13-player-reload-refused")
+	else:
+		mark("player_death", "refused", {"saved_level_reloaded": false})
 	cold.queue_free()
+	scene = null
+	fe = null
 	await process_frame
 	save_json()
 	var incomplete := false
 	for row in rows:
-		if str(row.result) in ["refused", "blocked_by_walk_and_talk", "blocked_unported_combat"]:
+		if str(row.result) in ["refused", "blocked_by_walk_and_talk", "blocked_unported_combat", "blocked_death_reload"]:
 			incomplete = true
 	quit(1 if incomplete else 0)
