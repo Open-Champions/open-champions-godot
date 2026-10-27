@@ -126,8 +126,21 @@ CTest invocation. No baseline, fixture, harness or pickup assertion was changed.
   0.39 s. A redundant overlapping native build was accidentally started; both
   completed, then a sequential verified build and focused test passed. This is
   not reported as two independent validations. Logs under ignored
-  `work/progression/`; the initial build log will be copied there at completion.
+  `work/progression/`; initial log: `build-initial.log`.
 - Full CTest `-j 3`: PENDING. Exact count/time and isolated timeout reruns follow.
 - Three development GDExtensions: Release / template_debug built at `-j 4`.
-- Strict Godot dev matrix, FULL_SAVE_LOAD and FULL_TRACE: PENDING.
+- Strict Godot dev matrix: **54/54 PASS**, **149.33 s** summed case durations,
+  exit 0, including six graphical cases. Errors are gated by the strict log
+  classifier, not merely process exit. Logs: `work/progression/matrix/`.
+- FULL_SAVE_LOAD: **300/300**, both presentation hashes
+  `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`.
+- FULL_TRACE: **36,402 bytes**,
+  `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`,
+  unchanged. Full combat **2,645 checks / zero failures**.
+- First journey launch lacked this fresh checkout's Godot import cache (the
+  matrix uses an isolated imported project). Missing global class/imported image
+  caused parse/resource errors before gameplay. Only that runner and child were
+  stopped by verified PIDs. Logs retained under `journey-unimported/`; a local
+  editor import completed and the standard runner was restarted unchanged.
+  The aborted launch is not a journey result.
 - Headless/rendered standard journey versus wave34 80/81 steps: PENDING.
