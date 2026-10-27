@@ -18,3 +18,39 @@ Pending full CTest (-j 3) checkpoint committed before invocation.
 Release build and focused results, Godot headless/rendered, full journeys
 and unchanged FULL_TRACE verification will be recorded after completion.
 No push/PR; private inputs remain read-only and untracked.
+
+## Fresh verification — 2026-10-27
+
+- Release native configure/build PASS (-j 4); Release GDExtension build PASS
+  (-j 4). Logs: work/mission1/r2-configure.log, r2-build.log, r2-extension.log.
+- Focused mission1-scripts/script-commands: 2/2 PASS, 0.52 seconds.
+  Direct mission fixture: 88 checks, zero failures. Initial new mutation
+  fixture used invalid opcode zero and dereferenced the refused load; fixed
+  to an authored replacement PROC and guarded the fixture contract access.
+  Final focused and full runs use the corrected fixture (be527959).
+- Mission 1 Godot headless: 46 checks / zero failures, 4.90 seconds.
+  Rendered: 48 checks / zero failures, 5.19 seconds. Both exit zero.
+  The former automatic Strife census/effect checks are replaced by explicit
+  production-attachment refusal assertions: no objects adopted, no start,
+  no restoration/visibility sites and no counter change on subsequent ticks.
+  Native explicit restoration coverage is retained. Strife's automatic
+  attachment intentionally no longer reaches its object census or visibility.
+- Rendered destination capture inspected: terrain/HUD and capsule fallback;
+  no visual parity claim. Only the non-stopped destination is captured by
+  this probe; the stopped branch is checked through controller state.
+- Full-combat headless: 2,641 checks / zero failures, exit zero (18.08 s).
+  Rendered: 2,771 checks / zero failures, exit zero (21.87 s).
+  FULL_TRACE unchanged in both: 36,402 bytes, SHA-256
+  9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+  Headless save/load presentation matches at 300/300; rendered draws 299/300
+  and correctly does not compare unequal-count presentation hashes.
+- tools/run_loop_playthrough.py: headless 67 steps, rendered 68 steps
+  (43 captures), six refusal kinds each; both write results and exit 1 at
+  blocked_death_reload, matching the requested wave-33 boundary. Wrapper
+  wall time 382.51 seconds. Read-only input count remains 994 before/after.
+  These are preserved blocked journeys, not passing full gameplay acceptance.
+- All final Godot logs have no SCRIPT ERROR or ERROR envelopes. Existing
+  ObjectDB exit warnings remain disclosed. Gate outputs remain ignored under
+  work/mission1/r2/. No baseline or journey-tool changes.
+- Full CTest remains pending at this evidence checkpoint; pending note was
+  committed in 439c1479 before its invocation. Final result follows.
