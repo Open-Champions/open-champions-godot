@@ -59,6 +59,62 @@ struct Host {
 };
 void host_tests() {
   {
+    // d4f58da ref_arena_match_core.py:45-67 and gold-run.md:323-335.
+    // Synthetic object address; the documented non-creature allocation is 0xc0.
+    constexpr A::Address object = 0x10000;
+    unsigned rejected_reads = 0;
+    A::Memory mem({}, [&](creature_hp::Address address, std::size_t size) {
+      if (address >= object && address < object + 0x1000 &&
+          address + size > object + 0xc0) {
+        ++rejected_reads;
+        throw std::runtime_error("non-creature allocation overread");
+      }
+      return std::uint64_t(0);
+    });
+    mem.poke(object + 12, 4, 0x220c);
+    mem.poke(A::NUM_PLAYERS, 4, 1);
+    mem.poke(A::MODE_B, 4, 1);
+    mem.poke(A::INTRO, 2, 0xffff);
+    mem.poke(A::FRAME, 4, 128);
+    mem.poke(A::PLAYERS + 0xac, 4, from_int(20));
+    A::Services services;
+    services.active = [](unsigned) { return true; };
+    services.prepare = [] {};
+    services.move_off_grid = [](A::Address) { throw std::runtime_error("non-creature moved"); };
+    services.destroy = [](A::Address) { throw std::runtime_error("non-creature destroyed"); };
+    services.walk = [&](const std::function<void(A::Address)> &fn) { fn(object); };
+    A::Model model(mem, services);
+    model.reset_scores();
+    model.prepare_wave();
+    check(mem.load(A::SAVED_COUNT, 2) == 0, "bounded non-creature is not saved");
+    model.visit();
+    check(mem.load(A::LIVE_COUNT, 2) == 0 && mem.load(A::INTERMISSION, 2) == 1,
+          "bounded non-creature does not block empty wave");
+    check(rejected_reads == 0, "both callbacks stay inside non-creature allocation");
+  }
+  for (unsigned players : {1u, 2u}) {
+    // Caller routing, not a standalone scorer: d4f58da ref_combat_ptick.py:437-442.
+    C::Services services;
+    services.dialog_is_open = [] { return false; };
+    services.jumpgate_travel_state = [] { return Raw(0); };
+    services.animation_start = [](Raw, Raw, Raw, Raw, Raw) {};
+    C::World w(services, 1, C::Composition::Full);
+    const auto victim = w.spawn_player(0, {});
+    if (players == 2) w.spawn_player(1, {from_int(100), 0, 0});
+    w.write(A::MODE_A, 4, 1); w.write(A::MODE_B, 4, 1);
+    w.arena_reset_scores();
+    check(w.read(victim + C::LAST_ATTACKER) == 0, "unattributed lethal fixture has no handle");
+    w.take_damage(victim, 0, 0, from_int(1000));
+    w.process_damage(victim);
+    check((w.read(victim + 12) & 8) && w.read(A::PLAYERS + 0xac) == 0,
+          "unattributed fixture reaches World player death");
+    check(w.read(A::SCORE, 2) == 0xffff && w.read(A::SCORE + 2, 2) == 2,
+          "both modes: unattributed death decrements kills, preserving lives");
+    if (players == 2)
+      check(w.read(A::SCORE + A::SCORE_STRIDE, 2) == 0,
+            "unattributed death does not change another player's kills");
+  }
+  {
     Host h; h.put(A::INTRO, 180, 2);
     A::Model m(h.mem, h.services());
     for (unsigned i = 0; i < 180; ++i) {
