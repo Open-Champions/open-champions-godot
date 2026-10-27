@@ -1,4 +1,4 @@
-STATUS: BLOCKED — rendered loading hang fixed; fresh journeys complete at 67 headless / 68 rendered steps, both exit 1 with results. Loading handoff still explicitly refuses unsupported deferred/equipment/peer/store readiness; all requested build/matrix/trace gates pass.
+STATUS: MORE — WAVE 33 VERIFIED (2026-10-26). Four audited branches integrated; all gates green (CTest 250/251 with netplay passing alone, Godot 61/61, combat 2,641/0, save/load 300/300, FULL_TRACE unchanged, sweeps 111/111, probes). Rendered loading hang fixed with a reported 5 s refusal bound; journeys complete at 67 headless / 68 rendered steps and end at explicit, bounded refusals (unsupported deferred/equipment/peer/store loading readiness), as wave 32 also ended with exit 1. Journey fix audited PASS (audits/wave33-journey-fix.md).
 
 # Playable integration wave 33 — 2026-10-26
 
