@@ -37,3 +37,5 @@ Pending; compare wave 35 80/81 steps, inventory 10→11. Full progression, unkno
 ## Exact command families
 
 Same wave-35 drivers/method with wave-36 output directories; native Release and universal libraries parallelism 4, full CTest parallelism 3. Strict matrix captures, timeout 1200; fresh full-combat log supplies combat/save-load/trace gates. Private sweeps serial four slices, 60 ticks. Unchanged journey driver serial headless/rendered.
+
+- Native Release configure/build **PASS**, `-j 4`, exit 0 (`configure.log`, `build.log`). All three tips verified ancestors; no unmerged paths; range diff check PASS.
