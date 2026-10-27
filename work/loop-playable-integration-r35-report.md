@@ -8,7 +8,7 @@ Assigned clean `codex/playable-integration` at wave-34-verified `a68504da`. Read
 
 | Branch | Audited tip | PASS audit | Merge commit | Conflicts |
 | --- | --- | --- | --- | --- |
-| `codex/play-options` | `679ec562` | `native-options-r1-fix2.md` | this merge (SHA recorded next milestone) | frontend documentation and capture checks |
+| `codex/play-options` | `679ec562` | `native-options-r1-fix2.md` | `b261c31d` | frontend documentation and capture checks |
 
 ## Conflict resolutions
 
@@ -21,3 +21,5 @@ None.
 ## Gates and evidence
 
 Pending. Live arena match stays refused; native/synthetic success is not campaign acceptance. Wave-34 comparison is 80/81 steps, pickup 10→11; broader trigger/loading/checkpoint/death-reload refusals remain.
+
+- Arena merge: retained both arena-mode and bounded-match documentation, and all campaign/Blood1 libraries alongside arena-match. Live PvP/frame and unbound match services remain refused. Merge SHA recorded next milestone.

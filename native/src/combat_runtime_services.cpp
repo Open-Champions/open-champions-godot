@@ -425,7 +425,7 @@ void World::State::install_ctor_services() {
   };
 }
 void World::State::install_services() {
-  const char *names[] = {"handle_clear",
+  const char *names[] = {"arena_addKill", "handle_clear",
                          "handle_link",
                          "handle_removeNode",
                          "handle_insertNode",
@@ -665,6 +665,11 @@ void World::State::install_services() {
   };
 }
 Value World::State::service(const std::string &n, const std::vector<Value> &a) {
+  if (n == "arena_addKill") {
+    if (!full()) throw Unsupported("arena scoring requires Full composition");
+    arena_match::Model(mem).add_kill(number(a.at(0)), number(a.at(1)));
+    return iv(0);
+  }
   auto ar = [&](unsigned k) { return number(a.at(k)); };
   // Effects that are not cosmetic (research t3/research-fx 19f80a6,
   // docs/effects.md 15.2 and 17): fx_spawn id 5 draws the shared seed and

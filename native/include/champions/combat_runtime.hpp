@@ -3,6 +3,7 @@
 #include "champions/creature_hp.hpp"
 #include "champions/arena_monsters.hpp"
 #include "champions/archive.hpp"
+#include "champions/arena_match.hpp"
 #include "champions/world_queries.hpp"
 #include "champions/world_authority.hpp"
 #include <array>
@@ -338,6 +339,12 @@ public:
   // 181 visits. The wave builder and later empty-wave branch are not implied.
   void begin_arena_intro();
   void arena_intro_visit();
+  // Bounded arena task on this World's shared memory and grid lists. Engine,
+  // construction, destructor, active-slot and saved-record services must be supplied.
+  void arena_task_visit(arena_match::Services, Raw pressed = 0,
+                        Raw confirm = 0, Raw cancel = 0);
+  void arena_reset_scores();
+  void creature_on_death(Address, Raw quiet = 0); // base 0x10beb8 only
   // Bind the owner-supplied .vif hulls at a PhProp's resource pointer. Checks
   // every active mesh bit before publishing bytes to the owned World memory.
   void bind_prop_model(Address prop, champions::Bytes vif);

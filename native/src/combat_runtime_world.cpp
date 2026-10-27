@@ -236,6 +236,24 @@ void World::State::grid(Address a) {
   HandlePool::unlink(n);
   HandlePool::push(head(home(a, false)), n);
 }
+void World::State::move_off_grid(Address a) {
+  // obj_moveOffGrid 0x14ef48, ref_objects.World.move_off_grid.
+  actor(a);
+  auto *back = head(a + 8).next;
+  if (!back || !back->partner) throw Error("object has no grid node");
+  auto *node = back->partner;
+  HandlePool::unlink(node);
+  HandlePool::push(head(OFF_GRID), node);
+}
+void World::State::for_each_grid(const std::function<void(Address)> &fn) {
+  // world_forEachGridObject 0x14a610, ref_objects.World.for_each_grid_object:
+  // off-grid, all cells of A, all cells of B; skip empty lists. Arena
+  // callbacks do not change g_excludeMask during a walk.
+  if (head(OFF_GRID).next) walk(OFF_GRID, fn);
+  for (auto base : {GRID, GRID_B})
+    for (unsigned i = 0; i < 14400; ++i)
+      if (head(base + 4 * i).next) walk(base + 4 * i, fn);
+}
 void World::State::schedule(Address a, unsigned period) {
   actor(a);
   if (period != 1 && period != 15 && period != 60)

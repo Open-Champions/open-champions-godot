@@ -1,0 +1,16 @@
+{
+  "schema": "arena-match-v1",
+  "research_commit": "d4f58da6377f1011068ba80d3608dbe1e3149370",
+  "references": {
+    "tools/ref_arena_modes.py": "839f500b3e77b4e830b43d4f131177b43a54542a52335c181edc30f455a06cbe",
+    "tools/ref_arena_match_core.py": "85280e831eaea93b7ab6bdf90c80d51c785f5f5fe5b29c930edbe3189000a1d2",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2",
+    "docs/arena-modes.md": "1dafe8b50e9d604ac387a87fe9d3c94490b6026f3eda4501cfd72da607c07a58",
+    "docs/spec/arena-match-core.md": "f87fffdbd92aeb832257ff90d03cf1fb15ff92dc097a8e35436c88d1b2588c2a",
+    "docs/spec/arena-match-probe.md": "4cc3db76cfa2cc06b5bcfb33ba513cc25477361964e1d72ff662fa3a2440f4d9"
+  },
+  "sha256": "240963ba83a492101a6e8733c43914b0b13174633423b232e5ae0727085d498e",
+  "content_sha256": "1d0730ebf4f8ab85eb08749c3e361618cef8b41e3d50b995e5691e16645f0d1f",
+  "cases": 426
+}

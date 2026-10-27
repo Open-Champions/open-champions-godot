@@ -413,8 +413,15 @@ void World::State::player_death(Address p) {
       if (u(killer + 12) & 0x40)
         throw Unsupported("PvP mode A kill credit (mana, a skill 0x3b orb)");
     }
-  if (u(G_PVP_B))
-    throw Unsupported("PvP mode B arena lives");
+  if (u(G_PVP_B)) {
+    // research-arena-match d4f58da ref_combat_ptick.py:437-442:
+    // handle presence selects scoring versus direct loss, even with both modes.
+    arena_match::Model arena(mem);
+    if (auto node = u(p + LAST_ATTACKER))
+      arena.on_player_killed(p, u(node + 12));
+    else
+      arena.lose_life(u(p + 0x3c8), (u(p + 12) & 0x20000) != 0);
+  }
   w(p + 0x2dc, 0);
 }
 void World::State::player_stagger(Address p) {

@@ -199,6 +199,13 @@ if(BUILD_TESTING)
         --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces" --source-commit "${CHAMPIONS_SOURCE_COMMIT}"
         --platform "${CHAMPIONS_TEST_PLATFORM}")
     find_package(Threads REQUIRED)
+    add_executable(champions-arena-match-tests tests/arena_match_tests.cpp)
+    target_link_libraries(champions-arena-match-tests PRIVATE champions-arena-match champions-combat-runtime)
+    add_test(NAME arena-match-host COMMAND champions-arena-match-tests)
+    add_test(NAME arena-match-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_arena_match_vectors.py"
+        "$<TARGET_FILE:champions-arena-match-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/arena_match.tsv.gz")
     add_executable(champions-arena-monsters-tests tests/arena_monsters_tests.cpp)
     target_link_libraries(champions-arena-monsters-tests PRIVATE champions-arena-monsters)
     if(MSVC)
