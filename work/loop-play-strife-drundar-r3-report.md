@@ -44,3 +44,21 @@ rebuild and executed the stale 122-check binary (one already-fixed assertion
 failure). It was interrupted by exact PID after verifying its cwd, preserved
 as work/mission1/r3/ctest-stale-interrupted.log, then restarted after the
 completed build/focused pass. No other worktree's process was interrupted.
+
+Godot / trace / journey gates (work/mission1/r3/):
+- Mission 1 headless PASS: 46 checks, zero failures, exit 0, 5.21 s.
+- Mission 1 rendered PASS: 48 checks, zero failures, exit 0, 5.76 s.
+  Production refused-preStart checks remain intact. Rendered destination
+  capture inspected: terrain, HUD, capsule fallback. No visual parity claim;
+  this probe does not visually establish door passability or cutscene completion.
+- Full-combat headless PASS: 2,641 checks, zero failures, exit 0, 20.60 s.
+- Full-combat rendered PASS: 2,771 checks, zero failures, exit 0, 22.69 s.
+- FULL_TRACE unchanged in both: 36,402 bytes, SHA-256
+  9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+- tools/run_loop_playthrough.py ran both variants: headless 67 steps,
+  rendered 68 steps / 43 captures, six refusal kinds each; both exit 1 at
+  blocked_death_reload, preserving the requested existing boundary. Wrapper
+  elapsed 384.90 s. Input count 994 before and after. Not full playable acceptance.
+- No SCRIPT ERROR or ERROR envelopes in final Godot logs. Existing ObjectDB
+  exit leak warnings persist. Baseline and journey tools are unchanged.
+- Full CTest remains running. No timeout observed at this checkpoint.
