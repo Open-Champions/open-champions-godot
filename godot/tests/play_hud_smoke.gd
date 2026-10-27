@@ -137,6 +137,9 @@ func _run() -> void:
 	# bar_green frame (tick >> 2) % 11, origin (27, 56), clip right
 	# trunc(27 + (xp - lower) / (upper - lower) * 99).
 	var xp_value := {"hp": 50.0, "max_hp": 100.0, "mana": 30.0, "max_mana": 60.0, "ready_ticks": 7, "acknowledged_level": 1, "experience": 550, "experience_base": 0, "experience_next": 1100}
+	# The merged catalogue supplies green frames; explicitly remove them for
+	# this missing-art refusal probe, then restore all eleven below.
+	for index in range(11): hud.textures.erase("bar_green%02d.tex" % index)
 	hud.observe_play(xp_value, true)
 	check(not "experience" in hud.drawn and not str(hud.refusals.get("experience", "")).is_empty(), "no bar_green texture loaded: refused, not substituted")
 	var green := {}
