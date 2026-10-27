@@ -36,6 +36,10 @@ func shot(label: String) -> void:
 	if image != null and label == "13a-char-class-model-11" and bright_pixels(image, Rect2i(780, 225, 360, 360), 4) < 50:
 		printerr("selected disc body texture preview did not render")
 		return
+	if label in ["05-options", "19-pause-options"]:
+		if fe.scene_view.draws.any(func(d): return d.kind == "rect" and str(d.role).contains("slider")):
+			printerr("untraced slider artwork submitted: ", label)
+			return
 	if image != null and label in ["08-load-game", "08a-load-card-synthetic", "21-save-game", "22-save-card-synthetic", "23-save-empty-card"]:
 		var frame_colour := image.get_pixel(500, 350)
 		if maxf(frame_colour.r, maxf(frame_colour.g, frame_colour.b)) < 0.08 or bright_pixels(image, Rect2i(300, 730, 680, 140), 4) < 100:
@@ -167,6 +171,12 @@ func run() -> void:
 	await shot("06-options-load")
 	fe.tap(CIRCLE)
 	fe.tap(CIRCLE)
+	if fe.screen() != "options-save" or not fe.scene_view.draws.is_empty():
+		printerr("state-14 submitted untraced draw calls")
+		quit(1)
+		return
+	await shot("06a-options-save")
+	fe.tap(CROSS) # state-14 save choice; bindings use the host diagnostic label
 	fe.tap(DOWN)
 	fe.tap(CROSS)
 	await shot("07-credits")

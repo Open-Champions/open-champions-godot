@@ -234,6 +234,8 @@ func _handle(requests: Array) -> void:
 			"credits_music": _credits_music(str(request.arg), int(request.value))
 			"menu_sound": _menu_sound(str(request.arg))
 			"apply_music_volume": _apply_volume(int(request.value))
+			"apply_effects_volume": _apply_effects(int(request.value))
+			"apply_stereo": _apply_stereo(int(request.value))
 			"preview_music": _preview(str(request.arg), int(request.value))
 			"write_options": _write_options()
 			"load_options": _load_options()
@@ -269,6 +271,15 @@ func _apply_volume(bits: int) -> void:
 	# The flow's live g_musicVolume word goes to the mixer bit for bit.
 	if scene != null and scene.audio != null and not scene.audio.load_options_file_music(bits):
 		_log("music volume refused: " + str(scene.audio.bridge.get_last_error()))
+
+func _apply_effects(bits: int) -> void:
+	if scene == null or scene.audio == null or scene.audio.bridge == null:
+		return
+	scene.audio.bridge.set_sfx_volume(_bits_to_float(bits))
+
+func _apply_stereo(value: int) -> void:
+	if scene != null and scene.audio != null and scene.audio.bridge != null:
+		scene.audio.bridge.set_two_channel_output(value != 0)
 
 func _preview(name: String, flags: int) -> void:
 	if scene == null or scene.audio == null or scene.audio.bridge == null:

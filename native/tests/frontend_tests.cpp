@@ -1,8 +1,12 @@
 #include "champions/frontend.hpp"
 #include "champions/menus.hpp"
+#include "champions/native_audio.hpp"
 #include "champions/ps2_save.hpp"
 
+#include <array>
+#include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -215,10 +219,17 @@ void slider_vectors() {
   expect(f.music().live == 0, "held left from 1.0 reaches 0");
   // Cursor move resets the timer.
   tap(f, UP);
-  expect(f.slider_timer() == 0 && f.cursor() == 0, "move resets timer");
+  expect(f.slider_timer() == audio::menu_slider_call(f.option_value(0), 0, 0).timer &&
+         f.cursor() == 0, "move resets timer, then brightness release advances it once");
   tap(f, DOWN);
   // Leave: commit copies live into the image and asks for a config save.
   tap(f, CIRCLE);
+  expect(f.screen() == Screen::OptionsSave && screen_state(f.screen()) == 14, "changed options enter state 14");
+  const auto save_scene = f.layout();
+  expect(save_scene.draws.empty() && save_scene.host_layout &&
+         save_scene.host_label.find("Cross: save, Circle: memory") != std::string::npos &&
+         !save_scene.unknown.empty(), "state-14 choice bindings use host diagnostics without untraced draw calls");
+  tap(f, CROSS);
   expect(f.screen() == Screen::Main, "options left");
   expect(f.music().image == 0 && word(f.options_image(), OPTIONS_MUSIC) == 0, "commit into image");
   expect(has(f.take_requests(), "write_options"), "config save requested");
@@ -258,6 +269,206 @@ void options_load_vectors() {
   f.options_loaded(std::nullopt);
   expect(f.screen() == Screen::Options, "no file: browser -1");
   reject([&] { f.options_loaded(file); }, "unrequested load refused");
+}
+
+void option_table_vectors() {
+  // Independent pinned goldens: options-menu 603b2b7 ref_options_menu.py
+  // rows 8-22, saves 8d43286 save-format offsets, chat 603b2b7 +0xc4.
+  struct GoldenOption { const char *key; int kind; std::size_t offset; };
+  constexpr std::array<GoldenOption, 13> golden{{
+      {"menu_bright", 4, 0x04}, {"menu_music", 4, 0x08},
+      {"menu_sfx", 4, 0x0c}, {"menu_controls", 0, 0},
+      {"menu_combatCam", 3, 0x2c}, {"menu_reverseYaw", 3, 0x30},
+      {"menu_vibration", 3, 0x14}, {"menu_stereo", 3, 0x10},
+      {"menu_blood", 3, 0x24}, {"menu_subtitles", 3, 0x1c},
+      {"menu_damagedisplay", 3, 0x20}, {"menu_chat", 3, 0xc4},
+      {"menu_markers", 3, 0x28}}};
+  Flow f = to_main();
+  tap(f, DOWN); tap(f, DOWN); tap(f, CROSS);
+  expect(f.entries().size() == golden.size() && OPTION_ROWS.size() == golden.size(), "front option row count");
+  for (std::size_t i = 0; i < golden.size(); ++i) {
+    expect(std::string(OPTION_ROWS[i].key) == golden[i].key &&
+           OPTION_ROWS[i].kind == golden[i].kind && OPTION_ROWS[i].offset == golden[i].offset,
+           "pinned option row key, kind and offset");
+    expect(f.entries()[i].id == golden[i].key && f.entries()[i].type == golden[i].kind,
+           "entry follows the pinned option record");
+    if (golden[i].kind != 0)
+      expect(f.option_value(int(i)) == word(f.options_image(), golden[i].offset), "default option word");
+  }
+  // The three float rows share the executed 1/120 menu handler and boundaries.
+  tap(f, UP); // brightness
+  auto value = f.option_value(0), timer = f.slider_timer();
+  for (int i = 0; i < 8; ++i) {
+    f.frame(RIGHT);
+    const auto call = audio::menu_slider_call(value, RIGHT, timer);
+    value = call.value; timer = call.timer;
+    expect(f.option_value(0) == value, "brightness step is the executed FPU result");
+  }
+  for (int i = 0; i < 200; ++i) f.frame(LEFT);
+  expect(f.option_value(0) == 0, "brightness clamps at zero");
+  for (int i = 0; i < 200; ++i) f.frame(RIGHT);
+  expect(f.option_value(0) == 0x3f800000u, "brightness clamps at one");
+  tap(f, DOWN); tap(f, DOWN); // effects
+  (void)f.take_requests();
+  value = f.option_value(2); timer = f.slider_timer();
+  for (int i = 0; i < 8; ++i) {
+    f.frame(LEFT);
+    const auto call = audio::menu_slider_call(value, LEFT, timer);
+    value = call.value; timer = call.timer;
+    expect(f.option_value(2) == value, "effects step is the executed FPU result");
+  }
+  expect(f.option_value(2) < 0x3f000000u && has(f.take_requests(), "apply_effects_volume"), "effects edit reaches mixer request");
+  tap(f, DOWN); tap(f, DOWN); // combat camera, past refused Controls
+  expect(f.cursor() == 4, "combat camera row");
+  tap(f, CROSS);
+  expect(f.option_value(4) == 0, "accept toggles one to zero");
+  tap(f, RIGHT);
+  expect(f.option_value(4) == 1, "right toggles zero to one");
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::OptionsSave, "changed option table asks for save");
+  tap(f, CROSS);
+  const auto saved = f.options_image();
+  expect(saved.size() == OPTIONS_BYTES && word(saved, 0x04) == 0x3f800000u &&
+         word(saved, 0x0c) == f.option_value(2), "scalar offsets committed in 760-byte image");
+  Flow restored(saved);
+  expect(restored.option_value(0) == f.option_value(0) &&
+         restored.option_value(2) == f.option_value(2) &&
+         restored.option_value(4) == f.option_value(4), "options image round-trip");
+  restored.attach_play();
+  const auto applied = restored.take_requests();
+  expect(restored.music().live == word(saved, OPTIONS_MUSIC) &&
+         has(applied, "apply_music_volume") && has(applied, "apply_effects_volume") &&
+         has(applied, "apply_stereo"), "host play attaches persisted mixer settings");
+  for (int row = 4; row <= 12; ++row) {
+    auto raw = ps2::config_set_defaults(-1);
+    const auto at = golden[static_cast<std::size_t>(row)].offset;
+    raw[at] = 2; raw[at + 1] = raw[at + 2] = raw[at + 3] = 0;
+    Flow toggle = to_main(raw);
+    tap(toggle, DOWN); tap(toggle, DOWN); tap(toggle, CROSS);
+    for (int move = 1; move < row; ++move) tap(toggle, DOWN);
+    tap(toggle, CROSS);
+    expect(toggle.option_value(row) == 0, "nonzero toggle accepts to zero");
+    tap(toggle, RIGHT);
+    expect(toggle.option_value(row) == 1, "right toggles zero to one");
+  }
+  Flow no_card = to_main(saved);
+  tap(no_card, DOWN); tap(no_card, DOWN); tap(no_card, CROSS);
+  for (int move = 1; move < 4; ++move) tap(no_card, DOWN);
+  tap(no_card, CROSS);
+  tap(no_card, CIRCLE);
+  expect(no_card.screen() == Screen::OptionsSave, "changed list enters save choice");
+  (void)no_card.take_requests();
+  tap(no_card, CIRCLE);
+  expect(no_card.screen() == Screen::Main && !has(no_card.take_requests(), "write_options") &&
+         word(no_card.options_image(), 0x2c) == no_card.option_value(4),
+         "state-14 cancel commits memory without card write");
+  const auto a = layout::list_anchors(layout::pause_options_list());
+  expect(a.size() == 14 && a[0].x == 297 && a[0].y == 80 && a[13].y == 366,
+         "pause option anchors");
+  const auto frames = layout::list_frames(layout::pause_options_list(), 0);
+  expect(frames[0].x == 180 && frames[0].y == 80 && frames[0].w == 280 && frames[0].h == 32 &&
+         frames[1].x == 214 && frames[1].y == 69 && frames[1].w == 212 && frames[1].h == 342 &&
+         frames[2].x == 223 && frames[2].y == 81 && frames[2].w == 210 && frames[2].h == 334,
+         "pause option frames");
+}
+
+void option_audit_vectors() {
+  Flow held = to_main();
+  tap(held, DOWN); tap(held, DOWN); tap(held, CROSS);
+  for (int row = 1; row < 4; ++row) tap(held, DOWN);
+  expect(held.cursor() == 4 && held.option_value(4) == 1, "held accept fixture starts on camera toggle");
+  held.frame(CROSS); // repeat word gets the first press immediately
+  expect(held.option_value(4) == 0, "held accept first frame toggles");
+  for (int frame = 2; frame <= 24; ++frame) {
+    held.frame(CROSS);
+    expect(held.option_value(4) == 0, "held accept waits through frame 24");
+  }
+  held.frame(CROSS);
+  expect(held.option_value(4) == 1, "held accept repeat toggles on frame 25");
+  for (int frame = 26; frame <= 28; ++frame) held.frame(CROSS);
+  expect(held.option_value(4) == 1, "held accept waits for the next repeat");
+  held.frame(CROSS);
+  expect(held.option_value(4) == 0, "held accept repeat toggles on frame 29");
+
+  Flow unchanged = to_main();
+  tap(unchanged, DOWN); tap(unchanged, DOWN); tap(unchanged, CROSS);
+  const auto original = unchanged.options_image();
+  tap(unchanged, CIRCLE);
+  expect(unchanged.screen() == Screen::OptionsSave, "unchanged front options still enter state 14");
+  (void)unchanged.take_requests();
+  tap(unchanged, CROSS);
+  expect(unchanged.screen() == Screen::OptionsSave && !unchanged.last_error().empty() &&
+         unchanged.options_image() == original && !has(unchanged.take_requests(), "write_options"),
+         "unresolved no-change state-14 accept refuses without write");
+  const auto refused_scene = unchanged.layout();
+  expect(refused_scene.draws.empty() && refused_scene.host_layout &&
+         refused_scene.host_label.find("unchanged choice refused") != std::string::npos,
+         "unchanged state-14 refusal uses host diagnostics without untraced draw calls");
+  tap(unchanged, CIRCLE);
+  expect(unchanged.screen() == Screen::OptionsSave && !unchanged.last_error().empty(),
+         "unresolved no-change state-14 cancel also refuses");
+
+  auto zeros = ps2::config_set_defaults(-1);
+  for (const std::size_t at : {std::size_t(0x04), std::size_t(0x08), std::size_t(0x0c)}) {
+    zeros[at] = zeros[at + 1] = zeros[at + 2] = 0;
+    zeros[at + 3] = 0x80; // pinned IEEE -0 word; c.eq.s considers it equal to +0
+  }
+  Flow signed_zero = to_main(zeros);
+  tap(signed_zero, DOWN); tap(signed_zero, DOWN); tap(signed_zero, CROSS);
+  tap(signed_zero, UP); // brightness
+  for (int i = 0; i < 8; ++i) signed_zero.frame(LEFT);
+  signed_zero.frame(0);
+  tap(signed_zero, DOWN); // music
+  for (int i = 0; i < 8; ++i) signed_zero.frame(LEFT);
+  signed_zero.frame(0);
+  tap(signed_zero, DOWN); // effects
+  for (int i = 0; i < 8; ++i) signed_zero.frame(LEFT);
+  signed_zero.frame(0);
+  expect(signed_zero.option_value(0) == 0 && signed_zero.option_value(1) == 0 &&
+         signed_zero.option_value(2) == 0, "all three slider words clamp negative zero to positive zero");
+  (void)signed_zero.take_requests();
+  tap(signed_zero, CIRCLE);
+  expect(signed_zero.screen() == Screen::OptionsSave, "signed-zero equality still follows state-14 route");
+  tap(signed_zero, CROSS);
+  expect(signed_zero.screen() == Screen::OptionsSave && !has(signed_zero.take_requests(), "write_options") &&
+         word(signed_zero.options_image(), 0x04) == 0x80000000u &&
+         word(signed_zero.options_image(), 0x08) == 0x80000000u &&
+         word(signed_zero.options_image(), 0x0c) == 0x80000000u &&
+         signed_zero.music().image == 0x80000000u,
+         "c.eq.s treats signed zeros equal and zero-count commit leaves all image words intact");
+
+  Flow stereo = to_main();
+  tap(stereo, DOWN); tap(stereo, DOWN); tap(stereo, CROSS);
+  for (int row = 1; row < 7; ++row) tap(stereo, DOWN);
+  expect(stereo.cursor() == 7, "stereo option row selected");
+  audio::Playback mixer;
+  audio::Pcm sample;
+  sample.rate = 48000;
+  sample.left.assign(4000, 8192); // authored constant sample, no game audio
+  sample.loop_start = 0;
+  sample.loop_end = 4000;
+  expect(mixer.add_effect("option-fixture", sample) &&
+         mixer.play_sample("option-fixture", 1, 1, audio::Vec3{600, 0, 0}) >= 0,
+         "synthetic positional voice for stereo option");
+  auto apply_stereo_requests = [&]() {
+    bool applied = false;
+    for (const auto &r : stereo.take_requests())
+      if (r.kind == "apply_stereo") {
+        mixer.set_two_channel_output(r.value != 0);
+        applied = true;
+      }
+    return applied;
+  };
+  tap(stereo, CROSS);
+  expect(apply_stereo_requests(), "mono option reaches the mixer request");
+  mixer.tick();
+  const auto mono = mixer.drain(audio::Playback::fifo_limit).front();
+  expect(std::abs(mono[0] - mono[1]) < 1e-6f, "mono option folds asymmetric effect sides");
+  tap(stereo, CROSS);
+  expect(apply_stereo_requests(), "stereo option reaches the mixer request");
+  mixer.tick();
+  const auto split = mixer.drain(audio::Playback::fifo_limit).front();
+  expect(split[0] < split[1], "stereo option restores asymmetric effect sides");
 }
 
 void character_vectors() {
@@ -435,13 +646,15 @@ void pause_vectors() {
   expect(f.screen() == Screen::Options, "pause options");
   {
     const auto s = f.layout();
-    expect(f.entries().size() == 2, "pause options use two host controls");
-    bool executed_frame = false, observed_row = false;
+    expect(f.entries().size() == 14, "pause options use fourteen observed records");
+    bool executed_frame = false, pause_colour = false;
     for (const auto &d : s.draws) {
       executed_frame = executed_frame || (d.kind == Draw::Kind::Frame && d.evidence == Evidence::Executed);
-      observed_row = observed_row || (d.kind == Draw::Kind::Text && d.evidence == Evidence::Observed);
+      pause_colour = pause_colour || (d.kind == Draw::Kind::Text && d.colour == layout::PAUSE_TEXT &&
+                                      d.evidence == Evidence::Host);
     }
-    expect(!executed_frame && !observed_row, "pause options borrow no front-end geometry or pause colour");
+    expect(executed_frame, "pause options use documented frames");
+    expect(pause_colour, "pause options use documented colour");
   }
   (void)f.take_requests();
   for (int i = 0; i < 6; ++i)
@@ -723,17 +936,16 @@ void layout_screen_vectors() {
     expect(s.host_layout, "the option value bar is a labelled host drawing");
   }
   (void)g.take_requests();
-  // A non-finite or out-of-range slider word draws a bounded fill (no undefined cast).
+  // No loaded scalar, including an exceptional float, authorizes value art.
   for (std::uint32_t bits : {0x7fc00000u, 0xbf800000u, 0x7f800000u, 0x40000000u}) {
     Flow n = to_main(options_with_music(bits));
     tap(n, DOWN);
     tap(n, DOWN);
     tap(n, CROSS);
-    bool ok = false;
+    bool untraced_art = false;
     for (const auto &d : n.layout().draws)
-      if (d.role == "host slider fill")
-        ok = d.w >= 0 && d.w <= 72;
-    expect(ok, "slider fill width stays within the track");
+      untraced_art = untraced_art || d.role == "host slider fill" || d.role == "host slider track";
+    expect(!untraced_art, "untraced slider art remains refused for loaded float words");
   }
   // Credits: the music handoff is requested with flags 3, exit requests the theme with flags 1.
   Flow c = to_main();
@@ -966,6 +1178,8 @@ int main() {
   repeat_vectors();
   slider_vectors();
   options_load_vectors();
+  option_table_vectors();
+  option_audit_vectors();
   character_vectors();
   import_vectors();
   pause_vectors();

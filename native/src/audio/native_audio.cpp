@@ -1004,8 +1004,17 @@ void Playback::mix(std::array<float, 2> &out) {
     const Pcm &p = *v.pcm;
     const double sample = p.left[std::size_t(v.phase >> 12)] / 32768.0;
     const double gain = v.volume * sfx_volume_;
-    left += sample * gain * v.gains.left;
-    right += sample * gain * v.gains.right;
+    const double voice_left = sample * gain * v.gains.left;
+    const double voice_right = sample * gain * v.gains.right;
+    if (two_channel_) {
+      left += voice_left;
+      right += voice_right;
+    } else {
+      // voice_setVolume averages the two positional sides in mono.
+      const double mono = (voice_left + voice_right) * 0.5;
+      left += mono;
+      right += mono;
+    }
     // Freeze zeros the pitch of voices that do not play while frozen.
     if (frozen_ && !v.plays_while_frozen)
       continue;

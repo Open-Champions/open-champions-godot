@@ -13,6 +13,16 @@ namespace champions::frontend {
 namespace ps2 = champions::simulation::rta::ps2_save;
 namespace netwire = champions::simulation::rta::netwire;
 
+const std::array<OptionRow, 13> OPTION_ROWS{{
+    {"menu_bright", "Brightness", 4, 0x04}, {"menu_music", "Music", 4, 0x08},
+    {"menu_sfx", "Effects", 4, 0x0c}, {"menu_controls", "Controls", 0, 0},
+    {"menu_combatCam", "Combat Camera", 3, 0x2c},
+    {"menu_reverseYaw", "Reverse Yaw", 3, 0x30},
+    {"menu_vibration", "Vibration", 3, 0x14}, {"menu_stereo", "Stereo", 3, 0x10},
+    {"menu_blood", "Blood", 3, 0x24}, {"menu_subtitles", "Subtitles", 3, 0x1c},
+    {"menu_damagedisplay", "Damage Display", 3, 0x20},
+    {"menu_chat", "Chat", 3, 0xc4}, {"menu_markers", "Markers", 3, 0x28}}};
+
 namespace {
 constexpr const char *SOUND_GAP =
     "Menu sounds: the FX.LMP resource names are documented (move menu_main_toggle, select menu_main_accept, back menu_main_back) and requested at the documented triggers. They are not voiced: the clips' variation draws and the group-67 volume word 0x41bac8 are not in the research.";
@@ -87,6 +97,7 @@ const char *screen_name(Screen s) {
   case Screen::Difficulty: return "difficulty";
   case Screen::Mode: return "mode";
   case Screen::Options: return "options";
+  case Screen::OptionsSave: return "options-save";
   case Screen::OptionsLoad: return "options-load";
   case Screen::Credits: return "credits";
   case Screen::LoadGame: return "load-game";
@@ -110,6 +121,8 @@ int screen_state(Screen s) {
   case Screen::Players: return 2;
   case Screen::Difficulty: return 3;
   case Screen::Mode: return 4;
+  case Screen::Options: return 11;
+  case Screen::OptionsSave: return 14;
   case Screen::Credits: return 15;
   case Screen::CharClass: return 1;
   case Screen::CharAppearance: return 2;
@@ -144,6 +157,28 @@ Flow::Flow(std::optional<std::vector<std::uint8_t>> options_file) {
     music_.browser_copy(1, image_word(OPTIONS_MUSIC));
     file_present_ = true;
   }
+  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i)
+    if (OPTION_ROWS[i].kind != 0)
+      option_live_[i] = image_word(OPTION_ROWS[i].offset);
+}
+
+std::uint32_t Flow::option_value(int row) const {
+  if (row < 0 || row >= static_cast<int>(OPTION_ROWS.size()))
+    throw Refusal("option row is outside the documented table");
+  return option_live_[static_cast<std::size_t>(row)];
+}
+
+void Flow::apply_option(int row) {
+  if (row == 1) {
+    music_.live = option_live_[1];
+    request("apply_music_volume", {}, music_.live);
+  } else if (row == 2) {
+    request("apply_effects_volume", {}, option_live_[2]);
+  } else if (row == 7) {
+    request("apply_stereo", {}, option_live_[7]);
+  }
+  // Other owning systems have no proven client setter yet. They stay local
+  // options state and are persisted without fabricating gameplay application.
 }
 
 std::uint32_t Flow::image_word(std::size_t at) const {
@@ -224,7 +259,7 @@ bool Flow::in_frontend() const {
   case Screen::Mode: case Screen::Credits: case Screen::CharClass: case Screen::CharAppearance:
   case Screen::CharAbility: case Screen::CharName:
     return true;
-  case Screen::Options: case Screen::OptionsLoad:
+  case Screen::Options: case Screen::OptionsSave: case Screen::OptionsLoad:
     return options_return_ == Screen::Main;
   case Screen::LoadGame:
     return load_return_ == Screen::Main;
@@ -271,7 +306,10 @@ void Flow::enter_frontend(int code) {
   paused_ = false;
   load_from_frontend_ = 1;
   music_.add_core_tasks();
+  option_live_[1] = music_.live;
   request("apply_music_volume", {}, music_.live);
+  request("apply_effects_volume", {}, option_live_[2]);
+  request("apply_stereo", {}, option_live_[7]);
   // frontend_run 0x1e09b0/0x1e09c4 requests flags 1 or 5; the condition that
   // selects 5 is not documented, so this host always asks for 1 (see notes()).
   music("front_end_music", "mx_maintheme_l.vag", 1);
@@ -310,16 +348,24 @@ void Flow::move_cursor(std::uint32_t repeat) {
   }
 }
 
-void Flow::commit(bool query_only) {
-  // config_commitOptions(force, queryOnly, noCardSave). force and noCardSave at
-  // the pause and front-end call sites are not in the research; 0 is passed.
-  const auto r = audio::config_commit_music(music_.live, music_.image, query_only, false, false);
-  if (query_only)
-    return;
-  music_.image = r.image;
-  set_image_word(OPTIONS_MUSIC, r.image);
-  if (r.save_requested)
-    request("write_options"); // memcard_requestConfigSave 0x217bdc, card state 5
+bool Flow::commit(bool query_only, bool save) {
+  bool changed = false;
+  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i) {
+    const auto kind = OPTION_ROWS[i].kind;
+    if (kind == 0)
+      continue;
+    const auto stored = image_word(OPTION_ROWS[i].offset);
+    changed = changed || (kind == 4 ? audio::ps2_cmp(option_live_[i], stored) != 0
+                                    : option_live_[i] != stored);
+  }
+  if (query_only) return changed;
+  if (!changed) return false; // config_commitOptions copies only for nonzero count
+  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i)
+    if (OPTION_ROWS[i].kind != 0)
+      set_image_word(OPTION_ROWS[i].offset, option_live_[i]);
+  music_.image = option_live_[1];
+  if (changed && save) request("write_options");
+  return changed;
 }
 
 void Flow::leave_options() {
@@ -328,8 +374,8 @@ void Flow::leave_options() {
     commit(false); // 0x18d2c8 / 0x18d2e0
     go(Screen::Pause, 3);
   } else {
-    commit(false); // frontend_run's call; the state-14 prompt is not documented
-    go(Screen::Main, 2);
+    (void)commit(true);
+    go(Screen::OptionsSave, 0);
   }
 }
 
@@ -343,16 +389,36 @@ void Flow::options_frame(std::uint32_t held, std::uint32_t pressed, std::uint32_
     go(Screen::OptionsLoad, 0);
     return;
   }
+  const int previous_cursor = cursor_;
   move_cursor(repeat);
-  if (cursor_ != 1)
+  if (cursor_ != previous_cursor)
+    return; // menuList resets its slider timer on a row change
+  if (cursor_ < 0 || cursor_ >= static_cast<int>(OPTION_ROWS.size()))
     return;
-  const auto before = music_.live;
-  const auto call = audio::menu_slider_call(music_.live, held, slider_timer_);
-  slider_timer_ = call.timer;
-  music_.live = call.value;
-  if (music_.live != before && !stream2_playing_)
-    request("preview_music", options_return_ == Screen::Pause ? "mx_main_l.vag" : "mx_maintheme_l.vag", 0x41);
-  request("apply_music_volume", {}, music_.live);
+  const auto row = static_cast<std::size_t>(cursor_);
+  const auto kind = OPTION_ROWS[row].kind;
+  if (kind == 0) {
+    if (pressed & CONFIRM)
+      error_ = row == 3 ? "Controls sub-screen unverified; no remap performed"
+                        : "Communications destination Unknown";
+    return;
+  }
+  const auto before = option_live_[row];
+  if (kind == 4) {
+    const auto call = audio::menu_slider_call(before, held, slider_timer_);
+    slider_timer_ = call.timer;
+    option_live_[row] = call.value;
+  } else if (repeat & (CONFIRM | LEFT | RIGHT)) {
+    option_live_[row] = before ? 0u : 1u;
+  }
+  if (row == 1) music_.live = option_live_[1];
+  if (kind == 4 ? audio::ps2_cmp(option_live_[row], before) != 0 : option_live_[row] != before) {
+    if (row != 1) apply_option(cursor_);
+    if (row == 1 && !stream2_playing_)
+      request("preview_music", options_return_ == Screen::Pause ? "mx_main_l.vag" : "mx_maintheme_l.vag", 0x41);
+  }
+  if (row == 1)
+    request("apply_music_volume", {}, music_.live);
 }
 
 void Flow::finish_character() {
@@ -457,6 +523,16 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     break;
   case Screen::Options:
     options_frame(held, pressed, repeat);
+    break;
+  case Screen::OptionsSave:
+    if (pressed & (CONFIRM | CANCEL)) {
+      if (!commit(true)) {
+        error_ = "unchanged state-14 choice is unverified; no save or exit performed";
+      } else {
+        commit(false, (pressed & CONFIRM) != 0);
+        go(Screen::Main, 2);
+      }
+    }
     break;
   case Screen::OptionsLoad:
     move_cursor(repeat);
@@ -660,11 +736,21 @@ void Flow::options_loaded(std::optional<std::vector<std::uint8_t>> file) {
   for (std::size_t at = 0xc4; at < 0xd8; ++at)
     image_[at] = (*file)[at];
   music_.options_screen(2, image_word(OPTIONS_MUSIC));
-  request("apply_music_volume", {}, music_.live);
+  for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i)
+    if (OPTION_ROWS[i].kind != 0)
+      option_live_[i] = image_word(OPTION_ROWS[i].offset);
+  apply_option(1);
+  apply_option(2);
+  apply_option(7);
   go(Screen::Options, 1);
 }
 
 void Flow::attach_play() {
+  music_.add_core_tasks();
+  option_live_[1] = music_.live;
+  request("apply_music_volume", {}, music_.live);
+  request("apply_effects_volume", {}, option_live_[2]);
+  request("apply_stereo", {}, option_live_[7]);
   paused_ = false;
   go(Screen::Playing);
 }
@@ -745,31 +831,30 @@ std::vector<Entry> Flow::entries() const {
                           "unlock test options_get4f8f38Level 0x1ec448 was not executed"));
     break;
   case Screen::Options: {
-    if (!in_frontend()) {
-      // The in-game table 0x44f218 was not captured. Keep only host controls
-      // whose behaviour this flow implements; do not borrow the 13-row table.
-      out.push_back(entry("entry0", "(entry 0)", "pause option row unknown", false,
-                          "the in-game option table was not captured"));
-      auto music = entry("music", "Music", "host pause music control");
-      music.type = 4;
-      music.value = music_.live;
-      out.push_back(music);
-      break;
+    for (std::size_t i = 0; i < OPTION_ROWS.size(); ++i) {
+      const auto &r = OPTION_ROWS[i];
+      auto e = entry(r.key, r.label, "research-options-menu: observed record; English label Host");
+      e.type = r.kind;
+      e.value = option_live_[i];
+      if (i == 3) {
+        e.enabled = false;
+        e.refusal = net_ && !in_frontend() ? "controls disabled in net game"
+                    : "controller configuration sub-screen unverified";
+      }
+      out.push_back(std::move(e));
     }
-    out.push_back(entry("entry0", "(entry 0)", "list entry 0 is not documented", false,
-                        "entry order is documented only for music at index 1"));
-    auto music = entry("music", "Music", "menu_music, index 1, type 4 float slider (Executed)");
-    music.type = 4;
-    music.value = music_.live;
-    out.push_back(music);
-    for (int i = 2; i < 13; ++i) // thirteen rows in table 0x4f6e88 (Executed)
-      out.push_back(entry("entry", "(entry " + std::to_string(i) + ")", "row of the options table; text and effect not documented", false,
-                          "this option's order and type are not documented"));
+    if (!in_frontend())
+      out.push_back(entry("menu_comm", "Communications", "pause record observed; destination Unknown", false,
+                          "communications destination Unknown"));
     break;
   }
   case Screen::OptionsLoad:
     out.push_back(entry("choice1", "Cancel (choice 1)", "options_warn box: choice 1 -> setState(-1) (Executed)"));
     out.push_back(entry("choice2", "Load options (choice 2)", "choice 2 -> browser -> state 2 copy (Executed)"));
+    break;
+  case Screen::OptionsSave:
+    out.push_back(entry("save", "Save settings", "state-14 accept commits and requests card save; English text Host"));
+    out.push_back(entry("continue", "Continue without saving", "state-14 cancel commits in memory; English text Host"));
     break;
   case Screen::LoadGame:
     out.push_back(entry("session", "Load native session save", "host save file (.ocplay/.ocnsave); the card browser is not documented"));
@@ -861,13 +946,17 @@ std::vector<std::string> Flow::notes() const {
     n.push_back("Ran: above the first difficulty the character screens take only an imported character.");
     break;
   case Screen::Options:
-    n.push_back("Only the music slider is modelled (1/120 steps, clamped 0..1, timer 0x3e4fdef8: four idle calls after the cursor lands). Other names in both lists: brightness, effects, stereo, controls, combat camera, reverse yaw, vibration, blood, subtitles, damage display, chat, markers, voice; their order and types are not documented.");
+    n.push_back("Both option tables and kinds are observed; slider edits use the documented 1/120 timer and toggle accept/left/right use pad repeat. English labels are Host; value glyphs and bars are refused. Controls and pause communications destinations remain unverified.");
+    n.push_back("Music, effects and stereo reach this client's native mixer; mono averages positional effect sides. Brightness, camera, vibration, blood, subtitles, damage, chat and markers persist locally; their gameplay application is unverified in this client.");
     n.push_back("Frames whose auto-repeat word carries left or right are stepped like the executed no-edge calls (Inferred).");
-    n.push_back("Triangle opens Load options (card state 10). Circle leaves: config_commitOptions copies the live music into the image and requests a config save when it differs.");
+    n.push_back("Triangle opens Load options (card state 10). Circle follows the front-end state-14 route or the pause query/commit; the card filename remains Unknown, so the host stores user://frontend/options.img.");
     if (options_return_ == Screen::Main)
-      n.push_back("Front end state 14 'save config?' prompt is not documented and is not shown.");
+      n.push_back("Front end state 14 query/choice call sites are Executed. The no-change choice is unverified and refused; prompt art and localized wording are Unknown.");
     else
       n.push_back("Pause list: the controls entry is disabled only in a net game.");
+    break;
+  case Screen::OptionsSave:
+    n.push_back("Front-end state 14: with changed values, accept requests a card save and cancel commits only in memory. The no-change choice is refused; prompt art and localized words are Unknown.");
     break;
   case Screen::OptionsLoad:
     n.push_back("memcard_optionsScreen state 0 message box 'options_warn' (0x3C, -1, 0, 0). Which on-screen choice is 1 and which is 2 is not documented.");

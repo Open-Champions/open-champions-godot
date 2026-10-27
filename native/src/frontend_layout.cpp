@@ -178,6 +178,7 @@ ListSpec players_list() { return {4, 0, 320, 309}; }
 ListSpec difficulty_list() { return {4, 0, 320, 309}; }
 ListSpec mode_list() { return {2, 0, 320, 309}; }
 ListSpec options_list() { return {13, 0x7u, 320, 238}; }
+ListSpec pause_options_list() { return {14, 0x7u, 320, 240}; }
 ListSpec pause_list() { return {5, 0, 320, 240}; }
 
 std::array<Draw, 2> logo_sprites() {
@@ -387,36 +388,23 @@ Scene Flow::layout() const {
   }
   case Screen::Options: {
     const bool front = in_frontend();
-    if (front)
-      add_list(s, layout::options_list(), list, cur, HOST_LIST_TEXT, Evidence::Host,
-               "list row (font, layer Executed; colour Host)");
-    else {
-      // The in-game table 0x44f218 has no captured count or geometry. Show only
-      // the two host controls that this flow actually implements.
-      for (std::size_t i = 0; i < list.size(); ++i)
-        host_text(s, 320, 220 + 28 * static_cast<int>(i),
-                  (static_cast<int>(i) == cur ? "> " : "  ") + list[i].label, Align::Centred);
-    }
-    // The value bar is host-drawn: knobs, glyphs and the live values are Unknown.
-    if (list.size() > 1 && list[1].type == 4) {
-      const auto anchors = front ? layout::list_anchors(layout::options_list()) : std::vector<layout::Point>{};
-      float live = 0;
-      std::uint32_t bits = list[1].value;
-      static_assert(sizeof(float) == sizeof(std::uint32_t), "float is 32 bits");
-      std::memcpy(&live, &bits, 4);
-      if (!(live >= 0.0f)) // also rejects NaN
-        live = 0.0f;
-      live = std::min(live, 1.0f);
-      const int bx = 336, by = front ? anchors[1].y + 4 : 252, bw = 72;
-      s.draws.push_back(rect(bx, by, bx + bw, by + 6, 7, 0x80303030, Evidence::Host, "host slider track"));
-      s.draws.push_back(rect(bx, by, bx + static_cast<int>(live * float(bw)), by + 6, 7,
-                             0x80366876, Evidence::Host, "host slider fill"));
-    }
-    host(front ? "value bars, knobs and glyphs of the option rows are Unknown"
-               : "the pause option list (table 0x44f218) was not captured; two host controls are shown");
-    s.unknown = {"what rows 0-2 control, value bars and knobs, glyphs, fade"};
+    const auto spec = front ? layout::options_list() : layout::pause_options_list();
+    add_list(s, spec, list, cur, front ? HOST_LIST_TEXT : layout::PAUSE_TEXT,
+             Evidence::Host, "list row (anchors Executed; pause tint Observed; English text Host)");
+    // The option fixture establishes anchors and frames, but no value art,
+    // dimensions or fill rule. Refuse a visual representation of the scalars.
+    host("option value bars, localized words and glyphs are Unknown; scalar art refused");
+    s.unknown = {"option value bars and knobs refused", "localized words", "controls screen",
+                 "pause transition", "retail pixel parity"};
     break;
   }
+  case Screen::OptionsSave:
+    // The state and choice calls are executed; no state-specific prompt draw
+    // geometry was captured. Keep the binding in the host diagnostic channel.
+    host(error_.empty() ? "State 14 art refused; Cross: save, Circle: memory"
+                        : "State 14 art refused; unchanged choice refused");
+    s.unknown = {"state-14 modal art and geometry refused", "instruction anchor and localized words refused"};
+    break;
   case Screen::OptionsLoad:
     host("the options-load message box text and choices are not captured");
     add_message_box(s, "Options: " + (list.size() > static_cast<std::size_t>(cur) ? list[static_cast<std::size_t>(cur)].label : std::string()), Evidence::Host);
