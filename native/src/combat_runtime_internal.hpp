@@ -87,6 +87,7 @@ struct World::State {
   std::map<Address, std::unique_ptr<Cell>> owned_heads;
   std::map<const Link *, Address> links;
   std::map<Address, std::unique_ptr<Actor>> objects;
+  std::map<Address, std::pair<objects::GameObject *, std::function<void()>>> adopted_props;
   std::map<Address, std::unique_ptr<Actor>> spells; // spell records (no object)
   std::vector<std::unique_ptr<Actor>> retired;
   std::shared_ptr<Overlay> overlay;

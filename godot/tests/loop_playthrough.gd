@@ -5,12 +5,13 @@ extends SceneTree
 # or this bound (about 90,000 ticks) ends it; nothing is forced.
 const SWING_CYCLES := 3000
 # Ticks run after the target dies so the death, XP award and loot roll settle.
-const SETTLE_TICKS := 120
+const SETTLE_TICKS := 480 # Authored probe bound, including flight/settle ticks.
 
 # Private, opt-in journey probe. The same script runs with --headless or a
 # rendered display. Only counts and generic refusal text leave the game folder.
 # --game-folder=ABS --out=ABS [--rendered]
 const CROSS := 0x40
+const CIRCLE := 0x20
 const DOWN := 0x4000
 const UP := 0x1000
 const RIGHT := 0x2000
@@ -83,6 +84,25 @@ func mark(stage: String, result: String, extra := {}) -> void:
 	for key in extra: row[key] = extra[key]
 	rows.append(row)
 	print("PLAYTHROUGH_STEP " + JSON.stringify(row))
+
+func pickup_save_refused(controller, path: String) -> bool:
+	var intact := true
+	for method in ["save_file", "save_snapshot_file", "save_player_companion"]:
+		var target := path + "." + str(method)
+		var destination := target + ".player" if method == "save_player_companion" else target
+		if FileAccess.file_exists(destination): DirAccess.remove_absolute(destination)
+		var absent: Dictionary = controller.call(method, target)
+		intact = intact and not absent.get("ok", false) and "inventory/equipment" in str(absent.get("error", "")) and not FileAccess.file_exists(destination)
+		var sentinel := "authored save refusal sentinel".to_utf8_buffer()
+		var file := FileAccess.open(destination, FileAccess.WRITE)
+		if file == null: return false
+		file.store_buffer(sentinel)
+		file.close()
+		var existing: Dictionary = controller.call(method, target)
+		intact = intact and not existing.get("ok", false) and FileAccess.get_file_as_bytes(destination) == sentinel
+		intact = intact and not FileAccess.file_exists(target + ".ocnsave.tmp") and not FileAccess.file_exists(target + ".player.tmp")
+		DirAccess.remove_absolute(destination)
+	return intact
 
 func capture(label: String) -> void:
 	if DisplayServer.get_name() == "headless": return
@@ -1538,7 +1558,85 @@ func run() -> void:
 		if target_dead or bool(polled.get("fight_failed", false)): break
 	var swing_msec := Time.get_ticks_msec() - swing_start_msec
 	if target_dead: advance(0, SETTLE_TICKS)
+	var loot_retry_kills := 0
+	var loot_retry_placements := 0
+	for retry in range(24):
+		var observed: Dictionary = scene.controller.get_observation()
+		if not observed.get("fight_ground_drops", []).is_empty() or observed.get("fight_failed", false): break
+		var next_target := {}
+		for actor in observed.get("fight_enemies", []):
+			if actor.get("dead", false) or float(actor.get("hp", 0.0)) <= 0.0: continue
+			if next_target.is_empty() or float(actor.hp) < float(next_target.hp): next_target = actor
+		if next_target.is_empty(): break
+		var spot: Vector3 = next_target.position
+		var put: Dictionary = scene.controller.fight_place_player(Vector3(spot.x - 40.0, spot.y, spot.z + 10.0), 0)
+		if not put.get("ok", false): break
+		loot_retry_placements += 1
+		advance(0, 24)
+		var retry_dead := false
+		for cycle in range(SWING_CYCLES):
+			advance(16, 6)
+			advance(0, 24)
+			if cycle % 16 != 0: continue
+			var retry_observed: Dictionary = scene.controller.get_observation()
+			for actor in retry_observed.get("fight_enemies", []):
+				if int(actor.handle) == int(next_target.handle): retry_dead = bool(actor.get("dead", false))
+			if retry_dead or retry_observed.get("fight_failed", false): break
+		if not retry_dead: break
+		loot_retry_kills += 1
+		advance(0, SETTLE_TICKS)
+		print("PLAYTHROUGH_LOOT_RETRY ", JSON.stringify({"kills": loot_retry_kills,
+			"ground_objects": scene.controller.get_observation().get("fight_ground_drops", []).size()}))
+	# Follow a real native ground object with ordinary movement. E goes through
+	# pressed-use on Player_run; no pickup call or player placement is injected.
+	var pickup_walk_ticks := 0
+	var pickup_walked := false
+	var pickup_start: Dictionary = scene.controller.get_observation()
+	var pickup_start_position: Vector3 = pickup_start.get("position", Vector3.ZERO)
+	var inventory_units_before := int(pickup_start.get("fight_inventory_units", 0))
+	var produced := false
+	var picked_up := false
+	for attempt in range(360):
+		var observed: Dictionary = scene.controller.get_observation()
+		var me: Vector3 = observed.get("position", Vector3.ZERO)
+		var target := {}
+		for drop in observed.get("fight_ground_drops", []):
+			produced = produced or bool(drop.get("spawned", false))
+			picked_up = picked_up or bool(drop.get("picked_up", false))
+			if drop.get("spawned", false) and not drop.get("picked_up", false) and not drop.get("lost", false):
+				target = drop
+				break
+		if picked_up or target.is_empty() or observed.get("fight_failed", false): break
+		var spot: Vector3 = target.position
+		var aim := Vector2(spot.x - me.x, spot.y - me.y)
+		if aim.length() < 20.0 and pickup_walked:
+			game_key(KEY_E)
+			advance(0, 1)
+		else:
+			var best := 1
+			var best_dot := -2.0
+			for cmd in candidates:
+				var v := Vector2.ZERO
+				for bit in [1, 2, 4, 8]:
+					if cmd & bit: v += basis[bit]
+				if v.length() < 0.01: continue
+				var dot := v.normalized().dot(aim.normalized())
+				if dot > best_dot:
+					best_dot = dot
+					best = cmd
+			advance(best, 2)
+			pickup_walk_ticks += 2
+			var moved: Vector3 = scene.controller.get_observation().get("position", Vector3.ZERO)
+			pickup_walked = pickup_walked or moved.distance_to(pickup_start_position) > 0.01
 	var after: Dictionary = scene.controller.get_observation()
+	for drop in after.get("fight_ground_drops", []): picked_up = picked_up or bool(drop.get("picked_up", false))
+	var inventory_units_after := int(after.get("fight_inventory_units", 0))
+	var pickup_passed := produced and picked_up and pickup_walked and inventory_units_after > inventory_units_before
+	mark("loot_pickup", "passed" if pickup_passed else "refused",
+		{"drop_produced": produced, "picked_up": picked_up, "walked": pickup_walked,
+		"walk_ticks": pickup_walk_ticks, "inventory_units_before": inventory_units_before,
+		"inventory_units_after": inventory_units_after, "rendered_pickup_verified": false,
+		"retry_kills": loot_retry_kills, "diagnostic_retry_placements": loot_retry_placements})
 	var actors_after: Array = after.get("fight_enemies", [])
 	var enemy_damaged := false
 	var enemy_died := false
@@ -1577,18 +1675,14 @@ func run() -> void:
 	var ground_drops: Array = after.get("fight_ground_drops", [])
 	var kill_evidence := enemy_died and target_dead_flag and target_hp_end <= 0.0 and int(fight_counts.get("deaths", 0)) >= 1
 	var gold_after := int(after.get("gold", -1))
-	# Round 8 traced Gold from AutoContainer, separate from the boar's
-	# zero-Gold drop. Require a runtime source witness; none is built here.
+	# WarBoar's documented zero chance must not be replaced by container Gold.
 	var auto_container_gold := bool(after.get("gold_from_auto_container", false))
 	var fight_started: bool = bool(after.get("fight_started", false)) and bool(after.get("fight_player_ready", false))
-	# The journey needs the kill, its XP, any generated item picked up and Gold.
-	# Item pickup and Gold are not reachable (refused, labelled), so the step
-	# stays "blocked_unported_combat" while they are missing.
 	var fight_passed: bool = fight_loaded and scene.real.current == fight_level \
 		and fight_started and attack_handled \
 		and not enemy_hp_before.is_empty() and enemy_damaged and kill_evidence \
-		and xp_gained > 0 and loot_items == 0 \
-		and auto_container_gold and gold_after > gold_before
+		and xp_gained > 0 and pickup_passed \
+		and gold_after == gold_before and not bool(after.get("fight_failed", false))
 	var missing_fight_steps := {}
 	if not fight_loaded or scene.real.current != fight_level: missing_fight_steps["enemy_level_entry"] = 1
 	if not fight_started: missing_fight_steps["campaign_combat_runtime"] = 1
@@ -1597,11 +1691,9 @@ func run() -> void:
 	if not enemy_damaged: missing_fight_steps["enemy_damage"] = 1
 	if not kill_evidence: missing_fight_steps["enemy_death"] = 1
 	if xp_gained <= 0: missing_fight_steps["kill_xp"] = 1
-	if loot_items > 0:
-		missing_fight_steps["loot_ground_object_spawn"] = loot_items
-		missing_fight_steps["loot_item_pickup"] = loot_items
-	if not auto_container_gold: missing_fight_steps["auto_container_gold_source"] = 1
-	if gold_after <= gold_before: missing_fight_steps["gold_gain"] = 1
+	if not produced: missing_fight_steps["loot_ground_object_spawn"] = 1
+	if not pickup_passed: missing_fight_steps["loot_item_pickup"] = 1
+	if gold_after != gold_before: missing_fight_steps["warboar_zero_gold"] = 1
 	var object_counts: Dictionary = scene.controller.script_command_counts()
 	mark("enemy_fight", "passed" if fight_passed else "blocked_unported_combat",
 		{"attack_input_handled": attack_handled, "live_enemies_before": enemy_hp_before.size(),
@@ -1712,6 +1804,8 @@ func run() -> void:
 	# The host's F5 route opens the documented in-game save screen.
 	var native_pause_intact: bool = fe.screen() == "pause" and pause_entries == 5 and not pause_save_entry
 	var save_path := out_dir.path_join("playthrough.ocplay")
+	var pickup_refusal_verified: bool = pickup_passed and pickup_save_refused(scene.controller, save_path)
+	mark("pickup_save_preflight", "refused_as_expected" if pickup_refusal_verified else "refused", {"existing_files_preserved": pickup_refusal_verified})
 	for suffix in ["", ".player", ".menus", ".level", ".campaign", ".worldstate"]:
 		if FileAccess.file_exists(save_path + suffix): DirAccess.remove_absolute(save_path + suffix)
 	fe.queue_path("save_session", save_path)
@@ -1722,11 +1816,13 @@ func run() -> void:
 	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign") and FileAccess.file_exists(save_path + ".worldstate")
 	var save_probe: Dictionary = scene.controller.save_level_object_directory(str(scene.real.levels[scene.real.current].stem)) if not saved else {}
 	var dead_state_refused: bool = not saved and str(save_probe.get("error", "")) == "dead built-Creature save state is unverified"
-	mark("in_game_save", "saved" if saved else ("refused_as_expected" if dead_state_refused else "refused"),
+	var refused_without_output: bool = pickup_refusal_verified and not saved and not FileAccess.file_exists(save_path) and not FileAccess.file_exists(save_path + ".level") and not FileAccess.file_exists(save_path + ".campaign") and not FileAccess.file_exists(save_path + ".player")
+	mark("in_game_save", "saved" if saved else ("refused_as_expected" if dead_state_refused or refused_without_output else "refused"),
 		{"screen": fe.screen(), "dead_state_refused": dead_state_refused})
 	var saved_state := FileAccess.get_file_as_bytes(save_path + ".worldstate") if saved else PackedByteArray()
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)
+	if refused_without_output and fe.screen() == "save-game": tap(CIRCLE)
 	if fe.screen() == "playing": tap(START)
 	if fe.screen() == "pause":
 		for i in range(4): tap(DOWN)
@@ -1757,7 +1853,7 @@ func run() -> void:
 		and is_equal_approx(float(restored.get("hp", -1.0)), saved_hp) \
 		and scene.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01 \
 		and quests_match
-	mark("load_and_carry", "restored" if carried else "refused",
+	mark("load_and_carry", "unavailable_save_refused" if refused_without_output else ("restored" if carried else "refused"),
 		{"screen": fe.screen(), "load_attempted": load_attempted, "status": scene.status_label.text,
 		"terrain_elements": terrain_elements,
 		"level_index_before": level_before,
@@ -1799,7 +1895,8 @@ func run() -> void:
 		cold.controller.get_presentation().get("current_position", Vector3.ZERO).distance_to(saved_position) < 0.01
 	for key in ["quest_lines", "mission_available_bits", "mission_complete_bits", "vars", "vars_nonzero"]:
 		cold_match = cold_match and cold_campaign.get(key, -1) == saved_campaign.get(key, -2)
-	mark("cold_load", "restored" if cold_match else "refused", {"opened": cold_opened, "loaded": cold_loaded,
+	var cold_refused: bool = refused_without_output and cold_opened and not cold_loaded and not FileAccess.file_exists(save_path)
+	mark("cold_load", "restored" if cold_match else ("refused_as_expected" if cold_refused else "refused"), {"opened": cold_opened, "loaded": cold_loaded,
 		"terrain_elements": int(cold.controller.get_play_capabilities().get("terrain_elements", 0))})
 	var cold_status: Dictionary = cold.controller.level_object_state_status()
 	var cold_fields: Dictionary = cold.controller.save_level_object_directory(str(cold.real.levels[cold.real.current].stem)) if cold_match else {}
@@ -1814,7 +1911,7 @@ func run() -> void:
 	var mismatch: Dictionary = cold.controller.prepare_save_file(save_path, true) if other_loaded else {}
 	var mismatch_refused: bool = other_loaded and not mismatch.get("ok", false) and \
 		"collision differs" in str(mismatch.get("error", ""))
-	mark("mismatched_display", "refused_as_expected" if mismatch_refused else "refused",
+	mark("mismatched_display", "unavailable_save_refused" if cold_refused else ("refused_as_expected" if mismatch_refused else "refused"),
 		{"different_level_loaded": other_loaded})
 	var revisited: bool = other_loaded and cold.load_real_level(level_before)
 	var revisit_status: Dictionary = cold.controller.level_object_state_status()

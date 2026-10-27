@@ -54,14 +54,13 @@ struct GroundItem {
 struct LootOutcome {
   std::string ending;          // loot_generate_drops' result word
   std::vector<GroundItem> items;
-  std::int32_t gold_objects = 0; // loot_spawnGold calls (never built here)
+  std::int32_t gold_objects = 0; // loot_spawnGold calls, bound or refused
   std::uint64_t shared_draws = 0;
 };
 // Runs loot_generateDrops for one Creature_dropLoot call over the World's
-// shared seed (0x404464). Each "make the item prop" step takes the one shared
-// draw GameObject_ctor takes (items.md section 8) and records the item; no
-// PhProp is built (the loot constructor's lump/model/texture/launch/scale
-// arguments are not in the research). A positive Gold roll is refused.
+// shared seed (0x404464). A bound adapter constructs the real PhProp/Gold and
+// owns its constructor draw. The unbound differential fixture records items
+// with GameObject_ctor's one shared draw and refuses a positive Gold roll.
 //
 // The level's monster level (g_levelMonsterLevel 0x4f714c) and the difficulty
 // (g_difficultyIdx 0x4f719c) are NOT read from the World's bytes: nothing in the
@@ -76,6 +75,12 @@ public:
   bool level_globals_bound() const { return level_bound_; }
   LootOutcome roll(const combat_runtime::LootDrop &, const std::string &reagent_filter);
   const items::Tables &tables() const { return *tables_; }
+  // Bound only by a real World adapter. Unbound callers retain the older
+  // record-only differential fixture. The callback owns allocation and the
+  // constructor draw, updating this very generator before the roll continues.
+  std::function<bool(const std::string &, items::Item &, items::Rng &)> spawn_item;
+  std::function<void(const items::Item &, std::int32_t)> throw_item;
+  std::function<void(std::int32_t, items::Rng &)> spawn_gold;
 private:
   std::shared_ptr<const items::Tables> tables_;
   Memory mem_;

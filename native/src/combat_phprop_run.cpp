@@ -212,6 +212,9 @@ struct B {
       bool named=item||s8m(obj+0x54)!=0;
       resting_ctor(block,obj,item,named);
     }
+    if (item)
+      if (const auto cb=m.callbacks.find("World_item_settled"); cb!=m.callbacks.end())
+        cb->second(m,{iv(obj),iv(block)});
     call("obj_delete",{iv(obj)});
   }
 };

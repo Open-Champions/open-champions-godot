@@ -110,6 +110,16 @@ void World::define_creature_table(Address table,
                                   const std::map<unsigned, Raw> &overrides) {
   s_->write_table(table, &overrides);
 }
+void World::adopt_prop(Address a, std::function<void()> retire) {
+  auto owner = s_->authority->objects->objects.find(a);
+  if (owner == s_->authority->objects->objects.end() || !owner->second->alive ||
+      s_->authority->find(a) != owner->second || !retire || s_->adopted_props.count(a))
+    throw Error("adopted prop requires its live registered owner and retirement callback");
+  adopt_creature(a);
+  s_->objects.at(a)->kind = State::Kind::Effect;
+  if (!s_->adopted_props.emplace(a, std::make_pair(owner->second, std::move(retire))).second)
+    throw Error("adopted prop identity already indexed");
+}
 void World::set_class_body(
     Raw function,
     std::function<void(Address, const std::vector<std::uint64_t> &)> body) {

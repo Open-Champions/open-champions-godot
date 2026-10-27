@@ -529,6 +529,27 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
   last_draws_complete_ = false;
+  if (outcome.constructor() == 0x292030 && chest_builder_) {
+    if (!external_seed_) {
+      counts_.build_refusals["Chest needs the shared session seed"] += 1;
+      return Build::NotBuilt;
+    }
+    try {
+      auto placed = record;
+      placed.props = props;
+      // Prefix match precedes the exact names; those four rows all select 0.
+      chest_builder_(c, placed, outcome.test == 0x533130 ? 4u : 0u, *external_seed_);
+      mark_built(c);
+      return Build::Built;
+    } catch (const std::exception &e) {
+      counts_.build_refusals[std::string("Chest: ") + e.what()] += 1;
+      if (variables_->object_properties.count(c)) {
+        last_draws_complete_ = true;
+        return Build::Stubbed;
+      }
+      return Build::NotBuilt;
+    }
+  }
   // Both sets of Horsemen rows call the same constructor. The factory supplies
   // the mounted argument; properties always come from the individual record.
   bool rider_row = false;

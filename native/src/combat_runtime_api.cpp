@@ -9,7 +9,7 @@ void require_full(const World::State &s) {
     throw Unsupported("a round-2 entry point needs the Full composition");
 }
 constexpr Address G_BUTTONS[] = {0x41b980, 0x41b990, 0x41b9a0, 0x41b9d0,
-                                 0x41ba10, 0x41ba20, 0x41ba30};
+                                 0x41ba10, 0x41ba20, 0x41ba30, 0x41b9c0};
 } // namespace
 World::State::Actor *World::State::find(Address a) const {
   auto i = objects.find(a);

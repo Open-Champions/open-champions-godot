@@ -173,7 +173,7 @@ func _update_menu() -> void:
 	if mode_label != null and play_mode and real != null and real.current >= 0:
 		mode_label.text = "Play mode · walk-in Triggers; physical use and gate travel require live object and campaign state."
 		if raw_observation.get("fight_player_ready", false):
-			mode_label.text = "Play mode · WASD moves · J attack / combo · K hold guard · U guard move · L heavy request · 1/2 ability slots. WarBoar sight, chase, attacks and hit reactions are active. Bodies use rest poses.\nUnarmed stand-in: guard needs equipment; heavy and abilities need learned records (refused_unknown). Minotaur construction refuses unbound Creature_init bounds. Enemy damage, held-part physics, path searches, ground loot, Gold, physical use and gate travel remain refused."
+			mode_label.text = "Play mode · WASD moves · J attack / combo · K hold guard · U guard move · L heavy request · 1/2 ability slots. WarBoar sight, chase, attacks and hit reactions are active. Bodies use rest poses.\nStarting equipment uses the native inventory; E uses nearby loot or chests; heavy and abilities need learned records (refused_unknown). Minotaur construction refuses unbound Creature_init bounds. Enemy damage, held-part physics, path searches, Gold, physical dialog use and gate travel remain refused."
 
 func open_game_folder(path: String) -> bool:
 	if not real.open_disc(path):
@@ -584,6 +584,9 @@ func attach_level_script(carry_campaign := false) -> bool:
 	for name in controller.combat_resource_lump_names():
 		if real.files.has(name):
 			resource_lumps[name] = FileAccess.get_file_as_bytes(real.files[name])
+		else:
+			var image: PackedByteArray = real.read_entry(level.gob, "", name)
+			if not image.is_empty(): resource_lumps[name] = image
 	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world, resource_lumps)
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
@@ -824,6 +827,7 @@ func handle_input_event(event: InputEvent) -> bool:
 			return true
 	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
 		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if key == KEY_E and controller.world_use(): return true
 		if TALK_KEYS.has(key) and controller.script_level_request().get("ok", false):
 			var open: bool = controller.dialog_status().get("open", false)
 			if TALK_KEYS[key] is String:

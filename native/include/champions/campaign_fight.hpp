@@ -57,6 +57,9 @@ struct GroundDrop {
   std::string kind;
   std::int32_t category = 0, count = 0;
   bool spawned = false;
+  Address address = 0;
+  bool picked_up = false, lost = false;
+  Vec3 position{};
 };
 struct Counts {
   std::size_t ticks = 0;
@@ -79,6 +82,8 @@ struct Counts {
   std::size_t boar_state_changes = 0, boar_attack_entries = 0, boar_hit_events = 0;
   std::size_t player_deaths = 0;
   std::size_t close_menu_requests = 0; // local presentation consumes this serial
+  std::size_t pickups = 0, pickup_recipients = 0, prompts = 0;
+  std::size_t starting_grants = 0, chests_built = 0, chests_opened = 0;
 };
 struct DeathView {
   bool running = false, animation_started = false;
@@ -106,6 +111,7 @@ public:
   // The player's animation lump (class model definition) name for a player
   // model index 0..11, read from the executable; empty when unavailable.
   static std::string player_animation_lump(const arena_modes::Executable &, unsigned model_index);
+  static std::vector<std::string> pickup_resource_lumps(const arena_modes::Executable &);
   struct PlayerStart {
     Vec3 position{};
     Raw facing = 0, hp = 0;
@@ -113,6 +119,7 @@ public:
     // The base level name (g_levelName) whose g_levelTable row supplies the
     // kill plane and level flag word the original game_loadLevel stores.
     std::string level_name;
+    bool grant_starting_items = false;
   };
   // After the objects are adopted: adopts the built actors into the combat
   // World and spawns the session player. Returns an empty string on success or
@@ -122,6 +129,7 @@ public:
   // movement/attack/guard/swap bits plus heavy and two ability-slot requests.
   void tick(std::uint32_t command);
   void release_input();
+  bool request_use();
   // DIAGNOSTIC ONLY, not an original routine: put the player at a point so a
   // scripted run can start a fight without path finding through the level.
   // No terrain or bounds check. Updates the grid cell; ground contact settles
@@ -139,6 +147,7 @@ public:
   const Counts &counts() const;
   const std::vector<AwardView> &awards() const;
   const std::vector<GroundDrop> &ground_drops() const;
+  void require_supported_save() const;
   // Labelled refusals by reason (what was needed, and why it stayed refused).
   const std::map<std::string, std::size_t> &refusals() const;
   combat_runtime::World &world();

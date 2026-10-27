@@ -11,6 +11,7 @@ add_library(champions-combat-runtime
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_move.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_melee.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_defence.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_pickups.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_tick.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_ranged.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_monsters.cpp"

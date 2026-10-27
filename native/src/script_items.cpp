@@ -463,8 +463,10 @@ std::uint64_t Service::machine_service(View &v, const std::string &name, const s
     variables_.quest_set(var, static_cast<amx::Cell>(sword(std::uint32_t(args.at(1)))));
     return 0;
   }
-  if (name == "script_runByName")
+  if (name == "script_runByName") {
+    if (delegates.count(name)) return delegate(name, args);
     throw Refused("equipping a weapon runs a notify script inside inventory_equipItem; not composed here");
+  }
   return delegate(name, args);
 }
 

@@ -214,6 +214,9 @@ public:
   std::uint32_t generator_spawn(std::uint32_t generator, std::uint32_t type_name_at, const std::string &type_name);
 
   const std::array<std::uint8_t, ITEM_SIZE> &record() const { return scratch_; }
+  // A world item's owned 72-byte record enters the same inventory path as
+  // script grants and menus. No alternate bag representation is introduced.
+  void set_record(const std::array<std::uint8_t, ITEM_SIZE> &record) { scratch_ = record; }
 
 private:
   std::uint64_t delegate(const std::string &, const std::vector<std::uint64_t> &);

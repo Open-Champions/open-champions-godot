@@ -83,6 +83,7 @@ public:
   // DIAGNOSTIC, not an original routine (scripted runs only).
   godot::Dictionary fight_place_player(const godot::Vector3 &position, int64_t facing);
   godot::Dictionary fight_diagnostic_lethal_hit();
+  bool world_use();
   // Save/load: put the saved player position and health back (not an original routine).
   godot::Dictionary fight_restore_player(const godot::Vector3 &position, int64_t facing, int64_t hp_raw);
 private:
@@ -130,8 +131,10 @@ private:
   void remember_script_fade();
   std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
   std::optional<champions::simulation::rta::player_state::Record> player_;
+  bool starting_items_pending_ = false;
   // Presentation identity: advances whenever a session player record is replaced.
   std::uint64_t player_record_revision_ = 0;
+  std::uint64_t inventory_record_revision_ = 0;
   void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
                               const champions::simulation::rta::player_state::Record &);
   champions::simulation::rta::player_state::Record observed_player() const;

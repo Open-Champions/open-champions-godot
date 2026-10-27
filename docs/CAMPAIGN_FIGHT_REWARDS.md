@@ -1,5 +1,9 @@
 # What a kill gives the session player (valor fight, round 2)
 
+Historical round-2 report. The ground-object and starting-equipment blockers
+below are superseded by [PICKUPS_IMPLEMENTATION.md](PICKUPS_IMPLEMENTATION.md),
+which records the current implementation, gates and remaining refusals.
+
 Native code: `native/src/campaign_rewards.cpp` (`campaign_rewards::give_exp`,
 `campaign_rewards::Loot`), wired into `campaign_fight.cpp`. Evidence is the
 research repositories only: `t3/research-levelup` 576b41c
@@ -83,6 +87,26 @@ in the research. So the flight, the rest as an `ItemProp` (documented in
 `itemprop_tryPickup` -> `inventory_giveItem`, documented in `pickups.md` section
 3) have nothing to act on. The generated item shows in the observation as
 `fight_ground_drops` with `spawned: false` and as a counted refusal.
+
+## Campaign use binding
+
+The campaign binds `World::Button::Use` through the same adapter as attack
+and block. Its initial mask is `0x80`, not the executable image's zero
+initializer at `0x41b9c0`. Observed/Executed provenance: `t3/research-options-menu`
+`603b2b72`, `docs/options-menu.md` (Applying values and persistence), and
+`t3/research-saves` `8d43286b`, `docs/save-format.md` (config defaults): both
+supported control schemes keep the fourth mask at `0x80`.
+`t3/research-pickups` `9911a6b`, `tools/ee_tests.py` (`BUTTON_TABLES` and
+`commit_options`), maps that fourth config word to `g_btnUse` at `0x41b9c0`.
+This selects the evidenced default for the client, not a guessed physical
+controller button or a complete controls-screen port. Later use requests read
+the live binding, so rebinding remains effective. `Player_run`'s K1 gate and
+`Player_interact`'s pressed-only, prompt, range and capacity rules are unchanged
+(`t3/research-loot-drop` `77c2f70`, `docs/loot-drop.md` section 5).
+
+The use binding does not relax the PP2 Chest, notification or save refusals.
+Inventory/equipment, changed Chest/item worlds and pending Gold still cannot
+be saved through the scalar-only persistence path.
 
 ## Gold
 

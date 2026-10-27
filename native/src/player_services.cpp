@@ -75,6 +75,11 @@ bool Bundle::touches_water(const Vec3 &p, Raw radius, bool padded) const {
   return false;
 }
 combat_runtime::Services Bundle::services(combat_runtime::Services s) {
+  s.terrain_sweep = [this](const Vec3 &p, const Vec3 &d, Raw mask, Raw radius) {
+    const auto r = world_queries::terrain_sweep_circle(level_, radius, p, d, mask);
+    return std::array<Raw, 3>{r.time, r.normal ? (*r.normal)[0] : 0,
+                             r.normal ? (*r.normal)[1] : 0};
+  };
   s.slide = [this](const Vec3 &p, const Vec3 &d, Raw mask, Raw radius) {
     const auto r = world_queries::world_slide_move(level_, radius, p, d, mask);
     combat_runtime::Slide out;

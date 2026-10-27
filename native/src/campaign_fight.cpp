@@ -7,11 +7,14 @@
 #include "champions/player_name_format.hpp"
 #include "champions/script_items.hpp"
 #include "champions/script_effects.hpp"
+#include "champions/pickups.hpp"
 #include "champions/creature_anim/runtime.hpp"
 #include "champions/model.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
 #include "champions/session_control.hpp"
 #include <algorithm>
+#include <cstring>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace champions::simulation::rta::campaign_fight {
@@ -20,6 +23,7 @@ namespace {
 // The pad mapping the Full composition fixture uses for the client (combat_play):
 // the attack button mask. A host choice, not a recorded original word.
 constexpr Raw ATTACK_MASK = ATTACK, BLOCK_MASK = GUARD, SWAP_MASK = GUARD_MOVE;
+constexpr Raw USE_MASK = 0x80;
 // Player_ctor's 12 model definitions (research-player-model 7f13899,
 // docs/spec/player-model-resources.md): word 0 names the animation LMP, words
 // 1..111 (8 bytes apart) name the slot entries.
@@ -29,7 +33,7 @@ constexpr std::array<std::uint32_t, 12> PLAYER_DEFINITIONS{
 // Unarmed weapon animation class (docs/player.md: 5 = unarmed). Rows are 0x68
 // apart; idle/walk/run layers at +0x44, +0x4c, +0x54, +0x5c
 // (research-player-anim cda95dc, player-animation-selection.md section 1-2).
-constexpr unsigned UNARMED_CLASS = 5, ROW_SIZE = 0x68;
+constexpr unsigned ROW_SIZE = 0x68;
 constexpr std::array<unsigned, 4> BASE_TRACK_OFFSETS{0x44, 0x4c, 0x54, 0x5c};
 constexpr std::uint32_t BASE_TRACK_FLAGS = 0x1205;
 constexpr Address PLAYER_LUMP_TOKEN = 0xa0000000;
@@ -41,7 +45,6 @@ constexpr std::array<std::pair<std::uint32_t, std::uint32_t>, 2> NAME_RANGES{
     {{0x535800, 0x536300}, {0x5375c0, 0x537d00}}};
 constexpr Address PLAYERS = C::PLAYERS, RECORD = C::RECORD_SIZE;
 
-Raw bits_of(std::int32_t v) { return Raw(v); }
 } // namespace
 
 void bind_minotaur_boundaries(arena_monsters::Model &m, C::World &world, Counts &counts,
@@ -87,6 +90,7 @@ struct Fight::Impl {
   std::shared_ptr<creature_anim::Runtime> anim = std::make_shared<creature_anim::Runtime>();
   struct Dispatch {
     std::function<bool(Address)> run;
+    std::function<bool(objects::GameObject &, std::int64_t)> destroy;
   };
   std::shared_ptr<Dispatch> dispatch = std::make_shared<Dispatch>();
   std::unique_ptr<C::World> world;
@@ -127,6 +131,7 @@ struct Fight::Impl {
   std::unique_ptr<campaign_rewards::Loot> loot;
   std::vector<GroundDrop> ground_drops;
   std::vector<AwardView> awards;
+  #include "campaign_pickups.inc"
   campaign_rewards::Memory shared_memory() {
     return {[this](Address a, unsigned n) { return std::uint64_t(world->read(a, n)); },
             [this](Address a, unsigned n, std::uint64_t v) { world->write(a, n, v); }};
@@ -249,24 +254,31 @@ struct Fight::Impl {
       return;
     }
     if (!loot) {
-      const auto reader = [e = exe](std::uint32_t a, std::size_t n) {
-        std::vector<std::uint8_t> out;
-        out.reserve(n);
-        for (std::size_t i = 0; i < n; ++i) out.push_back(e->byte(a + std::uint32_t(i)));
-        return out;
-      };
-      loot = std::make_unique<campaign_rewards::Loot>(script_items::image_tables(reader), shared_memory());
+      prepare_items();
+      loot = std::make_unique<campaign_rewards::Loot>(item_tables, shared_memory());
     }
     loot->bind_level_globals(globals->monster_level, globals->difficulty);
     // The reagent filter is a picture-name string address; the boar passes none.
     if (d.filter) throw C::Unsupported("loot_generateDrops: a reagent filter string is not bound");
+    loot->spawn_item = [this, d](const std::string &kind, items::Item &item, items::Rng &rng) {
+      auto pos = d.position;
+      pos[0] = add(pos[0], ZERO); pos[2] = add(pos[2], d.z);
+      return make_drop(kind, item, rng, pos, 0x520030) != 0;
+    };
+    loot->throw_item = [this, d](const items::Item &, std::int32_t angle) {
+      if (last_drop) world->throw_item(last_drop, Raw(angle), d.throw_speed);
+    };
+    loot->spawn_gold = [this, d](std::int32_t amount, items::Rng &rng) {
+      const auto services = bundle.services();
+      auto position = items::gold_scatter(rng, [&](Raw x, Raw y, Raw z) {
+        return services.terrain_height({x, y, z}, 0x41400000);
+      }, d.position[0], d.position[1], d.position[2]);
+      world->write(C::SHARED_SEED, 4, rng.seed);
+      if (world->spawn_gold(position, Raw(amount))) { rng.seed = read(C::SHARED_SEED); ++rng.draws; }
+    };
     const auto out = loot->roll(d, {});
     counts.loot_items += out.items.size();
     counts.loot_shared_draws += out.shared_draws;
-    for (const auto &g : out.items) {
-      ground_drops.push_back({g.kind, g.category, g.count, false});
-      refuse("loot item prop (" + g.kind + "): the ground object is not built; the loot PhProp_ctor's lump/model/texture, part mask, launch flags and scale, and PhProp_initPhysics' inputs are not in the research (the item record and the constructor's one shared draw are kept)");
-    }
   }
 
   // ---- services ----------------------------------------------------------
@@ -322,7 +334,11 @@ struct Fight::Impl {
     base.mesh_joint = [](Raw, Raw) -> Raw {
       throw C::Unsupported("model_getMeshJoint: model data not bound");
     };
-    base.resref = [](Raw) -> Raw {
+    base.resref = [this](Raw ref) -> Raw {
+      if (ref == 0x6e01b0) {
+        refuse("Gold animation reference is unbound; only its documented countdown is run");
+        return 0;
+      }
       throw C::Unsupported("resref_get: resource references not bound");
     };
     base.sample_point = [](Raw, Address, const Vec3 &, Raw, Raw, Raw) -> Vec3 {
@@ -332,7 +348,8 @@ struct Fight::Impl {
       return boar_hide_mask(model,variant);
     };
     base.resource = [this](const C::ResourceQuery &q) -> Raw {
-      if (q.lump_is_text || q.lump != PLAYER_LUMP_TOKEN) return 0;
+      if (q.lump_is_text) return item_resource(q.lump_text, q.entry);
+      if (q.lump != PLAYER_LUMP_TOKEN) return item_resource(runtime_string(q.lump), q.entry);
       if (q.entry.empty() || !player_entry(q.entry)) return 0;
       return player_token(q.entry);
     };
@@ -350,6 +367,19 @@ struct Fight::Impl {
         world->write(format_scratch + Address(i), 1, i < name.size() ? std::uint8_t(name[i]) : 0);
       return format_scratch;
     };
+    base.model_bounds = [this](Raw model, std::uint64_t mask) {
+      const auto it = item_resources.find(model);
+      if (it == item_resources.end()) {
+        if (actors) if (const auto bytes = actors->resource_bytes(model))
+          return pickups::model_bounds(*bytes, mask);
+        throw C::Unsupported("model bounds resource is not loaded");
+      }
+      const auto &b = it->second.bytes;
+      return pickups::model_bounds({b.data(), b.size()}, mask);
+    };
+    base.interact_prompt = [this](Address a, Raw slot) { return pickup_prompt(a, slot); };
+    base.interact_use = [this](Address a, Raw slot) { pickup_use(a, slot); };
+    base.item_settled = [this](Address from, Address replacement) { item_settled(from, replacement); };
     base.is_class = [](Address, const std::string &) { return false; };
     base.loot_generate = [this](const C::LootDrop &d) { roll_loot(d); };
     base.spawn_named_item = [](const Vec3 &, Raw) -> void {
@@ -672,13 +702,6 @@ struct Fight::Impl {
     player_handle = world->retain(player);
     refuse("net_getCamFlag: host-sourced (1 only while a script dialog is open; inventory, shop and cutscene camera modes not covered)");
     refuse("net_getCamYaw: host-sourced (the Godot sandbox camera's yaw, not Camera_getYaw; movement is relative to the host camera)");
-    // VF-1: player_giveStartingItems 0x1acc78 is not ported and the research
-    // does not establish which item the class 6 / model 11 character has
-    // equipped on this route (campaign-combat-handoff.md: "the normal campaign
-    // route's equipped player remains Unknown"). The record keeps weapon class
-    // 5 (unarmed, docs/player.md) with no equipment as a host stand-in; damage
-    // or kill results in this mode are not campaign evidence.
-    refuse("starting_equipment: refused_unknown (player_giveStartingItems not ported; weapon class 5 unarmed stand-in, not campaign evidence)");
     const Address def = read(player + 0x24);
     const auto table = PLAYER_DEFINITIONS.at(start.model_index);
     // The block the player's slot words are read from: lump word, then for
@@ -709,6 +732,17 @@ struct Fight::Impl {
     player_state = anim->add_state(8);
     bundle.bind_actor(player, player_state);
     states[player] = player_state;
+    prepare_items();
+    if (start.grant_starting_items) {
+      const auto given = host->items().counts.given;
+      pickups::give_starting_items(host->items(), 0, read(PLAYERS + 0x50),
+                                   [this](Address a) { return exe->string(a); });
+      counts.starting_grants += host->items().counts.given - given;
+    }
+    script_items::BinderView inventory(host->variables().memory);
+    script_items::recalc_load_limits(inventory);
+    // Player_ctor's documented contact radius (loot-drop section 6).
+    world->write(player + 0x1c, 4, 0x41400000);
     reset_idle_anim();
     player_ok = true;
     gold_start = read(PLAYERS + 0xe4);
@@ -718,11 +752,12 @@ struct Fight::Impl {
   // player-animation-selection.md section 2): idle, walk, run 1 and run 2 of
   // the weapon-class row into cells 0..3.
   void reset_idle_anim() {
-    if (!player || (std::int32_t)read(PLAYERS + 0xac) <= 0 && !lt(0, read(PLAYERS + 0xac))) return;
+    if (!player || !lt(0, read(PLAYERS + 0xac))) return;
     const Address def = read(player + 0x24);
     anim->anim_clear(player_state);
     for (unsigned i = 0; i < BASE_TRACK_OFFSETS.size(); ++i) {
-      const auto token = read(def + UNARMED_CLASS * ROW_SIZE + BASE_TRACK_OFFSETS[i]);
+      const auto cls = std::int8_t(read(PLAYERS + 0x4a86, 1));
+      const auto token = read(def + Address(cls) * ROW_SIZE + BASE_TRACK_OFFSETS[i]);
       const auto clip = clip_for(token);
       if (!clip) {
         refuse("player_resetIdleAnim: base clip resource unavailable");
@@ -751,9 +786,11 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
   p.adapter->bind_button(0, C::World::Button::Attack, ATTACK_MASK);
   p.adapter->bind_button(0, C::World::Button::Block, BLOCK_MASK);
   p.adapter->bind_button(0, C::World::Button::Swap, SWAP_MASK);
+  p.adapter->bind_button(0, C::World::Button::Use, USE_MASK);
   p.bundle.set_local_slot(0);
   p.dispatch->run = [impl = p_.get()](Address a) -> bool {
     auto &q = *impl;
+    if (q.chest_run(a)) return true;
     if (q.actors)
       if (auto *actor = q.actors->find(a)) {
         (void)actor;
@@ -774,10 +811,27 @@ Fight::Fight(std::shared_ptr<WorldAuthority> authority,
 }
 Fight::~Fight() {
   p_->dispatch->run = {};
+  p_->dispatch->destroy = {};
 }
 void Fight::install(script_commands::Host &host) {
   auto &p = *p_;
   p.host = &host;
+  p.dispatch->destroy = [impl = p_.get()](objects::GameObject &owner, std::int64_t flags) {
+    if (!impl->live_chest(owner.addr) || impl->authority->find(owner.addr) != &owner) return false;
+    if (flags != 3) throw C::Unsupported("Chest destruction requires the researched freeing destructor flags 3");
+    impl->world->destroy(owner.addr);
+    return true;
+  };
+  const auto bind_destroy = [dispatch = p.dispatch](auto previous) {
+    return [dispatch, previous](objects::GameObject &owner, std::int64_t flags) {
+      if (dispatch->destroy && dispatch->destroy(owner, flags)) return;
+      if (previous) previous(owner, flags);
+      else throw C::Unsupported("factory object destructor has no bound owner");
+    };
+  };
+  host.variables().world->on_destroy = bind_destroy(host.variables().world->on_destroy);
+  auto &host_destroy = host.variables().host->game->on_destroy;
+  host_destroy = bind_destroy(host_destroy);
   p.actors = std::make_unique<campaign_actors::Runtime>(*p.authority->objects, host.resources(),
                                                        p.boar_services(), &p.authority->memory);
   p.actors->set_contain_refusals(true);
@@ -792,6 +846,9 @@ void Fight::install(script_commands::Host &host) {
   host.set_creature_builder([impl = p_.get()](const script_commands::Host::CreatureRequest &r) {
     impl->build_boar(r);
   });
+  host.set_chest_builder([impl = p_.get()](Address a, const level_flow::Record &r, unsigned variant, SharedRandom &seed) {
+    impl->build_chest(a, r, variant, seed);
+  });
 }
 std::string Fight::player_animation_lump(const arena_modes::Executable &exe, unsigned model_index) {
   if (model_index >= PLAYER_DEFINITIONS.size()) return {};
@@ -800,6 +857,13 @@ std::string Fight::player_animation_lump(const arena_modes::Executable &exe, uns
   } catch (const std::exception &) {
     return {};
   }
+}
+std::vector<std::string> Fight::pickup_resource_lumps(const arena_modes::Executable &exe) {
+  std::vector<std::string> names{exe.string(0x520030), exe.string(0x5326b0), exe.string(0x549528)};
+  for (unsigned k = 0; k < 5; ++k) names.push_back(exe.string(exe.word(exe.word(0x501698 + 4 * k))));
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  return names;
 }
 std::string Fight::start(const PlayerStart &start) {
   auto &p = *p_;
@@ -826,6 +890,15 @@ std::string Fight::start(const PlayerStart &start) {
         if (!p.adopted[entry.first]) p.world->adopt_creature(entry.first);
         if (p.states.count(entry.first)) p.bundle.bind_actor(entry.first, p.states[entry.first]);
       }
+    for (auto &chest : p.chests) {
+      const auto address = chest.first;
+      p.world->adopt_prop(address, [impl = p_.get(), address] {
+        auto &state = impl->chests.at(address);
+        impl->anim->anim_clear(state.animation);
+        impl->anim->anim_state_dtor(state.animation);
+        impl->chests.erase(address);
+      });
+    }
   } catch (const std::exception &e) {
     p.error = e.what();
     p.failed = true;
@@ -897,7 +970,7 @@ std::string Fight::start(const PlayerStart &start) {
       std::move(death_services));
   p.death->level_enter(p.player_ok ? 1 : 0);
   p.world->write(0x4f85b0, 4, 1);
-  if (!player_error.empty()) p.refuse(player_error);
+  if (!player_error.empty()) { p.refuse(player_error); p.error = player_error; p.failed = true; }
   return player_error;
 }
 void Fight::tick(std::uint32_t command) {
@@ -946,6 +1019,8 @@ void Fight::tick(std::uint32_t command) {
         else if (!(moves.held & GUARD) || !p.read(p.player + 0x47f, 1))
           p.refuse_move("guard_move: unavailable (hold an established guard before pressing swap; no universal dodge)");
       }
+      if (p.pending_use) in.pressed |= p.read(0x41b9c0);
+      p.pending_use = false;
       p.adapter->pad_input(0, in);
       // net_getCamFlag offline is "the camera is not in follow mode"
       // (docs/spec/movement-camera.md 7.1, `mode != 1`). Mode 1 holds except
@@ -956,7 +1031,9 @@ void Fight::tick(std::uint32_t command) {
       p.bundle.set_camera_flag(0, p.dialog_open && p.dialog_open() ? 1 : 0);
     }
     p.world->clear_history();
+    p.prompt_object = 0;
     p.adapter->ready_tick(frame);
+    p.refresh_drops();
     p.counts.ticks += 1;
     for (const auto &event : p.world->events()) {
       if (event.name == "player_dead") {
@@ -985,6 +1062,12 @@ void Fight::release_input() {
   if (p.player_ok && !p.failed) p.adapter->pad_input(0, {});
 }
 
+bool Fight::request_use() {
+  auto &p = *p_;
+  if (!p.player_ok || !p.prompt_object || !p.world->contains(p.prompt_object) || p.failed) return false;
+  p.pending_use = true;
+  return true;
+}
 // DIAGNOSTIC ONLY: unchecked write (no terrain or bounds test); see the header.
 std::string Fight::place_player(const Vec3 &position, Raw facing) {
   auto &p = *p_;
@@ -1065,6 +1148,12 @@ std::vector<EnemyView> Fight::enemies() const {
 const Counts &Fight::counts() const { return p_->counts; }
 const std::vector<AwardView> &Fight::awards() const { return p_->awards; }
 const std::vector<GroundDrop> &Fight::ground_drops() const { return p_->ground_drops; }
+void Fight::require_supported_save() const {
+  if (!p_->host) throw C::Unsupported("Saving refused: fight has no authoritative host.");
+  const bool changed_world = p_->counts.chests_opened != 0 || p_->counts.chests_built != p_->chests.size() ||
+      std::any_of(p_->ground_drops.begin(), p_->ground_drops.end(), [](const GroundDrop &drop) { return drop.spawned; });
+  pickups::require_supported_save(p_->host->variables().memory, changed_world);
+}
 const std::map<std::string, std::size_t> &Fight::refusals() const {
   static std::map<std::string, std::size_t> merged;
   merged = p_->refusals;

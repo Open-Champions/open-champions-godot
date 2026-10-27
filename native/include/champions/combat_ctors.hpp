@@ -178,6 +178,9 @@ void phprop_ctor2(A::Model &, Address prop, const Vec3 &position, Raw facing,
                   Address item, Raw scale);
 void gold_ctor2(A::Model &, Address gold, const Vec3 &position, Raw amount);
 void phprop_run(A::Model &, Address prop);
+void phprop_init_physics(A::Model &, Address prop, Raw launch_flags);
+void itemprop_ctor2(A::Model &, Address prop, const Vec3 &, Address item, Raw launch_flags);
+void itemprop_ctor3(A::Model &, Address prop, const Vec3 &, Address item, const Mat34 &);
 void gutchunk_run(A::Model &, Address chunk);
 // research-combat-5 f33d1a3, rigidbody-init.md: executed prop body services.
 void rigidbody_init(A::Model &, Address body, Raw mass, Raw factor,
