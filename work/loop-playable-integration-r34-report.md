@@ -1,4 +1,4 @@
-STATUS: MORE — pickup repair PASS (10→11 headless/rendered); build, focused tests, CTest 253/253, Godot 54/54 and unchanged FULL_TRACE PASS; broader journey blocked by retained refusals.
+STATUS: MORE — WAVE 34 VERIFIED (2026-10-27). Eight audited branches integrated (play-levelup, play-quests, play-save, native-hud, play-pickups, play-dialog, play-mission2, matrix-errors); integration-made fixes 30d78414..dcf6d30f audited PASS (audits/wave34-integration-fixes.md). CTest 253/253, Godot 54/54, strict matrix, combat, save/load, FULL_TRACE unchanged, sweeps, probes; pickup restored 10→11 headless and rendered; journey ends at explicit bounded refusals (player death reload, unsupported dialog trigger stops the script, loading readiness).
 
 # Playable integration wave 34 — 2026-10-26
 
