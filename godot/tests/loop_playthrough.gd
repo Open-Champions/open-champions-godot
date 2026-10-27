@@ -871,6 +871,9 @@ func run() -> void:
 		if fe.screen() == "save-game": tap(CROSS)
 		point_saved = fe.screen() == "saved" and FileAccess.file_exists(point_path)
 		if fe.screen() == "saved": tap(CROSS)
+		# A refused save stays on its screen. Close that UI through the existing
+		# cancel input; point_saved remains false and all refusal checks remain.
+		elif fe.screen() == "save-game": tap(CIRCLE)
 	var point_after: Dictionary = scene.controller.get_observation()
 	var point_unchanged := true
 	for key in ["gold", "experience", "level", "record_max_hp_raw", "record_max_mana_raw", "player_record_revision"]:
@@ -946,6 +949,10 @@ func run() -> void:
 			portal_trigger_found = true
 			break
 	var portal_result: Dictionary = scene.controller.script_run_exit(12) if at_hub and dialog_choice_completed and menu_before.get("first_story_available", false) and portal_trigger_found else {"ok": false}
+	var portal_stop: Dictionary = scene.controller.script_command_counts()
+	mark("hub_portal_script_stop", "refused_script_stopped" if portal_stop.get("script_stopped", false) else "not_stopped",
+		{"stopped": portal_stop.get("script_stopped", false), "refusal": portal_stop.get("last_refusal", ""),
+		"trigger_error": portal_result.get("error", ""), "refusal_stops": portal_stop.get("refusal_stops", 0)})
 	var portal_repeat: Dictionary = scene.controller.script_run_exit(12) if portal_result.get("ok", false) else {"ok": false}
 	var portal_request_ok: bool = portal_trigger_found and portal_result.get("ok", false) and int(portal_result.get("portal_requests", -1)) == 1 \
 		and portal_repeat.get("ok", false) and int(portal_repeat.get("portal_requests", -1)) == 0
@@ -1412,6 +1419,12 @@ func run() -> void:
 	var fight_loaded := false
 	if fight_level >= 0:
 		fight_loaded = scene.load_real_level(fight_level)
+		if not fight_loaded:
+			mark("fight_level_departure", "refused", {"reason": scene.status_label.text, "ordinary_route_verified": false})
+			# Independent diagnostic selection, like the save branch's object-level
+			# census: do not claim a successful departure/checkpoint of that level.
+			fight_loaded = scene.load_real_level(fight_level, false, "", "", "", false)
+			mark("fight_level_diagnostic", "loaded" if fight_loaded else "refused", {"ordinary_route_verified": false})
 		if fight_loaded:
 			scene.start_play()
 			help_close()
