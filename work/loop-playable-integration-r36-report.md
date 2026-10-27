@@ -74,3 +74,7 @@ Unchanged `tools/run_loop_playthrough.py`, serial headless/rendered; evidence `w
 Matches wave 35 step counts/endpoints and required pickup. Six refusal kinds each. Zero retry kills/diagnostic retry placements; 52 pickup walking ticks versus wave 35's 26, recorded without changing harness/timing/RNG. Disc file counts **994 before / 994 after**. Existing initial diagnostic placement remains labelled; no normal-route combat or campaign acceptance. Wrapper exit 1 preserves full-journey refusal.
 
 Inspected actual rendered `05-fight-attempt.png`: fight presentation and diagnostic label show one loot item and one picked up. This is not original-client pixel parity; rendered_pickup_verified=false remains distinct from wrapper pickup_verified=true. Unsupported trigger stops, ordinary departure/checkpoint refusal for dead Creature state, loading prerequisites and unsuccessful death reload remain explicit. One ObjectDB exit-leak warning each; no strict errors. No journey, baseline, fixture or acceptance rule changed.
+
+## Full CTest result record
+
+After pending checkpoint `4b6aebd4`, full `ctest --test-dir build/native --output-on-failure -j 3` on merged runtime `27fbd8af` completed **257/257 PASS**, **796.34 s**, exit 0. No timeout, therefore no isolated timeout rerun required. Evidence `work/playable-wave36/ctest.out`. One new Mission 1 native test accounts for the increase from wave 35's 256. No assertion, fixture or baseline weakened. This separate result record supersedes the earlier pending state.
