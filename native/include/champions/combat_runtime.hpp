@@ -129,6 +129,10 @@ struct Services {
   std::function<Raw(Raw model)> sample_point_count;
   // Nightmare charge contact excludes players in knockdown animation.
   std::function<bool(Address)> in_knockdown_anim;
+  // Creature slot 19 (0x118418), reached by the MiniBoss meter: actor and
+  // output buffer. ref_creature.py leaves its body as an external call-out.
+  // A missing service refuses; a host may supply its own presentation only.
+  std::function<void(Address actor, Address output)> display_name;
   // model_getMeshJoint 0x179358 (model, mesh index) -> the u8 at +6 of the
   // 10-byte mesh record (model-texture.md, mesh record). The record is loaded
   // data (the user's disc at run time); the research models the call as an
@@ -256,6 +260,12 @@ public:
                                                const Spawn &rider,
                                                const Spawn &mount);
   void set_mounted_state(Address mount, Raw state);
+  // The four audited Nightmare mount lists. Other non-null lists refuse;
+  // absent keys return no string / the supplied integer default.
+  std::optional<std::string> property_string(Address, const std::string &key) const;
+  std::int32_t property_int(Address, const std::string &key,
+                            std::int32_t fallback = 0) const;
+  Address find_by_name(const std::string &) const;
   Address spawn_player(unsigned slot, const Spawn &, int strength = 20,
                        int level = 1);
   bool contains(Address) const;

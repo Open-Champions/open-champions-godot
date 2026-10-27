@@ -1,4 +1,5 @@
 #include "combat_runtime_internal.hpp"
+#include "champions/horsemen_properties.hpp"
 
 // Synthetic placement only. The fixture supplies HP and damage statistics;
 // the executed Horsemen/Nightmare run and set-state bodies own all later work.
@@ -71,6 +72,29 @@ std::array<Address, 2> World::State::spawn_mounted_horseman(
   auto m = place(0x3d8, mount, VT_NIGHTMARE,
                  {{4, NIGHTMARE_RUN}, {5, 0x270b4c}, {10, 0x27142c},
                   {11, 0x271484}, {27, NIGHTMARE_STATE}});
+  // GameObject_ctor stores the fixed mount list and registers its name;
+  // Creature_ctor consumes miniboss=1 (research 338d459, section 2.2).
+  const auto &props = horsemen_properties::mounts[variant];
+  auto text = [&](Address at, const std::string &value) {
+    for (std::size_t i = 0; i <= value.size(); ++i)
+      w(at + Raw(i), 1, i == value.size() ? 0 : std::uint8_t(value[i]));
+  };
+  // ref_arena_monsters.py S_MINIBOSS / _prop_int, audited 338d459.
+  text(0x52fa60, "MiniBoss");
+  text(0x52fa10, "Dead"); // S_DEAD, same pin ref_arena_monsters.py:105
+  // Same pin, S_DEATHSCRIPT / S_DROPITEM and spec arena-monsters 2.5.
+  text(0x52fbf8, "deathScript");
+  text(0x52fc08, "dropitem");
+  text(props.miniboss_text, "miniboss=1");
+  text(props.name_text, std::string("name=") + props.name);
+  w(props.list, props.miniboss_text);
+  w(props.list + 4, props.name_text);
+  w(props.list + 8, 0);
+  w(m + 0x2c, props.list);
+  w(m + 0xa8, 8, q(m + 0xa8) | UINT64_C(1));
+  auto named = std::make_unique<objects::GameObject>(m);
+  names.add(props.name, named.get());
+  name_records.emplace(m, std::move(named));
   // Horsemen_ctor embeds WeaponShield at +0x3d0 and equips both hands.
   // Its slot 17 supplies the descriptor used by mounted swing states.
   const Address holder = r + 0x3d0;
@@ -107,6 +131,59 @@ std::array<Address, 2> World::State::spawn_mounted_horseman(
   link(m + 0x3c8, r, r);
   model.horsemen_set_state(r, 0x1b);
   return {r, m};
+}
+
+Address World::State::property_value(Address a, const std::string &key,
+                                     Raw occurrence) const {
+  actor(a);
+  const auto list = u(a + 0x2c);
+  if (!list)
+    return 0;
+  for (const auto &props : horsemen_properties::mounts) {
+    if (props.list != list)
+      continue;
+    if (u(list) != props.miniboss_text || u(list + 4) != props.name_text ||
+        u(list + 8) || cstr(props.miniboss_text) != "miniboss=1" ||
+        cstr(props.name_text) != std::string("name=") + props.name)
+      throw Unsupported("Nightmare mount property list differs from audited 338d459");
+    // ref_objects.py props_find: these audited lists contain each key once.
+    if (occurrence != 0) return 0;
+    auto lower = key;
+    for (auto &c : lower)
+      if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+    if (lower == "miniboss") return props.miniboss_text + 9;
+    if (lower == "name") return props.name_text + 5;
+    return 0;
+  }
+  throw Unsupported("combat object property list is not documented by Horsemen props 338d459");
+}
+
+void World::State::remove_names(Address a) {
+  auto i = name_records.find(a);
+  if (i == name_records.end()) {
+    if (u(a + 0x2c))
+      throw Unsupported("cannot remove an unregistered combat object property list");
+    return;
+  }
+  const auto name = property_value(a, "name");
+  if (!name)
+    throw Unsupported("registered Nightmare mount has no audited name property");
+  names.remove(cstr(name), i->second.get());
+  name_records.erase(i);
+}
+
+std::optional<std::string> World::property_string(Address a, const std::string &key) const {
+  const auto value = s_->property_value(a, key);
+  return value ? std::optional<std::string>(s_->cstr(value)) : std::nullopt;
+}
+std::int32_t World::property_int(Address a, const std::string &key,
+                                 std::int32_t fallback) const {
+  const auto value = s_->property_value(a, key);
+  return value ? objects::atoi(s_->cstr(value)) : fallback;
+}
+Address World::find_by_name(const std::string &name) const {
+  const auto *found = s_->names.find_first(name);
+  return found ? found->addr : 0;
 }
 
 std::array<Address, 2> World::spawn_mounted_horseman(

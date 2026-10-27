@@ -23,3 +23,6 @@ None.
 Pending. Live arena match stays refused; native/synthetic success is not campaign acceptance. Wave-34 comparison is 80/81 steps, pickup 10→11; broader trigger/loading/checkpoint/death-reload refusals remain.
 
 - Arena merge: retained both arena-mode and bounded-match documentation, and all campaign/Blood1 libraries alongside arena-match. Live PvP/frame and unbound match services remain refused. Merge SHA recorded next milestone.
+
+- Arena merge commit `14e8f820`.
+- Horsemen: retained hud_view and exactly one loaded/catalogue declaration each; combined all runtime link dependencies. Reviewed automatic runtime merges: audited property occurrence/null-list/key refusals, name registration/removal, explicit missing display-name service refusal and opt-in mount initialization coexist with newer integration services and destruction handling. No actor-lifetime algorithm introduced here; shared helper from mission-2 follows next.

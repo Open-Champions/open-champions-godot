@@ -401,8 +401,9 @@ Address World::State::spawn_ctor_class(const std::string &name, const Spawn &v) 
 // Slot 1 of the six classes (combat-ctors-2.md section 6): CT::class_dtor on
 // the model, whose call-outs are the World's handle_clear, iter_*, Spell.v1
 // and pool_free services. sub_202500 (+0x320, 2; it frees only with bit 0) and
-// AnimState_dtor are recorded. objNames_remove refuses: no World object has a
-// property list at +0x2c, so the name scan never reaches it.
+// AnimState_dtor are recorded. These six constructor classes still have no
+// property lists; an unexpected objNames_remove call-out refuses. The audited
+// Nightmare name adapter is removed by gameobject_dtor_call instead.
 void World::State::class_dtor(Address a, Raw fn, Raw flags) {
   actor(a);
   if (!dtor_services) {
@@ -410,7 +411,7 @@ void World::State::class_dtor(Address a, Raw fn, Raw flags) {
       std::string n = name;
       model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &args) {
         if (n == "objNames_remove")
-          throw Unsupported("objNames_remove: the World keeps no object names");
+          throw Unsupported("objNames_remove call-out outside audited Nightmare destructor adapter");
         std::vector<std::uint64_t> words;
         for (const auto &x : args)
           words.push_back(std::uint64_t(number(x)));

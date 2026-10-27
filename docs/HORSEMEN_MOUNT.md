@@ -39,8 +39,47 @@ table functions by identity, as for the other arena classes. The rider side (`Ho
   `RiderWar`, `RiderPestilence`, and `RiderDeath` with their named MiniBoss mounts and reciprocal
   handles. The MiniBoss path of `Creature_init` reaches the inherited empty Creature slot 18.
 - A placed `Nightmare` passes the record's own list and is built.
-- Rows 0x532dc8-0x532df8 call the same constructor but are not documented by the research: they keep the
-  previous accounting (one block, one unmodelled draw).
+- Rows 0x532dc8-0x532df8 call the same constructor with mounted=0 (round 4,
+  research `a3daea5`). They consume the individual record's properties, one
+  block and one modelled shared draw; they receive no fixed mount list.
+
+## Round 6: documented mount properties in the combat fixture
+
+The opt-in mounted pair in `combat_runtime::World` now retains the same four
+fixed lists as the level factory. `horsemen_properties.hpp` records only the
+two fields and addresses audited at research `338d459`, section 2.2 and
+`ref_horsemen_props.py`: `miniboss=1` and the variant's `name`, followed by a
+null pointer. The mount's `+0x2c` points to that native-owned list, creature
+flag bit 0 is set, and the existing object name table registers its name.
+`property_string`, `property_int` and `find_by_name` expose the documented
+lookups; the runtime's property/name call-outs use the same list validation.
+The original `obj_getPropStr`/`obj_getPropInt` adapters use argument three as
+an occurrence index, returning zero when absent. Each fixed key occurs once,
+so nonzero occurrences return zero. The host `property_int` fallback argument
+is separate. The fixture initializes the documented MiniBoss key at `0x52fa60`
+and the keys used by its death path from `338d459:ref_arena_monsters.py`;
+unavailable key data on a non-null list refuses. A null list returns zero
+without requiring a key (the pinned `ref_objects.py:props_find` contract).
+Deletion removes the name through the existing table, including duplicate-name
+probing. The rider's properties are independent. `ShowName` and `hide` stay
+absent; the constructor's HomeRange, visual range and scale remain unchanged.
+
+The MiniBoss bit makes Creature's boss meter reachable. Its slot 19 at
+`0x118418` writes a display name, but `ref_creature.py` leaves that body as an
+external call-out (`docs/creatures.md`, slot 19). The World requires an
+explicit `Services::display_name` and refuses with that address if it is
+missing. The authored Full fixture alone supplies an empty output buffer;
+it records `presentation:Creature.v19`, not an original display name. The
+smoke checks both the missing-service refusal and the fixture call-out.
+
+An unrecognised non-null combat property list, or a modified fixed list,
+refuses with a diagnostic. This is not a general combat property-list loader.
+The factory still retains record-supplied lists in its own object store;
+this change does not adopt level-loaded pairs into the combat World. The
+research audit is static and its original-executable comparisons were not
+re-run for this native implementation. Its two exact internal MiniBoss
+instruction addresses carry the audit's LOW evidence caveat; this port uses
+the audited constructor effect, not a new claim about those instructions.
 
 ## Refused or host-bounded, on purpose
 
@@ -51,7 +90,7 @@ table functions by identity, as for the other arena classes. The rider side (`Ho
 | Whether a mounted rider can carry a stun / root / cooldown | Unknown (spec 6): the stranded-rider outcome is reproduced, not "fixed" |
 | Charge-target picker table capacity / maximum player count | Unknown (spec 4): the host chooses `history_entries` as its bound and refuses any slot at or above it (`player scan limit`) |
 | `Horsemen_draw` matrix chain (spec 7, rank 5) | not ported; only the mount's draw and the seat transform are |
-| Ticking the pair inside the play scene | no scene runtime ticks Horsemen-class objects (on-foot included) |
+| Level-loaded pair combat | factory and combat World remain separate stores; only opt-in synthetic combat fixtures tick pairs |
 | Mount pool exhaustion | the on-foot rider is labelled as a stub; no level-load exception escapes |
 
 ## Evidence

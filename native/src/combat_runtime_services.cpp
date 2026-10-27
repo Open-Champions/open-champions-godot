@@ -217,6 +217,14 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   if (slot == 6 && !args.empty())
     note("touch", {self, ar(0)});
   note("virtual", {self, slot});
+  if (fn == 0x118418) {
+    if (!services.display_name)
+      throw Unsupported("Creature_getName 0x118418: body unmodelled; display-name service missing");
+    auto display_name = services.display_name;
+    display_name(self, ar(0));
+    note("presentation:Creature.v19", {self, ar(0)});
+    return iv(0);
+  }
   if (fn == 0x27142c) {
     model.nightmare_on_hit_terrain(self);
     return iv(0);
@@ -348,7 +356,7 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
                                      std::vector<Value> args) {
   auto fn = u(u(self + 0x48) + 8 * slot + 4);
   if (fn == 0x27142c || fn == 0x271484 || fn == 0x27155c ||
-      fn == 0x272f4c)
+      fn == 0x272f4c || fn == 0x118418)
     return full_vcall(self, slot, std::move(args));
   if (run_class_hook(fn, self, args))
     return iv(0);
@@ -447,6 +455,7 @@ void World::State::install_services() {
                          "water_test",
                          "obj_getPropStr",
                          "obj_getPropInt",
+                         "world_findObjectByName",
                          "net_objOrGhost",
                          "net_isLocalSlot",
                          "net_getCamFlag",
@@ -909,15 +918,27 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
           {A::CallbackResult::integer(0), A::CallbackResult::integer(0)});
     return iv(0);
   }
-  if (n == "obj_getPropStr")
-    return iv(0);
-  if (n == "obj_getPropInt") {
-    if (full()) {
+  if (n == "obj_getPropStr" || n == "obj_getPropInt") {
+    // Original 0x14f4c0 / 0x14c880: argument three is an occurrence,
+    // not the host property_int helper's fallback (338d459 ref_objects.py).
+    if (full() && n == "obj_getPropInt") {
       auto *o = find(ar(0));
       if (!o || o->kind == Kind::Effect)
         return iv(0);
     }
-    return a.at(2);
+    // A null list is absent independently of the key (props_find).
+    if (!find(ar(0)) || !u(ar(0) + 0x2c))
+      return iv(0);
+    const auto key = cstr(ar(1));
+    if (key.empty())
+      throw Unsupported("object property key data unavailable at " + std::to_string(ar(1)));
+    const auto value = property_value(ar(0), key, ar(2));
+    return iv(n == "obj_getPropStr" ? value :
+              value ? Raw(objects::atoi(cstr(value))) : 0);
+  }
+  if (n == "world_findObjectByName") {
+    const auto *found = names.find_first(cstr(ar(0)));
+    return iv(found ? found->addr : 0);
   }
   if (n == "net_objOrGhost")
     return a.at(0);
@@ -1034,7 +1055,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     return iv(0);
   }
   if (n == "objNames_remove")
-    throw Unsupported("objNames_remove: the World keeps no object names");
+    throw Unsupported("objNames_remove call-out outside audited Nightmare destructor adapter");
   if (n == "isNearView")
     return iv(is_near_view(ar(0), ar(2)));
   if (n == "model_getAttachPoint") {
