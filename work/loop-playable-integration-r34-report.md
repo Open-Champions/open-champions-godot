@@ -80,3 +80,5 @@ After pending commit `17499ff0`, full CTest completed **250/253 PASS**, **915.50
 ## Pending final full CTest record
 
 Final full CTest on runtime `0e4c886a` is **PENDING**, not started at this commit. Initial full run's 250/253 and the three focused fixes remain distinct. No timeout occurred in the initial run.
+
+- native-ai: **PASS**, exit 0, 3.10 s. Counts-only output: `No probe summary`. Labelled diagnostic placement/hit; no normal-route or respawn claim. Evidence `native-ai.log`.
