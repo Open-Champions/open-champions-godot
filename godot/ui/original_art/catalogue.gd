@@ -2,7 +2,8 @@ extends RefCounted
 
 # RTA US v2.00 metadata only. The entry list started from research
 # a2b145b6b22f3c0451f861ed70faa1827f94bf09 catalogue.gd. Round 4
-# (research 3e39392) sets page and rect to the TEX used size: bars 100x8,
+# (research 3e39392; research-hud-gaps hud-layout.md) sets page and rect to
+# the TEX used size: red/blue bars 100x8, green experience bars 100x6,
 # button 83x38, status frame and glow 160x46. Frame tiles are unchanged.
 # rect is that used size at (0, 0) after field weaving. It is never a nine-slice margin.
 const ENTRIES := {
@@ -20,14 +21,16 @@ const ENTRIES := {
 	"frame_topright": {"lump":"INTERFAC.LMP", "entry":"tiletopright.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
 	"statusbar": {"lump":"HUD.LMP", "entry":"hud_statusbar00.tex", "page":[160,46], "rows":23, "rect":[0,0,160,46]},
 	"statusbar_glow": {"lump":"HUD.LMP", "entry":"hud_statusbar00glow.tex", "page":[160,46], "rows":23, "rect":[0,0,160,46]},
+	"bar_green": {"lump":"HUD.LMP", "entry":"bar_green10.tex", "page":[100,6], "rows":3, "rect":[0,0,100,6]},
 }
 
 static func hud_entries() -> Dictionary:
 	var entries := ENTRIES.duplicate(true)
-	for colour in ["red", "blue"]:
+	for colour in ["red", "blue", "green"]:
 		for frame in range(10):
 			var id := "bar_%s%02d" % [colour, frame]
-			entries[id] = {"lump":"HUD.LMP", "entry":id + ".tex", "page":[100,8], "rows":4, "rect":[0,0,100,8]}
+			var height := 6 if colour == "green" else 8
+			entries[id] = {"lump":"HUD.LMP", "entry":id + ".tex", "page":[100,height], "rows":height >> 1, "rect":[0,0,100,height]}
 	return entries
 
 static func matches_source(id: String, path: String, row: Dictionary) -> bool:

@@ -6,7 +6,7 @@ const RTA_EXE_SHA := "292f6f48e3609c0026def2307d76c222cd5b389303d53b89b0e107d7b1
 
 # Host shell around the documented menu contract. Canvas positions come from
 # ChampionsMenuService. Buttons in the side panel are host controls: the start
-# bit, the stat-spend bit and the skill-confirm bit were not executed.
+# bit remains a host control. Stat spending follows the executed level-up gate.
 var service: Object
 var layout_service: Object
 var dynamic_service: Object
@@ -25,6 +25,7 @@ var inventory_art: RefCounted
 var live_imported := false
 var vendor_open := false
 var vendor_resume := false
+var stat_open_ms := 0
 var icon_index := PackedByteArray()
 var icon_cache := {}
 var shop_art_cache := {}
@@ -74,15 +75,15 @@ func _ready() -> void:
 		_host_button(box, "Inventory page %d" % page, "Pages 0-2 are bags; pages 3-5 dispatch the stat sheet.", func(): _open_inventory_page(selected_page))
 	_host_button(box, "Shop stock", "Mode 0. K buys. Choice centre x was not executed.", func(): open_screen("shop"))
 	_host_button(box, "Shop bag", "Mode 1. K sells, or opens the confirm box when the cell is equipped.", func(): open_screen("shop-bag"))
-	_host_button(box, "Skills", "Displayed rank cost. The confirm bit was not executed.", func(): open_screen("skills"))
-	_host_button(box, "Stats", "Pages 3-5 draw this sheet. A press here does not spend.", func(): open_screen("stats"))
+	_host_button(box, "Skills", "Skill spending refused: sender conditions are Unknown.", func(): open_screen("skills"))
+	_host_button(box, "Stats", "Pages 3-5 draw this sheet; level-up spending uses the documented gate.", func(): open_screen("stats"))
 	_host_button(box, "Level up", "Acknowledges the pending level and shows page 5.", func(): open_screen("level-up"))
 	_host_button(box, "Save index", "Equipment named by the executed bag*1000+index conversion.", func(): open_screen("save"))
 	_host_button(box, "Pause", "Font, layer and colour only. Frame positions were not executed.", func(): open_screen("pause"))
 	_host_button(box, "Cross / circle", "Cross-confirm is inferred. Circle-confirm is the other executed mask set.", _toggle_scheme)
-	_host_button(box, "Spend stat 0", "Handler only. The pad bit and cursor value were not executed.", func(): _call("spend_stat", [0]))
-	_host_button(box, "Spend skill point", "Handler spends one point and ignores the displayed cost. The confirm bit was not executed.", func(): _call("spend_skill", [0, 1]))
-	_host_button(box, "Grant level", "Documented skill and stat point bands. The experience table was not in this contract.", _grant)
+	for stat in range(4):
+		var selected_stat := stat
+		_host_button(box, "Spend stat %d" % stat, "Wait 3 seconds on the level-up page before spending.", func(): _spend_stat(selected_stat))
 	_host_button(box, "Close", "Host close. The original close control was not executed.", close_menu)
 	_refresh_status()
 
@@ -106,6 +107,7 @@ func adopt_imported() -> Dictionary:
 	var result: Dictionary = service.adopt_record(imported.record_bytes(), file.get_buffer(file.get_length()), icon_index)
 	live_imported = result.get("ok", false)
 	_refresh_status()
+	if scene != null: scene.refresh_menu_hud()
 	queue_redraw()
 	return result
 
@@ -226,9 +228,11 @@ func open_screen(which: String) -> void:
 		service.set_page(3)
 	elif which == "level-up":
 		service.open_level_up()
+		stat_open_ms = Time.get_ticks_msec()
 	elif which != "pause":
 		service.set_page(0)
 	_refresh_status()
+	if scene != null: scene.refresh_menu_hud()
 	queue_redraw()
 
 func open_vendor_shop() -> Dictionary:
@@ -300,6 +304,9 @@ func handle_host_key(event: InputEvent) -> bool:
 	if key == KEY_J:
 		_press(int(row.equip_mask))
 		return true
+	if key >= KEY_1 and key <= KEY_4 and screen == "level-up":
+		_spend_stat(key - KEY_1)
+		return true
 	if key == KEY_U:
 		_press(int(row.drop_mask))
 		return true
@@ -357,13 +364,43 @@ func _toggle_scheme() -> void:
 	var next: String = "circle" if str(row.get("scheme", "cross")) == "cross" else "cross"
 	_show(service.set_scheme(next))
 
-func _grant() -> void:
-	_call("grant_level", [])
+func _spend_stat(stat: int) -> void:
+	if screen != "level-up":
+		status.text = "Stat spending requires the level-up page.\n" + status.text
+		return
+	var elapsed := Time.get_ticks_msec() - stat_open_ms
+	var result: Dictionary = service.press_stat(2, stat, 0x40 if str(service.state().scheme) == "cross" else 0x20, 0, elapsed)
+	if result.get("ok", false) and result.get("sent", false):
+		result = _sync_record(result)
+	_show(result)
+
+# The combat adapter can call this after a documented solo kill. The native
+# service computes the award; this host copies the changed player record back.
+func grant_kill_xp(creature_experience: int, creature_max_hp: int) -> Dictionary:
+	if service == null:
+		return {"ok": false, "error": "Player record service is unavailable."}
+	var result: Dictionary = _sync_record(service.give_kill_xp(creature_experience, creature_max_hp))
+	_show(result)
+	return result
+
+func grant_xp(amount: int) -> Dictionary:
+	if service == null:
+		return {"ok": false, "error": "Player record service is unavailable."}
+	var result: Dictionary = _sync_record(service.give_xp(amount))
+	_show(result)
+	return result
 
 func _call(method: String, args: Array) -> void:
 	if service == null:
 		return
-	_show(service.callv(method, args))
+	_show(_sync_record(service.callv(method, args)))
+
+func _sync_record(result: Dictionary) -> Dictionary:
+	if result.get("ok", false) and live_imported and scene != null and scene.get("ps2_import") != null:
+		var synced: Dictionary = scene.get("ps2_import").replace_record(service.record_bytes())
+		if not synced.get("ok", false):
+			return synced
+	return result
 
 func _press(edge: int) -> void:
 	if service == null:
@@ -380,6 +417,7 @@ func _press(edge: int) -> void:
 
 func _show(result: Dictionary) -> void:
 	_refresh_status()
+	if scene != null: scene.refresh_menu_hud()
 	if not result.get("ok", false):
 		status.text = str(result.get("error", "refused")) + "\n" + status.text
 	queue_redraw()
@@ -408,8 +446,14 @@ func _refresh_status() -> void:
 			elif str(gap.id) == "inventory-grid-footprint":
 				page_note = "\nITEM FOOTPRINT REFUSED: later placement unknown."
 	var shop_note := "\nShop stock unavailable: fixed count and generation budget unknown. S sell / B buy / Esc close." if vendor_open else ""
-	status.text = "%s · Page %d\nGold %d · Level %d\nJ equip/unequip · U drop\n%s controls are host keys.%s%s%s%s" % [
-		source, int(row.page), int(row.gold), int(row.level), str(row.scheme).capitalize(), drop_note, detail_note + shop_note, font_note, page_note]
+	var stats: Array = row.base_stats
+	var spend_note := "\n1-4 spend stats after 3 seconds on the level-up page." if screen == "level-up" else ""
+	var skill_note := "\nSkill spending refused: sender conditions Unknown." if screen == "skills" else ""
+	status.text = "%s · Page %d\nLevel %d · XP %d/%d · Gold %d\nHP %.1f · Mana %.1f · Stat points %d · Skill points %d\nStr %d · Int %d · Dex %d · Sta %d\nJ equip/unequip · U drop\n%s controls are host keys.%s%s%s%s%s" % [
+		source, int(row.page), int(row.level), int(row.experience), int(row.next_xp), int(row.gold),
+		float(row.hp_value), float(row.mana_value), int(row.stat_points), int(row.skill_points),
+		int(stats[0]), int(stats[1]), int(stats[2]), int(stats[3]),
+		str(row.scheme).capitalize(), spend_note, skill_note, drop_note, detail_note + shop_note, font_note + page_note]
 
 func _gui_input(event: InputEvent) -> void:
 	if not open or service == null:

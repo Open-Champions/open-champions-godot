@@ -291,7 +291,7 @@ func refresh_capabilities() -> void:
 func _update_menu() -> void:
 	if menu == null:
 		return
-	mode_label.text = "Play mode · authored dry movement; original game progression and combat are unimplemented." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
+	mode_label.text = "Play mode · authored dry movement; XP and stat spending require a complete player record. Live campaign combat remains unavailable." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
 	var combat: bool = raw_observation.get("combat_enabled", false)
 	animated_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("animated_fixture_available", false)
 	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
@@ -537,6 +537,26 @@ func load_session_file(path: String) -> bool:
 
 func _prepare_level_restore(path: String) -> void:
 	if level_textures != null: level_textures.prepare_restore(path)
+func refresh_menu_hud() -> void:
+	if play_hud == null:
+		return
+	var observation: Dictionary = raw_observation.duplicate()
+	# Only the imported dry session uses the menu ledger as its player. Combat
+	# and level fixtures have their own authoritative observations.
+	var imported_dry: bool = play_mode and session_started and game_menus != null and game_menus.live_imported and not raw_observation.get("combat_enabled", false) and not raw_observation.get("level_enabled", false) and not raw_observation.get("animated_enabled", false) and not raw_observation.get("full_enabled", false)
+	if imported_dry and game_menus.service != null:
+		var record: Dictionary = game_menus.service.state()
+		if record.get("ok", false) and record.get("xp_ready", false):
+			observation["experience"] = int(record.experience)
+			observation["experience_base"] = int(record.hud_xp_base)
+			observation["experience_next"] = int(record.hud_next_xp)
+			observation["level"] = int(record.level)
+			observation["acknowledged_level"] = int(record.acknowledged)
+			observation["hp"] = float(record.hp_value)
+			observation["mana"] = float(record.mana_value)
+			observation["max_hp"] = float(record.max_hp_value)
+			observation["max_mana"] = float(record.max_mana_value)
+	play_hud.observe_play(observation, play_mode)
 
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
@@ -559,7 +579,7 @@ func _observe(result: Dictionary) -> void:
 	if menu != null and stopped and flow == Flow.RUNNING:
 		_show_menu(Flow.PAUSED)
 	if play_hud != null:
-		play_hud.observe_play(raw_observation, play_mode)
+		refresh_menu_hud()
 	if hud_round3 != null:
 		hud_round3.observe(raw_observation, play_mode)
 	if game_menus != null and components.has("art"):
