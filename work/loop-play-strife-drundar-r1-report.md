@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — bounded implementation verified; full CTest and rendered journey running.
+STATUS: DONE — bounded addressed implementation and requested gates recorded. Full mission gameplay remains BLOCKED by explicit inherited/unsupported services.
 
 WIP preserved in d8d26769; verified wave 33 (66e52972) merged in e51783d0.
 Only the assigned worktree changed. No push or PR.
@@ -14,8 +14,8 @@ adapter applies only addressed cells and stops restoration on the first refusal.
 A new explicit diagnostic may inspect a different entry; ticks never resume it.
 
 Release configure/build (-j 4): PASS. Focused mission1-scripts and script-commands:
-2/2 PASS in 0.33 s. Full CTest (-j 3): PENDING; this note is committed before run.
-Godot, fresh private Mission 1 checks, both journey variants and FULL_TRACE: pending.
+2/2 PASS in 0.33 s. Full CTest (-j 3) was PENDING at checkpoint 7a31ca93, committed before run.
+Final results supersede that checkpoint below.
 
 ## Implementation and evidence ledger
 
@@ -99,7 +99,7 @@ remain unverified/refused. Mission 1 completion and mission 2 availability are
 not granted by census or diagnostic success. Actor identity/lifetime and the
 wave-33 loading readiness refusals are retained unchanged.
 
-## Gates in progress
+## Gate evidence
 
 - Native synthetic mission gate: 80 checks / 0 failures, including switch
   state effects, no double-count, persistence after refusal, fresh campaign
@@ -167,5 +167,47 @@ This branch retains the verified wave-33 endpoint and does not bypass it.
 The separate two-destination Mission 1 diagnostics establish only the bounded
 addressed effects described above, not reachability through this journey.
 
-Native full CTest still running: 251/252 passed; netplay is the sole
-remaining case. No timeout/failure observed at this checkpoint.
+Native full CTest was still running at report checkpoint 331a3788; the
+completed result follows.
+
+## Final gate record — 2026-10-27
+
+- Release native configure/build: PASS (-DCMAKE_BUILD_TYPE=Release, -j 4).
+  Main GDExtension and level-texture library Release builds: PASS (-j 4).
+  Architecture verified arm64. Build logs: configure.log, release-build.log,
+  extension-build-final.log and texture-build.log under work/mission1/.
+- Full CTest command: ctest --test-dir build/native --output-on-failure -j 3.
+  **252/252 PASS, 764.88 seconds real elapsed**. Netplay passed in 123.80 s;
+  mission1-scripts passed in 0.07 s. No timeouts and no isolated timeout
+  reruns were necessary. Evidence: work/mission1/ctest-full.log. The required
+  pending note was committed in 7a31ca93 before invocation.
+- Focused native: mission1-scripts + existing script-commands 2/2 PASS;
+  direct final mission fixture has 80 checks and 0 failures.
+- Final affected Godot gates: eight existing script/music/identity/movement/
+  loading/scene cases pass, both Mission 1 variants pass (53 headless,
+  57 rendered), both full-combat variants pass (2,641 headless,
+  2,771 rendered). All twelve final commands exit 0; no final ERROR or
+  SCRIPT ERROR envelopes. Existing ObjectDB exit warnings remain visible.
+- FULL_TRACE unchanged in headless and rendered execution: 36,402 bytes,
+  SHA-256 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+  Headless save/load has 300/300 matching presentation frames; rendered
+  299/300 is disclosed above, with no unsupported equality claim.
+- Both requested journeys complete within the unchanged 900-second bound,
+  at wave 33's 67/68 steps, with result JSONs and the same explicit refusal
+  endpoint. Both exit 1; neither is labelled a passing full campaign.
+- Final ancestry check: 66e52972 is an ancestor. Whitespace/conflict checks
+  pass. All task source/report changes are committed locally; the ignored
+  build/log/capture outputs stay local. The only untracked source-tree
+  artifact is the optional mission1_real.gd.uid, intentionally left alone.
+- No push, PR, unrelated worktree modification, process-name termination,
+  baseline weakening, private payload, decoded identifier inventory or
+  absolute private path was introduced in this task's tracked changes.
+
+Implementation runtime checkpoint: 7a31ca93. Test capture/API corrections:
+d0f3aabb and 136690ae. WIP checkpoint: d8d26769; integration merge: e51783d0.
+The final report commit is the branch HEAD returned to the parent.
+
+Remaining acceptance limits are evidence boundaries, not skipped authorized
+work: original continuous execution and physical mission completion require
+further researched prop/interaction/cutscene bodies and truthful loading
+readiness adapters. This implementation refuses those paths as requested.
