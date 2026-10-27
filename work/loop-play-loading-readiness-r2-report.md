@@ -202,3 +202,5 @@ early fixup, identity, valid-bit or outstanding-owner publication. Existing
 assertions and baselines retained. Release build, full CTest (-j 3), Godot dev
 matrix, both journeys and FULL_TRACE verification PENDING for this revision.
 This pending note is committed before the full CTest run.
+
+PLR2-1 fix full CTest (recorded by the orchestrator, 2026-10-27 ~12:15, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on `960835de` — **251/251 passed, 665.72 s**, no timeouts (log `work/plr2-fix-ctest.log`). Godot dev matrix, both journeys and FULL_TRACE for this revision are still PENDING and must be run by the next job before re-audit.
