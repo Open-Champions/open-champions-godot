@@ -52,7 +52,14 @@ two fields and addresses audited at research `338d459`, section 2.2 and
 null pointer. The mount's `+0x2c` points to that native-owned list, creature
 flag bit 0 is set, and the existing object name table registers its name.
 `property_string`, `property_int` and `find_by_name` expose the documented
-lookups; the runtime's property/name call-outs use the same implementation.
+lookups; the runtime's property/name call-outs use the same list validation.
+The original `obj_getPropStr`/`obj_getPropInt` adapters use argument three as
+an occurrence index, returning zero when absent. Each fixed key occurs once,
+so nonzero occurrences return zero. The host `property_int` fallback argument
+is separate. The fixture initializes the documented MiniBoss key at `0x52fa60`
+and the keys used by its death path from `338d459:ref_arena_monsters.py`;
+unavailable key data on a non-null list refuses. A null list returns zero
+without requiring a key (the pinned `ref_objects.py:props_find` contract).
 Deletion removes the name through the existing table, including duplicate-name
 probing. The rider's properties are independent. `ShowName` and `hide` stay
 absent; the constructor's HomeRange, visual range and scale remain unchanged.
