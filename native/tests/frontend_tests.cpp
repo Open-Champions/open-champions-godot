@@ -225,6 +225,10 @@ void slider_vectors() {
   // Leave: commit copies live into the image and asks for a config save.
   tap(f, CIRCLE);
   expect(f.screen() == Screen::OptionsSave && screen_state(f.screen()) == 14, "changed options enter state 14");
+  const auto save_scene = f.layout();
+  expect(save_scene.draws.empty() && save_scene.host_layout &&
+         save_scene.host_label.find("Cross: save, Circle: memory") != std::string::npos &&
+         !save_scene.unknown.empty(), "state-14 choice bindings use host diagnostics without untraced draw calls");
   tap(f, CROSS);
   expect(f.screen() == Screen::Main, "options left");
   expect(f.music().image == 0 && word(f.options_image(), OPTIONS_MUSIC) == 0, "commit into image");
@@ -396,6 +400,10 @@ void option_audit_vectors() {
   expect(unchanged.screen() == Screen::OptionsSave && !unchanged.last_error().empty() &&
          unchanged.options_image() == original && !has(unchanged.take_requests(), "write_options"),
          "unresolved no-change state-14 accept refuses without write");
+  const auto refused_scene = unchanged.layout();
+  expect(refused_scene.draws.empty() && refused_scene.host_layout &&
+         refused_scene.host_label.find("unchanged choice refused") != std::string::npos,
+         "unchanged state-14 refusal uses host diagnostics without untraced draw calls");
   tap(unchanged, CIRCLE);
   expect(unchanged.screen() == Screen::OptionsSave && !unchanged.last_error().empty(),
          "unresolved no-change state-14 cancel also refuses");

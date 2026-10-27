@@ -164,7 +164,12 @@ func run() -> void:
 	await shot("06-options-load")
 	fe.tap(CIRCLE)
 	fe.tap(CIRCLE)
-	fe.tap(CROSS) # state-14 save choice; host modal art is unverified
+	if fe.screen() != "options-save" or not fe.scene_view.draws.is_empty():
+		printerr("state-14 submitted untraced draw calls")
+		quit(1)
+		return
+	await shot("06a-options-save")
+	fe.tap(CROSS) # state-14 save choice; bindings use the host diagnostic label
 	fe.tap(DOWN)
 	fe.tap(CROSS)
 	await shot("07-credits")
@@ -261,4 +266,4 @@ func run() -> void:
 		return
 	await shot("23-save-empty-card")
 	print("captures ", saved)
-	quit(0 if saved == 24 else 1)
+	quit(0 if saved == 25 else 1)

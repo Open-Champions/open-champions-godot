@@ -40,6 +40,7 @@ submission first.
 | Title | `FRONTEND.LMP/title.tex` at (141,15), layer 5, tint 0x80808080, states 0-4 only | Executed |
 | Publisher logo | `SOELOGO.LMP/soe_splash_url.tex` (192,330) and `soe_splash.tex` (64,50), layer 3, tint 0x80808080 | Executed |
 | Footer, message box, slot list, character, name entry | the research's small-font layer-6 batches, colours and text anchors; the research word is carried verbatim in `Draw.colour`. Only the slot-list batch sets `Draw.settled` for known fade. The Godot host paints its authored placeholder text at a readable Host opacity, separate from the research alpha. Message-box backing style, layer and inflation are Host choices. Phase-3 colours follow the call order of `PLAYERSEL_PHASES` (header and description 0x0A316864, points row 0x08325D18, stat rows 0x08585E5D, selected 0x0068C7CC). Label text is a host choice | Executed positions, Host text |
+| Options state 14 | Query and changed accept/cancel calls are executed; its modal geometry and instruction anchor are untraced, so this state submits no draw calls. The choice bindings and unchanged-choice refusal appear in the existing host diagnostic label. | Executed flow / refused art |
 | Save/load tile frame | `memcard_slotList`'s settled fixture passes (61,126,519,97) to the wrapper, which submits the style-2 `INTERFAC.LMP/tile*.tex` frame at (60,122,521,105), layer 6. The nine pieces are loaded from the selected disc at run time. The fixture tint 0x7f616369 is retained for this captured state; fade interpolation and exact retail pixels remain Unknown | Executed frame submission / Observed art names |
 | Menu sounds | move `menu_main_toggle.anm`, select `menu_main_accept.anm`, back `menu_main_back.anm` (FX.LMP) are requested at the documented triggers and counted by the host (`sounds`) | Executed ids |
 | First theme | `mx_maintheme_l.vag` flags 1 goes through the one music-volume gate (0x3d4ccccc), also for the credits handoff (flags 3) | Executed |
@@ -85,7 +86,7 @@ None of the following is documented, so the flow refuses it or the host labels i
 - Other entries of the players, mode and difficulty tables. Internet Game.
   Difficulties above the first: the unlock test `options_get4f8f38Level` was not
   executed. The values of `g_pvpModeA/B`, 0x4f7124 and the kill limit per choice.
-- Credits (`credits_run` not read). The state-14 "save config?" prompt.
+- Credits (`credits_run` not read). State-14 modal art and instruction geometry are refused.
 - The complete controls sub-screen, pause parent transition, communications destination, localized option words and pixel parity remain unverified. Slider art and its fill geometry are refused. Brightness transfer, camera, pad, subtitle, damage and marker application need confirmed client setters.
 - Character creation:
   - which models the class page shows, and in which order;

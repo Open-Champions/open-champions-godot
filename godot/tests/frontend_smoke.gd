@@ -175,6 +175,7 @@ func run() -> void:
 	var live := int(fe.view.music_live)
 	tap(CIRCLE)
 	check(fe.screen() == "options-save" and int(fe.view.state) == 14, "changed options enter state-14 save choice")
+	check(fe.scene_view.draws.is_empty() and bool(fe.scene_view.host_layout) and str(fe.scene_view.host_label).contains("Cross: save, Circle: memory"), "state-14 bindings use host diagnostics without untraced artwork")
 	tap(CROSS)
 	check(fe.screen() == "main", "circle leaves options")
 	var image := FileAccess.get_file_as_bytes(fe.options_path)
@@ -393,6 +394,7 @@ func run() -> void:
 	fe.log_lines.clear()
 	tap(CROSS)
 	check(fe.screen() == "options-save" and str(fe.view.error) != "" and not ("write_options" in kinds()), "unverified no-change choice refuses without writing")
+	check(fe.scene_view.draws.is_empty() and str(fe.scene_view.host_label).contains("unchanged choice refused"), "unchanged state-14 refusal has no untraced artwork")
 	for name in ["boot-card", "soe-logo", "intro-movie", "main", "game-type", "players", "mode", "difficulty", "options", "options-save", "options-load", "credits", "load-game", "save-game", "saved", "char-class", "char-appearance", "char-ability", "char-name", "playing", "pause", "exit-confirm"]:
 		check(visited.has(name) or name in ["boot-card", "soe-logo", "intro-movie"], "visited " + name)
 	_cleanup()

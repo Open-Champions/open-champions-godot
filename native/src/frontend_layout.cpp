@@ -399,12 +399,11 @@ Scene Flow::layout() const {
     break;
   }
   case Screen::OptionsSave:
-    host("state-14 save-choice prompt art and localized words are Unknown");
-    add_message_box(s, error_.empty() ? "Save settings?" : "Unchanged choice refused", Evidence::Host);
-    host_text(s, 320, 300,
-              error_.empty() ? "Cross: save to user://   Circle: continue in memory"
-                             : "Unchanged choice needs an executed fixture",
-              Align::Centred);
+    // The state and choice calls are executed; no state-specific prompt draw
+    // geometry was captured. Keep the binding in the host diagnostic channel.
+    host(error_.empty() ? "State 14 art refused; Cross: save, Circle: memory"
+                        : "State 14 art refused; unchanged choice refused");
+    s.unknown = {"state-14 modal art and geometry refused", "instruction anchor and localized words refused"};
     break;
   case Screen::OptionsLoad:
     host("the options-load message box text and choices are not captured");
