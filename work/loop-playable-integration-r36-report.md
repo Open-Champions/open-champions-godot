@@ -53,3 +53,5 @@ Same wave-35 drivers/method with wave-36 output directories; native Release and 
 - Full synthetic combat **PASS**, 2,645 checks, zero failures. Fresh strict-matrix full-combat log; no fixture or assertion changed.
 
 - FULL_SAVE_LOAD **PASS**, 300/300 presentations; continued/uninterrupted SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573` identical.
+
+- FULL_TRACE **PASS unchanged**, 36,402 bytes / SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline changed. These three gates use `matrix/playable_wave_smoke_full_combat.log`.
