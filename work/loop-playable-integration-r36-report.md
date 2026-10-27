@@ -49,3 +49,5 @@ Same wave-35 drivers/method with wave-36 output directories; native Release and 
 - Private sweep `w36-on`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w36-on-s{0,28,56,84}.{json,log}`.
 
 - Private sweep `w36-off`: **PASS**, four slice exits [0, 0, 0, 0]; counts [111, 111, 111, 230] (tried/loaded/played/checks), failures 0, top-level refusal kinds 0. Four 60-tick slices run serially to limit load alongside CTest. Private disc read-only; internal unsupported-service counters remain separate. Evidence ignored `work/private/w36-off-s{0,28,56,84}.{json,log}`.
+
+- Full synthetic combat **PASS**, 2,645 checks, zero failures. Fresh strict-matrix full-combat log; no fixture or assertion changed.
