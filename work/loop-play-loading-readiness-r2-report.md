@@ -1,4 +1,4 @@
-STATUS: MORE — requested bounded implementation and gate runs complete; live arrival remains refused.
+STATUS: MORE — PLR2-1 review complete; revision Godot/journey gates running; live arrival remains refused.
 
 Assigned branch verified clean at 3278e618 before work.
 Research pin: research-loading-readiness@d6f035fab6bb5cbe66f5c72a55a1a6aef05ee8df,
@@ -204,3 +204,29 @@ matrix, both journeys and FULL_TRACE verification PENDING for this revision.
 This pending note is committed before the full CTest run.
 
 PLR2-1 fix full CTest (recorded by the orchestrator, 2026-10-27 ~12:15, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on `960835de` — **251/251 passed, 665.72 s**, no timeouts (log `work/plr2-fix-ctest.log`). Godot dev matrix, both journeys and FULL_TRACE for this revision are still PENDING and must be run by the next job before re-audit.
+
+
+## PLR2-1 independent test review (2026-10-27)
+
+Started clean on assigned branch at `00cf5f51`; reviewed `960835de` against
+PLR2-1 and its pinned references quoted in the audit. No native edits required.
+The earlier absolute draw-frame 3/4 timing claim was incorrect: servicing must
+use the published request frame at `0x4ef3f0` and published current frame at
+`0x44fdd0`, with current minus request at least four. The fix enforces that
+interval and refuses missing publication or the unestablished backwards domain.
+Already-valid matching resources retain the existing validated cache-hit route.
+
+Production regressions use request 100, current 100/103/104. At elapsed zero
+and three, submitted/completed state and both bound fixups make early publication
+observable; assertions retain empty fixup calls, submitted/completion state,
+previous identity, invalid bit and outstanding owner. At four, both fixups run
+in order, identity/valid/owner publish, outputs remain zero until the next match.
+Absent request-frame publication separately refuses. No assertions were weakened.
+
+Full CTest was not rerun: no native code changed. Inspected the recorded log on
+the fixed revision: **251/251 PASS, 665.72 s**, no timeouts, as recorded by
+`00cf5f51` in `work/plr2-fix-ctest.log`. The older 718.00 s result above belongs
+to the pre-fix revision and is not evidence for `960835de`.
+
+Fresh remaining gates are running under `work/plr2-verify-*`; final results
+will replace this pending checkpoint before completion.
