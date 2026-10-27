@@ -52,8 +52,11 @@ contracts with synthetic original-function execution, not live arrival proof.
   these routes under the documented environment and definition guards and trims
   four characters only from explicitly supplied formatter output. Formatter is
   unbound in ordinary play. Slot-3 selection still refuses. Generic lookup is
-  unchanged/refused. The four-draw-frame controls use the actual draw counter
-  (`tools/difftest_loading_arrival_r2.py:98-100,134-138`), not a guessed cache age.
+  unchanged/refused. PLR2-1 correction: servicing requires published current and request frames and
+  current minus request >= 4, per `docs/loading-readiness.md:63-72` and
+  `tools/difftest_loading_readiness.py:85-101`. The original absolute 3/4 controls
+  failed to establish this interval. Wrap behavior is unestablished; current below
+  request refuses rather than assuming rollover semantics.
 - Submission (`docs/loading-arrival-r2.md:101-118`): explicit service entry accepts
   resolved metadata/file location and age/busy observations; neither metadata
   search nor a device result is synthesized. Implements three source-address
@@ -189,3 +192,13 @@ Local checkpoints: `00107865` pending gate note; `5334d44e` implementation and
 native regressions; `cc54eba1` matrix/trace/headless evidence. This final report
 commit records the completed aggregate/journey results. No playable campaign or
 real transformed model acceptance is claimed.
+
+## PLR2-1 revision checkpoint
+
+Request-relative timing fixed; missing request-frame publication and backwards/
+wrapped frame domain refuse. Production-runtime regressions use request 100 and
+current 100/103/104, with submitted/completed I/O and bound fixups, checking no
+early fixup, identity, valid-bit or outstanding-owner publication. Existing
+assertions and baselines retained. Release build, full CTest (-j 3), Godot dev
+matrix, both journeys and FULL_TRACE verification PENDING for this revision.
+This pending note is committed before the full CTest run.

@@ -1394,7 +1394,10 @@ void test_loading_r2_equipment() {
   for(unsigned i=0;i<slots.size();++i) for(unsigned index=0;index<2;++index) {
     auto cache=*e.cache(slots[i],index);
     m.word(cache,0x160000);m.word(cache+0x4c,0x80);
-    m.store(cache+10,2,0);m.word(0x44fdd0,3);
+    m.store(cache+10,2,0);m.word(0x44fdd0,103);
+    if (i==0 && index==0)
+      check(refuses([&]{e.lookup(cache,"authored_route");}),"absent request-frame publication refuses");
+    m.word(0x4ef3f0,100);
     auto pair=e.lookup(cache,"authored_route");
     check(!pair.ready && !pair.base && !pair.model,"young specialized route remains pending without I/O fabrication");
     m.string(cache+12,"authored_route");m.store(cache+10,2,1);
@@ -1405,7 +1408,7 @@ void test_loading_r2_equipment() {
     check(pair.ready && pair.base==0x160000 && pair.model==0x160080,"specialized route publishes actual validated pointer pair");
     e.valid_resource={};
   }
-  m.word(0x44fdd0,4);
+  m.word(0x44fdd0,104);
   auto c=bases[1]; const unsigned metadata=0x140000, base=0x150000;
   m.word(c,base); m.store(c+8,2,0); m.store(c+10,2,0);
   m.word(metadata+4,2); m.store(metadata+10,2,1); m.word(metadata+12,4);
@@ -1450,6 +1453,20 @@ void test_loading_r2_equipment() {
   e.fixup_base=[&](unsigned at){fixups.push_back(at);m.word(at,0x1234);};
   e.fixup_model=[&](unsigned at){fixups.push_back(at);m.word(at,0x5678);};
   e.valid_resource=[&](unsigned b,unsigned model){return m.word(b)==0x1234 && m.word(model)==0x5678;};
+  m.string(c+12,"authored_previous");
+  for (auto current : {100u,103u}) {
+    m.word(0x44fdd0,current);
+    pair=e.lookup(c,"authored_model");
+    check(!pair.ready && !pair.base && !pair.model && fixups.empty() &&
+          m.u16(c+8)==1 && m.read(0x4ef3e8)==1 && m.u16(c+10)==0 &&
+          m.cstr(c+12)=="authored_previous" && m.word(0x4ef3ec)==c,
+          "completed submitted request at elapsed zero/three cannot fix up or publish");
+  }
+  m.word(0x44fdd0,99);
+  check(refuses([&]{e.lookup(c,"authored_model");}) && fixups.empty() &&
+        m.u16(c+10)==0 && m.word(0x4ef3ec)==c,
+        "unestablished backwards/wrapped frame domain refuses before publication");
+  m.word(0x44fdd0,104);
   pair=e.lookup(c,"authored_model");
   check(!pair.ready && !pair.base && !pair.model && fixups==std::vector<unsigned>{base,base+0x1000} &&
         m.u16(c+10)==1 && m.cstr(c+12)=="authored_model" && m.word(0x4ef3ec)==0,

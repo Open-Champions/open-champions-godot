@@ -95,10 +95,13 @@ Runtime::Pair Runtime::lookup(std::uint32_t c, const std::string &identity) {
       return {true,model,base};
     }
   }
-  // d6f035fa:docs/loading-arrival-r2.md:87-103; addressed draw counter
-  // in tools/difftest_loading_arrival_r2.py:98-100,134-138 (authored controls).
-  require(0x44fdd0,4);
-  if (m.word(0x44fdd0)<4) return {};
+  // d6f035fa:docs/loading-readiness.md:63-72 and its difftest:85-101:
+  // service only after four frames since the published request. The pin does
+  // not establish wrap/signed rollover semantics; refuse that domain.
+  require(0x44fdd0,4); require(0x4ef3f0,4);
+  const auto current=m.word(0x44fdd0), request=m.word(0x4ef3f0);
+  if (current<request) refuse();
+  if (current-request<4) return {};
   require(c+8,2);
   if (!m.u16(c+8)) refuse(); // metadata/formatter/submission not guessed
   require(0x4ef3e8,1);
