@@ -26,3 +26,7 @@ Verified so far:
 Pending: full CTest (-j 3, timeout retries alone), affected Godot checks,
 headless/rendered journey and final trial merge against the then-current tip.
 Detailed logs remain ignored under work/mission2-r2.
+
+Continuation checkpoint: implementation review confirms one shared lifetime helper
+implementation and all requested regression cases. Pending full CTest rerun
+with `ctest --test-dir build/native --output-on-failure -j 3` before final gates.
