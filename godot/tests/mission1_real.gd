@@ -76,7 +76,7 @@ func run() -> void:
 			var actions := [0x1cac, 0x1d7c, 0x1e4c, 0x1f1c, 0x1fec, 0x20bc, 0x218c, 0x225c]
 			for i in range(8):
 				var key: Dictionary = scene.controller.script_mission1_action("entry", keys[i])
-				check(key.get("ok", false) and int(key.value) == 1, "switch key runs actual VM predicate")
+				check(key.get("ok", false) and int(key.value) == 1, "switch key evaluates addressed predicate")
 				var action: Dictionary = scene.controller.script_mission1_action("entry", actions[i])
 				check(action.get("refused", false) and not action.get("fault", true), "switch stops at untraced effect")
 				var state: Dictionary = scene.controller.script_mission1_status()

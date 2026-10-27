@@ -210,13 +210,15 @@ void Contract::validate_objects(const std::vector<level_flow::Record> &records,
   }
   const bool s = level == Level::Strife;
   require(next.records == (s ? 283u : 270u) && next.selected == (s ? 267u : 254u));
+  // Light-bearing fallback is selected by the existing executed factory
+  // (research-script-session 6841b8a), not the unlit-only research summary.
   const std::map<std::uint32_t,std::size_t> expected = s
       ? std::map<std::uint32_t,std::size_t>{{0x2a0954,69},{0x24d440,2},{0x261dbc,15},{0x2b1e80,70},
           {0x23d93c,73},{0x23ad18,6},{0x23c44c,8},{0x29df04,4},{0x28f15c,6},{0x28cb90,3},
           {0x27c694,1},{0x1ec900,2},{0x1ecdf4,2},{0x1d7778,1},{0x158928,2},
           {0x158bcc,1},{0x158c6c,1},{0x158d0c,1}}
       : std::map<std::uint32_t,std::size_t>{{0x26a624,71},{0x29fad0,14},{0x290c24,29},{0x23d93c,70},
-          {0x23ad18,3},{0x23c44c,24},{0x243594,4},{0x28f15c,12},{0x28cb90,3},{0x27c694,1},
+          {0x23ad18,3},{0x23c44c,16},{0x2416c4,8},{0x243594,4},{0x28f15c,12},{0x28cb90,3},{0x27c694,1},
           {0x1ec900,13},{0x1ecdf4,6},{0x158928,1},{0x158bcc,1},{0x158c6c,1},{0x158d0c,1}};
   if (next.constructors != expected) {
     std::string detail;

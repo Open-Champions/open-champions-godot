@@ -455,7 +455,11 @@ amx::NativeMap Host::command_map() {
         // An ignored return never licenses skipping an unknown side effect.
         if (machine.cip >= 8 && mission1_->sites.count(std::uint32_t(machine.cip - 8)))
           ++mission1_sites_reached_[std::uint32_t(machine.cip - 8)];
-        if (!mission1_->allows(machine, kRows[i].name, params)) {
+        if (!mission1_->allows(machine, kRows[i].name, params) ||
+            std::string(kRows[i].name) == "trigger" ||
+            std::string(kRows[i].name) == "autoPropSetState" ||
+            std::string(kRows[i].name) == "cutScene" ||
+            std::string(kRows[i].name) == "callScript") {
           ++counts_.refused[i];
           ++counts_.stopped[i];
           throw RefusedResult("Mission 1: untraced script call or effect body");
@@ -1197,10 +1201,10 @@ Stop Host::enter(const std::string &name, bool optional) {
       counts_.missing_entries += 1;
     return Stop::Missing;
   }
-  if (mission1_ && !mission1_->offset_of(name)) {
-    counts_.refusal_stops += 1;
-    refusal_stopped_ = true;
-    last_fault_ = "Mission 1: entry body is outside the addressed handoff";
+  if (mission1_) {
+    const auto offset = mission1_->offset_of(name);
+    if (offset) return run_mission1_entry(*offset);
+    remember(RefusedResult("Mission 1: entry body outside addressed handoff"));
     return Stop::Refused;
   }
   machine_->budget = session::SCRIPT_BUDGET;
@@ -1313,15 +1317,32 @@ Stop Host::run_mission1_entry(std::uint32_t offset) {
   // does not resume a stopped script or drain its deferred/post-action queue.
   faulted_ = refusal_stopped_ = false;
   last_fault_.clear();
-  if (!level_started_) { ++counts_.started; level_started_ = true; }
-  struct Frame {
-    amx::Machine &m;
-    amx::Address hea,stk,frm,cip,params;
-    explicit Frame(amx::Machine &v):m(v),hea(v.hea),stk(v.stk),frm(v.frm),cip(v.cip),params(v.params){}
-    ~Frame(){m.hea=hea;m.stk=stk;m.frm=frm;m.cip=cip;m.params=params;}
-  } frame(*machine_);
-  return enter(mission1_->entries.at(offset), false);
+  // The handoff proves selected cells, not the intervening entry bodies.
+  // Apply only those cells through the existing binder, never execute unknown
+  // bytecode between two documented call sites.
+  for (const auto &sw : mission1_->switches) {
+    if (offset == sw.key_entry) {
+      auto stop = mission1_site(sw.key_entry + 0x2c);
+      if (stop == Stop::Complete) last_value_ = !last_value_;
+      return stop;
+    }
+    if (offset == sw.action_entry) {
+      // INC at action+0x1c addresses local slot zero (audited switch_effects).
+      machine_->set_cell(0, std::uint32_t(machine_->cell(0)) + 1u);
+      auto stop = mission1_site(sw.action_entry + 0x48);
+      return stop == Stop::Complete ? mission1_site(sw.action_entry + 0x74) : stop;
+    }
+  }
+  if (mission1_->level == mission1_scripts::Level::Drundar && offset == 0xa3c) {
+    auto stop = mission1_site(0xa68);
+    if (stop != Stop::Complete || last_value_ != 0) return stop;
+    stop = mission1_site(0xaa0);
+    return stop == Stop::Complete ? mission1_site(0xacc) : stop;
+  }
+  remember(RefusedResult("Mission 1: entry body outside addressed effects"));
+  return Stop::Refused;
 }
+
 bool Host::restore_mission1_counter() {
   if (!mission1_ || !machine_ || mission1_->level != mission1_scripts::Level::Strife) return false;
   machine_->set_cell(0x14c, std::uint32_t(variables_->quest_get(mission1_->counter_key)));
@@ -1373,28 +1394,32 @@ Stop Host::mission1_site(std::uint32_t offset) {
 Stop Host::restore_mission1_addressed() {
   if (!mission1_ || !mission1_->objects_validated) return Stop::Refused;
   if (faulted_ && !refusal_stopped_) return Stop::Fault;
-  bool refused = false;
-  const auto request = [&](std::uint32_t site) {
-    const auto stop = mission1_site(site);
-    refused = refused || stop != Stop::Complete;
-  };
   if (mission1_->level == mission1_scripts::Level::Strife) {
     restore_mission1_counter();
     const std::uint32_t sites[4][4] = {{0x6b0,0x6dc,0x708,0x734}, {0x794,0x7c0,0x7ec,0x818},
                                       {0x878,0x8a4,0x8d0,0x8fc}, {0x95c,0x988,0x9b4,0x9e0}};
     for (unsigned group=0; group<4; ++group) {
       const bool flag = variables_->quest_get(mission1_->stage_keys[group]) != 0;
-      if ((group == 0 ? !flag : flag)) for (const auto at : sites[group]) request(at);
+      if (group == 0 ? !flag : flag) for (const auto at : sites[group]) {
+        const auto stop = mission1_site(at);
+        if (stop != Stop::Complete) return stop;
+      }
     }
   } else {
-    if (variables_->quest_get(mission1_->door_flag)) { request(0x374); request(0x3a8); }
-    for (const auto &site : mission1_->restore_keys)
-      if (variables_->quest_get(site.second)) request(site.first);
+    if (variables_->quest_get(mission1_->door_flag)) {
+      auto stop = mission1_site(0x374);
+      if (stop != Stop::Complete) return stop;
+      stop = mission1_site(0x3a8);
+      if (stop != Stop::Complete) return stop;
+    }
+    for (const auto &site : mission1_->restore_keys) if (variables_->quest_get(site.second)) {
+      const auto stop = mission1_site(site.first);
+      if (stop != Stop::Complete) return stop;
+    }
   }
-  // Each site above is an independent documented predicate/effect, not a
-  // continuation past another site's refusal in the original start entry.
-  return refused ? Stop::Refused : Stop::Complete;
+  return Stop::Complete;
 }
+
 Stop Host::mission1_count_gate() {
   if (!mission1_ || !mission1_->objects_validated || mission1_->level != mission1_scripts::Level::Drundar)
     return Stop::Refused;

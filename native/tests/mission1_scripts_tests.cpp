@@ -15,7 +15,7 @@ namespace {
 unsigned checks=0, failures=0;
 void check(bool ok, const char *why) { ++checks; if (!ok) { ++failures; std::cerr << "FAIL " << why << '\n'; } }
 struct Fixture {
-  std::vector<a::Cell> code = std::vector<a::Cell>(0x3000/4, 0x7c);
+  std::vector<a::Cell> code = std::vector<a::Cell>(0x3000/4, 0x2e);
   a::ImageOptions options;
   std::map<std::string, a::Cell> strings;
   std::map<unsigned,std::string> entries;
@@ -32,7 +32,7 @@ struct Fixture {
   }
   std::string entry(unsigned at, const std::string &name={}) {
     if (entries.count(at)) return entries.at(at);
-    auto s=name.empty()?"authored-entry-"+std::to_string(at):name;
+    auto s=name.empty()?"fixture-"+std::to_string(at):name;
     entries[at]=s;
     cells(at,{0x2e});
     return s;
@@ -101,8 +101,8 @@ Fixture drundar() {
   const unsigned actions[]={0x1cac,0x1d7c,0x1e4c,0x1f1c,0x1fec,0x20bc,0x218c,0x225c};
   for(unsigned i=0;i<8;++i) {
     const auto key=f.text("authored-switch-"+std::to_string(i));
-    const auto effect=f.text("authored-untraced-effect-"+std::to_string(i));
-    f.entry(0xb30+0x10*i,"authored-untraced-effect-"+std::to_string(i));
+    const auto effect=f.text("effect-"+std::to_string(i));
+    f.entry(0xb30+0x10*i,"effect-"+std::to_string(i));
     f.entry(keys[i]); f.entry(actions[i]);
     f.call(gets[i],"getv",{key}); f.cells(gets[i]+0x10,{0x35,a::Cell(skips[i])});
     f.call(effects[i],"callScript",{effect});
@@ -121,7 +121,8 @@ Fixture drundar() {
   return f;
 }
 r::level_factory::Executable executable() {
-  return {[](uint32_t va){return "authored-class-"+std::to_string(va);},[](uint32_t va){
+  return {[](uint32_t va){return "class-"+std::to_string(va)+
+      ((va==0x541e98 || va==0x541eb0 || va==0x541ec0)?"-%d":"");},[](uint32_t va){
     const auto ch=int64_t(va)-r::level_factory::CTYPE;
     return uint8_t(ch>='A'&&ch<='Z'?1:ch==' '?8:0);
   }};
@@ -131,9 +132,9 @@ std::vector<r::level_flow::Record> records(const ms::Contract &c) {
   std::vector<r::level_flow::Record> rows;
   auto add=[&](uint32_t ctor,std::vector<std::string> props={}) {
     r::level_flow::Record row;
-    if(ctor==0x23c44c || ctor==0x23d93c || ctor==0x23ad18) {
+    if(ctor==0x23c44c || ctor==0x2416c4 || ctor==0x23d93c || ctor==0x23ad18) {
       row.cls="authored-fallback";
-      props.push_back(exe.string(ctor==0x23c44c?0x5339a0:ctor==0x23d93c?0x533980:0x533990)+"=1");
+      props.push_back(exe.string((ctor==0x23c44c || ctor==0x2416c4)?0x5339a0:ctor==0x23d93c?0x533980:0x533990)+"=1");
     }
     else if(!ctor) row.cls="authored-no-object";
     else {
@@ -142,6 +143,7 @@ std::vector<r::level_flow::Record> records(const ms::Contract &c) {
       if(p==tests.end()) throw std::runtime_error("authored constructor row missing");
       row.cls=exe.string(p->name);
     }
+    if (ctor==0x2416c4) props.push_back(exe.string(0x541ec8)+"=1");
     row.props=std::move(props); rows.push_back(row);
   };
   if(c.level==ms::Level::Strife) {
@@ -167,7 +169,7 @@ std::vector<r::level_flow::Record> records(const ms::Contract &c) {
         {0x27c694,1},{0x1ec900,2},{0x1ecdf4,2},{0x1d7778,1},{0x158928,2},
         {0x158bcc,1},{0x158c6c,1},{0x158d0c,1}}
     : std::map<uint32_t,unsigned>{{0x26a624,71},{0x29fad0,14},{0x290c24,29},{0x23d93c,70},
-        {0x23ad18,3},{0x23c44c,24},{0x243594,4},{0x28f15c,12},{0x28cb90,3},{0x27c694,1},
+        {0x23ad18,3},{0x23c44c,16},{0x2416c4,8},{0x243594,4},{0x28f15c,12},{0x28cb90,3},{0x27c694,1},
         {0x1ec900,13},{0x1ecdf4,6},{0x158928,1},{0x158bcc,1},{0x158c6c,1},{0x158d0c,1}};
   for(const auto &p:expected) {
     unsigned have=0;
@@ -201,7 +203,9 @@ int main() {
     for(bool s:{true,false}) {
       auto f=s?strife():drundar(); auto image=f.image(s?47:36,s?21:20);
       sc::Host host;
-      check(host.load(image),"authored addressed script loads");
+      const bool loaded = host.load(image);
+      if (!loaded) std::cerr << "contract diagnostic " << host.last_fault() << "\n";
+      check(loaded,"authored addressed script loads");
       const auto *contract=host.mission1_contract();
       check(contract!=nullptr,"candidate recognized"); if(!contract) continue;
       auto c=*contract;
@@ -215,10 +219,20 @@ int main() {
       check(host.adopt_objects(blob.data(),blob.size()),"host adopts validated synthetic records");
       if(s) {
         host.variables().quest_set(contract->counter_key,2);
-        host.restore_mission1_addressed();
+        const auto restore = host.restore_mission1_addressed();
+        check(restore==sc::Stop::Complete,"documented scout visibility effects apply through host");
+        const auto before_sites=host.mission1_sites_reached();
+        check(host.run_start()==sc::Stop::Refused,"untraced start body refuses");
+        for(unsigned tick=0;tick<3;++tick) host.on_ready_tick();
+        check(host.mission1_sites_reached()==before_sites,"ticks do not resume refused restoration or start");
         check(host.mission1_local_count()==2,"addressed persistent catapult restoration");
         for(unsigned i=0;i<3;++i) check(host.mission1_bridge_request(i)==sc::Stop::Refused,"unported bridge request refused");
       } else {
+        host.variables().quest_set(contract->door_flag,1);
+        check(host.restore_mission1_addressed()==sc::Stop::Refused,"unported door restoration refuses");
+        check(host.mission1_sites_reached().count(0x374)==1 && host.mission1_sites_reached().count(0x3a8)==0,
+              "restoration stops before the next effect after refusal");
+        host.variables().quest_set(contract->door_flag,0);
         check(host.mission1_count_gate()==sc::Stop::Refused,"eight-switch gate stays closed below eight");
         for(unsigned i=0;i<8;++i) {
           const auto &sw=contract->switches[i];
@@ -244,6 +258,19 @@ int main() {
       sc::Host changed;
       check(!changed.load(f.image(s?47:36,s?21:20)),"changed literal predicate refused");
     }
+    // An undocumented store inserted between the known action cells must
+    // never run. The bounded adapter executes only the addressed increment.
+    auto injected=drundar();
+    injected.cells(0x1cac+4,{0x0b,99,0x0f,0});
+    sc::Host bounded;
+    check(bounded.load(injected.image(36,20)),"unknown gap is not part of the admitted body");
+    bounded.set_executable(executable());
+    if (!bounded.mission1_contract()) return 1;
+    auto fixture_rows=records(*bounded.mission1_contract());
+    auto blob=objects(fixture_rows);
+    check(bounded.adopt_objects(blob.data(),blob.size()),"bounded gap fixture adopts");
+    check(bounded.run_mission1_entry(0x1cac)==sc::Stop::Refused && bounded.mission1_local_count()==1,
+          "unknown bytecode cannot overwrite addressed count before refusal");
     // Ordinary scripts retain their existing interpreter path.
     sc::Host generic;
     a::ImageOptions options;options.publics={{"start",0}};

@@ -409,7 +409,7 @@ public:
   const std::map<std::uint32_t, std::uint64_t> &mission1_sites_reached() const { return mission1_sites_reached_; }
   // Addressed restore at 0x5e8/0x5f8 only, not a successful preStart entry.
   bool restore_mission1_counter();
-  // Independently evaluated addressed restoration predicates/effects. Never
+  // Ordered addressed restoration predicates/effects; stops on refusal. Never
   // claims that the rest of start or preStart executed or that props changed.
   Stop restore_mission1_addressed();
   Stop mission1_count_gate();
