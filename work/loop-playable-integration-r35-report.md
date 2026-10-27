@@ -33,3 +33,9 @@ Pending. Live arena match stays refused; native/synthetic success is not campaig
 | `codex/native-arena` | `486d5769` | `native-arena-r4.md` | `14e8f820` | roadmap, simulation libraries |
 | `codex/native-horsemen` | `bbaf93df` | `native-horsemen-r7.md` | `d553d0fe` | fixture declarations, runtime links |
 | `codex/port-mission2-hostiles` | `8595fcf5` | `port-mission2-hostiles-r2.md` | `ab8a0607` | fight and probe additive overlaps |
+
+- Native Release configure PASS; build retry PASS (`build-final.log`, -j 4), after the recorded duplicate adapter correction. All four audited tips verified ancestors; no unmerged paths and diff check PASS.
+
+## Pending full CTest record
+
+Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, not started at this commit. Result will be recorded separately; any timeout will be rerun alone and both results retained.
