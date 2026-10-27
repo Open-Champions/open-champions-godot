@@ -44,3 +44,10 @@ Same drivers/method as waves 32/33, output directory wave 34, build parallelism 
 ## Remaining boundaries
 
 Gates pending. Unsupported behavior remains explicitly refused; synthetic/native success is not campaign acceptance or original-client pixel parity.
+
+- Universal GDExtension + level-texture debug/release libraries PASS: all four configure/build pairs (8/8), Release, arm64;x86_64, parallelism 4. `build-results.json` / `extension-builds.out`.
+- Strict tooling regression suite PASS: 12 tests. Initial fixture lacked the newly mandatory pickup; corrected its success fixture to an authored 10→11 pickup, retaining diagnostic-error rejection and adding missing-pickup rejection. No acceptance rule weakened. `tooling-tests{,-final}.log`.
+
+## Pending full CTest record
+
+Full `ctest --test-dir build/native --output-on-failure -j 3` is **PENDING**, not yet started at this commit. Native runtime source is the eight-merge candidate plus API-comment clarification only. Result will be recorded in a separate commit, with any timeout rerun alone and both results retained.

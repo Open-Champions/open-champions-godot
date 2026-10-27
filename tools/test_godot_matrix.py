@@ -175,12 +175,13 @@ class RunnerTests(unittest.TestCase):
         disc = self.root / "synthetic-empty-folder"
         disc.mkdir()
         executable = self.root / "fake-godot"
-        for diagnostic, expected in (("", 0), ("SCRIPT ERROR: Invalid call", 1)):
-            with self.subTest(diagnostic=diagnostic):
+        for diagnostic, pickup, expected in (("", True, 0), ("SCRIPT ERROR: Invalid call", True, 1), ("", False, 1)):
+            with self.subTest(diagnostic=diagnostic, pickup=pickup):
                 executable.write_text(
                     f"#!{sys.executable}\nimport json, pathlib, sys\n"
                     "out = pathlib.Path(next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--out=')))\n"
-                    "(out / 'result.json').write_text(json.dumps({'steps': [], 'refusals': {}}))\n"
+                    f"steps = [dict(step='loot_pickup', result='passed', drop_produced=True, picked_up=True, walked=True, inventory_units_before=10, inventory_units_after=11)] if {pickup!r} else []\n"
+                    "(out / 'result.json').write_text(json.dumps({'steps': steps, 'refusals': {}}))\n"
                     f"print({diagnostic!r}, file=sys.stderr)\n", encoding="utf-8")
                 executable.chmod(0o755)
                 output = self.root / ("clean" if not diagnostic else "errors")
@@ -191,7 +192,8 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
                 summary = json.loads((output / "run-summary.json").read_text())
                 self.assertTrue(all(row["exit_code"] == 0 for row in summary["variants"].values()))
-                self.assertEqual(summary["variants"]["headless"]["log_errors"], expected)
+                self.assertEqual(summary["variants"]["headless"]["log_errors"], int(bool(diagnostic)))
+                self.assertEqual(summary["variants"]["headless"]["pickup_verified"], pickup)
 
 
 if __name__ == "__main__":
