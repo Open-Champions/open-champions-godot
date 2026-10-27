@@ -1,4 +1,4 @@
-STATUS: MORE — WAVE 35 IN PROGRESS (2026-10-27). Gates pending.
+STATUS: MORE — WAVE 35 VERIFIED (2026-10-27). Four audited tips integrated; native CTest 256/256, strict Godot 54/54 plus 9/9, combat/save-load/unchanged FULL_TRACE, both private sweeps and probes PASS. Journey matches wave 34 at 80/81 steps with pickup 10→11; existing campaign and live-arena refusals remain. Post-merge adapter deduplication listed separately for audit.
 
 # Playable integration wave 35 — 2026-10-27
 
@@ -29,7 +29,7 @@ Post-merge correction: automatic arena overlap duplicated creature_on_death decl
 
 ## Gates and evidence
 
-Full CTest pending; completed gates recorded below. Live arena match stays refused; native/synthetic success is not campaign acceptance. Wave-34 comparison is 80/81 steps, pickup 10→11; broader trigger/loading/checkpoint/death-reload refusals remain.
+All requested gates executed and recorded below. Live arena match stays refused; native/synthetic success is not campaign acceptance. Wave-34 comparison is 80/81 steps, pickup 10→11; broader trigger/loading/checkpoint/death-reload refusals remain.
 
 - Native Release configure PASS; build retry PASS (`build-final.log`, -j 4), after the recorded duplicate adapter correction. All four audited tips verified ancestors; no unmerged paths and diff check PASS.
 
@@ -69,3 +69,19 @@ Command: `python3 tools/run_loop_playthrough.py --godot "$GODOT_BIN" --game-fold
 Matches wave 34's 80/81 steps and pickup. Both pass 22/22 combat-input assertions, one death, one loot call, 11 shared loot draws, one generated consumable, 26 walking ticks and zero retry kills/diagnostic retry placements. Existing initial diagnostic placement remains labelled; no normal-route combat acceptance. Six refusal kinds each; one ObjectDB exit-leak warning each; no strict log errors. Wrapper exit 1 retains the unsupported full-journey acceptance boundary. Disc file counts **994 before / 994 after**.
 
 Inspected actual rendered `05-fight-attempt.png`: visible fight presentation and diagnostic label report one loot item and one picked up. This is not original-client pixel parity; script retains rendered_pickup_verified=false, wrapper pickup_verified=true. Existing unsupported script-trigger stop, dead-Creature departure/checkpoint refusal, loading prerequisites and unsuccessful saved-level reload remain explicit. No new journey, RNG, fixture or baseline changes. Evidence ignored under `playthrough/` and `playthrough.out`.
+
+## Full CTest result record
+
+After pending commit `1780604a`, full `ctest --test-dir build/native --output-on-failure -j 3` on runtime `f648c673` completed **256/256 PASS**, **674.20 s**, exit 0. No timeout, so no isolated timeout rerun required. Evidence `work/playable-wave35/ctest.out`. Added native tests from merged work account for the count increase from wave 34's 253. No assertion, fixture or baseline weakened. Result recorded in this separate commit.
+
+## Exact command families
+
+Same wave-33/34 drivers and method, wave-35 output directories, native Release `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and `cmake --build build/native -j 4`, universal builds parallelism 4, full CTest parallelism 3. Strict matrix uses `tools/godot_matrix.py matrix --captures --timeout 1200`; combat/save-load/trace are from that fresh matrix's full-combat case. Private probes and both 111-level sweeps reuse the prior serial four-slice/60-tick method. Private paths occur only in ignored drivers/logs.
+
+## Remaining boundaries and final disposition
+
+All four requested full no-ff merges committed in order; none aborted or omitted. All tips are ancestors of HEAD. Post-merge correction `f648c673` is the sole additional source change beyond conflict resolution and is separately listed above for audit; no independent PASS audit of that integration correction is claimed.
+
+Live arena match/PvP frame execution, normal-route mission-2 combat, unsupported script-trigger continuation, loading prerequisite completion, dead-Creature checkpoint/departure and successful death reload remain refused/unverified. Journey exit 1 is retained and reported, not converted to campaign acceptance. Native/synthetic gates do not establish original-client pixel parity or full playable acceptance.
+
+Final ancestry, no-unmerged-path, ignored-evidence and `git diff --check a68504da..HEAD` checks PASS. No push, PR, branch creation, private-disc write, sibling worktree change or process termination. Only authorized local commits; final tree clean after report commit.
