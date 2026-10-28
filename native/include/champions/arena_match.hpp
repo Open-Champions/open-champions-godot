@@ -3,10 +3,12 @@
 #include "champions/creature_hp.hpp"
 #include <array>
 #include <functional>
+#include <memory>
 #include <vector>
 
 // RTA US v2.00 only. Authored from research-arena-match d4f58da:
 // arena-modes.md, arena-match-core.md and arena-match-probe.md round 11.
+// R5 request stages: research-arena-live@9a0c26a5 docs/spec/arena-live-scheduler.md.
 // Task/constructor/UI call-outs require an explicit host; no retail recipes,
 // classes, names, saved records or rewards are embedded here.
 namespace champions::simulation::rta::arena_match {
@@ -37,7 +39,37 @@ std::vector<Group> wave_groups(Raw wave, int active,
                               const std::vector<Recipe> &recipes);
 int next_level_record(Raw wave, int recipe_count);
 
+// research-arena-live@9a0c26a5 docs/spec/arena-live-scheduler.md:16-34,41-47.
+// Runtime-owned pointers, never shipped names/data. A request is not a created
+// creature, completed startWave, rendered result or successful level load.
+struct RequestTables {
+  std::vector<Recipe> recipes;
+  std::vector<Address> classes;
+  std::vector<Address> levels;
+};
+struct SpawnGroup { Address class_pointer; int count; };
+struct WaveRequest {
+  Raw increment, wave, waves_left, monster_level;
+  std::vector<SpawnGroup> groups;
+};
+struct RequestServices {
+  RequestTables tables;
+  std::function<int()> active_count;
+  std::function<Address(Address)> preload_factory;
+  // Explicit boundary for the player/resource portion of startWave. This may
+  // consume the shared seed; a fixture must identify itself as such.
+  std::function<void(const WaveRequest &)> prepare_players;
+  // Original 0x3065fc requests; callback return does not prove construction/ticks.
+  std::function<void(Address class_pointer, Address saved_object)> spawn;
+  std::function<void()> camera_reset;
+  std::function<void(Address destination, Address source)> copy_level;
+  std::function<void(Raw)> close_menus;
+};
+
 struct Services {
+  // Explicit opt-in to native request selection. Absent tables never fall back
+  // to invented recipes; the existing complete-body services remain supported.
+  std::shared_ptr<const RequestServices> requests;
   // world_forEachGridObject 0x14a610, in original grid/list order.
   std::function<void(const std::function<void(Address)> &)> walk;
   std::function<bool(unsigned)> active;
@@ -68,9 +100,12 @@ public:
   void draw_prompt_step(); // fade arithmetic only, no displayed UI claim
   void open_prompt();     // ranking; unestablished multi-slot ties refuse
   void prepare_wave();
+  void begin(); // 0x304f5c: preload + three-wave setup + start request
+  void start_wave(Raw increment); // bounded native request stages, explicit hosts
   void next_wave(Raw increment);
-  // The host must bind the complete original startWave body for this to
-  // construct anything. Missing services throw with the original boundary.
+  // Native RequestServices supplies the researched scheduler stages; omitted
+  // engine work is still explicit. Legacy complete-body services remain valid.
+  // Neither path by itself establishes live match acceptance.
   void visit(Raw pressed = 0, Raw confirm = 0, Raw cancel = 0);
 
 private:
@@ -81,5 +116,9 @@ private:
   unsigned players() const;
   Address score(unsigned slot) const;
   bool still_in(unsigned slot, bool intermission) const;
+  WaveRequest wave_request(Raw increment, Raw left, Raw saved) const;
+  std::vector<Address> preload_requests() const;
+  Address level_request(bool restart) const;
+  void require_start_wave() const;
 };
 } // namespace champions::simulation::rta::arena_match

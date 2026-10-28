@@ -231,6 +231,8 @@ public:
   // construction, destructor, active-slot and saved-record services must be supplied.
   void arena_task_visit(arena_match::Services, Raw pressed = 0,
                         Raw confirm = 0, Raw cancel = 0);
+  void arena_begin(arena_match::Services); // bounded preload/start requests only
+  void arena_start_wave(arena_match::Services, Raw increment);
   void arena_reset_scores();
   void creature_on_death(Address, Raw quiet = 0); // base 0x10beb8 only
   // Bind the owner-supplied .vif hulls at a PhProp's resource pointer. Checks
