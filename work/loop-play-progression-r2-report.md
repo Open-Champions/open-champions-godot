@@ -1,4 +1,12 @@
-STATUS: MORE — all requested validation accounted for; bounded Round 2 implementation reviewed, ordinary campaign progression still refused.
+STATUS: PENDING — PPR2-1 repair in progress; fresh native/Godot/journey gates pending. Ordinary campaign progression remains refused.
+
+2026-10-28 audit repair, starting from 0bbcf15b. The full Round-2 audit
+reports one HIGH finding (PPR2-1) and no other findings. The previous menu
+lifetime claim and cancellation test were unsupported and are withdrawn.
+Fresh Release build -j 4, full CTest -j 3 (timeouts rerun alone), strict Godot
+development matrix, FULL_SAVE_LOAD, FULL_TRACE and both standard journeys
+are PENDING. Historical results below are retained evidence only.
+
 
 2026-10-27. Test continuation on codex/play-progression, clean at 5e0a5825.
 Round 2 started from c12ecc31. Implementation commits: 559bb17f, c48f4f2c,
@@ -20,10 +28,11 @@ retain the supplied native VM and production quest writer; later actions refuse.
 Recall and mission-menu suppressors use live state, and the existing mission
 menu consumes campaign availability.
 
-c48f4f2c corrects menu lifetime: Campaign's menu_open survives cancellation,
-so admission uses the existing menu's active-lifetime condition (no pending
-destination and no completed state-4 fade). A production cancel-and-reopen
-regression passes. a1c2ab87 adds first-offer menu/save and stale-admission cases.
+c48f4f2c introduced an unsupported menu-lifetime proxy, now withdrawn by
+PPR2-1. Neither a nonpositive state-4 counter nor a published destination
+proves run-task termination. The former cancellation test incorrectly called
+17 decrement-only ticks completion and expected an admitted second offer.
+a1c2ab87 adds first-offer menu/save and stale-admission cases; those remain.
 
 The authored tests independently specify truth-node sets for all 31 predicates,
 raw bits 0..3 and signed variable values -128,-1,0,1,2,127. They include 160
@@ -78,7 +87,7 @@ completion, a second offer following played completion, or real-level reload.
 
 Round-2 independent code review (2026-10-27, candidate 339b5630)
 
-No native or fixture changes required. Reviewed commits 559bb17f, c48f4f2c,
+Historical review (superseded for menu lifetime by PPR2-1). Reviewed commits 559bb17f, c48f4f2c,
 a1c2ab87 against audited research-mission-unlocks@950b2538. Authority references
 below all mean that revision's docs/spec/mission-unlocks.md (path:line).
 The 31 predicate expressions are bounded Inferred contracts backed by original
@@ -102,9 +111,11 @@ execution, not exhaustive imported-state or played-campaign proofs (:37-44).
   admits only setMissionAvailable(1,1) or (2,1) for the respective action.
   Opening never writes mission availability; completion and other difficulty rows remain preserved.
 - Recall and active mission-menu suppressors use live state (:120-125); recall
-  address is tools/difftest_mission_unlocks.py:175-178. Menu lifetime uses the
-  existing production menu machine (research-quests@7efd3ce docs/quests.md,
-  section 4), with cancel-and-reopen regression. No physical binding is inferred.
+  address is tools/difftest_mission_unlocks.py:175-178. The prior review
+  incorrectly accepted the implementation as menu-lifetime authority. At
+  research-mission-unlocks@950b2538, docs/quests.md:193,357-358 leaves the
+  cancellation boundary untraced; :197 proves destination publication only.
+  No termination or physical binding is inferred from these observations.
 - native/tests/hub_offer_host_tests.hpp drives production quest records and actual
   campaign save/load, independently expected truth-node sets, signed suppressing
   cases for each variable, recall/menu controls, state changes after opening,
@@ -191,7 +202,7 @@ demo-specific behavior and unsupported host services remain Unknown/refused
 (research authority, lines 129-142). Dialog node priority is not mission order.
 Constructed-state offers and native save composition do not remove those gates.
 
-## Final disposition
+## Historical disposition (before PPR2-1)
 
 All requested gate results are recorded. CTest, predicate/admission review,
 Godot matrix, FULL_TRACE and the already-completed FULL_SAVE_LOAD are retained
