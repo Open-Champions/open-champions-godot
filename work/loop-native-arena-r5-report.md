@@ -55,3 +55,5 @@ Missing construction/resources/records/services, ranking ties and unsupported
 purchase paths must refuse. No live match acceptance or success fallback.
 
 No game data/names or absolute private paths belong in tracked changes.
+
+Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 74fae130 — **217/217 passed, 714.29 s**, no timeouts (log `work/native-arena-r5-ctest-full.log`). Arena Godot tests/matrix and FULL_TRACE for this revision are still PENDING.
