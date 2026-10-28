@@ -2,6 +2,7 @@
 // comparing itself: research-death-reload 0e3afdb8 docs/death-reload.md:75-89,
 // tools/difftest_death_reload.py:132-365. Fixtures contain synthetic values only.
 #include "champions/ps2_class_restore.hpp"
+#include "champions/creature_anim/runtime.hpp"
 #include <iostream>
 #include <stdexcept>
 using namespace champions::simulation::rta;
@@ -85,10 +86,47 @@ void chests() {
   builtins::Memory m; Bytes b(12);b[8]=1;
   refuses([&]{restore_class_fields(m,C,"Chest",b,{});},"clip start");
 }
+// Execute the existing native animation services, matching the original's
+// constructed-cache control, not a rendered/world reconstruction claim.
+// 0e3afdb8 tools/difftest_death_reload.py:340-365;
+// docs/death-reload.md:77-78; tools/ref_anim.py:685,919.
+void chest_animation_runtime() {
+  for (bool ac : {false, true}) for (unsigned opened : {0, 1}) {
+    creature_anim::Runtime runtime;
+    creature_anim::Clip clip; clip.length = 73;
+    const auto clip_id = runtime.add_clip(clip);
+    const auto state = runtime.add_state(1);
+    builtins::Memory m;
+    m.word(C+0xc,0x100000); m.word(C+0x24,0x20000);
+    m.word(0x2001c,std::uint32_t(clip_id)); m.word(C+0xf4,std::uint32_t(clip_id));
+    Bytes b;put(b,7,4);put(b,0,2);put(b,0,1);put(b,0,1);put(b,opened,4);
+    ClassLoadServices services;
+    services.start_animation = [&](auto track, auto selected, auto flags) {
+      check(track == C+(ac?0x98:0x5c));
+      runtime.anim_push(state, selected, flags);
+    };
+    services.end_animation = [&](auto track) {
+      check(track == C+(ac?0x98:0x5c));
+      runtime.anim_jump_top_to_end(state);
+    };
+    services.class_definition = [](auto variant) { check(variant==0); return 0x20000u; };
+    services.set_class = [&](auto object, auto definition) {
+      check(object==C && definition==m.word(C+0x24)); // already-current cache boundary
+    };
+    check(restore_class_fields(m,C,ac?"AutoChest":"Chest",b,services)==12);
+    check(runtime.state(state).count==int(opened));
+    check(m.word(C+0xc)==(opened?0:0x100000));
+    if (opened) {
+      const auto &track=runtime.track(runtime.state(state).tracks[0]);
+      check(track.clip==clip_id && track.flags==0x204);
+      check(track.time==Fpu{}.from_int(73));
+    }
+  }
+}
 void doors() {
   for(const auto *cls:{"DoorSwing","DoorSecret","RollDoor"})for(unsigned opened:{0,1}){
-    world_queries::LevelData data;data.pieces={0};
-    data.elements.push_back(world_queries::make_element(0,0,0,4,4,-1,0x12,0,0,123,32767,0));
+    world_queries::LevelData data;data.pieces={0};data.heightfields.push_back({});
+    data.elements.push_back(world_queries::make_element(0,0,0,4,4,0,0x12,0,0,123,32767,0));
     world_queries::Level terrain(data);
     level_flow::Piece piece;piece.tz=16;
     level_flow::Pieces world({piece},terrain);
@@ -206,8 +244,8 @@ void boundaries() {
   refuses([&]{restore_class_fields(m,C,"JumpGate",Bytes{2,1},s);},"portal light");
   check(later==0 && m.u8(C+0x4d)==2 && m.u8(C+0x4e)==1);
 
-  world_queries::LevelData data; data.pieces={0};
-  data.elements.push_back(world_queries::make_element(0,0,0,4,4,-1,0x12,0,0,123,32767,0));
+  world_queries::LevelData data; data.pieces={0}; data.heightfields.push_back({});
+  data.elements.push_back(world_queries::make_element(0,0,0,4,4,0,0x12,0,0,123,32767,0));
   world_queries::Level terrain(data); level_flow::Pieces world({level_flow::Piece{}},terrain);
   s.pieces=&world; m.w16(C+0x4c,0); m.word(C+0x50,0x87654321);
   Bytes door;put(door,1,2);put(door,0,2);put(door,0,4);
@@ -218,4 +256,4 @@ void boundaries() {
 }
 
 }
-int main(){try{trigger();creatures();chests();doors();gates();props();boundaries();}catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}std::cout<<"PS2 class restore: "<<checks<<" checks passed; recording services are bounded, not full-world proof\n";}
+int main(){try{trigger();creatures();chests();chest_animation_runtime();doors();gates();props();boundaries();}catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}std::cout<<"PS2 class restore: "<<checks<<" checks passed; recording services are bounded, not full-world proof\n";}

@@ -1095,7 +1095,7 @@ void Fight::bind_death_checkpoint(ps2_save::Bytes data, ps2_save::LoadServices s
   if (p.death && p.death->running())
     throw ps2_save::Unknown("checkpoint replacement refused during death reload");
   // Validate before replacing the owner's last good snapshot. An empty or
-  // malformed image is never a restart selector (0e3afdb8 death-reload:58-62).
+  // malformed image is never a restart selector (0e3afdb8 docs/death-reload.md:58-62).
   ps2_save::parse_slot(data, true);
   p.death_checkpoint = std::move(data);
   p.death_load_services = std::move(services);

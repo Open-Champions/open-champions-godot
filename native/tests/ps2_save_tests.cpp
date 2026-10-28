@@ -972,10 +972,13 @@ void native_import() {
 // service boundary, never evidence of a restored camera or playable world.
 void death_save_runtime() {
   namespace D = player_death_flow;
-  for (int act : {-1, 0, -2}) { // literal != -1 branch, not checkpoint validity
+  for (bool qualified : {false, true}) for (int act : {-1, 0, -2}) { // literal != -1 branch, not checkpoint validity
     builtins::Variables vars;
     auto &m = vars.memory;
     auto in = ref_inputs();
+    in.level_name = "synth_saved";
+    if (qualified) in.subname = "part";
+    in.acts = {{{qualified_name(in.level_name, in.subname), 0x2000}}};
     put32(in.players[0].record, 0xac, f(37));
     put32(in.players[0].record, 0xb0, f(80));
     const auto saved = build_slot(in);
@@ -987,6 +990,7 @@ void death_save_runtime() {
     m.word(0x4f85b0, 1);
     auto before = m.read(PLAYERS, RECORD_SIZE);
     unsigned cameras = 0, requests = 0;
+    bool names_match = false;
     D::Services services;
     services.frozen = [] { return false; };
     services.close_menus = [] {};
@@ -1002,7 +1006,7 @@ void death_save_runtime() {
     };
     services.request_current_level = [&] { ++requests; request_death_restart(vars, "synthetic_current"); };
     services.pending_level = [&] { return !m.cstr(PENDING_LEVEL).empty(); };
-    services.qualified_names_match = [] { return true; };
+    services.qualified_names_match = [&] { return names_match; };
     D::Flow flow(D::Memory{[&](auto a, auto n) {
       std::uint64_t v = 0; for (unsigned j = 0; j < n; ++j) v |= std::uint64_t(m.read(a+j)) << (8*j); return v;
     }, [&](auto a, auto n, auto v) { m.store(a, n, v); }}, services);
@@ -1022,11 +1026,17 @@ void death_save_runtime() {
     } else {
       CHECK(m.read(PLAYERS, RECORD_SIZE) == decode_loaded_record(parse_slot(saved).characters[0].raw, PLAYERS));
       CHECK(m.word(PLAYERS + 0xac) == f(37) && m.word(PLAYERS + 0xe4) == 777);
-      CHECK(m.cstr(PENDING_LEVEL) == in.level_name && m.u8(LOADED_FROM_SAVE) == 1);
+      CHECK(m.cstr(PENDING_LEVEL) == qualified_name(in.level_name, in.subname) && m.u8(LOADED_FROM_SAVE) == 1);
+      CHECK(m.word(NUM_PLAYERS) == 1 && m.word(PLAY_TIME) == in.play_time);
+      CHECK(m.word(SPAWN_POS) == in.players[0].position[0]);
+      CHECK(m.word(SPAWN_POS+4) == in.players[0].position[1]);
+      CHECK(m.word(SPAWN_POS+8) == in.players[0].position[2]);
+      CHECK(vars.quest_get("opened") == 7 && vars.quest_get("door") == -2);
       CHECK(m.u16(SPAWN_FACING) == in.players[0].facing);
       CHECK(cameras == 1 && requests == 0 && flow.phase() == 2 && flow.running());
       flow.task_step(); CHECK(flow.running()); // pending request is not load completion
-      m.string(PENDING_LEVEL, ""); flow.task_step(); CHECK(!flow.running());
+      m.string(PENDING_LEVEL, ""); flow.task_step(); CHECK(flow.running());
+      names_match = true; flow.task_step(); CHECK(!flow.running());
     }
     CHECK(saved == build_slot(in)); // dying world never overwrites checkpoint
   }
