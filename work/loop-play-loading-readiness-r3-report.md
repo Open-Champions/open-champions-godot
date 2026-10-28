@@ -24,3 +24,16 @@ Full Release CTest (-j 3): PENDING; record exact count/time and isolated timeout
 Release extension build, strict Godot dev matrix, both journeys and FULL_TRACE:
 PENDING. Known inherited ui_layout_smoke four-argument diagnostic remains a gate
 failure, not an allowed diagnostic. No fixtures/baselines/tests weakened.
+
+## Recovery checkpoint (2026-10-27)
+
+Resumed at 4ba375b5 with exactly two modified files. Reviewed their full diff
+against audited research 2550d34; retained the sound citation-only edits and
+committed them as 83f5dff5. No interrupted implementation was discarded.
+Reviewed the original fixups and Host-runtime authored fixtures (252 paired
+controls plus four incomplete/overflow refusals); unknown arrival inputs remain
+refused. Fresh Release configure/build (-j 4) and script-commands PASS.
+Full CTest (-j 3): PENDING for recovery revision; next gate will record exact
+count/time and rerun any timeouts alone. Extension, strict isolated Godot matrix,
+both journeys, and FULL_TRACE revalidation: PENDING. Prior ignored logs are
+historical evidence only and will not stand in for this recovery's execution.
