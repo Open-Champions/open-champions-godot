@@ -769,7 +769,8 @@ void require_profile(const std::string &profile) {
 }
 
 // save_load 0x221d60, steps 1..10 (docs/save-format.md "Load path").
-std::vector<std::string> apply_load(builtins::Variables &variables, const Bytes &data) {
+static std::vector<std::string> load_impl(builtins::Variables &variables, const Bytes &data,
+                                          const LoadServices *services) {
   const auto slot = parse_slot(data, true);
   auto &memory = variables.memory;
   // Refusals that must happen before any write.
@@ -784,7 +785,10 @@ std::vector<std::string> apply_load(builtins::Variables &variables, const Bytes 
   // 1. The header copy.
   memory.write(SAVE_HEADER_COPY, Bytes(data.begin(), data.begin() + HEADER_SIZE));
   // 2. Camera (refused, not restored) and jump gates.
-  notes.emplace_back("camera: the load side of Camera_saveState is not documented; the 0xc4 bytes were not applied");
+  if (services) {
+    if (!services->camera) throw Unknown("save_reload refused: camera reconstruction Unknown; no camera load service bound");
+    services->camera(slot.camera);
+  } else notes.emplace_back("camera: the load side of Camera_saveState is not documented; the 0xc4 bytes were not applied");
   memory.write(JUMP_DESTS, slot.jump_destinations);
   memory.byte(JUMP_COUNT, static_cast<std::uint8_t>(slot.jump_count));
   // 3. Minimap mode and the u32 player count.
@@ -823,6 +827,27 @@ std::vector<std::string> apply_load(builtins::Variables &variables, const Bytes 
       notes.push_back("level " + level.name + " decal: " + level.decal_refused);
   }
   return notes;
+}
+
+std::vector<std::string> apply_load(builtins::Variables &variables, const Bytes &data) {
+  return load_impl(variables, data, nullptr);
+}
+void reload_checkpoint(builtins::Variables &variables, const Bytes &data, const LoadServices &services) {
+  // save_reload -> save_load; never rebuild/store the dying world first.
+  // 0e3afdb8 docs/death-reload.md:23-31,52-62. Level bodies are consumed
+  // later by the level loader, not by this function (docs/save-world.md:69-86).
+  if (data.empty()) throw Unknown("save_reload refused: no valid in-memory checkpoint; invalid-buffer behavior Unknown");
+  load_impl(variables, data, &services);
+}
+
+void request_death_restart(builtins::Variables &variables, const std::string &current_level) {
+  // The task compares save_findAct(current level) with -1; checkpoint validity
+  // is not the branch selector. 0e3afdb8 docs/death-reload.md:32-42,58-62.
+  if (current_level.empty() || current_level.find('\0') != std::string::npos ||
+      current_level.size() + 1 > PENDING_LEVEL_ROOM)
+    throw Unknown("death restart refused: current qualified level unavailable or invalid");
+  variables.memory.string(PENDING_LEVEL, current_level);
+  variables.memory.byte(PENDING_MARKER, PENDING_MARKER_VALUE);
 }
 
 ImportedCharacter import_into(const Bytes &data, int index, const std::string &profile,

@@ -2,6 +2,7 @@
 // file. Scenario builders mirror tools/test_ref_save.py and tools/difftest_save.py
 // at t3/research-saves 8d43286; ps2_save_vectors.inc holds what ref_save produced.
 #include "champions/ps2_save.hpp"
+#include "champions/player_death_flow.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -965,6 +966,82 @@ void native_import() {
   refuses([&] { import_into(build_slot(lng)); });
 }
 
+// Original-function expectations: research-death-reload 0e3afdb8
+// docs/death-reload.md:12-42 and tools/difftest_death_reload.py:40-129.
+// Real Flow and save_load share one native memory; camera is a recording
+// service boundary, never evidence of a restored camera or playable world.
+void death_save_runtime() {
+  namespace D = player_death_flow;
+  for (int act : {-1, 0, -2}) { // literal != -1 branch, not checkpoint validity
+    builtins::Variables vars;
+    auto &m = vars.memory;
+    auto in = ref_inputs();
+    put32(in.players[0].record, 0xac, f(37));
+    put32(in.players[0].record, 0xb0, f(80));
+    const auto saved = build_slot(in);
+    m.write(PLAYERS, ref_record());
+    m.word(PLAYERS + 0xac, 0);
+    m.word(PLAYERS + 0xb0, f(99));
+    m.word(PLAYERS + 0xe4, 1234);
+    m.word(NUM_PLAYERS, 1);
+    m.word(0x4f85b0, 1);
+    auto before = m.read(PLAYERS, RECORD_SIZE);
+    unsigned cameras = 0, requests = 0;
+    D::Services services;
+    services.frozen = [] { return false; };
+    services.close_menus = [] {};
+    services.clear_fade = [] {};
+    services.step_fade = [](Raw increment) { CHECK(increment == 4); return Raw(128); };
+    services.find_act = [act] { return act; };
+    services.reload_checkpoint = [&] {
+      reload_checkpoint(vars, saved, LoadServices{[&](const Bytes &camera) {
+        CHECK(camera == in.camera.value());
+        CHECK(m.word(PLAYERS + 0xe4) == 1234); // camera precedes player rollback
+        ++cameras;
+      }});
+    };
+    services.request_current_level = [&] { ++requests; request_death_restart(vars, "synthetic_current"); };
+    services.pending_level = [&] { return !m.cstr(PENDING_LEVEL).empty(); };
+    services.qualified_names_match = [] { return true; };
+    D::Flow flow(D::Memory{[&](auto a, auto n) {
+      std::uint64_t v = 0; for (unsigned j = 0; j < n; ++j) v |= std::uint64_t(m.read(a+j)) << (8*j); return v;
+    }, [&](auto a, auto n, auto v) { m.store(a, n, v); }}, services);
+    flow.level_enter(1);
+    m.w16(D::WIPE_COUNTDOWN, 1); m.w16(D::DEAD_COUNTDOWNS, 1);
+    flow.check_all_dead();
+    CHECK(flow.running() && flow.phase() == 0);
+    CHECK(m.u16(D::WIPE_COUNTDOWN) == 0 && m.u16(D::DEAD_COUNTDOWNS) == 0);
+    flow.task_step(); CHECK(flow.phase() == 1);
+    flow.task_step();
+    CHECK(m.u8(PENDING_MARKER) == 253);
+    if (act == -1) {
+      put32(before, 0xac, f(99));
+      CHECK(m.read(PLAYERS, RECORD_SIZE) == before);
+      CHECK(!flow.running() && cameras == 0 && requests == 1);
+      CHECK(m.cstr(PENDING_LEVEL) == "synthetic_current");
+    } else {
+      CHECK(m.read(PLAYERS, RECORD_SIZE) == decode_loaded_record(parse_slot(saved).characters[0].raw, PLAYERS));
+      CHECK(m.word(PLAYERS + 0xac) == f(37) && m.word(PLAYERS + 0xe4) == 777);
+      CHECK(m.cstr(PENDING_LEVEL) == in.level_name && m.u8(LOADED_FROM_SAVE) == 1);
+      CHECK(m.u16(SPAWN_FACING) == in.players[0].facing);
+      CHECK(cameras == 1 && requests == 0 && flow.phase() == 2 && flow.running());
+      flow.task_step(); CHECK(flow.running()); // pending request is not load completion
+      m.string(PENDING_LEVEL, ""); flow.task_step(); CHECK(!flow.running());
+    }
+    CHECK(saved == build_slot(in)); // dying world never overwrites checkpoint
+  }
+  builtins::Variables vars;
+  const auto saved = build_slot(ref_inputs());
+  vars.memory.word(PLAYERS + 0xe4, 1234);
+  refuses<Unknown>([&] { reload_checkpoint(vars, {}, {}); });
+  refuses<Unknown>([&] { reload_checkpoint(vars, saved, {}); });
+  CHECK(vars.memory.word(PLAYERS + 0xe4) == 1234);
+  CHECK(vars.memory.cstr(PENDING_LEVEL).empty());
+  CHECK(vars.memory.read(SAVE_HEADER_COPY, HEADER_SIZE) == Bytes(saved.begin(), saved.begin()+HEADER_SIZE));
+  refuses([&] { reload_checkpoint(vars, Bytes{1}, {}); });
+  refuses<Unknown>([&] { request_death_restart(vars, ""); });
+}
+
 void native_inventory() {
   items::Tables tables;
   auto definition = std::make_shared<items::Definition>();
@@ -996,6 +1073,7 @@ int main() {
     config();
     native_import();
     native_inventory();
+    death_save_runtime();
   } catch (const std::exception &error) {
     std::cerr << "ps2-save: " << error.what() << '\n';
     return 1;
