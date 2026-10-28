@@ -3,6 +3,7 @@
 // at t3/research-saves 8d43286; ps2_save_vectors.inc holds what ref_save produced.
 #include "champions/ps2_save.hpp"
 #include "champions/player_death_flow.hpp"
+#include "champions/combat_runtime.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -1052,6 +1053,51 @@ void death_save_runtime() {
   refuses<Unknown>([&] { request_death_restart(vars, ""); });
 }
 
+// DR-2: run the real World/Flow/save composition with old-world HUD credit.
+// The client refusal guard must halt the *current* tick after the restore.
+// 0e3afdb8 docs/death-reload.md:41-42,52-62,91-97; the HUD pending address
+// is the existing combat_ctors::hud_tick_gold store, not new reload behavior.
+void death_world_request_boundary() {
+  namespace C = combat_runtime;
+  namespace D = player_death_flow;
+  auto authority = std::make_shared<WorldAuthority>();
+  builtins::Variables vars(authority);
+  auto &m=vars.memory;
+  auto input=ref_inputs();
+  const auto checkpoint=build_slot(input);
+  bool requested=false;
+  D::Flow *flow=nullptr;
+  auto services=C::flat_fixture_services();
+  services.death_task=[&]{flow->task_step();};
+  services.death_reload_requested=[&]{return requested;};
+  services.check_all_dead=[&]{flow->check_all_dead();};
+  C::World world(authority,services,0,C::Composition::Full);
+  D::Services death;
+  death.clear_fade=[]{};
+  death.step_fade=[](auto){return Raw(128);};
+  death.find_act=[]{return 0;};
+  death.reload_checkpoint=[&]{
+    reload_checkpoint(vars,checkpoint,LoadServices{[](const Bytes &){}});
+    requested=true;
+  };
+  D::Flow actual({[&](auto a,auto n){return world.read(a,n);},
+      [&](auto a,auto n,auto v){world.write(a,n,v);}},death);
+  flow=&actual;
+  actual.level_enter(1); actual.schedule(); actual.task_step();
+  m.word(0x86ace8,8); // pending credit would add 1 after the death task
+  m.word(C::FRAME,77);
+  world.tick();
+  CHECK(requested && actual.phase()==2 && actual.running());
+  const auto expected=decode_loaded_record(parse_slot(checkpoint).characters[0].raw,PLAYERS);
+  CHECK(m.read(PLAYERS,RECORD_SIZE)==expected && m.word(PLAYERS+0xe4)==777);
+  CHECK(m.word(0x86ace8)==8 && m.word(C::FRAME)==77);
+  CHECK(m.u8(PENDING_MARKER)==253 && !m.cstr(PENDING_LEVEL).empty());
+  world.tick(); // no actor tick, credit, frame or phase-2 success fallback
+  CHECK(m.read(PLAYERS,RECORD_SIZE)==expected && m.word(0x86ace8)==8);
+  CHECK(m.word(C::FRAME)==77 && actual.running());
+  CHECK(checkpoint==build_slot(input));
+}
+
 void native_inventory() {
   items::Tables tables;
   auto definition = std::make_shared<items::Definition>();
@@ -1084,6 +1130,7 @@ int main() {
     native_import();
     native_inventory();
     death_save_runtime();
+    death_world_request_boundary();
   } catch (const std::exception &error) {
     std::cerr << "ps2-save: " << error.what() << '\n';
     return 1;

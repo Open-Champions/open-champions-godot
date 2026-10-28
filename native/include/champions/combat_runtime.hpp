@@ -90,6 +90,11 @@ struct Services {
   // rebuild/check below still runs at the end of the tick (tasks_run).
   std::function<void()> death_task;
   std::function<void()> check_all_dead;
+  // Host refusal boundary after a death request: no remaining old-world work
+  // may mutate restored records, including HUD credit later in this tick.
+  // This stops at Unknown reconstruction, not an original scheduler claim.
+  // research-death-reload 0e3afdb8 docs/death-reload.md:41-42,52-62,91-97.
+  std::function<bool()> death_reload_requested;
   std::function<bool()> dialog_is_open;
   std::function<Raw()> jumpgate_travel_state;
   // Required for reachable terrain/animation services. No silent zero defaults.

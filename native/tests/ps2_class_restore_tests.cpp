@@ -173,6 +173,7 @@ void props() {
   for(bool item:{false,true})for(bool bit:{false,true})for(unsigned mask:{8,10}){
     builtins::Memory m;m.word(C+0xc,0x3800);m.w16(C+0x38,0xc000);
     m.word(C+0x10,0x40800000);m.word(C+0x14,0x40a00000);m.word(C+0x18,0x40c00000);
+    m.string(C+0x54,"old_lump"); m.string(C+0x64,"old_model"); m.string(C+0xa4,"old_texture");
     Bytes b;
     if(item){b.resize(0x48);b[0]=7;if(bit)b[12]=0x80;}
     put(b,11,4);put(b,22,4);put(b,33,4);
@@ -183,6 +184,8 @@ void props() {
     s.asset=[&](const auto &a,const auto &name){check(a=="synthetic_asset");check(name==(!assets?"synthetic_model":"synthetic_texture"));return ++assets==1?0x1234:0x5678;};
     check(restore_class_fields(m,C,item?"ItemProp":"Prop",b,s)==b.size());
     check(m.word(C+0x4c)==0x1234&&m.word(C+0x50)==0x5678&&m.u64(C+0xe8)==mask);
+    check(m.cstr(C+0x54)=="synthetic_asset" && m.cstr(C+0x64)=="synthetic_model" &&
+          m.cstr(C+0xa4)=="synthetic_texture");
     check(m.word(C+0x110)==ONE&&m.word(C+0x120)==ONE&&m.word(C+0x130)==ONE);
     check(m.word(C+0x134)==(item?0x40800000:ONE));
     check(m.word(C+0x138)==(item?0x40a00000:0xc0000000));
@@ -237,6 +240,11 @@ void boundaries() {
   s.stop=[](auto){throw Unknown("Creature world stop/list integration Unknown");};
   refuses([&]{restore_class_fields(m,C,"Creature",dead,s);},"world stop/list");
   check(m.word(C+0xa8)==0xdeadbeef && m.u16(C+0x312)==0);
+  m.w16(C+0x312,17);
+  Bytes alive; put(alive,7,4);put(alive,ONE,4);put(alive,0,4);
+  const auto nonzero_charm=m.read(C,0x400);
+  refuses([&]{restore_class_fields(m,C,"Creature",alive,s);},"constructor charm");
+  check(m.read(C,0x400)==nonzero_charm);
   unsigned later=0;
   s.light=[](auto){throw Unknown("JumpGate portal light world effects Unknown");};
   s.gate_asset=[&](auto,auto){++later;return 1;};

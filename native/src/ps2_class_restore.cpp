@@ -41,6 +41,10 @@ void admit(builtins::Memory &m, std::uint32_t c, const std::string &cls,
     const auto bits = r.get(4);
     if (bits & ~0x7full) throw Unknown("Creature packed flags outside documented domain");
     if (bits & 64) r.get(4);
+    else if (m.u16(c+0x312) != 0)
+      // The pin starts +0x312 at zero and only proves the optional write.
+      // tools/difftest_death_reload.py:239,264-272; death-reload.md:76.
+      throw Unknown("Creature nonzero constructor charm without optional word Unknown");
   } else if (cls == "Chest" || cls == "AutoChest") { // docs/death-reload.md:77-78
     r.get(4); r.get(2); r.get(1); r.get(1); r.get(4);
   } else if (cls == "DoorSwing" || cls == "DoorSecret" || cls == "RollDoor") {
@@ -98,6 +102,15 @@ std::size_t prop(builtins::Memory &m, std::uint32_t c, Reader &r, const ClassLoa
     const auto handle = std::uint32_t(r.get(4));
     str = need(s.string, "world string resolution")(handle);
   }
+  // Pin docs/objects.md:333-337 and docs/death-reload.md:83: the names
+  // themselves are copied, not only resolved pointers. Host admission stays
+  // inside the known adjacent fields; it does not emulate overflow/truncation.
+  constexpr std::uint32_t offsets[] = {0x54, 0x64, 0xa4};
+  constexpr std::size_t rooms[] = {0x64-0x54, 0xa4-0x64, 0xe8-0xa4};
+  for (unsigned i=0; i<3; ++i)
+    if (strings[i].size() >= rooms[i] || strings[i].find('\0') != std::string::npos)
+      throw Unknown("Prop resource name outside bounded field");
+  for (unsigned i=0; i<3; ++i) m.string(c+offsets[i], strings[i]);
   m.word(c+0x4c, need(s.asset, "model asset lookup")(strings[0], strings[1]));
   m.word(c+0x50, need(s.asset, "texture asset lookup")(strings[0], strings[2]));
   auto tag = r.get(1);
@@ -166,7 +179,7 @@ std::size_t restore_class_fields(builtins::Memory &m, std::uint32_t c,
         throw Unknown("Creature optional-word eligibility branch Unknown");
       m.w16(c+0x312, r.get(4));
       need(s.unlink, "Creature optional-word unlink")(c+0x234);
-    } else m.w16(c+0x312, 0);
+    } // No invented clear of a nonserialized constructor timer.
   } else if (cls == "Chest" || cls == "AutoChest") {
     // docs/death-reload.md:77-78; tools/difftest_death_reload.py:138-160,340-365;
     // docs/save-world.md:119 for AutoChest's distinct field layout.

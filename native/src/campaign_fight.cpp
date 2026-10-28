@@ -305,6 +305,7 @@ struct Fight::Impl {
         }
       }
     };
+    base.death_reload_requested = [this] { return death_world_requested; };
     base.check_all_dead = [this] {
       // The restored records belong to the requested world, not the old body.
       // 0e3afdb8 docs/death-reload.md:26-31,46-56,91-97.
