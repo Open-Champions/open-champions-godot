@@ -41,3 +41,6 @@ supported rows, both initial raw bytes 0/2 and both choices: 40 grants, zero
 invalid/stalled paths. Production native VM and binder, with campaign save state.
 Source/log are ignored under work/progression-r2/binding-probe.cpp and
 action-probe.log. No physical NPC or first-act completion claim follows.
+
+Resume at c48f4f2c: pinned research/audit reviewed; first-offer menu/save and
+stale-admission regressions added. Full CTest PENDING before invocation.

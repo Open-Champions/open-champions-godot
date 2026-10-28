@@ -138,13 +138,20 @@ inline void run(Check check,std::string &where) {
       } else if(start==8 && choice==1) confirm(host,1);
       check(host.campaign().record(0).missions==after,"hub: choice preserves completion and other difficulty rows");
       check(!host.dialog_stalled(),"hub: documented path does not stall");
-      if(start==7) {
+      if(start==1 || start==7) {
+        const int granted=start==1 ? 1 : 2;
         ready(host); run_to_close(host);
         host.campaign().open_menu(0);
         for(int i=0;i<17;++i)host.tick_mission_menu(0);
-        check(host.campaign().menu().row==1,"hub: granted offer surfaces in production mission menu");
+        // The menu initially selects its highest available row; constructed
+        // states can already have mission 2 available when offer 1 is granted.
+        if(granted==1 && (second&1))host.tick_mission_menu(q::BTN_UP);
+        check(host.campaign().menu().row==granted-1,"hub: granted offer surfaces in production mission menu");
+        host.tick_mission_menu(q::BTN_CROSS);
+        check(host.campaign().menu().state==5,
+              "hub: production menu accepts travel for the granted offer");
         sc::Host restored; fixture.load_into(restored,check); restored.load_campaign(host.save_campaign());
-        check(restored.campaign().mission_available(2),"hub: choice grant survives actual campaign save/load");
+        check(restored.campaign().mission_available(granted),"hub: choice grant survives actual campaign save/load");
       }
       ++cases;
     }
@@ -238,6 +245,22 @@ inline void run(Check check,std::string &where) {
     confirm(host);
     check(host.dialog_stalled() && !host.campaign().mission_available(2),
           "hub: changed recall/menu/quest state suppresses a stale offer choice");
+  }
+  // First-offer traversal must also revalidate admission before its final writer.
+  for(int control=0;control<3;++control) {
+    sc::Host host; fixture.load_into(host,check);
+    open(host); confirm(host); confirm(host);
+    check(host.dialog().node==3,"hub: first offer reaches final choice");
+    if(control==0)host.variables().memory.byte(0x41b51d,1);
+    else if(control==1)host.campaign().open_menu(0);
+    else {
+      host.variables().memory.byte(host.variables().mission_byte(0,1,12),1);
+      host.variables().quest_set("v12",-1);
+    }
+    const auto before=host.campaign().record(0).missions;
+    confirm(host);
+    check(host.dialog_stalled() && host.campaign().record(0).missions==before,
+          "hub: stale first-offer admission cannot write availability");
   }
   {
     sc::Host host; fixture.load_into(host,check);
