@@ -29,3 +29,5 @@ removed: nonzero constructor charm without the optional word now refuses.
 Focused tests: ps2-save, ps2-class-restore, player-death-flow 3/3 PASS.
 Fresh full CTest after these source fixes is PENDING (the earlier suite is
 still running and will be recorded separately).
+
+Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 435e1740 — **258/258 passed, 881.13 s**, no timeouts (log `work/death-reload/ctest-r1.log`). Strict Godot matrix, FULL_SAVE_LOAD, death probe, FULL_TRACE and both journeys for this revision are still PENDING.
