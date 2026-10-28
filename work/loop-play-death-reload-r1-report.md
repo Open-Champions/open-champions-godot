@@ -9,3 +9,12 @@ with any timeouts rerun alone. No acceptance gate or fixture changed.
 Automatic reload restores the checkpoint buffer, not a card slot or a guessed
 spawn. Restart is the separate current-level act-lookup -1 branch. Whole-world
 Creature/portal effects and continuous death reload remain unknown and refuse.
+
+Inherited runtime review: b1753453 retained. It uses the actual death Flow and
+save loader, compares the whole restored/current record, retains literal != -1
+branching and refuses missing camera before player/request mutation. Class
+reconstruction is being reviewed separately. Campaign reload now invokes that
+loader on shared memory when an owner explicitly supplies a valid checkpoint;
+there is no checkpoint synthesized from the dying world. After a request it
+stops before another old-world tick because world reconstruction is Unknown.
+Full CTest remains PENDING; fresh acceptance results will replace this status.

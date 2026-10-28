@@ -3,6 +3,7 @@
 #include "champions/campaign_moves.hpp"
 #include "champions/combat_runtime.hpp"
 #include "champions/player_death_flow.hpp"
+#include "champions/ps2_save.hpp"
 #include "champions/player_services.hpp"
 #include "champions/script_commands.hpp"
 #include <functional>
@@ -126,6 +127,12 @@ public:
   // World and spawns the session player. Returns an empty string on success or
   // a label when the player could not be established.
   std::string start(const PlayerStart &);
+  // Native owner supplies a validated original-format in-memory checkpoint.
+  // Never captures the current dying world or substitutes the manual native save.
+  // research-death-reload 0e3afdb8 docs/death-reload.md:23-42,52-62,91-97.
+  // Camera remains an explicit service. A request stops before unproved world
+  // reconstruction; this does not authorize continuous play or actor revival.
+  void bind_death_checkpoint(ps2_save::Bytes, ps2_save::LoadServices);
   // One ready tick of the shared World. `command` holds the session command
   // movement/attack/guard/swap bits plus heavy and two ability-slot requests.
   void tick(std::uint32_t command);

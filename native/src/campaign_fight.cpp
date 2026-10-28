@@ -98,6 +98,9 @@ struct Fight::Impl {
   std::unique_ptr<C::SessionAdapter> adapter;
   std::unique_ptr<player_death_flow::Flow> death;
   std::string death_error;
+  ps2_save::Bytes death_checkpoint;
+  ps2_save::LoadServices death_load_services;
+  bool death_world_requested = false;
   script_commands::Host *host = nullptr;
   std::unique_ptr<campaign_actors::Runtime> actors;
   std::unique_ptr<mission2_actors::Runtime> mission2;
@@ -303,7 +306,9 @@ struct Fight::Impl {
       }
     };
     base.check_all_dead = [this] {
-      if (death && death_error.empty()) {
+      // The restored records belong to the requested world, not the old body.
+      // 0e3afdb8 docs/death-reload.md:26-31,46-56,91-97.
+      if (death && death_error.empty() && !death_world_requested) {
         try { death->check_all_dead(); }
         catch (const C::Unsupported &e) {
           death_error = e.what();
@@ -1053,10 +1058,26 @@ std::string Fight::start(const PlayerStart &start) {
     }
     return -1;
   };
-  death_services.reload_checkpoint = [] {
-    throw C::Unsupported("save_reload refused: no valid in-memory checkpoint (complete saved player records, level, pose, quests and gates); populated world/decal restore and camera load unsupported; invalid-buffer behavior Unknown");
+  death_services.reload_checkpoint = [&p] {
+    // Actual save_reload -> save_load on the shared memory, without first
+    // saving the dying world. 0e3afdb8 docs/death-reload.md:23-31,52-62.
+    try {
+      ps2_save::reload_checkpoint(p.host->variables(), p.death_checkpoint,
+                                 p.death_load_services);
+      p.death_world_requested = true;
+    } catch (const ps2_save::Error &e) {
+      throw C::Unsupported(e.what());
+    }
+  };
+  death_services.pending_level = [&p] {
+    return !p.host->variables().memory.cstr(ps2_save::PENDING_LEVEL).empty();
+  };
+  death_services.qualified_names_match = []() -> bool {
+    throw C::Unsupported("death reload refused: completed world reconstruction and qualified-name match Unknown");
   };
   death_services.request_current_level = [] {
+    // 0e3afdb8 docs/death-reload.md:32-35,58-62,91-97. The request/HP
+    // branch is native-tested; this campaign owner has no replacement loader.
     throw C::Unsupported("same-level restart refused: death level-loader/object restoration is not bound; current records must be retained and HP restored only with a valid level request");
   };
   p.death = std::make_unique<player_death_flow::Flow>(
@@ -1069,9 +1090,29 @@ std::string Fight::start(const PlayerStart &start) {
   if (!player_error.empty()) { p.refuse(player_error); p.error = player_error; p.failed = true; }
   return player_error;
 }
+void Fight::bind_death_checkpoint(ps2_save::Bytes data, ps2_save::LoadServices services) {
+  auto &p = *p_;
+  if (p.death && p.death->running())
+    throw ps2_save::Unknown("checkpoint replacement refused during death reload");
+  // Validate before replacing the owner's last good snapshot. An empty or
+  // malformed image is never a restart selector (0e3afdb8 death-reload:58-62).
+  ps2_save::parse_slot(data, true);
+  p.death_checkpoint = std::move(data);
+  p.death_load_services = std::move(services);
+}
 void Fight::tick(std::uint32_t command) {
   auto &p = *p_;
   if (!p.started || p.failed) return;
+  if (p.death_world_requested) {
+    // mainloop_loadRequestedWorld precedes another old-world tick. Stop here:
+    // do not run the stale Player against restored records or clear the pending
+    // request. 0e3afdb8 docs/death-reload.md:46-62,91-97.
+    if (p.death_error.empty()) {
+      p.death_error = "death reload refused: checkpoint request published; whole-world Creature/portal reconstruction and continuous death reload Unknown";
+      p.refuse(p.death_error);
+    }
+    return;
+  }
   try {
     const auto frame = Raw(p.world->read(C::FRAME));
     if (p.player_ok) {
