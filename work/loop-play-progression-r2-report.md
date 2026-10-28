@@ -97,3 +97,15 @@ campaign graph, later availability writers including missions 8/9, demo-specific
 behavior, and unsupported host services remain Unknown/refused (:129-142).
 Constructed-state offers and native save composition do not prove those paths.
 No tests, baselines, fixtures, game inputs or mission-order rules were changed.
+
+Fresh synthetic Full combat: 2,645 checks, zero failures. FULL_SAVE_LOAD passes
+300/300 with identical continued/uninterrupted presentation hashes. FULL_TRACE
+is unchanged: 36,402 bytes, SHA-256
+9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+Evidence: test-matrix/playable_wave_smoke_full_combat.log. These fixtures do not
+prove physical campaign completion or a second offer after played completion.
+
+Fresh strict Godot development matrix: 54/54 PASS, including six graphical
+cases; command: python3 tools/godot_matrix.py matrix --godot <Godot> --captures
+--out work/progression-r2/test-matrix. Logs pass diagnostic checks as well as
+exit-status checks. Summary: test-matrix.log and test-matrix/results.json.
