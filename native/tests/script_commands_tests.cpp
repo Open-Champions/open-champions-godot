@@ -1533,6 +1533,106 @@ void test_loading_r3_resources() {
     check(pair.ready && pair.base==b && pair.model==model && m.read(b,0x1200)==expected,
           "matching rescan does not relocate model twice");
   }
+  // Immediate termination, multiple rectangles and low-halfword truncation.
+  // 2550d34:docs/loading-arrival-r3.md:22-29; authored one-cell rectangles.
+  for(unsigned rectangles : {0u,2u,3000u}) {
+    sc::Host host;auto &m=host.variables().memory;auto &e=host.equipment_loading();
+    const unsigned b=0x180000,model=b+0x10000,c=*e.cache(4,0);
+    m.write(b,std::vector<std::uint8_t>(0x10100,0));
+    m.store(b+8,2,0x100);m.word(b+0x10,0x80);m.word(b+0x80,0x60);
+    for(unsigned i=0;i<rectangles;++i) {
+      auto at=b+0x84+8*i;
+      m.byte(at,254);m.byte(at+2,254);m.word(at+4,0x20+i);
+    }
+    m.byte(b+0x84+8*rectangles,255);
+    m.byte(model+0x26,1);m.word(model+0x28,0x20);
+    auto expected=m.read(b,0x10100);
+    auto put=[&](unsigned off,unsigned value,unsigned size=4){
+      for(unsigned i=0;i<size;++i)expected[off+i]=(value>>(8*i))&255;
+    };
+    put(0x10,b+0x80);put(0xa,0xa7fb,2);put(0x1c,0xffffffff);put(0x80,b+0x60);
+    put(6,(0x48+22*rectangles)&0xffff,2);
+    for(unsigned i=0;i<rectangles;++i)put(0x88+8*i,b+0x20+i);
+    put(0x10028,model+0x20);
+    m.word(c,b);m.word(c+0x4c,0x10000);m.store(c+8,2,1);m.store(c+10,2,0);
+    m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
+    m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
+    e.valid_resource=[&](unsigned x,unsigned y){return x==b && y==model && m.read(b,0x10100)==expected;};
+    auto pair=e.lookup(c,"authored_pair");
+    check(!pair.ready && !pair.base && !pair.model && m.read(b,0x10100)==expected,
+          "texture traversal handles empty/multiple rectangles and accumulator truncation");
+    pair=e.lookup(c,"authored_pair");
+    check(pair.ready && pair.base==b && pair.model==model && m.read(b,0x10100)==expected,
+          "structural texture controls publish once through real runtime");
+  }
+  // Researched early exits must not require or publish downstream fields.
+  // 2550d34:docs/loading-arrival-r3.md:11-20,31-35, including negative widths.
+  for(unsigned mode=0;mode<6;++mode) {
+    sc::Host host;auto &m=host.variables().memory;auto &e=host.equipment_loading();
+    const unsigned b=0x180000,model=b+0x200,c=*e.cache(4,0);
+    m.word(b+0x1c,mode==0 ? 1 : 0);
+    if(mode) {
+      m.word(b+0x10,0x80);m.store(b+0xa,2,0);
+      m.store(b+8,2,mode==2 ? 1 : mode==3 ? 0x101 : 0);
+    }
+    m.byte(model+0x26,255);m.byte(model+0x12,mode==4 ? 254 : mode==5 ? 128 : 255);
+    m.word(c,b);m.word(c+0x4c,0x200);m.store(c+8,2,1);m.store(c+10,2,0);
+    m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
+    m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
+    e.valid_resource=[&](unsigned x,unsigned y){
+      return x==b && y==model && m.read(model+0x26)==1 &&
+          m.word(b+0x1c)==(mode ? 0xffffffffu : 1u) &&
+          (!mode || (m.word(b+0x10)==b+0x80 && m.u16(b+0xa)==0xa7fb));
+    };
+    e.lookup(c,"authored_pair");
+    auto pair=e.lookup(c,"authored_pair");
+    check(pair.ready && pair.base==b && pair.model==model &&
+          !m.published(b+0x80,1) && !m.published(model+0x28,1) &&
+          (mode || !m.published(b+8,1)),
+          "early exits preserve absent texture table/header and negative-width model words");
+  }
+  // A rejecting/throwing validator cannot leave the unguarded model relocated
+  // for the next readiness scan. Rollback is a client restriction, preserving
+  // 2550d34:docs/loading-arrival-r3.md:31-37,49-55 once-only publication behavior.
+  for(bool throws : {false,true}) {
+    sc::Host host;auto &m=host.variables().memory;auto &e=host.equipment_loading();
+    const unsigned b=0x180000,model=b+0x200,c=*e.cache(4,0);
+    m.write(b,std::vector<std::uint8_t>(0x300,0));
+    m.word(b+0x10,0x40);m.word(model+0x28,0x20);
+    auto before=m.read(b,0x300);
+    m.word(c,b);m.word(c+0x4c,0x200);m.store(c+8,2,1);m.store(c+10,2,0);
+    m.string(c+12,"authored_previous");
+    m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
+    m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
+    unsigned validations=0;
+    auto transformed=[&](unsigned x,unsigned y) {
+      return x==b && y==model && m.word(b+0x10)==b+0x40 &&
+          m.u16(b+0xa)==0xa7fb && m.word(b+0x1c)==0xffffffff &&
+          m.read(model+0x26)==1 && m.word(model+0x28)==model+0x20;
+    };
+    e.valid_resource=[&](unsigned x,unsigned y) -> bool {
+      ++validations;
+      check(transformed(x,y),"refusing validator sees pair relocated exactly once");
+      if(throws) throw a::HostFault("authored resource validation refusal");
+      return false;
+    };
+    for(unsigned attempt=0;attempt<2;++attempt) {
+      bool refused=false;try {e.lookup(c,"authored_pair");}catch(const a::HostFault &){refused=true;}
+      check(refused && validations==attempt+1 && m.read(b,0x300)==before &&
+            !m.u16(c+10) && m.cstr(c+12)=="authored_previous" && m.word(0x4ef3ec)==c &&
+            m.u16(c+8)==1 && m.read(0x4ef3e8)==1,
+            "validation refusal restores both resources and retains pending cache state");
+    }
+    e.valid_resource=transformed;
+    auto pair=e.lookup(c,"authored_pair");
+    check(!pair.ready && !pair.base && !pair.model && m.u16(c+10)==1 &&
+          m.cstr(c+12)=="authored_pair" && m.word(0x4ef3ec)==0,
+          "successful retry publishes once and returns zero outputs");
+    auto accepted=m.read(b,0x300);
+    pair=e.lookup(c,"authored_pair");
+    check(pair.ready && pair.base==b && pair.model==model && m.read(b,0x300)==accepted,
+          "post-refusal matching rescan preserves accepted bytes");
+  }
   // Missing texture/model fields and relocation overflow refuse without publishing
   // or mutating either resource. Safety restrictions, not original malformed rules.
   for(unsigned mode=0;mode<4;++mode) {
@@ -1547,9 +1647,48 @@ void test_loading_r3_resources() {
     m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
     m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
     e.valid_resource=[](unsigned,unsigned){return true;};
+    const auto writes=m.writes;
     bool refused=false;try {e.lookup(c,"authored_pair");}catch(const a::HostFault &){refused=true;}
-    check(refused && m.read(b,0x300)==before && !m.u16(c+10) && m.word(0x4ef3ec)==c,
+    check(refused && m.read(b,0x300)==before && m.writes==writes &&
+          !m.u16(c+10) && m.word(0x4ef3ec)==c,
           "incomplete/overflow resource pair refuses atomically");
+  }
+  // Truncated traversal and later-word failures must not apply earlier plans.
+  // These are client safety restrictions, not claims about original malformed inputs.
+  for(unsigned mode=0;mode<10;++mode) {
+    sc::Host host;auto &m=host.variables().memory;auto &e=host.equipment_loading();
+    const unsigned b=0x180000,model=b+0x200,c=*e.cache(4,0),table=b+0x80;
+    m.write(b,std::vector<std::uint8_t>(0x40,0));
+    m.store(b+8,2,0x100);m.word(b+0x10,0x80);
+    m.write(model,std::vector<std::uint8_t>(0x28,0));
+    m.byte(model+0x26,1);m.word(model+0x28,0x20);
+    if(mode) m.word(table,mode==5 ? 0xffffffffu : 0x100u);
+    if(mode==2) m.byte(table+4,0); // incomplete rectangle
+    if(mode==3 || mode==4 || mode==6) {
+      m.write(table+4,{0,0,static_cast<std::uint8_t>(mode==3 ? 1 : 0),0});
+      m.word(table+8,mode==6 ? 0xffffffffu : 0x20u);
+      // mode 3 lacks its second cell; mode 4 lacks the next terminator.
+      if(mode==6) m.byte(table+12,255);
+    }
+    if(mode==7 || mode==8) {
+      m.byte(table+4,255);m.byte(model+0x12,1);
+      if(mode==8) m.word(model+0x2c,0xffffffff);
+    }
+    if(mode==9) m.word(b+0x10,0xfffffffeu-b); // table word crosses address space
+    m.word(c,b);m.word(c+0x4c,0x200);m.store(c+8,2,1);m.store(c+10,2,0);
+    m.string(c+12,"authored_previous");
+    m.word(0x44fdd0,104);m.word(0x4ef3f0,100);m.byte(0x4ef3e8,1);
+    m.word(0x4ef3ec,c);m.string(0x8667a8,"authored_pair");
+    const auto before=m.read(b,0x300);const auto writes=m.writes;
+    unsigned validations=0;
+    e.valid_resource=[&](unsigned,unsigned){++validations;return true;};
+    for(unsigned attempt=0;attempt<2;++attempt) {
+      bool refused=false;try {e.lookup(c,"authored_pair");}catch(const a::HostFault &){refused=true;}
+      check(refused && validations==0 && m.read(b,0x300)==before && m.writes==writes &&
+            !m.u16(c+10) && m.cstr(c+12)=="authored_previous" && m.word(0x4ef3ec)==c &&
+            m.u16(c+8)==1 && m.read(0x4ef3e8)==1,
+            "malformed traversal refuses without resource/cache/publication mutation");
+    }
   }
 }
 

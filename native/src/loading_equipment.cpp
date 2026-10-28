@@ -174,13 +174,28 @@ Runtime::Pair Runtime::lookup(std::uint32_t c, const std::string &identity) {
   if (fixup_base || fixup_model) {
     if (!fixup_base || !fixup_model) refuse();
     fixup_base(base); fixup_model(model);
+    if (!valid_resource(base,model)) refuse();
   } else {
     // 2550d34:docs/loading-arrival-r3.md:49-55: ordered pair, once before
     // publication. Preflight both resources so a refusal cannot poison the guard.
     auto first=texture(m,base), second=loading_equipment::model(m,model);
-    apply_writes(m,first); apply_writes(m,second);
+    // Client safety: validation may reject or throw after seeing transformed
+    // bytes. Restore our writes on refusal, so a later scan cannot apply the
+    // unguarded model relocation twice (2550d34:docs/loading-arrival-r3.md:31-37).
+    auto previous=first;
+    previous.insert(previous.end(),second.begin(),second.end());
+    for (auto &[a,n,v]:previous) {
+      v=0;
+      for(unsigned i=0;i<n;++i) v|=std::uint32_t(m.read(a+i))<<(8*i);
+    }
+    try {
+      apply_writes(m,first); apply_writes(m,second);
+      if (!valid_resource(base,model)) refuse();
+    } catch (...) {
+      apply_writes(m,previous);
+      throw;
+    }
   }
-  if (!valid_resource(base,model)) refuse();
   m.string(c+0xc,requested); m.store(c+0xa,2,1); m.word(0x4ef3ec,0);
   return {}; // completing call has zero outputs; only next matching lookup publishes
 }
