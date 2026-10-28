@@ -4,8 +4,9 @@ Assigned branch `codex/play-death-reload`, base `76c5b35e`.
 Research verified at `0e3afdb8ce3cdf79746f535d8a2654db37c9e97b`,
 `research-death-reload/docs/death-reload.md:12-62,75-97`; audit PASS.
 
-Full CTest: PENDING. Release build started with -j 4; full suite will use -j 3,
-with any timeouts rerun alone. No acceptance gate or fixture changed.
+Full CTest: PASS, 258/258 (881.13 s), recorded in `8748f4fc` after
+the native fixes through `435e1740`. The test continuation does not rerun it
+unless native code changes. No acceptance gate or fixture changed.
 Automatic reload restores the checkpoint buffer, not a card slot or a guessed
 spawn. Restart is the separate current-level act-lookup -1 branch. Whole-world
 Creature/portal effects and continuous death reload remain unknown and refuse.
@@ -17,7 +18,7 @@ reconstruction is being reviewed separately. Campaign reload now invokes that
 loader on shared memory when an owner explicitly supplies a valid checkpoint;
 there is no checkpoint synthesized from the dying world. After a request it
 stops before another old-world tick because world reconstruction is Unknown.
-Full CTest remains PENDING; fresh acceptance results will replace this status.
+Fresh acceptance results are recorded below separately from this bounded proof.
 
 Review follow-up: DR-1 (missing Prop resource-name copies) and DR-2
 (post-request old-world HUD gold credit) were fixed. Prop restores the three
@@ -27,7 +28,25 @@ A real World/Flow/save regression retains pending credit 8 without adding 1 to
 the restored record. A speculative clear of nonserialized Creature charm was
 removed: nonzero constructor charm without the optional word now refuses.
 Focused tests: ps2-save, ps2-class-restore, player-death-flow 3/3 PASS.
-Fresh full CTest after these source fixes is PENDING (the earlier suite is
-still running and will be recorded separately).
+The full CTest after these source fixes passed as recorded below.
 
 Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 435e1740 — **258/258 passed, 881.13 s**, no timeouts (log `work/death-reload/ctest-r1.log`). Strict Godot matrix, FULL_SAVE_LOAD, death probe, FULL_TRACE and both journeys for this revision are still PENDING.
+
+## Test continuation, 2026-10-28
+
+Started from clean `8748f4fca1897167c26bd515f98acde815e8ef3f` on the assigned
+branch; ancestry to `76c5b35e` verified. The research checkout has advanced, so
+the contract was read with `git show 0e3afdb8:docs/death-reload.md`, retaining
+the audited pin rather than adopting later research. The named audit is PASS.
+No runtime, test, fixture or baseline edits have been made in this continuation.
+All raw logs/captures remain ignored under `work/death-reload/gates-r1-final/`.
+
+Three Release-optimized debug-ABI Godot extensions were rebuilt with `-j 3`.
+The strict dev matrix is running with `--captures`, normal per-case isolation,
+and the unchanged diagnostic checker. Remaining private gates will run serially.
+
+The historical `ui_layout_smoke` four-argument diagnostic is already fixed in
+the inherited `d5001c5f`: `godot/tests/ui_layout_smoke.gd:89-97` checks the
+five-argument signature and absence of defaults without making an invalid
+four-argument call. That file is unchanged from the integration base. No
+allow-list entry or diagnostic exemption is introduced here.
