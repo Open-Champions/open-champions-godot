@@ -45,7 +45,12 @@ struct Fixture {
       check(saved == 0, "recipe spawn has null saved object");
       spawns.push_back(pointer); rings.emplace_back(get(0x8e7364),get(0x8e7360,2)); calls.push_back("spawn");
     };
-    requests->camera_reset = [&] { calls.push_back("camera"); };
+    requests->camera_reset = [&] {
+      // research-arena-live@9a0c26a5 docs/arena-modes.md:136-138:
+      // MIPS call delay slot runs before Camera_reset, not after it.
+      check(get(0x503890)==1,"camera observes call-delay lock store");
+      calls.push_back("camera");
+    };
     requests->copy_level = [&](Raw destination, Raw source) { copies.emplace_back(destination,source); calls.push_back("copy"); };
     services.requests = requests;
     services.active = [&](unsigned slot) { return slot < active; };
@@ -170,11 +175,24 @@ void levels_and_terminal() {
 void refusals() {
   { Fixture f; f.put(A::MODE_B,0); f.services.requests.reset(); f.world.arena_begin(f.services); check(f.calls.empty(),"disabled B begin no-op"); }
   { Fixture f; f.put(A::WAVE,0xffff,2); f.requests->prepare_players={}; refused([&]{f.world.arena_begin(f.services);},"player/resource"); check(f.calls.empty() && f.get(A::WAVE,2)==0xffff,"missing body refuses before preload/mutation"); }
+  { Fixture f; f.put(A::NUM_PLAYERS,5); f.put(A::WAVE,0xffff,2); f.put(A::WAVES_LEFT,1,2); f.put(A::SAVED_COUNT,9,2);
+    refused([&]{f.world.arena_begin(f.services);},"four slots");
+    check(f.calls.empty() && f.preloads.empty() && f.get(A::WAVE,2)==0xffff && f.get(A::WAVES_LEFT,2)==1 && f.get(A::SAVED_COUNT,2)==9,"begin player-domain refusal before preload/counter mutation"); }
   { Fixture f; f.put(A::WAVE,0xffff,2); f.requests->tables.recipes[0][1]=0xff; refused([&]{f.world.arena_begin(f.services);},"class index"); check(f.calls.empty(),"invalid signed class preflight"); }
   { Fixture f; f.put(A::WAVE,0xffff,2); f.requests->tables.recipes.clear(); refused([&]{f.world.arena_begin(f.services);},"recipe count"); }
   { Fixture f; f.put(A::WAVE,0xffff,2); f.requests->preload_factory=[](Raw){return Raw(0x10000);}; refused([&]{f.world.arena_begin(f.services);},"non-null"); check(f.get(A::WAVE,2)==0xffff && f.spawns.empty(),"unexecuted destruction stops begin"); }
   { Fixture f; f.put(A::WAVE,32767,2); f.put(A::WAVES_LEFT,1,2); refused([&]{f.world.arena_start_wave(f.services,1);},"signed-wave overflow"); check(f.calls.empty() && f.get(A::WAVE,2)==32767,"no signed overflow mutations"); }
   { Fixture f; f.put(A::WAVE,0,2); f.put(A::WAVES_LEFT,2,2); f.put(A::SAVED_COUNT,1,2); refused([&]{f.world.arena_start_wave(f.services,1);},"saved-creature"); check(f.calls.empty(),"saved creature construction is explicit refusal"); }
+  { Fixture f; const auto actor=f.world.spawn_skelight({});
+    f.put(A::WAVE,0,2); f.put(A::WAVES_LEFT,2,2); f.put(A::INTERMISSION,480,2);
+    f.put(A::SAVED_COUNT,0,2); f.put(0x50388c,0x300000); f.put(0x300000,0x12345678); f.services.saved_capacity=1;
+    f.put(A::LIVE_COUNT,7,2); f.put(actor+0x231,0x42,1);
+    const auto flags=f.get(actor+12), state=f.get(actor+0x312,2);
+    const auto grid_before=f.world.collect_box({from_int(-100),from_int(-100),from_int(-100)}, {from_int(100),from_int(100),from_int(100)},16);
+    check(A::save_action(flags,state)==A::SaveAction::Save && !grid_before.empty(),"actual World actor would be saved by preparation");
+    refused([&]{f.visit();},"saved-creature preparation");
+    check(f.calls.empty() && f.get(A::INTERMISSION,2)==480 && f.get(A::WAVE,2)==0 && f.get(A::WAVES_LEFT,2)==2 && f.get(A::SAVED_COUNT,2)==0 && f.get(A::LIVE_COUNT,2)==7 && f.get(0x300000)==0x12345678 && f.get(actor+0x231,1)==0x42 && f.get(actor+12)==flags,"saved-creature refusal preserves counters/actor/pointer before effects");
+    check(f.world.collect_box({from_int(-100),from_int(-100),from_int(-100)}, {from_int(100),from_int(100),from_int(100)},16)==grid_before,"saved-creature refusal preserves actual World grid"); }
   { Fixture f; f.put(A::WAVE,14,2); f.put(A::INTERMISSION,480,2); f.requests->tables.recipes[0][0]=0x3f; refused([&]{f.visit();},"level index"); check(f.calls.empty() && f.get(A::INTERMISSION,2)==480,"bad level destination before counter write"); }
   { Fixture f; f.put(A::WAVE,14,2); f.put(A::INTERMISSION,480,2); f.requests->copy_level={}; refused([&]{f.visit();},"copy service"); check(f.get(A::INTERMISSION,2)==480,"missing loader never succeeds"); }
   { Fixture f(2); f.put(A::SCORE+12,0,2); f.put(A::FRAME,128); refused([&]{f.visit();},"qsort tie"); check(!f.get(A::INTERMISSION,2) && !f.get(A::END),"ties retain refusal"); }

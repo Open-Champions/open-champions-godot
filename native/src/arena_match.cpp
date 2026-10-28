@@ -173,6 +173,9 @@ void Model::start_wave(Raw increment) {
     // docs/spec/arena-live-scheduler.md:16-29. Only the documented request
     // stages are native: player/resource work is an explicit required service.
     r.close_menus(0);
+    // docs/arena-modes.md:136-138 records the earlier zero store. The
+    // unimplemented player stage's internals remain behind prepare_players.
+    put(0x503890, 0);
     put(WAVE, request.wave, 2);
     put(WAVES_LEFT, request.waves_left, 2);
     put(0x4f714c, request.monster_level);
@@ -192,8 +195,8 @@ void Model::start_wave(Raw increment) {
       for (int i = 0; i < group.count; ++i) r.spawn(group.class_pointer, 0);
     }
     // docs/arena-modes.md:136-138. No renderer/actor acceptance is inferred.
-    r.camera_reset();
     put(0x503890, 1);
+    r.camera_reset(); // store is in the call's delay slot, before the callee
   } else {
     auto start = services_.start_wave;
     start(increment);
@@ -205,6 +208,7 @@ void Model::begin() {
   if (get(MODE_A)) throw Unsupported("arena begin mode-A composition remains unbound");
   if (!services_.requests) throw Unsupported("arena begin requires explicit runtime request tables/services");
   require_start_wave();
+  (void)players(); // host record bound, before preload callbacks or stores
   require(services_.requests->preload_factory, "arena preload factory 0x14f6c8 missing");
   const auto preloads = preload_requests();
   (void)wave_request(1, 3, 0); // validate before issuing requests
@@ -347,10 +351,32 @@ void Model::prepare_wave() {
 void Model::next_wave(Raw increment) {
   // research-arena-live@9a0c26a5 docs/arena-modes.md:90-93;
   // tools/difftest_arena_live_scheduler.py:132-136 executes the call chain.
+  preflight_next_wave(increment);
+  perform_next_wave(increment);
+}
+void Model::preflight_next_wave(Raw increment) const {
   require_start_wave();
-  if (services_.requests)
-    (void)wave_request(increment, get(WAVES_LEFT, 2), get(SAVED_COUNT, 2));
   require(services_.screen_effect, "arena_nextWave: screen effect missing");
+  if (!services_.requests) return; // legacy complete body retains its own domain
+  (void)players();
+  (void)wave_request(increment, get(WAVES_LEFT, 2), get(SAVED_COUNT, 2));
+  require(services_.prepare, "arena_prepareWave 0x3063fc: service 0x19f018 missing");
+  require(services_.walk, "arena_prepareWave: original grid walk missing");
+  require(services_.move_off_grid, "arena_prepareWave: obj_moveOffGrid missing");
+  require(services_.destroy, "arena_prepareWave: creature destructor missing");
+  // Host-only refusal preflight, not an extra RTA gameplay transition.
+  // research-arena-live@9a0c26a5 docs/arena-modes.md:90-107: preparation
+  // can produce the unsupported saved-creature branch. Reject its existing
+  // grid inputs before effects, intermission increment, move-off-grid or saves.
+  // Classification retains research-arena-match@d4f58da
+  // tools/ref_arena_match_core.py:45-67 (the audited R4 callback contract).
+  services_.walk([&](Address object) {
+    const auto flags = get(object + 12);
+    if ((flags & 0x20) && save_action(flags, get(object + 0x312, 2)) == SaveAction::Save)
+      throw Unsupported("arena saved-creature preparation remains unbound");
+  });
+}
+void Model::perform_next_wave(Raw increment) {
   auto effect = services_.screen_effect;
   effect(15);
   prepare_wave();
@@ -461,11 +487,9 @@ void Model::visit(Raw pressed, Raw confirm, Raw cancel) {
       } else {
         // Native request stages own counters with an explicit RequestServices;
         // the legacy complete startWave service otherwise owns these stores.
-        require_start_wave();
-        if (services_.requests)
-          (void)wave_request(1, get(WAVES_LEFT, 2), get(SAVED_COUNT, 2));
+        preflight_next_wave(1);
         put(INTERMISSION, inter + 1, 2);
-        next_wave(1);
+        perform_next_wave(1);
       }
       return;
     }

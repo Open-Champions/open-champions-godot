@@ -120,5 +120,7 @@ private:
   std::vector<Address> preload_requests() const;
   Address level_request(bool restart) const;
   void require_start_wave() const;
+  void preflight_next_wave(Raw increment) const;
+  void perform_next_wave(Raw increment);
 };
 } // namespace champions::simulation::rta::arena_match

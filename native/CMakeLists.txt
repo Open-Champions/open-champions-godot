@@ -192,7 +192,9 @@ if(BUILD_TESTING)
     add_test(NAME arena-match-host COMMAND champions-arena-match-tests)
     add_executable(champions-arena-scheduler-tests tests/arena_scheduler_tests.cpp)
     target_link_libraries(champions-arena-scheduler-tests PRIVATE champions-arena-match champions-combat-runtime)
-    add_test(NAME arena-scheduler-runtime COMMAND champions-arena-scheduler-tests
+    add_test(NAME arena-scheduler-runtime COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_arena_scheduler_vectors.py"
+        "$<TARGET_FILE:champions-arena-scheduler-tests>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/arena_scheduler.tsv")
     add_test(NAME arena-match-exact COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_arena_match_vectors.py"
