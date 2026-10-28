@@ -5,7 +5,8 @@
 
 namespace champions::simulation::rta::loading_equipment {
 // Every original field/condition in this API is pinned to
-// research-loading-readiness@d6f035fa:docs/loading-arrival-r2.md, cited below.
+// research-loading-readiness@d6f035fa:docs/loading-arrival-r2.md, except
+// resource fixups at 2550d34:docs/loading-arrival-r3.md:11-55, cited below.
 // Reference addresses operate on the real binder memory, never host pointers.
 class Runtime {
 public:

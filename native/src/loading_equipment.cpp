@@ -19,15 +19,15 @@ std::uint32_t field(builtins::Memory &m, std::uint32_t base, unsigned off, unsig
 }
 Writes texture(builtins::Memory &m, std::uint32_t b) {
   Writes out;
-  // :11-16: guard, relative table, marker and relocated header.
+  // 2550d34:docs/loading-arrival-r3.md:11-16: guard, relative table, marker/header.
   if (m.word(field(m,b,0x1c,4))) return out;
   auto relative=m.word(field(m,b,0x10,4));
   auto table=address(b,relative);
   field(m,b,0xa,2);
-  auto flags=m.u16(field(m,b,8,2)); // :18-20: unsigned flags and early branches.
+  auto flags=m.u16(field(m,b,8,2)); // 2550d34:docs/loading-arrival-r3.md:18-20.
   out={{b+0x10,4,table},{b+0xa,2,0xa7fb},{b+0x1c,4,0xffffffff}};
   if ((flags&1) || !(flags&0x100)) return out;
-  // :22-29: table first word, signed inclusive rectangles, terminator,
+  // 2550d34:docs/loading-arrival-r3.md:22-29: table word, rectangles, terminator,
   // per-cell relocation, accumulator and low-halfword store.
   out.emplace_back(field(m,table,0,4),4,address(b,m.word(table)));
   auto cursor=address(table,4);
@@ -49,7 +49,7 @@ Writes texture(builtins::Memory &m, std::uint32_t b) {
 }
 Writes model(builtins::Memory &m, std::uint32_t b) {
   Writes out;
-  // :31-40: signed count fallback, signed width + 1, consecutive words;
+  // 2550d34:docs/loading-arrival-r3.md:31-40: count fallback, width + 1, words;
   // no guard: deliberate second application adds the resource base again.
   int n=m.s8(field(m,b,0x26,1));
   if (n<=0) { n=1; out.emplace_back(b+0x26,1,1); }
