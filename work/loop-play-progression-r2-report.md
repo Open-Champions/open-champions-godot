@@ -1,53 +1,80 @@
-STATUS: MORE — bounded round-2 implementation reviewed; campaign journey remains refused.
+STATUS: MORE — all requested validation accounted for; bounded Round 2 implementation reviewed, ordinary campaign progression still refused.
 
-Final test-subagent evidence is appended below; earlier PENDING entries are historical checkpoints.
+2026-10-27. Test continuation on codex/play-progression, clean at 5e0a5825.
+Round 2 started from c12ecc31. Implementation commits: 559bb17f, c48f4f2c,
+a1c2ab87. This continuation changes this report only; native code, tests,
+baselines, fixtures and the standard journey runner remain unchanged.
 
-2026-10-27. Round 2 starts from c12ecc31 on codex/play-progression.
-Authority: research-mission-unlocks@950b2538 docs/spec/mission-unlocks.md;
-research audit PASS. Round-1 audit PASS retained.
+Authority: research-mission-unlocks@950b2538, docs/spec/mission-unlocks.md;
+cursor-runs/audits/research-mission-unlocks.md records VERDICT: PASS.
+Round-1 audit PASS remains retained. Research files were read only; this test
+continuation is not a new research audit or original-executable comparison.
 
-Full CTest is PENDING; this note precedes its invocation. Release build,
-Godot dev matrix, FULL_SAVE_LOAD, unchanged FULL_TRACE, and unchanged standard
-headless/rendered journey gates are pending. No campaign completion, physical
-reachability, later offer actions or full graph acceptance is claimed.
+## Implementation evidence
 
-Candidate milestone (gates still pending): implemented the 31 normal-mode
-predicates and bounded choice admission using live binder/save state, identified
-by runtime dialog/public structure and runtime-resolved variable strings. No
-physical binding inferred. Native original choice actions retain their own VM
-and production quest writer; later actions refuse. Recall/menu inputs now track
-live state. Menu rows consume resulting campaign availability as before.
+559bb17f implements all 31 normal-mode predicates and bounded choice admission
+from live binder/save state. Resource identity uses the complete runtime
+predicate/public-offset structure and runtime-resolved variable strings.
+Physical actor/interaction binding is not inferred. First/second offer choices
+retain the supplied native VM and production quest writer; later actions refuse.
+Recall and mission-menu suppressors use live state, and the existing mission
+menu consumes campaign availability.
 
-Focused Release candidate: dialog + script-commands 2/2 PASS, 1.18 s.
-Independent expected truth-node sets cover all 31 predicates, raw bits 0..3
-and signed variable values -128,-1,0,1,2,127. 160 saved/replacement-host
-opening/choice cases cover five existing campaign difficulty rows. Tests also
-cover each active variable, changed state after opening, mismatched resources,
+c48f4f2c corrects menu lifetime: Campaign's menu_open survives cancellation,
+so admission uses the existing menu's active-lifetime condition (no pending
+destination and no completed state-4 fade). A production cancel-and-reopen
+regression passes. a1c2ab87 adds first-offer menu/save and stale-admission cases.
+
+The authored tests independently specify truth-node sets for all 31 predicates,
+raw bits 0..3 and signed variable values -128,-1,0,1,2,127. They include 160
+saved/replacement-host opening/choice cases across five difficulty rows,
+individual active variables, changed state after opening, mismatched resources,
 unknown later actions, create-zero reads and mission-menu/save publication.
-A counts-only private read-only binding probe found exactly 1 matching supplied
-resource and 0 invalid bindings/state controls. This is constructed-state
-binding evidence, not physical reachability or actual played completion.
 
-Menu-lifetime correction: Campaign's menu_open flag persists after cancellation;
-the dialog admission bridge now uses the existing Godot menu's active-lifetime
-condition (no pending destination, not completed state-4 fade). A production
-cancel-and-reopen regression passes. Focused native 2/2 PASS, 1.80 s.
-The first full CTest was intentionally interrupted during review of this edge
-case (verified worktree CTest PID only, SIGINT, exit 130). It is not a completed
-gate. Its log remains ctest-interrupted-menu-review.log. Full CTest is PENDING
-again before the corrected candidate's invocation; no test/baseline was weakened.
+Retained private read-only probes: exactly one matching supplied resource and
+zero invalid bindings/state controls; 40 first/second choice paths across five
+rows, raw bytes 0/2 and both choices produced 40 grants and zero invalid/stalled
+paths. These use supplied resources with synthetic speaker/service binding,
+production VM/binder and campaign saves. They establish constructed-state
+binding/action evidence, not physical reachability or played completion.
+Evidence stays ignored under work/progression-r2/: binding-probe.cpp,
+binding-probe.log and action-probe.log. No extracted names, dialog or game bytes
+are included in this report.
 
-Additional private read-only probe: actual supplied script and matched dialog,
-synthetic speaker/service binding, 40 first/second choice paths across five
-supported rows, both initial raw bytes 0/2 and both choices: 40 grants, zero
-invalid/stalled paths. Production native VM and binder, with campaign save state.
-Source/log are ignored under work/progression-r2/binding-probe.cpp and
-action-probe.log. No physical NPC or first-act completion claim follows.
+## Retained gates, inspected in this continuation
 
-Resume at c48f4f2c: pinned research/audit reviewed; first-offer menu/save and
-stale-admission regressions added. Full CTest PENDING before invocation.
+- Release configure/build PASS; focused dialog/script-commands 2/2 PASS, 1.18 s
+  before the menu correction, then 2/2 PASS, 1.80 s after it. The first full
+  CTest was interrupted for that correction (verified CTest PID, SIGINT, exit
+  130); ctest-interrupted-menu-review.log remains an incomplete run.
+- Full CTest recorded by 339b5630: 253/253 PASS, 679.23 s, no timeouts.
+  Command: ctest --test-dir build/native --output-on-failure -j 3.
+  Evidence: work/progression-r2/ctest-resume.log. Not rerun here.
+- Independent predicate/admission review recorded by 97ba319b: no native or
+  fixture change required. Focused dialog/script-commands 2/2 PASS, 0.96 s;
+  GDExtension build -j 3 PASS. Evidence: test-focused.log and test-extension.log.
+- Strict Godot development matrix recorded by 5e0a5825: 54/54 PASS, including
+  six graphical cases; 136.58 s summed case durations. A read-only review of
+  all 54 case logs and 51 engine logs found zero classified diagnostic errors.
+  ObjectDB shutdown warnings remain; clean diagnostic classification does not
+  mean warning-free output. Evidence: test-matrix.log and test-matrix/results.json.
+- FULL_SAVE_LOAD is already present in that same completed matrix: 300/300
+  presentation frames with identical uninterrupted/continued hashes:
+  cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573.
+  This continuation parsed the marker, checked both counts/hashes and the log
+  diagnostics, and matched the passing matrix result. It did not repeat the
+  combined smoke, which would also rerun the already-completed FULL_TRACE gate.
+- Full combat: 2,645 checks, zero failures. FULL_TRACE remains 36,402 bytes,
+  SHA-256 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+  Retained Round-1/Round-2 markers match. This is recorded trace evidence, not a
+  new raw-trace rehash. Evidence for both trace and save/load:
+  work/progression-r2/test-matrix/playable_wave_smoke_full_combat.log.
 
-Full CTest (recorded by the orchestrator, 2026-10-27 ~20:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` — **253/253 passed, 679.23 s**, no timeouts (log `work/progression-r2/ctest-resume.log`). Godot dev matrix, FULL_SAVE_LOAD, FULL_TRACE and both journeys for this revision are still PENDING.
+All short evidence names above are relative to work/progression-r2/.
+The synthetic save/load and trace gates do not prove physical campaign
+completion, a second offer following played completion, or real-level reload.
+
+## Predicate/admission review retained from 97ba319b
 
 Round-2 independent code review (2026-10-27, candidate 339b5630)
 
@@ -73,7 +100,7 @@ execution, not exhaustive imported-state or played-campaign proofs (:37-44).
   first traversal 1/2/3 (:88-92), second node 7 (:99-112), and node-8 close
   without a grant (:113). Later actions refuse. native/src/script_commands.cpp
   admits only setMissionAvailable(1,1) or (2,1) for the respective action.
-  Opening never writes; completion and other difficulty rows remain preserved.
+  Opening never writes mission availability; completion and other difficulty rows remain preserved.
 - Recall and active mission-menu suppressors use live state (:120-125); recall
   address is tools/difftest_mission_unlocks.py:175-178. Menu lifetime uses the
   existing production menu machine (research-quests@7efd3ce docs/quests.md,
@@ -87,25 +114,94 @@ execution, not exhaustive imported-state or played-campaign proofs (:37-44).
   existing ignored private probes corroborate supplied-resource binding and both
   real VM action paths, without claiming physical interaction.
 
-Verification boundary: full native CTest remains the completed 253/253, 679.23 s
-recorded in 339b5630 (ctest-resume.log); intentionally not rerun because no native
-code changed. Fresh focused dialog/script-commands: 2/2 PASS, 0.96 s
-(test-focused.log). Fresh GDExtension build -j 3 PASS (test-extension.log).
+## Fresh standard journeys at 5e0a5825
 
-Remaining refusals: first-act completion, actual physical reachability, complete
-campaign graph, later availability writers including missions 8/9, demo-specific
-behavior, and unsupported host services remain Unknown/refused (:129-142).
-Constructed-state offers and native save composition do not prove those paths.
-No tests, baselines, fixtures, game inputs or mission-order rules were changed.
+The unchanged tools/run_loop_playthrough.py ran headless and rendered serially
+with the pinned Godot 4.5.2 runtime and the existing read-only input. No option
+changed the journey, combat, pickup or refusal expectations. Command (private
+paths supplied only at runtime):
 
-Fresh synthetic Full combat: 2,645 checks, zero failures. FULL_SAVE_LOAD passes
-300/300 with identical continued/uninterrupted presentation hashes. FULL_TRACE
-is unchanged: 36,402 bytes, SHA-256
-9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
-Evidence: test-matrix/playable_wave_smoke_full_combat.log. These fixtures do not
-prove physical campaign completion or a second offer after played completion.
+```sh
+python3 tools/run_loop_playthrough.py --godot <local-engine> --game-folder <read-only-input> --out work/progression-r2/final-journey
+```
 
-Fresh strict Godot development matrix: 54/54 PASS, including six graphical
-cases; command: python3 tools/godot_matrix.py matrix --godot <Godot> --captures
---out work/progression-r2/test-matrix. Logs pass diagnostic checks as well as
-exit-status checks. Summary: test-matrix.log and test-matrix/results.json.
+| Gate | Headless | Rendered |
+| --- | --- | --- |
+| Journey steps | 80 (baseline 80) | 81 (baseline 81) |
+| Process exit | 1 | 1 |
+| Classified log errors | 0 | 0 |
+| Result JSON written | yes | yes |
+| Refusal kinds | 8 (baseline 6) | 8 (baseline 6) |
+| Captures | 0 | 38 |
+| Pickup assertion | PASS, 10 to 11 | PASS, 10 to 11 |
+| Walked pickup | yes, 52 ticks | yes, 52 ticks |
+| Retry kills / diagnostic pickup placements | 0 / 0 | 0 / 0 |
+| Last step | 80: player_death, refused | 81: player_death, refused |
+| saved_level_reloaded | false | false |
+
+The wrapper exits 1; these are completed non-green journeys, not passing
+campaign acceptance. Evidence: final-journey.log, final-journey/run-summary.json,
+and each variant's result.json and godot.log, all under work/progression-r2/.
+The input file census remains 994 before / 994 after. File counts are the
+runner's read-only census, not a byte-for-byte content integrity measurement.
+
+Offer result: both runs show the existing first offer path (three choices
+close the dialog; one mission bit and one quest line are added). Mission 1
+is available at step 24 in both, exactly as in Round 1. No newly reachable
+second or later offer is demonstrated. First-act completion/return remains
+branch_unverified (headless step 57, rendered step 58), with no completed
+destination, queued return or loaded hub; the conditional post-return offer
+path is not reached.
+
+Ordinary progression stops at the hub portal: step 25 records
+refused autoPropSetState, and the later hub-trigger attempt records
+refused trigger. The mission menu remains closed with no host panel.
+The first-story request is not queued (headless step 40, rendered step 41).
+The unchanged harness continues through its diagnostic destination/fight
+branches; that continuation and its successful pickup do not establish travel
+through the ordinary mission route. The fight's own diagnostic placement is
+separate from the pickup's zero diagnostic retry placements.
+
+Both runs retain all six prior refusal kinds and add two reporting contexts
+(dialog confirmation and tick collection) for the same explicit boundary:
+hub actions beyond the documented first/second offers are Unknown. This is
+not a new successful offer or evidence for later writers. The difference is
+recorded without weakening the harness or changing any baseline.
+
+Real-level save/load remains refused: hub savepoint readback is incomplete;
+pickup inventory/equipment reload and creature death restoration remain
+unsupported. Existing-file preservation checks pass. The load_and_carry row
+has load_attempted=false, so unchanged experience/level/gold/HP fields are
+not a successful load. Cold reload, object roundtrip and revisit remain refused,
+and both final player_death rows have saved_level_reloaded=false. These are
+separate from the passing synthetic FULL_SAVE_LOAD fixture.
+
+Visual inspection used fresh rendered captures: 04-dialog-prompt.png shows
+an open dialog; 10-mission-menu.png shows the hub view with the later-action
+refusal and no mission panel; 09-loaded.png remains at the main menu.
+No game text/names or captures are committed. The harness still reports
+rendered_pickup_verified=false; the inventory assertion is not promoted to
+independent visual pickup verification. No presentation change was made.
+
+## Remaining refusals
+
+First-act completion, physical reachability, the full campaign prerequisite
+and travel graph, later availability writers including missions 8/9,
+demo-specific behavior and unsupported host services remain Unknown/refused
+(research authority, lines 129-142). Dialog node priority is not mission order.
+Constructed-state offers and native save composition do not remove those gates.
+
+## Final disposition
+
+All requested gate results are recorded. CTest, predicate/admission review,
+Godot matrix, FULL_TRACE and the already-completed FULL_SAVE_LOAD are retained
+evidence inspected in this continuation, not claimed as fresh reruns. Both
+standard journeys were freshly executed and compared against Round 1's 80/81
+steps; neither establishes a newly reachable offer or completed campaign.
+No native change required repeating the earlier suites.
+
+The only staged file is this report (explicit git add -f). Final diff/whitespace
+and content-boundary checks passed. Tests, baselines, fixtures and pickup
+assertions were unchanged; private inputs and captures remain uncommitted.
+No sibling checkout was modified, no process was killed, and no push or PR
+was performed.
