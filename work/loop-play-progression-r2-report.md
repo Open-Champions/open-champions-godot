@@ -44,3 +44,5 @@ action-probe.log. No physical NPC or first-act completion claim follows.
 
 Resume at c48f4f2c: pinned research/audit reviewed; first-offer menu/save and
 stale-admission regressions added. Full CTest PENDING before invocation.
+
+Full CTest (recorded by the orchestrator, 2026-10-27 ~20:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` — **253/253 passed, 679.23 s**, no timeouts (log `work/progression-r2/ctest-resume.log`). Godot dev matrix, FULL_SAVE_LOAD, FULL_TRACE and both journeys for this revision are still PENDING.
