@@ -37,3 +37,5 @@ Full CTest (-j 3): PENDING for recovery revision; next gate will record exact
 count/time and rerun any timeouts alone. Extension, strict isolated Godot matrix,
 both journeys, and FULL_TRACE revalidation: PENDING. Prior ignored logs are
 historical evidence only and will not stand in for this recovery's execution.
+
+Full CTest (recorded by the orchestrator, 2026-10-27 ~20:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` — **251/251 passed, 675.65 s**, no timeouts (log `work/r3-resume-ctest.log`). Godot dev matrix, both journeys and FULL_TRACE for this revision are still PENDING.
