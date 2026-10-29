@@ -1,4 +1,7 @@
-STATUS: IN PROGRESS
+STATUS: PARTIAL — bounded gates PASS; continuous playable death reload REFUSED.
+
+Test continuation completed 2026-10-29. All requested gate outcomes are recorded;
+no in-scope runtime bug was found. This continuation changes only this report.
 
 Assigned branch `codex/play-death-reload`, base `76c5b35e`.
 Research verified at `0e3afdb8ce3cdf79746f535d8a2654db37c9e97b`,
@@ -14,11 +17,11 @@ Creature/portal effects and continuous death reload remain unknown and refuse.
 Inherited runtime review: b1753453 retained. It uses the actual death Flow and
 save loader, compares the whole restored/current record, retains literal != -1
 branching and refuses missing camera before player/request mutation. Class
-reconstruction is being reviewed separately. Campaign reload now invokes that
+reconstruction remains bounded by the pinned research. Campaign reload invokes that
 loader on shared memory when an owner explicitly supplies a valid checkpoint;
 there is no checkpoint synthesized from the dying world. After a request it
 stops before another old-world tick because world reconstruction is Unknown.
-Fresh acceptance results are recorded below separately from this bounded proof.
+Gate outcomes are recorded below separately from this bounded proof.
 
 Review follow-up: DR-1 (missing Prop resource-name copies) and DR-2
 (post-request old-world HUD gold credit) were fixed. Prop restores the three
@@ -30,7 +33,7 @@ removed: nonzero constructor charm without the optional word now refuses.
 Focused tests: ps2-save, ps2-class-restore, player-death-flow 3/3 PASS.
 The full CTest after these source fixes passed as recorded below.
 
-Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 435e1740 — **258/258 passed, 881.13 s**, no timeouts (log `work/death-reload/ctest-r1.log`). Strict Godot matrix, FULL_SAVE_LOAD, death probe, FULL_TRACE and both journeys for this revision are still PENDING.
+Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 435e1740 — **258/258 passed, 881.13 s**, no timeouts (log `work/death-reload/ctest-r1.log`). The other gates were pending at that checkpoint; their completed outcomes follow below.
 
 ## Test continuation, 2026-10-28
 
@@ -104,9 +107,12 @@ excluded from death evidence. The corrected command above has the actual
 `death_check` completion line; no code or test change was necessary.
 
 Root cause of the retained reload refusal: normal campaign initialization does
-not call `Fight::bind_death_checkpoint`; its reload callback refuses before the
-strict loader when `death_restore_bound` is false. Manual native save companions
-are not the original checkpoint buffer. The audited contract at
+not call `Fight::bind_death_checkpoint`. The callback calls
+`ps2_save::reload_checkpoint` (`native/src/campaign_fight.cpp:1062-1071`), whose
+empty-buffer guard refuses before `load_impl` (`native/src/ps2_save.cpp:835-840`).
+There is no `death_restore_bound` flag at this revision; this corrects the earlier
+report's mechanism, without changing the recorded probe outcome. Manual native
+save companions are not the original checkpoint buffer. The audited contract at
 `research-death-reload/docs/death-reload.md:23-42,91-97` (`0e3afdb8`) requires
 restoring the real saved state and explicitly leaves real-level checkpoint
 creation/restore and continuous recovery Unknown. No snapshot or spawn fallback
@@ -135,3 +141,93 @@ The step counts equal the user-supplied wave-36 comparison (80/81); that
 comparison was not independently rerun. The ending refusal is recorded without
 claiming a successful saved-level reload. Its pinned-contract assessment follows
 in the final continuation section.
+
+## Final continuation assessment, 2026-10-29
+
+**Verdict: intended remaining refusal, not an in-scope runtime bug.** The precise
+journey stop is earlier than the bounded native death probe:
+
+1. Both journey results record `in_game_save=refused_as_expected` and
+   `dead_state_refused=true`. The save guard refuses dead built-Creature state
+   (`native/src/script_commands_objects.cpp:119-139`); the scene reports that
+   refusal before writing the save (`godot/scenes/real_data_play.gd:409-414`).
+2. Both record `load_and_carry=unavailable_save_refused`, `load_attempted=false`,
+   and `cold_load=refused_as_expected`, `loaded=false`. No journey save or its
+   five companion files exists in either output directory.
+3. `godot/tests/loop_playthrough.gd:1957-1958` requires that saved-level load
+   before entering the diagnostic lethal-hit sequence. Its failure takes
+   lines 2000-2001 and records `player_death=refused`,
+   `saved_level_reloaded=false`. Neither journey executes or verifies that
+   lethal-hit sequence, the native reload callback, or a rendered death pose.
+   The native probe in Gate 4 supplies the separate bounded death evidence.
+
+At **`0e3afdb8`**, `research-death-reload/docs/death-reload.md:23-31` establishes
+synthetic saved-record restore and a level request, with remaining callbacks
+explicitly bounded. Lines **58-62** leave invalid/uninitialized checkpoints and
+full level/object construction Unknown. Line **76** leaves complete Creature
+motion, corpse tracks and world registration Unknown. Lines **91-97** expressly
+leave real-level checkpoint creation/restore and continuous death-to-playable
+recovery Unknown and require preserving `blocked_death_reload`. The named audit
+is PASS and affirms that boundary. Removing the save guard or inventing a
+checkpoint/fallback would exceed this research.
+
+The actual campaign callback also retains that boundary: an explicitly bound
+valid buffer can restore/request through the strict loader, but completed world
+reconstruction and qualified-name matching refuse
+(`native/src/campaign_fight.cpp:1076-1082`). After a successful request, further
+old-world ticking stops at lines 1107-1115. This is not continuous recovery.
+An independent read-only review at `6a8c03ab` reached the same verdict and
+identified the report mechanism correction above; it ran no gates.
+
+### Final gate accounting and provenance
+
+- **Full CTest: PASS, 258/258, 881.13 s**, retained execution on `435e1740`,
+  recorded by `8748f4fc`; final log summary inspected again.
+- **Strict Godot matrix: PASS, 54/54**, recorded by `68de0217`; all 105 retained
+  logs rechecked with unchanged `godot_log.error_lines`: **0 errors**.
+- **FULL_TRACE: PASS, unchanged**, recorded by `4f74a440`; retained structured
+  marker rechecked: **36,402 bytes**, exact SHA-256 recorded in Gate 3.
+- **FULL_SAVE_LOAD: PASS**, recorded by `0e64eb9e`; retained marker rechecked:
+  **300/300 presents**, equal hashes recorded in Gate 2; **2,645 checks,
+  0 failures**. This remains synthetic continuation evidence.
+- **Native death probe: PASS for bounded death/refusal**, recorded by `88dbd679`;
+  retained exit metadata is **0**, and the actual `death_check` completion line
+  confirms Gate 4's counts and `reload_refused=1`.
+- **Headless journey: REFUSED/incomplete, exit 1, 80 steps**, pickup **10 → 11**.
+- **Rendered journey: REFUSED/incomplete, exit 1, 81 steps**, pickup **10 → 11**,
+  38 screenshots. Both final steps and reload flags are recorded in Gate 5.
+
+For both journeys, `run-summary.json` confirms `result_written=true`,
+`pickup_verified=true`, `log_errors=0`, and unchanged private-input file counts.
+Fresh strict log inspection also found **0 errors** in each journey log. Every
+`PLAYTHROUGH_STEP` and the final `PLAYTHROUGH_RESULT` exactly match the respective
+`result.json`. Clean diagnostics do not make the refused journeys pass.
+The retained rendered `07-save.png` visibly reports the Creature-state save
+refusal; `09-loaded.png` shows the main menu, consistent with no successful load.
+
+Result artifact SHA-256 values (raw outputs remain ignored):
+
+- Headless: `1865f4eac2dc5e600bcf13bb418cc33cc6677f2b8e4c934fe92571912425cf5a`.
+- Rendered: `8cc1ddbb666f459fd531b6f4f04a0e05ab597a50ecc9b880caaaef03d9a73f3f`.
+
+### Remaining refusals and completion boundary
+
+The journeys retain 27 headless / 28 rendered rows with the literal result
+`refused`, including the final death prerequisite; they are not all death
+regressions. Remaining categories include hub save/readback, portal scripts and
+requests, mission-menu art/network/navigation, physical story travel and
+destination/objective actions, level departure, object-state roundtrips and
+revisit. Journal layout, normal combat/ability/construction coverage, and rendered
+pickup verification also retain their existing limitations. Six refusal kinds
+are recorded in each result's refusal map. No result, baseline or fixture was
+changed to suppress these outcomes.
+
+The requested test/report continuation is complete; playable reload remains
+blocked on the documented reconstruction/checkpoint research above. The runtime,
+Godot scripts, tools, tests, fixtures and baselines are unchanged from the tested
+`435e1740` tree. No native change was needed, so no CTest, matrix, probe, trace,
+save/load or journey execution was repeated. Fresh work here was evidence
+inspection, source/contract comparison, log parsing and rendered capture review.
+Only this report is staged with `git add -f`; private outputs stay ignored.
+Journey evidence was committed first as `6a8c03ab`; this final report is a separate
+local milestone on the same branch. No push or PR is part of this continuation.
