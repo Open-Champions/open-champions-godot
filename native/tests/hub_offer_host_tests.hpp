@@ -217,20 +217,115 @@ inline void run(Check check,std::string &where) {
     check(host.variables().quest_vars()==vars && !host.campaign().mission_available(2),
           "hub: admission suppressors neither create quest variables nor grant");
   }
-  {
-    sc::Host host; fixture.load_into(host,check);
-    host.variables().memory.byte(host.variables().mission_byte(0,1,1),3);
+  // PPR2-1: research-mission-unlocks@950b2538 docs/spec/mission-unlocks.md:120-125
+  // suppresses a running menu. docs/quests.md:193,357-358 only follows four
+  // closing ticks (127 -> 63); :197 proves publication, NOT task termination.
+  // Later countdown ticks below exercise the port's refusal boundary, not a
+  // newly established original lifecycle. 127 - 16*n skips exact zero, so the
+  // zero case is an explicitly authored imported-state control as well.
+  // Both opening and already-admitted first/second choices use real quest
+  // records, menu ticks, VM/binder actions, and production campaign save/load.
+  int menu_cases=0;
+  auto offer_state=[&](sc::Host &host,int mission,bool stale) {
+    fixture.load_into(host,check);
+    auto record=host.campaign().record(0);
+    // The other authored row can launch while this offer remains unavailable.
+    record.missions[q::mission_index(1,3-mission)]=3;
+    host.campaign().set_record(0,record);
+    host.load_campaign(host.campaign().save());
+    if(stale) {
+      open(host);
+      check(host.dialog().node==(mission==1 ? 1 : 7),"hub: menu control starts with an admitted offer");
+      if(mission==1) { confirm(host); confirm(host); }
+      check(host.dialog().node==(mission==1 ? 3 : 7),"hub: menu control reaches the real grant choice");
+      ready(host);
+    }
+  };
+  auto refused_menu=[&](sc::Host &host,bool stale,int choice) {
+    const auto before=host.save_campaign();
+    const auto vars=host.variables().quest_vars();
+    const auto scripts=host.dialog_counts().scripts_run;
+    if(stale) {
+      confirm(host,choice);
+      check(host.dialog_stalled() && host.dialog_stall_reason()==
+            "confirm: mission menu admission refused: run-task termination is Unknown",
+            "hub: stale choice explicitly refuses unresearched menu termination");
+    } else {
+      open(host);
+      check(!host.dialog().is_open() && host.dialog_counts().open_gate_refused==1 &&
+            host.dialog_counts().refused.count(
+                "open: mission menu admission refused: run-task termination is Unknown")==1,
+            "hub: opening explicitly refuses unresearched menu termination");
+    }
+    // Opening counts the NPC entry only; stale confirmation counts the refused
+    // action attempt only. Neither may evaluate predicates/create-zero reads.
+    check(host.dialog_counts().scripts_run==scripts+1,
+          "hub: menu refusal stops predicate dispatch and VM grant execution");
+    check(host.variables().quest_vars()==vars && host.save_campaign()==before,
+          "hub: menu refusal preserves all saved mission bytes and quest variables");
+    ++menu_cases;
+  };
+  auto menu_case=[&](int mission,bool stale,int choice,const auto &drive) {
+    sc::Host host; offer_state(host,mission,stale);
+    drive(host);
+    const auto saved=host.save_campaign();
+    const auto menu=host.campaign().menu();
+    refused_menu(host,stale,choice);
+    sc::Host restored; offer_state(restored,mission,stale);
+    restored.load_campaign(saved);
+    check(restored.campaign().menu_open() && restored.campaign().menu().state==menu.state &&
+          restored.campaign().menu().counter==menu.counter && restored.campaign().menu().pending==menu.pending,
+          "hub: replacement host restores the actual running-menu save state");
+    refused_menu(restored,stale,choice);
+  };
+  auto ready_menu=[&](sc::Host &host) {
     host.campaign().open_menu(0);
     for(int i=0;i<17;++i)host.tick_mission_menu(0);
-    host.tick_mission_menu(q::BTN_CIRCLE);
-    for(int i=0;i<17;++i)host.tick_mission_menu(0);
-    check(host.campaign().menu().state==4 && host.campaign().menu().counter<=0,
-          "hub: production cancel completes menu run task");
-    open(host);
-    check(host.dialog().node==7,"hub: cancelled menu no longer suppresses the next dialog");
-    confirm(host);
-    check(host.campaign().mission_available(2),"hub: offer choice works after menu cancellation");
+    check(host.campaign().menu().state==2 && host.campaign().menu().counter==127,
+          "hub: production menu reaches the researched input state");
+  };
+  auto launch_menu=[&](sc::Host &host,int ticks) {
+    ready_menu(host);
+    host.tick_mission_menu(q::BTN_CROSS);
+    check(host.campaign().menu().state==5,"hub: available authored row enters launch");
+    q::MenuInputs input; input.fade=128; // docs/quests.md:194-197
+    for(int i=0;i<ticks;++i)host.tick_mission_menu(0,input);
+    check(host.campaign().menu().state==(ticks<3 ? 5+ticks : 8) &&
+          host.campaign().menu().pending.empty()==(ticks<4),
+          "hub: launch control distinguishes entering state 8 from publishing a destination");
+  };
+  for(int mission:{1,2}) for(bool stale:{false,true}) for(int choice:{0,1}) {
+    for(int ticks:{0,4,7,8,9,17})
+      menu_case(mission,stale,choice,[&](sc::Host &host) {
+        ready_menu(host);
+        host.tick_mission_menu(q::BTN_CIRCLE);
+        for(int i=0;i<ticks;++i)host.tick_mission_menu(0);
+        check(host.campaign().menu().state==4 && host.campaign().menu().counter==127-16*ticks,
+              "hub: cancel checkpoint does not claim run-task completion");
+      });
+    menu_case(mission,stale,choice,[&](sc::Host &host) {
+      ready_menu(host); host.tick_mission_menu(q::BTN_CIRCLE);
+      host.campaign().menu().counter=0; // authored import; not an observed countdown tick
+      host.load_campaign(host.save_campaign());
+      check(host.campaign().menu().state==4 && host.campaign().menu().counter==0,
+            "hub: exact-zero imported save remains a termination-unknown control");
+    });
+    for(int ticks:{0,1,2,3,4,5})
+      menu_case(mission,stale,choice,[&](sc::Host &host) { launch_menu(host,ticks); });
+    for(int ticks:{0,1,17})
+      menu_case(mission,stale,choice,[&](sc::Host &host) {
+        launch_menu(host,4);
+        const auto destination=host.campaign().menu().pending;
+        // Save/restore BEFORE reopen as well as AFTER it in menu_case.
+        host.load_campaign(host.save_campaign());
+        host.campaign().open_menu(0);
+        for(int i=0;i<ticks;++i)host.tick_mission_menu(0);
+        check(host.campaign().menu().state==(ticks==0 ? 0 : ticks==1 ? 1 : 2) &&
+              !destination.empty() && host.campaign().menu().pending==destination,
+              "hub: reopened menu retains an old destination in states 0, 1 and 2");
+      });
   }
+  check(menu_cases==256,"hub: 256 live/replacement-host menu refusal controls");
   // Admission/state is rechecked at the choice, not cached at opening.
   for(int control=0;control<3;++control) {
     sc::Host host; fixture.load_into(host,check);

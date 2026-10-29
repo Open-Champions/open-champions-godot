@@ -7,6 +7,43 @@ Fresh Release build -j 4, full CTest -j 3 (timeouts rerun alone), strict Godot
 development matrix, FULL_SAVE_LOAD, FULL_TRACE and both standard journeys
 are PENDING. Historical results below are retained evidence only.
 
+## PPR2-1 repair (2026-10-28)
+
+Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
+against the complete Round-2 audit (one HIGH finding; no other findings).
+Kept 7df45143's pending status and withdrawal of the false lifetime claim.
+Kept the interrupted implementation because it restores menu_open as a
+conservative admission latch and explicitly refuses bound hub openings and
+stale choices with `mission menu admission refused: run-task termination is Unknown`.
+Neither countdown sign nor destination publication clears admission suppression.
+This is an explicit Unknown boundary, not a claim that the original task runs forever.
+
+Authority for the unchanged supported contracts is
+research-mission-unlocks@950b2538: docs/spec/mission-unlocks.md:46-84
+(predicate table, ordering, variable reads), :88-118 (first/second choices),
+:120-125 (running-menu/recall suppressors); tools/difftest_mission_unlocks.py:175-178
+(recall byte). The same pin's docs/quests.md:176-197 describes opening,
+the observed countdown prefix and destination publication; :193,357-358
+explicitly leaves cancellation to zero untraced. No termination timing is added.
+
+Replaced the unsupported cancellation-completion test with 256 production-path
+controls over first/second offers, both choices, opening/stale-choice admission,
+and live/replacement Hosts. Cancellation checkpoints include 127, 63, 15,
+-1, -17 and -145 (the existing port's decrement-only arithmetic, not new
+original-executable evidence). Exact zero is a labelled authored imported save
+control: subtracting 16 from 127 does not naturally hit zero. Launch controls
+cover states 5/6/7/8 before, at and after publication; reopen controls preserve
+the old destination in states 0/1/2 and save/restore both before and after reopen.
+Every control asserts the explicit reason, no predicate dispatch, no create-zero
+reads, and byte-identical campaign saves after the refused attempt. Existing
+positive VM grants, all-node predicates, signed variables and recall controls stay.
+No fixture, baseline, journey runner or admission threshold is weakened.
+
+Fresh Release/focused/full CTest, extension, strict matrix, save/trace and journeys
+remain PENDING at this implementation checkpoint. Evidence will be retained under
+work/progression-r2/ppr2-1/ and results committed after each gate group.
+
+## Historical continuation before PPR2-1
 
 2026-10-27. Test continuation on codex/play-progression, clean at 5e0a5825.
 Round 2 started from c12ecc31. Implementation commits: 559bb17f, c48f4f2c,
