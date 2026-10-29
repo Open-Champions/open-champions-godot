@@ -67,6 +67,15 @@ Evidence: matrix.log, matrix-run.json, matrix-verification.json and
 matrix/results.json in the fresh evidence directory. Save/load, trace and
 journey verification remain PENDING.
 
+FULL_SAVE_LOAD PASS: the freshly executed strict matrix's Full-combat case
+recorded 300/300 presentation frames and matching uninterrupted/continued
+presentation hashes cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573.
+The exact counts, both hashes and absence of a skipped presentation comparison
+were checked after the matrix commit; the complete case log has zero classified
+errors. Evidence: full-save-load.json and matrix/playable_wave_smoke_full_combat.log
+in the fresh evidence directory. This is synthetic mid-fight continuation, not
+real-level reload or campaign completion. Trace and journeys remain PENDING.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
