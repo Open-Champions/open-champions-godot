@@ -44,6 +44,15 @@ off by a provider limit; the orchestrator recorded the finished result. Still
 PENDING: Release GDExtension rebuild, strict development matrix, FULL_SAVE_LOAD
 300/300, FULL_TRACE, standard headless/rendered journeys vs 80/81 (pickup 10 to 11).
 
+Release GDExtension rebuild PASS on a8a27aef: all three existing development
+extensions rebuilt with Release optimization and template_debug ABI. Commands:
+`cmake --build build/godot-extension --config Release --parallel 3`, then the
+same command for build/level-texture-debug and build/creature-anim-debug.
+Elapsed: 2.87 s, 0.24 s and 0.54 s; all exit 0. Evidence: extension-build.json
+and each build-directory-named log in the fresh evidence directory. No native
+source changed; the completed 253/253 CTest result remains applicable. Strict
+matrix, save/load, trace and journeys remain PENDING.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
