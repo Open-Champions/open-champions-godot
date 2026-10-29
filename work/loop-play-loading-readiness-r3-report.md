@@ -179,7 +179,19 @@ The retained pre-repair CTest log was verified: **251/251 PASS, 675.65 s**,
   user data (`work/r3-final-additional/results.json`). Final public coverage:
   **62/63 clean**; private loading-disc gate separately PASS. The raw failed
   aggregate is retained. No diagnostic was suppressed or test changed.
-- Fresh headless/rendered journeys: PENDING; `work/r3-final-playthrough/`.
+- Fresh headless journey: DONE — 67 steps (matches the 67-step headless baseline), at
+  `d7f04e75` (code identical to `6b066acb`); output `work/r3-completion-playthrough/headless/`,
+  result.json SHA-256 029d97c8212c46fb91e60f1466d692d5d69617bc9706c599df09255eae5dcb86;
+  godot.log has 67 PLAYTHROUGH_STEP lines. Arrival still refuses on the normal route:
+  step 37 `blood1_arrival` = refused (steps 36-41 marker records, arrival, level change,
+  initial choice state, record census and objective all refused); step 55 `portal_arrival`
+  = refused_expected ("Gate travel refused: campaign hub/GateList lifecycle, paused menu
+  task, and destination constructor seed/blocking grid are unavailable."). Last step 67
+  `player_death` = blocked_death_reload. The run was started by a job that was cut off by a
+  provider limit; the orchestrator recorded the finished result.
+- Fresh rendered journey: PENDING — the wrapper withheld it ("Rendered launch withheld:
+  headless checkpoint not recorded", `work/r3-completion-playthrough/rendered/godot.log`)
+  because the job stopped before recording the headless checkpoint. Rerun vs 68.
 - Fresh FULL_TRACE: **36,402 bytes**, SHA-256
   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`,
   unchanged. FULL_SAVE_LOAD: **300/300**, identical continued/uninterrupted
