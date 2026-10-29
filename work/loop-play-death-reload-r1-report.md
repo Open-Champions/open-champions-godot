@@ -111,3 +111,27 @@ are not the original checkpoint buffer. The audited contract at
 restoring the real saved state and explicitly leaves real-level checkpoint
 creation/restore and continuous recovery Unknown. No snapshot or spawn fallback
 was fabricated to satisfy the gate.
+
+### Gate 5: completed campaign journeys — retained refusal evidence
+
+Fresh inspection on 2026-10-29 of the completed `tools/run_loop_playthrough.py`
+outputs under `work/death-reload/gates-r1-final/playthrough/` confirms:
+
+- `headless/result.json`: **80 steps**; last step `player_death`, result
+  `refused`, `saved_level_reloaded=false`. `loot_pickup` passed with inventory
+  **10 → 11**, `picked_up=true`, `drop_produced=true`, `walked=true`,
+  `walk_ticks=52`, zero retry kills and zero diagnostic retry placements.
+- `rendered/result.json`: **81 steps**, 38 recorded screenshots; last step
+  `player_death`, result `refused`, `saved_level_reloaded=false`.
+  `loot_pickup` passed with inventory **10 → 11**, `picked_up=true`,
+  `drop_produced=true`, `walked=true`, `walk_ticks=52`, zero retry kills and zero
+  diagnostic retry placements.
+
+Both runs record `rendered_pickup_verified=false`; the inventory transition is
+verified state evidence, not a claim of rendered pickup verification. Both
+`pickup_save_preflight` steps are `refused_as_expected` with existing files
+preserved. These are retained completed executions, not new journey runs.
+The step counts equal the user-supplied wave-36 comparison (80/81); that
+comparison was not independently rerun. The ending refusal is recorded without
+claiming a successful saved-level reload. Its pinned-contract assessment follows
+in the final continuation section.
