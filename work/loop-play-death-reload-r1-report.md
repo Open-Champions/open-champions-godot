@@ -86,3 +86,28 @@ The same completed strict matrix run records **36,402 bytes**, SHA-256
 `headless`. Fresh structured extraction matches both the exact requested size
 and hash. No trace/baseline explanation or adjustment is needed. This retained
 synthetic determinism gate is separate from the private campaign journeys.
+
+### Gate 4: native death probe — PASS for bounded death/refusal
+
+Fresh `build/native/champions-campaign-fight-probe --game <private-input>
+--death-check --attack-every 0`: exit **0**, 600 ticks, 78 actors, no fight failure.
+The actual diagnostic damage route produced dead state and zero HP; both timers
+reached 0; task remained running in phase 1 with fade 128. Native clip started
+and advanced 239 steps. XP/mana/Gold/bag/equipment comparisons passed, the same
+dead body remained, and `reload_refused=1`. Log and exit metadata:
+`work/death-reload/gates-r1-final/native-death-probe{.log,-result.json}`.
+This passes the existing refusal probe, not a playable reload gate.
+
+An initial invocation included `--counts-only`; that flag selects a separate
+early-return diagnostic and did not execute the death check. Its exit 0 is
+excluded from death evidence. The corrected command above has the actual
+`death_check` completion line; no code or test change was necessary.
+
+Root cause of the retained reload refusal: normal campaign initialization does
+not call `Fight::bind_death_checkpoint`; its reload callback refuses before the
+strict loader when `death_restore_bound` is false. Manual native save companions
+are not the original checkpoint buffer. The audited contract at
+`research-death-reload/docs/death-reload.md:23-42,91-97` (`0e3afdb8`) requires
+restoring the real saved state and explicitly leaves real-level checkpoint
+creation/restore and continuous recovery Unknown. No snapshot or spawn fallback
+was fabricated to satisfy the gate.
