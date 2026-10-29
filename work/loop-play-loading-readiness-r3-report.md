@@ -1,4 +1,4 @@
-STATUS: MORE — interrupted PLR3-1 repair retained after pinned-research review; full native CTest verified for the retained code. Godot/journey evidence reconciliation in progress; normal-route arrival remains refused.
+STATUS: MORE — 6b066acb recovery reviewed against pinned round-3 research; exact-tree native rerun PENDING. Godot/journey reconciliation PENDING; normal-route arrival remains refused.
 
 ## Recovery disposition (2026-10-28)
 
@@ -11,15 +11,28 @@ any baseline. Research was read with `git show 2550d34:<path>`; the research
 checkout's later HEAD and uncommitted round-4 work are outside this task.
 
 The retained full run `work/r3-final-ctest.log` is **251/251 PASS, 868.43 s**,
-with no timeouts. Both source SHA-256 digests match the retained source manifest;
-implementation/test object and executable timestamps follow their last source
-edits and precede this run. A recovery `cmake --build build/native -j 3` passes
-without compilation or linking. Only report text changes during recovery, so
-this full CTest applies to the unchanged implementation/test content committed
-here; the older 675.65-second run is not substituted for it. Evidence:
-`work/r3-retained-source-sha256.json`, `work/r3-retained-full-LastTest.log`,
-`work/r3-recovery-verified-noop-build.log`. A fresh independent source review is
-running; existing Godot and journey results below are being reconciled.
+with no timeouts. Both changed source files at `6b066acb` match
+`work/r3-retained-source-sha256.json`; their timestamps precede the run. However,
+that two-file manifest was written after the run, and is not a contemporaneous
+whole-tree/build-input manifest. The previous no-op build and timestamps support
+consistency but do not prove exact tested-tree identity. This supersedes the
+previous report's stronger attribution. The 868.43-second run remains retained
+historical evidence and is not the final exact-tree gate.
+
+### Current continuation checkpoint (2026-10-28)
+
+Started clean at `6b066acbe5b8639dbbbae488237fb6f33a077f2c`. Reviewed the recovery
+code against `2550d34:docs/loading-arrival-r3.md:11-55` and the PASS research audit.
+Rollback is a client transaction restriction preserving once-only relocation,
+not a claim about an original rollback branch. Existing authored false/throwing
+validator controls exercise refusal, byte restoration, retry and matching rescan.
+
+**PENDING:** configure/build, then fresh full `ctest --test-dir build/native
+--output-on-failure -j 3`; rerun only timeout cases alone if needed. Commit this
+pending note before execution. Record source-tree identity before/after, keep
+load moderate, and checkpoint each remaining gate. An independent read-only
+review is also in progress. No implementation/test/baseline changes have been
+made in this continuation.
 
 ## Round-3 test review and repair
 
