@@ -53,6 +53,20 @@ and each build-directory-named log in the fresh evidence directory. No native
 source changed; the completed 253/253 CTest result remains applicable. Strict
 matrix, save/load, trace and journeys remain PENDING.
 
+Strict Godot development matrix PASS on 170fa711: 54/54, including all six
+graphical cases; 124.65 s wall time, 124.53 s summed case durations.
+Command: `python3 tools/godot_matrix.py matrix --godot <local-engine> --captures
+--out work/progression-r2/ppr2-1/2026-10-29/matrix`. Godot version:
+4.5.2.stable.official.6ce3de25a. All 105 case/engine logs were additionally
+checked by the unchanged strict classifier: zero errors. ObjectDB shutdown
+warnings remain visible. The known inherited ui_layout_smoke four-argument
+diagnostic did not reproduce: existing ancestor d5001c5f replaced that invalid
+call with required-tint signature assertions (godot/tests/ui_layout_smoke.gd:84-91).
+No filter, allow-list, test or source change was made in this continuation.
+Evidence: matrix.log, matrix-run.json, matrix-verification.json and
+matrix/results.json in the fresh evidence directory. Save/load, trace and
+journey verification remain PENDING.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
