@@ -1,4 +1,4 @@
-STATUS: MORE — 6b066acb recovery reviewed against pinned round-3 research; exact-tree native rerun PENDING. Godot/journey reconciliation PENDING; normal-route arrival remains refused.
+STATUS: MORE — 6b066acb recovery reviewed against pinned round-3 research; exact-tree native rerun DONE (251/251, 616.04 s). Godot/journey reconciliation PENDING; normal-route arrival remains refused.
 
 ## Recovery disposition (2026-10-28)
 
@@ -27,12 +27,15 @@ Rollback is a client transaction restriction preserving once-only relocation,
 not a claim about an original rollback branch. Existing authored false/throwing
 validator controls exercise refusal, byte restoration, retry and matching rescan.
 
-**PENDING:** configure/build, then fresh full `ctest --test-dir build/native
---output-on-failure -j 3`; rerun only timeout cases alone if needed. Commit this
-pending note before execution. Record source-tree identity before/after, keep
-load moderate, and checkpoint each remaining gate. An independent read-only
-review is also in progress. No implementation/test/baseline changes have been
-made in this continuation.
+**Exact-tree native CTest: DONE — 251/251 passed, total 616.04 s** (log
+`work/r3-verified-ctest.log`, started 2026-10-28 19:40, finished 19:50). The run
+was started by a continuation job that was then cut off by a provider limit; the
+orchestrator recorded the finished result. Tree identity: clean working tree at
+`333fcfe8`, whose code is identical to `6b066acb` (`git diff 6b066acb 333fcfe8`
+touches only this report). `make -n` on `build/native` issues no compile or link
+commands, so the tested binaries were current with the committed sources. This
+supersedes citing the earlier working-tree run (`work/r3-final-ctest.log`).
+Remaining: Godot dev matrix, headless/rendered journeys vs 67/68, FULL_TRACE.
 
 ## Round-3 test review and repair
 
