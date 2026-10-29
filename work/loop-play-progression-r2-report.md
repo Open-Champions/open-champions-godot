@@ -7,6 +7,25 @@ Fresh Release build -j 4, full CTest -j 3 (timeouts rerun alone), strict Godot
 development matrix, FULL_SAVE_LOAD, FULL_TRACE and both standard journeys
 are PENDING. Historical results below are retained evidence only.
 
+## Fresh repair validation (2026-10-29)
+
+Coordination: resumed only codex/play-progression at d77c01a9; inspected the
+complete 0bbcf15b..HEAD history, clean status, report, and full PPR2-1 audit.
+The one HIGH finding is addressed by d77c01a9's conservative menu-open latch
+and explicit Unknown refusal. Its 256 production Host/campaign/save controls
+are already committed; they do not claim a researched termination threshold.
+The old cancellation-completion claim remains withdrawn in this report.
+
+PENDING before this run: Release configure/build -j 4; focused production
+script-command tests; full CTest -j 3 with any timeouts rerun alone; Release
+GDExtension rebuild; strict development matrix including graphical cases;
+FULL_SAVE_LOAD 300/300 and unchanged FULL_TRACE; standard headless/rendered
+journeys compared against 80/81 steps and pickup inventory 10 to 11.
+The known inherited ui_layout_smoke four-argument diagnostic will remain a
+strict failure if reproduced; no test or diagnostic filter will be weakened.
+Fresh evidence directory: work/progression-r2/ppr2-1/2026-10-29/.
+Earlier logs remain retained evidence, not results of this run.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
