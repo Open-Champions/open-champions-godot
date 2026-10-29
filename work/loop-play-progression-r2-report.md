@@ -26,6 +26,16 @@ strict failure if reproduced; no test or diagnostic filter will be weakened.
 Fresh evidence directory: work/progression-r2/ppr2-1/2026-10-29/.
 Earlier logs remain retained evidence, not results of this run.
 
+Fresh native preflight PASS: Release configure 1.17 s; build -j 4, 2.91 s;
+focused dialog/script-commands selection 5/5, 1.58 s CTest wall time. Commands:
+`cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`,
+`cmake --build build/native -j 4`, and
+`ctest --test-dir build/native --output-on-failure -R '(dialog|script-commands)' -j 1`.
+The selected production script-commands target includes all 256 menu refusal
+controls. Evidence: configure.log, build.log, focused.log and native-preflight.json
+in the fresh evidence directory. Full CTest -j 3 is now running; later gates
+remain PENDING. No source/test change was needed after reviewing d77c01a9.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
