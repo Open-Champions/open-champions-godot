@@ -42,11 +42,27 @@ No runtime, test, fixture or baseline edits have been made in this continuation.
 All raw logs/captures remain ignored under `work/death-reload/gates-r1-final/`.
 
 Three Release-optimized debug-ABI Godot extensions were rebuilt with `-j 3`.
-The strict dev matrix is running with `--captures`, normal per-case isolation,
-and the unchanged diagnostic checker. Remaining private gates will run serially.
+The strict dev matrix was launched with `--captures`, normal per-case isolation,
+and the unchanged diagnostic checker. Its completed result was recovered below;
+remaining private gates run serially.
 
 The historical `ui_layout_smoke` four-argument diagnostic is already fixed in
 the inherited `d5001c5f`: `godot/tests/ui_layout_smoke.gd:89-97` checks the
 five-argument signature and absence of defaults without making an invalid
 four-argument call. That file is unchanged from the integration base. No
 allow-list entry or diagnostic exemption is introduced here.
+
+### Gate 1: strict Godot development matrix — PASS
+
+Recovered the completed continuation run from
+`work/death-reload/gates-r1-final/matrix/results.json`: **54/54 PASS, 0 FAIL**,
+including graphical capture cases. The matrix finished after all three extension
+build logs reached their successful target completion. This is retained execution
+evidence from the interrupted job on the unchanged native implementation through
+`435e1740`, freshly inspected here; the matrix was not redundantly rerun.
+A fresh invocation of the unchanged `godot_log.error_lines` checker across all
+105 matrix logs found **0 diagnostic errors**. Completion markers and per-case
+results remain available in the ignored logs. `ui_layout_smoke` is PASS; its
+historical four-argument diagnostic does not recur because the inherited
+`d5001c5f` fix is already present. Its script is unchanged against `76c5b35e`.
+No source, baseline, fixture, allow-list or test was changed.
