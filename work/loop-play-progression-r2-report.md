@@ -76,6 +76,15 @@ errors. Evidence: full-save-load.json and matrix/playable_wave_smoke_full_combat
 in the fresh evidence directory. This is synthetic mid-fight continuation, not
 real-level reload or campaign completion. Trace and journeys remain PENDING.
 
+FULL_TRACE PASS, unchanged: the freshly executed Full-combat case emitted
+36,402 bytes and SHA-256 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+Both values were checked exactly after the save/load commit. The driver computes
+the hash from its generated trace and checks byte-identical headless/drawing
+and save/continued traces; this continuation verified that fresh marker, not a
+separately saved raw-trace file. Evidence: full-trace.json and
+matrix/playable_wave_smoke_full_combat.log in the fresh evidence directory.
+Standard headless/rendered journeys remain PENDING.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
