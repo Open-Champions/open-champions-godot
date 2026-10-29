@@ -1,4 +1,31 @@
-STATUS: MORE — 6b066acb recovery reviewed against pinned round-3 research; exact-tree native rerun DONE (251/251, 616.04 s). Godot/journey reconciliation PENDING; normal-route arrival remains refused.
+STATUS: MORE — exact-tree native CTest retained (251/251); strict Godot dev gate recorded with inherited UI diagnostic. FULL_TRACE/journeys and final review PENDING; normal-route arrival remains refused.
+
+## Ordered continuation gates (2026-10-29)
+
+Started clean at `8e99daae`; `git diff 6b066acb HEAD` contains report-only
+changes. The retained exact-tree CTest is **251/251 PASS, 616.04 s** in
+`work/r3-verified-ctest.log`; no native code changed and CTest was not rerun.
+The extension dry-run schedules no compilation/linking. Source, wrapper, helper,
+engine and extension hashes are retained in ignored
+`work/r3-verified-gate-manifest.json`.
+
+1. **Strict Godot dev matrix recorded:** raw **58/61 PASS**, exit 1,
+   125.77 s summed case time (`work/r3-verified-matrix/results.json`).
+   Failures are the private-disc argument prerequisite, native-FX output-directory
+   prerequisite, and inherited `ui_layout_smoke.gd:84` diagnostic:
+   `hud_text_glyphs` expects five arguments but receives four through `callv`.
+   This remains a strict failure despite engine exit zero; no filtering or
+   allowlist changes. Explicit supplemental setup/rendered runs are **5/5 PASS**,
+   6.01 s (`work/r3-verified-additional/results.json`), checked from every row
+   rather than the helper's exit code. Public coverage is **62/63 clean**;
+   private disc separately PASS. Captured stdout/stderr and separate engine logs
+   were inspected; the inherited UI diagnostic remains unresolved.
+   The three creature-driver cases use their existing fixed scratch project;
+   other matrix cases use copied projects with fresh per-case user data. All
+   cases ran serially. Native-FX capture was separately retained and checked
+   (save result zero, nonempty PNG) in `work/r3-verified-fx-capture/` because the
+   existing script ignores the capture-directory argument and its temporary
+   output otherwise disappears. No source test or baseline was changed.
 
 ## Recovery disposition (2026-10-28)
 
