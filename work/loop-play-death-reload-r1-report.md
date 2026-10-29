@@ -66,3 +66,11 @@ results remain available in the ignored logs. `ui_layout_smoke` is PASS; its
 historical four-argument diagnostic does not recur because the inherited
 `d5001c5f` fix is already present. Its script is unchanged against `76c5b35e`.
 No source, baseline, fixture, allow-list or test was changed.
+
+### Gate 3: FULL_TRACE — PASS, unchanged
+
+The same completed strict matrix run records **36,402 bytes**, SHA-256
+`9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, renderer
+`headless`. Fresh structured extraction matches both the exact requested size
+and hash. No trace/baseline explanation or adjustment is needed. This retained
+synthetic determinism gate is separate from the private campaign journeys.
