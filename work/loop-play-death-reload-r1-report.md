@@ -67,6 +67,18 @@ historical four-argument diagnostic does not recur because the inherited
 `d5001c5f` fix is already present. Its script is unchanged against `76c5b35e`.
 No source, baseline, fixture, allow-list or test was changed.
 
+### Gate 2: FULL_SAVE_LOAD — PASS
+
+The completed final matrix's `playable_wave_smoke_full_combat.log` records
+**300/300 presents**, with identical uninterrupted and continued presentation
+SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`.
+Fresh structured extraction confirmed equality and the unchanged strict log
+checker accepted the complete log. The driver completed **2,645 checks, 0
+failures**, at 640 target ready ticks. This is synthetic full-combat save/load
+continuation; it does not establish a retail death checkpoint or world reload.
+The ordinary ObjectDB shutdown warning remains visible and is not an engine
+error under the unchanged checker. Evidence is retained execution from Gate 1.
+
 ### Gate 3: FULL_TRACE — PASS, unchanged
 
 The same completed strict matrix run records **36,402 bytes**, SHA-256
