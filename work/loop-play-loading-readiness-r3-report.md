@@ -1,4 +1,19 @@
-STATUS: MORE — exact-tree native CTest retained (251/251); strict Godot dev gate recorded with inherited UI diagnostic. FULL_TRACE/journeys and final review PENDING; normal-route arrival remains refused.
+STATUS: MORE — exact-tree native CTest retained (251/251); strict Godot dev gate recorded with inherited UI diagnostic; FULL_TRACE verified unchanged. Journeys and final review PENDING; normal-route arrival remains refused.
+
+## Final continuation checkpoints (2026-10-29)
+
+Started clean at `ec8d941b` on the assigned branch. No native, Godot, fixture or
+baseline edits. Completed gates are retained rather than rerun.
+
+1. **FULL_TRACE verified unchanged:** **36,402 bytes**, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+   Read the exact-source strict-matrix output at
+   `work/r3-verified-matrix/playable_wave_smoke_full_combat.log:18` and its PASS
+   row in `results.json`; cross-checked `work/r3-verified-trace.json`.
+   All eleven source/wrapper/helper/engine/extension entries still match
+   `work/r3-verified-gate-manifest.json` byte counts and SHA-256 hashes.
+   Only this report differs from that gate's `8e99daae` source tree.
+   This is verification of the retained execution, not a new matrix run.
 
 ## Ordered continuation gates (2026-10-29)
 
