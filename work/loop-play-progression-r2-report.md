@@ -36,6 +36,14 @@ controls. Evidence: configure.log, build.log, focused.log and native-preflight.j
 in the fresh evidence directory. Full CTest -j 3 is now running; later gates
 remain PENDING. No source/test change was needed after reviewing d77c01a9.
 
+Full native CTest PASS: 253/253, total test time 610.92 s, command
+`ctest --test-dir build/native --output-on-failure -j 3`, started 2026-10-29 01:41
+on the clean tree at be126413 (code identical to d77c01a9); no timeouts. Log:
+work/progression-r2/ppr2-1/2026-10-29/ctest.log. The job that started it was cut
+off by a provider limit; the orchestrator recorded the finished result. Still
+PENDING: Release GDExtension rebuild, strict development matrix, FULL_SAVE_LOAD
+300/300, FULL_TRACE, standard headless/rendered journeys vs 80/81 (pickup 10 to 11).
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
