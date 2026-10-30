@@ -83,7 +83,17 @@ the hash from its generated trace and checks byte-identical headless/drawing
 and save/continued traces; this continuation verified that fresh marker, not a
 separately saved raw-trace file. Evidence: full-trace.json and
 matrix/playable_wave_smoke_full_combat.log in the fresh evidence directory.
-Standard headless/rendered journeys remain PENDING.
+
+Headless journey PASS (no regression) at c6f824d8: 80 steps vs 80 baseline, step
+outcomes and the 8 refusal kinds unchanged; pickup passed with inventory 10 to 11
+(drop produced, walked 52 ticks, picked up, 0 retries); 0 log errors; private-input
+file count 994 before and after; last step player_death = refused
+(saved_level_reloaded false), exit code 1 as in the baseline. Evidence:
+journey-headless-verification.json and journey/headless/ (result.json SHA-256
+7340195f9a58761d4feb813027750baa5a03d6ce5f3559369a30f8663dda5f37) in the fresh
+evidence directory. The run was verified by a job that was cut off by a provider
+limit before committing; the orchestrator recorded the result. Rendered journey
+(vs 81) remains PENDING.
 
 ## PPR2-1 repair (2026-10-28)
 
