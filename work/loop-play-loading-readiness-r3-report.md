@@ -189,9 +189,17 @@ The retained pre-repair CTest log was verified: **251/251 PASS, 675.65 s**,
   task, and destination constructor seed/blocking grid are unavailable."). Last step 67
   `player_death` = blocked_death_reload. The run was started by a job that was cut off by a
   provider limit; the orchestrator recorded the finished result.
-- Fresh rendered journey: PENDING — the wrapper withheld it ("Rendered launch withheld:
-  headless checkpoint not recorded", `work/r3-completion-playthrough/rendered/godot.log`)
-  because the job stopped before recording the headless checkpoint. Rerun vs 68.
+- Fresh rendered journey: DONE — a complete wrapper run (tools/run_loop_playthrough.py)
+  at `7a5df5ab` (code identical to `6b066acb`) wrote both variants to
+  `work/r3-rendered-completion-playthrough/`: headless 67 steps (exit 1, 6 refusal kinds,
+  result.json SHA-256 9da1861bb2b5d034da4829b93e9e5ad07ef90e17a2eedfb275cca6778af92a36) and
+  rendered 68 steps (macOS renderer, 43 screenshots, exit 1, 6 refusal kinds, result.json
+  SHA-256 958cfad7c910b8a440b7457c736b25179a36b761df6ff3ca3571c4b4b00091db) — both match the
+  67/68 baseline. Private-input file count 994 before and after. Rendered arrival still
+  refuses at step 38 `blood1_arrival` = refused and step 56 `portal_arrival` = refused_expected
+  (same gate-travel refusal text as headless); last step 68 `player_death` =
+  blocked_death_reload. The wrapper was started by a job that was cut off by a provider
+  limit; the orchestrator recorded the finished result.
 - Fresh FULL_TRACE: **36,402 bytes**, SHA-256
   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`,
   unchanged. FULL_SAVE_LOAD: **300/300**, identical continued/uninterrupted
