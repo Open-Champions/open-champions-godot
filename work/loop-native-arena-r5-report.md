@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — bounded implementation and review fixes committed; final gates pending. Live match acceptance REFUSED.
+STATUS: VALIDATION COMPLETE — arena Godot PASS; strict Godot dev matrix FAIL (inherited UI-layout diagnostic); FULL_TRACE UNCHANGED. Live match acceptance REFUSED.
 
 # Native arena round 5
 
@@ -30,13 +30,14 @@ No previous vectors, tests, baselines or trace implementation were changed.
   synthetic recipes, row count and content digest before invoking the native
   runtime test. A mutated-copy negative check refused before launching a binary.
 
-## Gates (pending note before execution)
+## Final gate results
 
-- Release configure/build (`-j 4`): PASS after review fixes.
-- Focused arena native runtime/refusal tests: 5/5 PASS, 3.19 s after review fixes.
-- Full CTest (`-j 3`), count/time and isolated timeout retries: PENDING.
-- Arena Godot checks and existing dev matrix: PENDING.
-- Fresh FULL_TRACE: PENDING; required unchanged 36,402 bytes, SHA-256
+- Release configure/build (`-j 4`): retained PASS after review fixes; no native code changed in this continuation.
+- Focused arena native runtime/refusal tests: retained 5/5 PASS, 3.19 s after review fixes.
+- Full CTest (`-j 3`): retained **217/217 PASS**, 714.29 s, no timeouts; recorded in `035061f0` and verified against its log. Not rerun.
+- Arena Godot: **113/113 checks PASS**, zero engine/script diagnostics.
+- Strict Godot dev matrix: **FAIL**, 44/45 strict passes; all 45 exits 0. The inherited four-argument UI-layout error is retained, not filtered. Fifteen ObjectDB exit-leak warnings are separately recorded.
+- Fresh FULL_TRACE: **PASS / UNCHANGED**, 36,402 bytes, SHA-256
   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
 
 The initial pre-fix full run was interrupted after 1/217 completed tests when
@@ -56,7 +57,7 @@ purchase paths must refuse. No live match acceptance or success fallback.
 
 No game data/names or absolute private paths belong in tracked changes.
 
-Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 74fae130 — **217/217 passed, 714.29 s**, no timeouts (log `work/native-arena-r5-ctest-full.log`). Arena Godot tests/matrix and FULL_TRACE for this revision are still PENDING.
+Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's provider stopped on its usage limit): `ctest --test-dir build/native --output-on-failure -j 3` on 74fae130 — **217/217 passed, 714.29 s**, no timeouts (log `work/native-arena-r5-ctest-full.log`). That checkpoint left Godot and FULL_TRACE pending; the continuation below completes their execution and records the strict failure.
 
 ## Test continuation checkpoints (2026-11-02)
 
@@ -94,3 +95,95 @@ Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's pro
   presented frames. Evidence: `work/native-arena-r5-verify-20261102/full-trace-result.json`
   and `matrix-verified/godot-combined-full-combat.log` under that evidence directory.
   This unchanged fixture does not enter mode B and is not live-arena acceptance.
+
+## Completion and evidence scope
+
+The continuation began clean at `035061f0` on `codex/native-arena`, after
+reviewing `git log 486d5769..HEAD`, status and this report. The checked-in
+native, GDExtension, Godot, tool, fixture and baseline files remain byte-for-byte
+unchanged relative to that revision (`git diff --exit-code 035061f0 -- native/
+gdextension/ godot/ tools/`). Only this report changed in the continuation.
+Godot 4.5.2 used the existing post-fix extension builds. All commands ran
+serially; no native rerun, push or PR. The referenced logs and harness remain
+local ignored evidence; no game inputs or private paths are added to commits.
+
+Evidence root: `work/native-arena-r5-verify-20261102/`. The local runner is
+`run.py` (`arena` and `matrix` modes); it executes the previous 46-command
+coverage as the standalone arena gate plus 45 dev-matrix commands, retaining
+all engine/script errors. Editor import is preparation for the arena gate and
+also appears in the dev matrix. A script PASS marker or process exit 0 cannot
+override a captured engine error. Fresh user directories isolate runtime state.
+The FULL_TRACE result is extracted from the matrix's fresh full-combat run;
+it is not a second or stale execution.
+
+Checkpoint commits: arena gate `5af6f55e`, strict matrix `13938c50`,
+FULL_TRACE `0ab757bb`. The final report commit completes the handoff.
+
+The remaining strict failure is the inherited required-tint arity probe,
+whose source and binding are cited above. Its correction is intentionally
+not part of this task's instruction to note and preserve the diagnostic.
+No arena gate failure called for a code fix or a new research interpretation.
+The round-5 behavior remains bounded by the research-to-code map in
+`docs/ARENA_MATCH.md:34-55`; the intro/intermission and terminal authority is
+`research-arena-live@9a0c26a5`, `docs/spec/arena-live-scheduler.md:35-47,105-125`.
+Non-null preload-factory destruction and saved-creature construction remain
+refused; missing services, invalid tables/player domains and signed-overflow
+boundaries also refuse. No destructor flags, tie ordering, successful loading,
+natural victory, normal-input kills, newly spawned creature ticking, continuous
+later-wave progression, displayed results or fixed rewards are inferred.
+Rendered FX/camera/material smoke commands passed their assertions; this is
+not interactive or exported-app live-arena acceptance.
+
+## Complete dev-matrix ledger
+
+Each row references `matrix-verified/godot-<command>.log`; strict results also
+appear in `matrix-verified/results.json`. Warning counts are retained separately
+from the engine/script error criterion. Total command time: 155.35 s.
+
+| Command | Exit | Strict error gate | ObjectDB warnings |
+|---|---:|---|---:|
+| `import` | 0 | PASS | 0 |
+| `archive` | 0 | PASS | 0 |
+| `frame_rate` | 0 | PASS | 0 |
+| `session_facing` | 0 | PASS | 0 |
+| `session_recovery` | 0 | PASS | 0 |
+| `session_sandbox` | 0 | PASS | 0 |
+| `texture_upscale` | 0 | PASS | 0 |
+| `ui_art_gallery` | 0 | PASS | 0 |
+| `control_anim_cache` | 0 | PASS | 0 |
+| `level_library` | 0 | PASS | 0 |
+| `scene_animation_preview` | 0 | PASS | 0 |
+| `scene_original_art` | 0 | PASS | 0 |
+| `scene_play_flow` | 0 | PASS | 1 |
+| `playable_wave` | 0 | PASS | 1 |
+| `play_session_runtime` | 0 | PASS | 0 |
+| `combined-play-short` | 0 | PASS | 1 |
+| `inventory_icons_smoke` | 0 | PASS | 0 |
+| `ui_layout_smoke` | 0 | FAIL — inherited arity diagnostic | 0 |
+| `ui_layout_dynamic_smoke` | 0 | PASS | 0 |
+| `combined-ui` | 0 | PASS | 1 |
+| `combined-level` | 0 | PASS | 1 |
+| `combined-animation` | 0 | PASS | 0 |
+| `native-fx` | 0 | PASS | 0 |
+| `combined-fx` | 0 | PASS | 1 |
+| `default` | 0 | PASS | 1 |
+| `level_texture_preview_smoke` | 0 | PASS | 0 |
+| `level_textured_session_smoke` | 0 | PASS | 1 |
+| `combined-textures` | 0 | PASS | 1 |
+| `level_texture_material` | 0 | PASS | 1 |
+| `native-audio` | 0 | PASS | 1 |
+| `combined-full-combat` | 0 | PASS | 1 |
+| `fx-camera-headless` | 0 | PASS | 0 |
+| `fx-camera-rendered` | 0 | PASS | 0 |
+| `native-fx-visual` | 0 | PASS | 0 |
+| `fx-bridge-refusals` | 0 | PASS | 0 |
+| `level-lights` | 0 | PASS | 0 |
+| `combined-combat` | 0 | PASS | 1 |
+| `wave12-combat-extensions` | 0 | PASS | 0 |
+| `real-data-empty` | 0 | PASS | 1 |
+| `creature-anim` | 0 | PASS | 0 |
+| `creature-anim-freed` | 0 | PASS | 0 |
+| `creature-anim-dispatch` | 0 | PASS | 0 |
+| `combined-audio` | 0 | PASS | 1 |
+| `script_commands_smoke` | 0 | PASS | 0 |
+| `real_water_texture_smoke` | 0 | PASS | 0 |
