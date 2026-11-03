@@ -1,4 +1,4 @@
-STATUS: VALIDATION RECORDED WITH EXCEPTION — PPR2-1 Release/extensions PASS; focused 5/5, CTest 253/253, strict Godot 54/54, FULL_SAVE_LOAD 300/300 and unchanged FULL_TRACE PASS; headless 80/80 and rendered 81/81 steps, pickup 10 to 11. Exact rendered refusal comparison FAIL (count 2 vs 3). Ordinary campaign progression and death reload remain refused.
+STATUS: VALIDATION RECORDED — mini Release native and three template_debug extensions rebuilt; prior focused 5/5, CTest 253/253, strict Godot 54/54, FULL_SAVE_LOAD 300/300 and unchanged FULL_TRACE remain the recorded passes and were not rerun because production code is unchanged. Clean headless 80/80 and rendered 81/81, pickup 10 to 11, and both exact refusal dictionaries match the retained journey, including rendered count 3. The earlier rendered count 2 is the same post-grant node-3 retry counter under a different display-frame schedule, not a lost grant. Ordinary campaign progression and death reload remain refused.
 
 Final disposition, 2026-11-02: the requested native, extension, Godot, save/load,
 trace and both journey executions are recorded. The previously completed gates
@@ -22,6 +22,75 @@ continuation. Tests, fixtures, baselines and production code remain unchanged;
 private data, captures and absolute paths were not committed. No push or PR
 was performed. The remaining exception is the raw rendered refusal count,
 whose exact cause has not been established; it was not normalized or waived.
+
+
+## Rendered refusal count (2026-11-03)
+
+The dictionary entry that previously failed equality is one diagnostic, not a
+missing refusal kind. `safe()` rewrites the slash in "first/second", so the
+retained and observed strings are:
+
+- retained rendered: `dialog: confirm: hub action beyond documented <path> offers is Unknown count=3`
+- the 2026-11-02 rendered runs: the same text with `count=2`
+
+Headless retained and headless reruns are `count=2`. Eight refusal entries
+otherwise match. `choices_taken` stays 3, the opening quest goes 0 to 1, and
+one mission bit is added. Pickup remains 10 to 11.
+
+That count is not a second offer and not the PPR2-1 menu latch. The journey
+never raises `mission menu admission refused: run-task termination is Unknown`.
+The menu stays closed. The throw is `script_dialog.cpp`'s node admission:
+nodes 1, 2 and 3 are admitted only while the evaluated start node is still 1
+(`native/src/script_dialog.cpp` admission before the Unknown throw). Research
+`docs/spec/mission-unlocks.md` lines 88-92 is that traversal: two confirms
+reach node 3, and node 3 writes mission 1. Lines 99-105 then select node 3,
+not node 1, once mission 1's raw byte is 1. The next confirm of the same node
+is outside the admitted traversal, so it throws "hub action beyond documented
+first/second offers is Unknown" and the dialog guard rolls the box back.
+`choices_taken` does not increase. The grant already ran and is kept.
+
+The close itself zeros the UI fade (`native/src/dialog.cpp` fade restart when
+`closing` becomes 1) and keeps taking confirms until that fade is 1
+(`native/src/dialog.cpp` input branch). The fade is not stepped by the sim
+tick once the text HUD owns it: `godot/ui/text_hud.gd` sets the frame driver
+and steps `ui_frame()` from real frame delta, at most four steps per frame.
+When the fade reaches 1 the dialog sends leave and the camera close runs for
+a fixed tick count, during which further Enter presses are not confirms.
+The harness presses Enter on every 8th close-loop iteration
+(`godot/tests/loop_playthrough.gd`). The integer in the diagnostic is how many
+of those presses land in the fade window.
+
+A temporary trace, reverted before this report and not part of the harness,
+recorded the same 84 visual waits and 162 prompt waits in both variants, the
+grant at loop iteration 72 with `choices` 3 and `closing` true, then:
+
+- headless: retries at iterations 80 and 88 (`count=2`), dialog closed at 139
+- rendered: retries at 80, 88, 96 and 104 (`count=4`), dialog closed at 155
+
+The gap from the last retry to close was 51 iterations in both. That is the
+camera leave. The fade window is what changed. The same production code
+already produced rendered `count=2` and `count=3` on 2026-10-27
+(`work/progression-r2/journey` and `final-journey`) before the PPR2-1 latch.
+The 2026-11-02 rendered runs were `count=2`. The clean 2026-11-03 rerun, with
+the harness restored, matched the retained dictionaries exactly, including
+rendered `count=3`. The only non-timing step-field difference against
+`work/progression-r2/final-journey` was `enemy_fight.swing_wall_msec`.
+
+The retained rendered value 3 is one display schedule. It is not a simulation
+constant. This report does not change the harness, the baseline, or any
+fixture. A later rendered run may record 2 or 4 again with the same three
+choices and the same grant. That is the same counter, not a new refusal and
+not evidence that mission 1 failed to unlock.
+
+Mini input census for both clean variants was 995 before and 995 after. The
+designated tree had been short of the historical 994-file set, so the missing
+portion was restored before these runs; one extra file was already present
+and was left in place. No input bytes were committed. Release native
+configure/build `-j 4` and the three arm64 `template_debug` extensions
+(archive, level texture, creature animation) were rebuilt first. Godot
+remained 4.5.2.stable.official.6ce3de25a. No production source change, no
+push, and no PR.
+
 
 ## Fresh repair validation (2026-10-29)
 
