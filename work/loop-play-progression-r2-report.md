@@ -95,6 +95,80 @@ evidence directory. The run was verified by a job that was cut off by a provider
 limit before committing; the orchestrator recorded the result. Rendered journey
 (vs 81) remains PENDING.
 
+## Rendered journey continuation (2026-11-02)
+
+Ran only the rendered command from unchanged tools/run_loop_playthrough.py
+at f5718436, with its original 900-second timeout and standard options.
+The wrapper has no variant selector; its rendered Godot invocation was used
+directly to avoid repeating the completed headless gate. No native/Godot suite,
+FULL_SAVE_LOAD or FULL_TRACE was rerun. The engine remained
+4.5.2.stable.official.6ce3de25a. Runner SHA-256 matches the headless run:
+effc67e93946c938d808f8b09d59b82615c699ee9125138e91bf6a371faa729f.
+
+Final rendered result: 81/81 steps, pickup PASS with inventory 10 to 11,
+52 walking ticks, 0 retry kills and 0 diagnostic retry placements. All 81
+step outcomes match the retained rendered journey; every step field also
+matches after excluding only FPS, memory usage and combat wall-clock timing.
+There are 38 captures, 8 refusal reporting entries and zero classified log
+errors; the existing ObjectDB shutdown warning remains. Final step 81 is
+player_death = refused, saved_level_reloaded=false, process exit 1. Runtime
+51.97 s. This is a completed non-green journey, not campaign acceptance.
+
+The exact refusal-dictionary comparison did NOT pass: one otherwise identical
+later-action refusal diagnostic contains count=2 instead of retained count=3.
+The unchanged verify-journey.py raises at its refusal-equality assertion;
+journey-rendered-verification.json honestly retains refusals_unchanged=false.
+No assertion, fixture, runner, diagnostic classifier or baseline was changed.
+The separate detail review establishes identical step values without relabelling
+that stricter comparison PASS. The counter is emitted from the existing
+frame-yielding confirmation loop (godot/tests/loop_playthrough.gd:781-796),
+using the refusal-attempt counter in native/src/script_dialog.cpp:365-373.
+The exact cause of the raw counter difference is not established. No researched
+mission lifecycle or expected counter value is invented to eliminate it.
+
+Two earlier attempts are retained, not accepted as matching baselines:
+
+- Initial attempt: 81 steps, inventory 10 to 10, pickup refused, 245.23 s.
+  Native fight ticks stopped at 699; scene_paused=true, and the approach capture
+  shows the pause menu. Repeated submissions while paused explain absent enemy
+  damage and loot. The host focus-out handler pauses at
+  godot/scenes/session_sandbox.gd:173-177; docs/SESSION_CONTROL.md:30-37 documents
+  its input-release policy. Focus loss is the suspected trigger, not a recorded
+  notification from that attempt. A scoped process sample showed active script
+  work rather than an idle wait. No process was terminated.
+- First retry: pickup 10 to 11 recovered, but the dialog prompt was unavailable
+  and only 37 captures were written; 80.66 s. Its external focus observer failed
+  during application startup, so it is not accepted as focus-verified evidence.
+
+The final attempt activated only its own renderer and recorded OS focus changes.
+Activation was accepted at 0.56 s; focus was lost at 1.16 s and regained at
+5.11 s, then retained until 51.40 s near shutdown. This does not claim an
+uninterrupted foreground run. The pause and missing-prompt discrepancies did
+not recur; the raw refusal counter difference remains explicitly recorded.
+No in-game inputs, pause rules, timeouts or simulation values were overridden.
+No production change was justified by the recovered step/pickup results.
+The PPR2-1 research boundary remains
+research-mission-unlocks@950b2538:docs/spec/mission-unlocks.md:120-125 and
+docs/quests.md:193,197,357-358: suppression while running, with termination
+Unknown; neither cancellation arithmetic nor publication authorizes a grant.
+
+All three attempts preserved the 994-file private-input census and independently
+matched every input file's SHA-256 before/after; all tracked-file contents were
+also unchanged during each run. Input names/manifests, captures and logs remain
+ignored. Only this counts-only report is committed.
+
+Evidence root: work/progression-r2/ppr2-1/2026-11-02/.
+Initial run and first retry are in that root and foreground-retry/, respectively.
+The final run is under focus-verified/: journey-rendered-run.json,
+journey-rendered-verification.json, journey-rendered-detail-review.json and
+journey/rendered/{result.json,godot.log}. Final result.json SHA-256:
+b33f6e6500576f5855c4d7f88b1c90a918a01376b69995fa83c6d9583e11c2bb.
+The log's step rows exactly match result.json and the renderer reports macOS.
+Fresh final captures were visually inspected: the dialog prompt is drawn,
+the mission-menu view retains its refusal with no mission panel, and the load
+capture remains at the main menu. rendered_pickup_verified=false remains
+unchanged; the inventory assertion is not independent visual pickup proof.
+
 ## PPR2-1 repair (2026-10-28)
 
 Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
