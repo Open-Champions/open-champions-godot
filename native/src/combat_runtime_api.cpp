@@ -521,6 +521,14 @@ void World::arena_reset_scores() {
   require_full(*s_);
   arena_match::Model(s_->mem).reset_scores();
 }
+void World::arena_begin(arena_match::Services services) {
+  require_full(*s_);
+  arena_match::Model(s_->mem, std::move(services)).begin();
+}
+void World::arena_start_wave(arena_match::Services services, Raw increment) {
+  require_full(*s_);
+  arena_match::Model(s_->mem, std::move(services)).start_wave(increment);
+}
 void World::creature_on_death(Address creature, Raw quiet) {
   require_full(*s_);
   if (s_->actor(creature).player || !(s_->u(creature + 12) & 0x20))
