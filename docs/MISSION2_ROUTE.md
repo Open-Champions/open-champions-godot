@@ -48,9 +48,10 @@ from a stopped mission script.
 Mission-2 exit actions are refused with a diagnostic even in levels whose
 start script did not stop. The research audit explicitly leaves each
 record-to-entry pairing and addressed call's entry containment Unknown.
-It labels the four-level sequence Inferred. The client therefore supplies
-no guessed exit, automatic ordering, portal destination, boss completion
-or item reward. Existing movement in a loaded World remains available.
+It labels the four-level sequence Inferred. The scene therefore supplies
+no guessed exit, automatic ordering, boss completion or item reward. The
+hub-return list below is a separate direct call and is not this scene's
+exit. Existing movement in a loaded World remains available.
 
 ## Evidence still required
 
@@ -89,3 +90,44 @@ The other three loads are labelled direct diagnostics. Aggregate counts,
 ready ticks and expected refusals are measured; the result explicitly
 leaves `playable_route_verified` false. Captures and original data remain
 local and untracked.
+
+## Hub-return list
+
+Research pin: `research-mission2-route` `b8e2d11`, `docs/mission2-compose.md`.
+`mission2_route` is the direct-call contract. Public tests use synthetic
+ordinary names. The session does not call it, because the object that calls
+the two list writers during play was not re-established
+(`docs/mission2-compose.md:48-51`).
+
+Latch 0 on reset stores the one name from `game_getHubName`. A nonzero latch
+leaves the existing entries and does not call the resolver
+(`docs/mission2-compose.md:16-24`, `tools/ref_mission2_compose.py:10-21`).
+A new current name is appended, then the first hub entry other than the
+resolver result is removed. A second copy of that other hub name stays. A
+name that is already listed returns with the resolver uncalled
+(`docs/mission2-compose.md:28-40`, `tools/ref_mission2_compose.py:24-41`).
+Latch-clear reset followed by four ordinary insertions leaves the resolver
+hub and then those four names (`docs/mission2-compose.md:42-46`).
+
+Portal gate 0 refuses before discovery and registers no travel task. Gate 1,
+with the current level already listed, writes row 0 through the existing
+travel counter. The pre-load stop accepts that pending hub and does not enter
+the loader. Player bytes and the quest table are copied through unchanged
+(`docs/mission2-compose.md:54-70,92-96`, `tools/ref_mission2_travel.py:54-58`).
+
+Mission-menu run-task admission, including counter 0, stays on
+`codex/play-progression` round 3, code `d5889ae9`, report `c583578a`. It is
+not copied. This portal uses the existing jump-gate travel counter.
+
+These stay refused:
+
+| Call | Reason |
+|---|---|
+| Hub2 dialog choices | The dialog was not opened (`docs/mission2-compose.md:124-130`). |
+| Helper `0x18ebb8` | The compared menu path stubs it. Its other effects are Unknown (`docs/mission2-compose.md:133-138`). |
+| Physical NPC, trigger, and portal use | Unknown (`docs/mission2-compose.md:141-145`). |
+| Loader body | The stop is before any loader instruction at `0x1e55c0` (`docs/mission2-compose.md:65-70`). |
+| Arrival | Unknown (`docs/mission2-compose.md:72-74`). |
+
+List save/load and a nonzero act-change on this boundary stay unexecuted.
+The older destination-list walk in level flow is unchanged.
