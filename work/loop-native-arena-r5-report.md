@@ -85,3 +85,12 @@ Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's pro
   15 ObjectDB exit-leak warnings are separately retained in the summary;
   the error gate checks exits and engine/script errors, not warning severity.
   Each runtime command used a fresh isolated custom user directory.
+
+- Fresh FULL_TRACE: **PASS / UNCHANGED**, 36,402 bytes, SHA-256
+  `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+  The matrix's fresh `combined-full-combat` run exited 0 without engine/script
+  errors and compared headless, drawing-enabled and mid-fight saved continuations.
+  `FULL_SAVE_LOAD` also matched trace and presentation hashes with 300/300
+  presented frames. Evidence: `work/native-arena-r5-verify-20261102/full-trace-result.json`
+  and `matrix-verified/godot-combined-full-combat.log` under that evidence directory.
+  This unchanged fixture does not enter mode B and is not live-arena acceptance.
