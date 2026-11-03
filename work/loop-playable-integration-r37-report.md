@@ -1,4 +1,4 @@
-STATUS: PENDING — WAVE 37 merges committed; Release build and GDExtensions PASS; remaining gates in progress.
+STATUS: PENDING — WAVE 37 merges committed; Release, GDExtensions, and CTest 259/259 PASS; Godot gates in progress.
 
 # Playable integration wave 37 — 2026-11-03
 
@@ -31,7 +31,7 @@ Evidence under ignored `work/playable-wave37/`. Native configure/build and the e
 
 - Native Release configure/build **PASS**, exit 0, 110.77 s combined, `-j 4`. Evidence `configure.log`, `build.log`. New binaries `champions-ps2-class-restore-tests` and `champions-arena-scheduler-tests` are present.
 - GDExtensions **PASS**, exit 0, parallelism 4, `arm64` and `x86_64`. Archive and level-texture `template_debug` / `template_release` each configured and linked. `lipo -archs` reports both architectures. Evidence `template_debug-*.log`, `template_release-*.log`, `texture-template_debug-*.log`, `texture-template_release-*.log`. Creature-animation `template_debug` **PASS**, universal, linked to `godot/creature_anim/bin`. Evidence `creature-template_debug-configure.log`, `creature-template_debug-build.log`.
-- Full CTest `-j 3`: RUNNING (wave 36 was 257/257; this tree registers 259)
+- Full CTest `-j 3`: **PASS, 259/259, 694.03 s**, exit 0. Evidence `ctest.out`. Wave 36 was 257/257. The two added tests are `ps2-class-restore` (death-reload) and `arena-scheduler-runtime` (arena round 5). Loading round 3 extended `script-commands` in place. Two earlier full runs are not this gate: the driver left shell text on standard input, and `amx-validation-transport` then took its invalid-command return after printing format refusal 17. The same test passes with standard input closed. No test, fixture, or source was changed.
 - Strict Godot dev matrix: PENDING. The inherited `ui_layout_smoke` four-argument diagnostic is not filtered. On this integration base the smoke already inspects the five-argument signature (`godot/tests/ui_layout_smoke.gd`) and does not issue the invalid call; arena round 5 and loading round 3 recorded the diagnostic only because their older trees still contained it.
 - FULL_SAVE_LOAD 300/300: PENDING
 - FULL_TRACE 36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`: PENDING. None of the three branch reports records a trace change.
