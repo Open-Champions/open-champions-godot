@@ -70,3 +70,18 @@ Full CTest (recorded by the orchestrator, 2026-10-28 ~00:10, after the job's pro
   by arena assertions; Godot sanitizes parent-directory components. The final
   runtime used a fresh supported custom user-directory name; editor import
   does not create a game user directory. No game-source or test change.
+
+- Strict Godot dev matrix: **FAIL**, 44/45 commands pass the strict error gate;
+  all 45 processes exited 0, 155.35 s total command time, run serially.
+  Runner exit 1 correctly retains the sole engine error in `ui_layout_smoke`.
+  Evidence: `work/native-arena-r5-verify-20261102/matrix-verified/results.json`,
+  `matrix-summary.json` and `matrix-run.log` under that evidence directory.
+  Root cause: `godot/tests/ui_layout_smoke.gd:84` deliberately calls
+  `hud_text_glyphs` with four arguments; the binding at
+  `gdextension/src/ui_layout_service.cpp:45` requires five (including tint).
+  Both files are unchanged from `486d5769`. The engine diagnostic remains
+  captured despite the script's PASS marker and exit 0. Per the task, it was
+  neither filtered nor changed. No arena regression or in-scope code fix.
+  15 ObjectDB exit-leak warnings are separately retained in the summary;
+  the error gate checks exits and engine/script errors, not warning severity.
+  Each runtime command used a fresh isolated custom user directory.
