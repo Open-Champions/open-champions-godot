@@ -1,4 +1,4 @@
-STATUS: PENDING — WAVE 37 merges committed; Release, GDExtensions, and CTest 259/259 PASS; Godot gates in progress.
+STATUS: PENDING — WAVE 37 native gates and strict matrix PASS; journeys running.
 
 # Playable integration wave 37 — 2026-11-03
 
@@ -32,7 +32,8 @@ Evidence under ignored `work/playable-wave37/`. Native configure/build and the e
 - Native Release configure/build **PASS**, exit 0, 110.77 s combined, `-j 4`. Evidence `configure.log`, `build.log`. New binaries `champions-ps2-class-restore-tests` and `champions-arena-scheduler-tests` are present.
 - GDExtensions **PASS**, exit 0, parallelism 4, `arm64` and `x86_64`. Archive and level-texture `template_debug` / `template_release` each configured and linked. `lipo -archs` reports both architectures. Evidence `template_debug-*.log`, `template_release-*.log`, `texture-template_debug-*.log`, `texture-template_release-*.log`. Creature-animation `template_debug` **PASS**, universal, linked to `godot/creature_anim/bin`. Evidence `creature-template_debug-configure.log`, `creature-template_debug-build.log`.
 - Full CTest `-j 3`: **PASS, 259/259, 694.03 s**, exit 0. Evidence `ctest.out`. Wave 36 was 257/257. The two added tests are `ps2-class-restore` (death-reload) and `arena-scheduler-runtime` (arena round 5). Loading round 3 extended `script-commands` in place. Two earlier full runs are not this gate: the driver left shell text on standard input, and `amx-validation-transport` then took its invalid-command return after printing format refusal 17. The same test passes with standard input closed. No test, fixture, or source was changed.
-- Strict Godot dev matrix: PENDING. The inherited `ui_layout_smoke` four-argument diagnostic is not filtered. On this integration base the smoke already inspects the five-argument signature (`godot/tests/ui_layout_smoke.gd`) and does not issue the invalid call; arena round 5 and loading round 3 recorded the diagnostic only because their older trees still contained it.
-- FULL_SAVE_LOAD 300/300: PENDING
-- FULL_TRACE 36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`: PENDING. None of the three branch reports records a trace change.
-- Journeys versus wave 36 (80/81, pickup 10→11, death-reload refusal): PENDING. Death-reload round 1 retained that same refusal. Loading round 3's 67/68 counts are that older branch's baseline, not this integration tree.
+- Strict Godot dev matrix: **54/54 PASS**, exit 0, `--captures`, timeout 1200, isolated projects and user directories. Evidence `matrix/results.json`. The unchanged checker found 0 diagnostic errors in the matrix logs. `ui_layout_smoke` PASS. Its script still inspects the five-argument `hud_text_glyphs` signature and does not make the invalid four-argument call (`godot/tests/ui_layout_smoke.gd`). Arena round 5 and loading round 3 recorded that diagnostic only on their older trees, where the call was still present. It did not recur here and was not filtered or allowlisted.
+- Full synthetic combat **2,645 checks, 0 failures** (`matrix/playable_wave_smoke_full_combat.log`).
+- FULL_SAVE_LOAD **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical.
+- FULL_TRACE **PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. Death-reload, arena round 5, and loading round 3 each recorded this same trace. No baseline was edited.
+- Journeys versus wave 36 (80/81, pickup 10→11, death-reload refusal): RUNNING. Death-reload round 1 retained that same refusal. Loading round 3's 67/68 counts are that older branch's baseline, not this integration tree.
