@@ -1,4 +1,4 @@
-STATUS: PENDING — WAVE 37 merges committed; gates not finished.
+STATUS: PENDING — WAVE 37 merges committed; Release build and GDExtensions PASS; remaining gates in progress.
 
 # Playable integration wave 37 — 2026-11-03
 
@@ -27,10 +27,11 @@ None yet. Source changes so far are the incoming audited work plus the auto-merg
 
 ## Gates
 
-Pending. Evidence will land under ignored `work/playable-wave37/`.
+Evidence under ignored `work/playable-wave37/`. Native configure/build and the extension builds ran on the mini from the rsynced tree. Godot is 4.5.2.stable. Registered CTest count before execution is 259 (`ps2-class-restore`, `arena-scheduler-runtime`, plus the wave-36 set).
 
-- Release build `-j 4` and GDExtensions: PENDING
-- Full CTest `-j 3`: PENDING (wave 36 was 257/257; death-reload adds `ps2-class-restore`, arena adds `arena-scheduler-runtime`)
+- Native Release configure/build **PASS**, exit 0, 110.77 s combined, `-j 4`. Evidence `configure.log`, `build.log`. New binaries `champions-ps2-class-restore-tests` and `champions-arena-scheduler-tests` are present.
+- GDExtensions **PASS**, exit 0, parallelism 4, `arm64` and `x86_64`. Archive and level-texture `template_debug` / `template_release` each configured and linked. `lipo -archs` reports both architectures. Evidence `template_debug-*.log`, `template_release-*.log`, `texture-template_debug-*.log`, `texture-template_release-*.log`. Creature-animation `template_debug` **PASS**, universal, linked to `godot/creature_anim/bin`. Evidence `creature-template_debug-configure.log`, `creature-template_debug-build.log`.
+- Full CTest `-j 3`: RUNNING (wave 36 was 257/257; this tree registers 259)
 - Strict Godot dev matrix: PENDING. The inherited `ui_layout_smoke` four-argument diagnostic is not filtered. On this integration base the smoke already inspects the five-argument signature (`godot/tests/ui_layout_smoke.gd`) and does not issue the invalid call; arena round 5 and loading round 3 recorded the diagnostic only because their older trees still contained it.
 - FULL_SAVE_LOAD 300/300: PENDING
 - FULL_TRACE 36,402 bytes / `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`: PENDING. None of the three branch reports records a trace change.
