@@ -5,7 +5,8 @@
 
 namespace champions::simulation::rta::loading_equipment {
 // Every original field/condition in this API is pinned to
-// research-loading-readiness@d6f035fa:docs/loading-arrival-r2.md, cited below.
+// research-loading-readiness@d6f035fa:docs/loading-arrival-r2.md, except
+// resource fixups at 2550d34:docs/loading-arrival-r3.md:11-55, cited below.
 // Reference addresses operate on the real binder memory, never host pointers.
 class Runtime {
 public:
@@ -18,7 +19,7 @@ public:
   std::uint32_t header() const; // 140-144, requires published inputs
   bool published(std::uint32_t, std::size_t) const;
   // 101-118: caller must resolve actual metadata/file location and submit real
-  // device work. No formatter, header search, transfer or fixup stand-in exists.
+  // device work. No formatter, header search or transfer stand-in exists.
   struct Read { std::uint32_t source, destination, completion, offset, size; };
   std::function<void(const Read &)> transfer;
   void submit(std::uint32_t cache, std::uint32_t metadata,
@@ -27,7 +28,8 @@ public:
   // Streaming callers supply observed remaining bytes after their service call.
   void poll(bool busy, bool error, std::optional<std::uint32_t> remaining = {});
   std::function<void()> retry;
-  // 130-138: transformations are required services; absent services refuse.
+  // 2550d34:docs/loading-arrival-r3.md:11-55: built-in bounded fixups.
+  // Optional paired service overrides retained for explicit adapters/tests.
   // Validation checks usable transformed data, not pointer/valid-bit presence.
   std::function<void(std::uint32_t)> fixup_base, fixup_model;
   std::function<bool(std::uint32_t, std::uint32_t)> valid_resource;
