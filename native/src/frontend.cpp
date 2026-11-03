@@ -897,7 +897,7 @@ std::vector<std::string> Flow::notes() const {
   case Screen::CharName:
     n.push_back("The initialized name grid has 10 columns and 64 glyphs: 26 lowercase letters, ten digits and 28 unidentified high-bit glyphs (Executed). Editing, case toggle, trim and DONE branches are Unknown; the host keyboard types under the record's 31-byte limit.");
     n.push_back("The full menu confirm/cancel handoff, character kind, first object-present recalc and finish transition remain unverified. The host creates only the documented fields and marks appearance and skill points Unknown.");
-    n.push_back("Starting gear (player_giveStartingItems, 323 descriptor calls by class and model, no table) is refused. Skill points at creation are not documented; 0 is kept.");
+    n.push_back("Starting gear addresses are known only for the executed initializer controls; this screen does not publish item instances. Skill points at creation are not documented; 0 is kept.");
     break;
   case Screen::Playing:
     n.push_back("Start opens the pause menu (Ran).");

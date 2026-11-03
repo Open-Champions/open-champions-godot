@@ -672,11 +672,11 @@ struct Fight::Impl {
     player_handle = world->retain(player);
     refuse("net_getCamFlag: host-sourced (1 only while a script dialog is open; inventory, shop and cutscene camera modes not covered)");
     refuse("net_getCamYaw: host-sourced (the Godot sandbox camera's yaw, not Camera_getYaw; movement is relative to the host camera)");
-    // VF-1: player_giveStartingItems 0x1acc78 is not ported and the research
-    // does not establish which item the class 6 / model 11 character has
-    // equipped on this route (campaign-combat-handoff.md: "the normal campaign
-    // route's equipped player remains Unknown"). The record keeps weapon class
-    // 5 (unarmed, docs/player.md) with no equipment as a host stand-in; damage
+    // The initializer's definition addresses are executed for bodies 0-11 at
+    // seeds 7 and 20973 and kinds -1 and 1
+    // (366b65a:docs/starting-equipment-r4.md:43-60). This fight does not run
+    // that initializer, and the route's seed, kind and saved inventory are
+    // not those controls. Weapon class 5 stays the unarmed stand-in. Damage
     // or kill results in this mode are not campaign evidence.
     refuse("starting_equipment: refused_unknown (player_giveStartingItems not ported; weapon class 5 unarmed stand-in, not campaign evidence)");
     const Address def = read(player + 0x24);
