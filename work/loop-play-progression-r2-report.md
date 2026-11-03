@@ -1,11 +1,27 @@
-STATUS: PENDING — PPR2-1 repair in progress; fresh native/Godot/journey gates pending. Ordinary campaign progression remains refused.
+STATUS: VALIDATION RECORDED WITH EXCEPTION — PPR2-1 Release/extensions PASS; focused 5/5, CTest 253/253, strict Godot 54/54, FULL_SAVE_LOAD 300/300 and unchanged FULL_TRACE PASS; headless 80/80 and rendered 81/81 steps, pickup 10 to 11. Exact rendered refusal comparison FAIL (count 2 vs 3). Ordinary campaign progression and death reload remain refused.
 
-2026-10-28 audit repair, starting from 0bbcf15b. The full Round-2 audit
-reports one HIGH finding (PPR2-1) and no other findings. The previous menu
-lifetime claim and cancellation test were unsupported and are withdrawn.
-Fresh Release build -j 4, full CTest -j 3 (timeouts rerun alone), strict Godot
-development matrix, FULL_SAVE_LOAD, FULL_TRACE and both standard journeys
-are PENDING. Historical results below are retained evidence only.
+Final disposition, 2026-11-02: the requested native, extension, Godot, save/load,
+trace and both journey executions are recorded. The previously completed gates
+were inspected, not rerun. Rendered evidence was committed in caed3e95;
+all rendered step values match except performance telemetry, but the exact
+refusal-dictionary comparison remains failed as documented below. This is not
+an all-green validation or a completed campaign claim.
+
+The 2026-10-28 audit identified one HIGH finding, PPR2-1. Its repair d77c01a9
+retains explicit Unknown admission refusal with 256 production controls.
+Rechecked the audit-cited 0bbcf15b report lines 23-26 and 104-107 against this
+report: the cancellation-completion and active-lifetime claims no longer appear
+as supported claims. Their historical mentions explicitly withdraw them.
+The research pin remains research-mission-unlocks@950b2538. Cancellation to
+zero and run-task termination remain untraced; destination publication does
+not prove termination (docs/quests.md:193,197,357-358).
+
+The dated checkpoint prose below preserves when each gate was pending; the
+STATUS above is the current disposition. Only this report changed in the
+continuation. Tests, fixtures, baselines and production code remain unchanged;
+private data, captures and absolute paths were not committed. No push or PR
+was performed. The remaining exception is the raw rendered refusal count,
+whose exact cause has not been established; it was not normalized or waived.
 
 ## Fresh repair validation (2026-10-29)
 
@@ -93,7 +109,7 @@ journey-headless-verification.json and journey/headless/ (result.json SHA-256
 7340195f9a58761d4feb813027750baa5a03d6ce5f3559369a30f8663dda5f37) in the fresh
 evidence directory. The run was verified by a job that was cut off by a provider
 limit before committing; the orchestrator recorded the result. Rendered journey
-(vs 81) remains PENDING.
+(vs 81) was still PENDING at that checkpoint; its continuation follows.
 
 ## Rendered journey continuation (2026-11-02)
 
