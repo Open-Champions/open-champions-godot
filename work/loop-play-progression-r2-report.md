@@ -16,12 +16,12 @@ The research pin remains research-mission-unlocks@950b2538. Cancellation to
 zero and run-task termination remain untraced; destination publication does
 not prove termination (docs/quests.md:193,197,357-358).
 
-The dated checkpoint prose below preserves when each gate was pending; the
-STATUS above is the current disposition. Only this report changed in the
-continuation. Tests, fixtures, baselines and production code remain unchanged;
-private data, captures and absolute paths were not committed. No push or PR
-was performed. The remaining exception is the raw rendered refusal count,
-whose exact cause has not been established; it was not normalized or waived.
+The dated checkpoint prose below preserves when each gate was pending.
+The 2026-11-02 paragraphs still describe that day's unresolved count. The
+STATUS line and the 2026-11-03 section are the current disposition: the clean
+rerun matched count 3, and the earlier count 2 is explained there. Tests,
+fixtures, baselines and production code remain unchanged. No push or PR
+was performed.
 
 
 ## Rendered refusal count (2026-11-03)
