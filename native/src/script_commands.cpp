@@ -1079,8 +1079,12 @@ bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
   mirror();
   const bool launch = campaign_->tick_menu(button, inputs);
   const auto &menu = campaign_->menu();
+  // State 0 stores pause 1. The negative closing step stores 0
+  // (mission-unlocks.md:156-158, ref_mission_lifecycle.py state 4).
   if (menu.paused)
     variables_->memory.word(PAUSED_WORD, 1u);
+  else
+    variables_->memory.word(PAUSED_WORD, 0u);
   if (launch) {
     variables_->memory.string(PENDING_WORD, menu.pending);
     variables_->memory.byte(ORIENT_WORD, static_cast<std::uint8_t>(menu.orient));
@@ -1093,7 +1097,12 @@ std::vector<std::uint8_t> Host::save_campaign() {
   return campaign_->save();
 }
 void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
+  // Same-process load keeps the live run task. A host that has never
+  // registered one stays unregistered: the image does not carry the registry.
+  // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:252-260.
+  const bool run = campaign_->menu_run_registered();
   auto next = quests::Campaign::load(bytes);
+  next.retain_menu_run(run);
   *campaign_ = std::move(next);
   quests::restore_variables(*campaign_, *variables_, player_currents_known_);
 }

@@ -230,19 +230,30 @@ public:
   const std::vector<Var> &vars() const { return vars_; }
   void set_vars(std::vector<Var> vars) { vars_ = std::move(vars); }
 
-  // missionMenu_open stores the chooser and leaves the run state at 0. Only
-  // those two are written: the research does not say the open resets the
-  // other menu words, and state 0 rewrites row, column, pause and counter.
-  // The draw is not this function.
+  // missionMenu_open stores the chooser, registers the run task, and resets
+  // state, the transition word, the countdown and the selection-animation
+  // counter. Row, column, pause, pending and orientation stay.
+  // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:205-223.
+  // The draw task is removed on the same original calls and has no reader here.
   void open_menu(int slot);
+  // Client session latch. Dialog admission does not read it: the original
+  // menu-open flag is cleared on the first closing tick while the run task
+  // is still registered (mission-unlocks.md:159-161).
   bool menu_open() const { return menu_open_; }
+  // task_isRunning of the menu run task. Names at 0x540c70 and 0x5410e8 are
+  // the same task (mission-unlocks.md:177-180; mission2-compose.md:105-107).
+  bool menu_run_registered() const { return menu_run_; }
+  // Same-process save_load keeps the live registry and does not resurrect a
+  // removed one. The image itself has no registry snapshot
+  // (mission-unlocks.md:252-260).
+  void retain_menu_run(bool live) { menu_run_ = live; }
   int chooser() const { return chooser_; }
   Menu &menu() { return menu_; }
   const Menu &menu() const { return menu_; }
   // One missionMenu_run call. Returns true on the tick that runs state 8,
   // which copies the chosen level name into menu().pending with orientation
-  // 0xff. The medal the helpers read is record 0's: every executed menu case
-  // had the local slot at 0.
+  // 0xff and then drops the run task. The medal the helpers read is record
+  // 0's: every executed menu case had the local slot at 0.
   bool tick_menu(int button, const MenuInputs &inputs = {});
 
   // save_actChanged: stores the new act when a different one matches.
@@ -273,6 +284,7 @@ private:
   bool network_ = false;
   bool xp_ready_ = false;
   bool menu_open_ = false;
+  bool menu_run_ = false;
   int chooser_ = 0;
   int reward_player_ = 0;
   std::array<std::int32_t, XP_LEVELS> xp_{};

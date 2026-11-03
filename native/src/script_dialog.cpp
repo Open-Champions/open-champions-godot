@@ -18,8 +18,6 @@ constexpr std::uint32_t DIALOG_DATA = 0x8e2d60, SWOOP = 0x4fdce4, SWOOP_DONE = 0
                         CUTSCENE_ACTIVE = 0x44fcd0; // player-tick.md; also native/player.cpp
 // Nested dialog operations (a post action that starts another conversation).
 constexpr int MAX_DIALOG_DEPTH = 8;
-constexpr const char *MENU_TERMINATION_UNKNOWN =
-    "mission menu admission refused: run-task termination is Unknown";
 // Player_interact's box (docs/dialog.md 2.1 step 1): +-48 in x and y, from the
 // player's height to 60 above, at most 256 objects.
 constexpr Raw BOX_XY = 0x42400000, BOX_UP = 0x42700000; // 48.0, 60.0
@@ -280,12 +278,11 @@ void Host::dialog_pull() {
   // tools/difftest_mission_unlocks.py:175-178 identifies the recall byte.
   // Previously these remained the dialog Host's default false values.
   dialog_host_.recall = mem.read(0x41b51d);
-  // Keep admission suppressed once a menu has opened. Termination is Unknown:
-  // research-mission-unlocks@950b2538 docs/quests.md:193,357-358 never follows
-  // cancellation to zero; :197 establishes destination publication only.
-  // Neither the counter nor a retained destination proves task termination,
-  // including when open_menu resets state to zero (:176-178).
-  dialog_host_.mission_menu = campaign_->menu_open();
+  // Dialog admission calls task_isRunning on the menu run task. Counter 0,
+  // state, pause and the pending string do not decide it.
+  // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:172-180.
+  // research-mission2-route@6dc8968 docs/mission2-compose.md:105-110.
+  dialog_host_.mission_menu = campaign_->menu_run_registered();
 }
 
 // script_runByName from the machine: node and choice conditions, actions,
@@ -297,8 +294,11 @@ std::int32_t Host::dialog_run_script(const std::string &name, bool) {
   // Only the structurally bound hub dialog uses this bounded implementation.
   // Generic dialogs keep their script VM; no identity is inferred from a name.
   if (hub_offers_ && (hub_opening_ || dialog_.is_open())) {
+    // A registered run task blocks predicate dispatch and the availability
+    // writer (mission-unlocks.md:120-125, 226-231). Opening returns before
+    // pick_start; a choice already on screen is suppressed here.
     if (dialog_host_.mission_menu)
-      throw dialog::Refused(MENU_TERMINATION_UNKNOWN);
+      throw dialog::Refused("hub offer admission suppressed");
     for (std::size_t i=0; i<hub_offers_->conditions.size(); ++i)
       if (hub_offers_->conditions[i]==name) return hub_offers_->evaluate(i,*variables_) ? 1 : 0;
     // An action must be the actual current visible choice, never a direct grant.
@@ -442,10 +442,8 @@ void Host::dialog_message(const dialog::Bytes &msg) {
       hub_offers_ = machine_ ? hub_offers::Binding::match(*machine_, file->second) : std::nullopt;
       hub_offer_start_ = -1;
       // Admission must precede predicate dispatch, including its create-zero reads.
-      if (hub_offers_ && dialog_host_.mission_menu) {
-        dialog_counts_.open_gate_refused += 1;
-        throw dialog::Refused(MENU_TERMINATION_UNKNOWN);
-      }
+      // on_open returns before pick_start while the run task is registered
+      // (mission2-compose.md:105-108).
       if (hub_offers_ && !dialog_host_.recall && !dialog_host_.mission_menu)
         hub_offer_start_ = hub_offers_->start(*variables_);
       struct OpeningScope {
