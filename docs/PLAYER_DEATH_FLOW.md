@@ -43,8 +43,9 @@ existing native `hud_stepFade(4)` until 128. Alternate death waits in phase
 10 for an external revival. Phase 1 looks up the level in the executable's
 act lists, then asks the required checkpoint or same-level loader service.
 Phase 2 waits for the pending request to clear and qualified names to match.
-The original scheduler setup is Observed only; no new original-instruction
-execution is claimed for it.
+The later `research-death-reload` **0e3afdb8** executes the original countdown
+and scheduler wrapper with recording freeze/fade/registration services
+(`docs/death-reload.md:12-31`). Real scheduler timing remains Unknown.
 These hooks cover the combat World's tasks. The controller's separate
 script/dialog pumping is an authored composition; complete original task
 interleaving and script-driven revival/loading are not established here.
@@ -70,13 +71,43 @@ Unknown in the death research.
 
 This fight has **no valid in-memory retail checkpoint**. The existing manual
 native save and `.player` / `.fight` companions are not `g_saveBuffer`.
-The PS2 save importer also refuses populated world/decal restoration and
-camera application. Normal death therefore stops once in phase 1, with an
+The strict PS2 runtime now applies the existing save loader when a native
+owner supplies a validated original-format buffer through
+`Fight::bind_death_checkpoint`. It requires an explicit camera service at that
+call; the importer diagnostic path does not silently stand in for it. No
+campaign producer currently supplies such a buffer. Normal death therefore
+stops once in phase 1, with an
 explicit `save_reload refused` diagnostic, the dead body, zero HP and full
 fade retained. The special same-level loader is also unbound and refuses
 before any HP refill. A missing checkpoint is never replaced by an entry
 snapshot, arbitrary spawn point or half-HP recovery. Manual health restoration
 also refuses a dead object; revival requires object replacement.
+
+The new bounded save/class work is pinned to `research-death-reload`
+**0e3afdb8ce3cdf79746f535d8a2654db37c9e97b**:
+
+- `docs/death-reload.md:23-42` and
+  `tools/difftest_death_reload.py:104-126`: automatic buffer load restores the
+  complete saved record, pose, player count and loaded flag, then requests the
+  saved qualified destination with marker 253. The separate literal lookup
+  `-1` branch requests the current level and changes only HP to max HP.
+- `docs/death-reload.md:46-62`: pending request plus qualified-name match gate
+  task completion. Reload retains the checkpoint; it never stores the dying
+  world first. The campaign stops before another old-world tick after a bound
+  restore request, since its replacement world is not established.
+- `docs/death-reload.md:75-89`: `ps2_save::restore_class_fields` operates only
+  on already constructed objects. It restores Trigger fields, bounded Creature
+  fields/callback arguments, Chest/AutoChest state and clip calls, world-backed
+  door collision/pose/height, JumpGate bytes/callbacks, and identity-pose
+  Prop/ItemProp state. Existing `level_flow::Pieces`, core math and save
+  memory are reused. The chest test runs the real native animation services.
+- `docs/death-reload.md:76,82-83,91-97`: missing Creature stop/motion/animation/
+  registry, JumpGate light/assets/updates, other portal classes, arbitrary
+  quaternion/facing, whole-world construction and continuous death-to-playable
+  behavior refuse. A class byte count is not proof of world membership. A
+  supported prefix may be applied before a service refuses; callers must not
+  publish partially reconstructed objects. Truncated/unsupported encodings are
+  rejected before field or service mutation.
 
 Individual savepoint/teammate revival remains unsupported: the free-spot
 search, complete Player constructor, spawn-protection/light and local-camera
@@ -90,6 +121,11 @@ Normal campaign wipe does not call this individual revival routine.
 - Public `player-death-flow` tests: timer/service gates, phases, restart
   retention, no guessed checkpoint heal, signed boundaries, all 24 death-clip
   selector cases on the real Player damage body, and actual World task order.
+- Public `ps2-save` tests: the real death Flow calls the real strict loader;
+  simple/qualified rollback, the separate restart branch, full-record retention,
+  phase-2 waiting, missing/invalid checkpoint and missing camera refusals.
+- Public `ps2-class-restore` tests: researched class fields, native door world
+  setters and chest animation runtime, callback ordering and refusal prefixes.
 - Public `godot/tests/player_death_smoke.gd`: fade states, render-only frames
   preserving native time, rendered half/full-alpha pixels and absent-fight
   diagnostic refusal. No retail input.

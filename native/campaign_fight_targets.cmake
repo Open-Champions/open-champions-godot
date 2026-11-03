@@ -30,7 +30,7 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
     target_include_directories(champions-campaign-fight PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
     target_link_libraries(champions-campaign-fight PUBLIC
         champions-script-commands champions-campaign-actors champions-mission2-actors champions-player-services
-        champions-combat-runtime champions-creature-anim champions-player-state champions-items
+        champions-combat-runtime champions-creature-anim champions-player-state champions-items champions-ps2-save
         ${CHAMPIONS_FIGHT_ARCHIVE})
     set_target_properties(champions-campaign-fight PROPERTIES POSITION_INDEPENDENT_CODE ON)
     if(MSVC)

@@ -2,6 +2,7 @@
 #include "champions/items.hpp"
 #include "champions/script_builtins.hpp"
 #include <array>
+#include <functional>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -257,6 +258,17 @@ ConfigFile parse_config(const Bytes &data, bool strict = true);
 // a set share-quest-items word refuses before any write. The slot is parsed
 // strictly first, so nothing is written for an image the reader refuses.
 std::vector<std::string> apply_load(builtins::Variables &variables, const Bytes &data);
+// Strict runtime variant: unlike the import inspector, an unbound camera is a
+// refusal at the camera call, before player records or a request are published.
+// research-death-reload at 0e3afdb8 docs/death-reload.md:23-31,58-62.
+struct LoadServices {
+  std::function<void(const Bytes &)> camera;
+};
+void reload_checkpoint(builtins::Variables &, const Bytes &, const LoadServices &);
+// Only publishes the request; Flow then restores current HP and removes its task.
+// No world reset or synthetic Player construction. 0e3afdb8 docs/death-reload.md:32-42.
+void request_death_restart(builtins::Variables &, const std::string &current_level);
+
 
 // One imported character written into the native player record, inventory
 // words and quest table by apply_load, plus the items::Player view of it.

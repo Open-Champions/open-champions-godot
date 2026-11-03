@@ -740,6 +740,7 @@ void World::State::alive() {
   w(0x4f841c, count ? u(0x4f8430) : UINT32_MAX);
 }
 void World::State::tick() {
+  if (services.death_reload_requested && services.death_reload_requested()) return;
   domain();
   if (full()) {
     // Observations of the borrowed models are not retained across ticks.
@@ -763,6 +764,9 @@ void World::State::tick() {
   run_objects();
   if (services.death_task)
     services.death_task();
+  // The host stops at unproved world reconstruction immediately after the
+  // checkpoint request, before HUD credit, frame/record or alive-list writes.
+  if (services.death_reload_requested && services.death_reload_requested()) return;
   // Authored ordering (audit C3-6): gold-run.md has hud_tickGold run from
   // hud_run, a run task, so its order against the object runs is not pinned;
   // it is placed after them here. hud_flush_gold is never called, and the
