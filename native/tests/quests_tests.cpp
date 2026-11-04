@@ -701,7 +701,9 @@ void test_menu_and_save() {
   fade.fade = 128;
   check(!host.tick_mission_menu(0, fade) && host.campaign().menu().state == 7, "fade done");
   check(!host.tick_mission_menu(0, fade) && host.campaign().menu().state == 8, "state 8 entered");
+  check(host.campaign().menu_run_registered(), "state 8 arrival keeps the run task");
   check(host.tick_mission_menu(0, fade), "state 8 copies the level");
+  check(!host.campaign().menu_run_registered(), "state 8 body removes the run task");
   check(host.campaign().menu().pending == "s1" && host.variables().memory.cstr(0x41b6d0u) == "s1" &&
             host.variables().memory.read(0x41b720u) == 0xffu,
         "the binder's pending name and orientation");
@@ -725,6 +727,93 @@ void test_menu_and_save() {
         "the loaded binder record");
   check(other.campaign().record(0).bags[0].size() == 1 && other.campaign().menu().pending == "s1",
         "bags and the menu travel in the image");
+  check(!other.campaign().menu_run_registered(), "a new host does not resurrect a removed run task");
+}
+
+void test_menu_run_lifetime() {
+  line_no = 0;
+  sc::Host host;
+  host.variables().memory.word(NUM_PLAYERS, 1u);
+  host.variables().memory.word(0x4f719cu, 1u);
+  std::vector<q::MissionRow> rows(13);
+  rows[0].story = "s0";
+  host.campaign().set_rows(rows);
+  host.variables().memory.byte(PLAYERS_AT + 0x4bbfu + 13u, 1);
+  host.campaign().open_menu(0);
+  check(host.campaign().menu_run_registered(), "open registers the run task");
+  for (int i = 0; i < 17; ++i)
+    check(!host.tick_mission_menu(0), "lifetime intro");
+  check(host.campaign().menu().state == 2 && host.campaign().menu().counter == 127, "ready counter");
+  host.tick_mission_menu(q::BTN_CIRCLE);
+  check(host.campaign().menu().state == 4 && host.campaign().menu().counter == 127 &&
+            host.campaign().menu_run_registered(),
+        "cancel enters state 4 without removing the task");
+  const int nonnegative[] = {111, 95, 79, 63, 47, 31, 15};
+  for (int left : nonnegative) {
+    host.tick_mission_menu(0);
+    check(host.campaign().menu().counter == left && host.campaign().menu_run_registered() &&
+              host.campaign().menu().state == 4,
+          "nonnegative close keeps the run task");
+  }
+  host.tick_mission_menu(0);
+  check(host.campaign().menu().counter == 0 && host.campaign().menu().state == 4 &&
+            !host.campaign().menu_run_registered() && host.campaign().menu().paused == 0 &&
+            host.variables().memory.word(0x41b4f4u) == 0u,
+        "the negative step from 15 removes the run task and clears pause");
+  const auto frozen_state = host.campaign().menu().state;
+  const auto frozen_counter = host.campaign().menu().counter;
+  check(!host.tick_mission_menu(0) && host.campaign().menu().state == frozen_state &&
+            host.campaign().menu().counter == frozen_counter && !host.campaign().menu_run_registered(),
+        "a removed task leaves residual menu fields unchanged");
+
+  sc::Host exact;
+  exact.variables().memory.word(NUM_PLAYERS, 1u);
+  exact.variables().memory.word(0x4f719cu, 1u);
+  exact.campaign().set_rows(rows);
+  exact.variables().memory.byte(PLAYERS_AT + 0x4bbfu + 13u, 1);
+  exact.campaign().open_menu(0);
+  for (int i = 0; i < 17; ++i)
+    exact.tick_mission_menu(0);
+  exact.tick_mission_menu(q::BTN_CIRCLE);
+  exact.campaign().menu().counter = 16;
+  exact.tick_mission_menu(0);
+  check(exact.campaign().menu().counter == 0 && exact.campaign().menu_run_registered() &&
+            exact.campaign().menu().paused == 1 && exact.variables().memory.word(0x41b4f4u) == 1u,
+        "constructed counter 16 stores 0 and keeps the run task");
+  const auto at_zero = exact.save_campaign();
+  exact.load_campaign(at_zero);
+  check(exact.campaign().menu_run_registered() && exact.campaign().menu().counter == 0,
+        "same-process load keeps the counter-0 task");
+  sc::Host fresh;
+  fresh.load_campaign(at_zero);
+  check(!fresh.campaign().menu_run_registered() && fresh.campaign().menu().state == 4 &&
+            fresh.campaign().menu().counter == 0,
+        "the counter-0 image does not create a run task");
+  exact.tick_mission_menu(0);
+  check(!exact.campaign().menu_run_registered() && exact.campaign().menu().counter == 0 &&
+            exact.campaign().menu().state == 4,
+        "the tick after counter 0 removes the run task");
+  exact.campaign().menu().pending = "kept";
+  exact.campaign().open_menu(0);
+  check(exact.campaign().menu_run_registered() && exact.campaign().menu().state == 0 &&
+            exact.campaign().menu().counter == 0 && exact.campaign().menu().mark == 0 &&
+            exact.campaign().menu().c0 == 0 && exact.campaign().menu().pending == "kept",
+        "reopen registers the task and resets the four open fields");
+
+  sc::Host branched;
+  branched.variables().memory.word(NUM_PLAYERS, 1u);
+  branched.campaign().set_rows(rows);
+  branched.variables().memory.byte(PLAYERS_AT + 0x4bbfu + 13u, 1);
+  branched.campaign().open_menu(0);
+  for (int i = 0; i < 17; ++i)
+    branched.tick_mission_menu(0);
+  branched.tick_mission_menu(q::BTN_CIRCLE);
+  branched.campaign().menu().counter = 0;
+  branched.campaign().menu().c0 = 1;
+  branched.tick_mission_menu(0);
+  check(branched.campaign().menu().state == 5 && branched.campaign().menu().counter == 0 &&
+            branched.campaign().menu_run_registered() && branched.campaign().menu().paused == 0,
+        "constructed nonzero transition word keeps the task and enters state 5");
 }
 
 void test_host() {
@@ -842,6 +931,7 @@ int main(int argc, char **argv) {
   test_mission_rows();
   test_level_change();
   test_menu_and_save();
+  test_menu_run_lifetime();
   // mission-menu-art.md: the lockstep alternate bits move down/right; a row
   // change returns to the story column even after visiting a medal column.
   {

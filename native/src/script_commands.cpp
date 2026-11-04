@@ -566,6 +566,17 @@ amx::NativeMap Host::command_map() {
           }
         }
       } dialog_sync(*this, dialog_attached_, dialog_route);
+      // research-mission-unlocks@950b2538 docs/spec/mission-unlocks.md:88-113.
+      // Execute the supplied original action through the production binder; only
+      // the documented (mission, on) write is admitted in this bounded dialog.
+      if (hub_action_running_ && std::strcmp(kRows[i].name,"setMissionAvailable")==0 &&
+          (hub_action_mission_==0 || machine.cell(machine.params+4)!=hub_action_mission_ ||
+           machine.cell(machine.params+8)!=1)) {
+        counts_.executed[i]-=1;
+        counts_.refused[i]+=1;
+        counts_.stopped[i]+=1;
+        throw RefusedResult("refused hub availability write outside documented offer");
+      }
       std::optional<amx::Address> result;
       try {
         result = function(machine, params);
@@ -1089,8 +1100,12 @@ bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
   mirror();
   const bool launch = campaign_->tick_menu(button, inputs);
   const auto &menu = campaign_->menu();
+  // State 0 stores pause 1. The negative closing step stores 0
+  // (mission-unlocks.md:156-158, ref_mission_lifecycle.py state 4).
   if (menu.paused)
     variables_->memory.word(PAUSED_WORD, 1u);
+  else
+    variables_->memory.word(PAUSED_WORD, 0u);
   if (launch) {
     variables_->memory.string(PENDING_WORD, menu.pending);
     variables_->memory.byte(ORIENT_WORD, static_cast<std::uint8_t>(menu.orient));
@@ -1103,7 +1118,12 @@ std::vector<std::uint8_t> Host::save_campaign() {
   return campaign_->save();
 }
 void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
+  // Same-process load keeps the live run task. A host that has never
+  // registered one stays unregistered: the image does not carry the registry.
+  // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:252-260.
+  const bool run = campaign_->menu_run_registered();
   auto next = quests::Campaign::load(bytes);
+  next.retain_menu_run(run);
   *campaign_ = std::move(next);
   quests::restore_variables(*campaign_, *variables_, player_currents_known_);
 }
@@ -1111,6 +1131,11 @@ void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
 bool Host::load(const amx::ByteVector &image) {
   mission1_.reset();
   mission1_sites_reached_.clear();
+  hub_offers_.reset();
+  hub_offer_start_=-1;
+  hub_opening_=false;
+  hub_action_running_=false;
+  hub_action_mission_=0;
   machine_.reset();
   variables_->script_machine.reset();
   level_started_ = false;

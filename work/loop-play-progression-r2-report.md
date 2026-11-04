@@ -1,0 +1,502 @@
+STATUS: VALIDATION RECORDED — mini Release native and three template_debug extensions rebuilt; prior focused 5/5, CTest 253/253, strict Godot 54/54, FULL_SAVE_LOAD 300/300 and unchanged FULL_TRACE remain the recorded passes and were not rerun because production code is unchanged. Clean headless 80/80 and rendered 81/81, pickup 10 to 11, and both exact refusal dictionaries match the retained journey, including rendered count 3. The earlier rendered count 2 is the same post-grant node-3 retry counter under a different display-frame schedule, not a lost grant. Ordinary campaign progression and death reload remain refused.
+
+Final disposition, 2026-11-02: the requested native, extension, Godot, save/load,
+trace and both journey executions are recorded. The previously completed gates
+were inspected, not rerun. Rendered evidence was committed in caed3e95;
+all rendered step values match except performance telemetry, but the exact
+refusal-dictionary comparison remains failed as documented below. This is not
+an all-green validation or a completed campaign claim.
+
+The 2026-10-28 audit identified one HIGH finding, PPR2-1. Its repair d77c01a9
+retains explicit Unknown admission refusal with 256 production controls.
+Rechecked the audit-cited 0bbcf15b report lines 23-26 and 104-107 against this
+report: the cancellation-completion and active-lifetime claims no longer appear
+as supported claims. Their historical mentions explicitly withdraw them.
+The research pin remains research-mission-unlocks@950b2538. Cancellation to
+zero and run-task termination remain untraced; destination publication does
+not prove termination (docs/quests.md:193,197,357-358).
+
+The dated checkpoint prose below preserves when each gate was pending.
+The 2026-11-02 paragraphs still describe that day's unresolved count. The
+STATUS line and the 2026-11-03 section are the current disposition: the clean
+rerun matched count 3, and the earlier count 2 is explained there. Tests,
+fixtures, baselines and production code remain unchanged. No push or PR
+was performed.
+
+
+## Rendered refusal count (2026-11-03)
+
+The dictionary entry that previously failed equality is one diagnostic, not a
+missing refusal kind. `safe()` rewrites the slash in "first/second", so the
+retained and observed strings are:
+
+- retained rendered: `dialog: confirm: hub action beyond documented <path> offers is Unknown count=3`
+- the 2026-11-02 rendered runs: the same text with `count=2`
+
+Headless retained and headless reruns are `count=2`. Eight refusal entries
+otherwise match. `choices_taken` stays 3, the opening quest goes 0 to 1, and
+one mission bit is added. Pickup remains 10 to 11.
+
+That count is not a second offer and not the PPR2-1 menu latch. The journey
+never raises `mission menu admission refused: run-task termination is Unknown`.
+The menu stays closed. The throw is `script_dialog.cpp`'s node admission:
+nodes 1, 2 and 3 are admitted only while the evaluated start node is still 1
+(`native/src/script_dialog.cpp` admission before the Unknown throw). Research
+`docs/spec/mission-unlocks.md` lines 88-92 is that traversal: two confirms
+reach node 3, and node 3 writes mission 1. Lines 99-105 then select node 3,
+not node 1, once mission 1's raw byte is 1. The next confirm of the same node
+is outside the admitted traversal, so it throws "hub action beyond documented
+first/second offers is Unknown" and the dialog guard rolls the box back.
+`choices_taken` does not increase. The grant already ran and is kept.
+
+The close itself zeros the UI fade (`native/src/dialog.cpp` fade restart when
+`closing` becomes 1) and keeps taking confirms until that fade is 1
+(`native/src/dialog.cpp` input branch). The fade is not stepped by the sim
+tick once the text HUD owns it: `godot/ui/text_hud.gd` sets the frame driver
+and steps `ui_frame()` from real frame delta, at most four steps per frame.
+When the fade reaches 1 the dialog sends leave and the camera close runs for
+a fixed tick count, during which further Enter presses are not confirms.
+The harness presses Enter on every 8th close-loop iteration
+(`godot/tests/loop_playthrough.gd`). The integer in the diagnostic is how many
+of those presses land in the fade window.
+
+A temporary trace, reverted before this report and not part of the harness,
+recorded the same 84 visual waits and 162 prompt waits in both variants, the
+grant at loop iteration 72 with `choices` 3 and `closing` true, then:
+
+- headless: retries at iterations 80 and 88 (`count=2`), dialog closed at 139
+- rendered: retries at 80, 88, 96 and 104 (`count=4`), dialog closed at 155
+
+The gap from the last retry to close was 51 iterations in both. That is the
+camera leave. The fade window is what changed. The same production code
+already produced rendered `count=2` and `count=3` on 2026-10-27
+(`work/progression-r2/journey` and `final-journey`) before the PPR2-1 latch.
+The 2026-11-02 rendered runs were `count=2`. The clean 2026-11-03 rerun, with
+the harness restored, matched the retained dictionaries exactly, including
+rendered `count=3`. The only non-timing step-field difference against
+`work/progression-r2/final-journey` was `enemy_fight.swing_wall_msec`.
+
+The retained rendered value 3 is one display schedule. It is not a simulation
+constant. This report does not change the harness, the baseline, or any
+fixture. A later rendered run may record 2 or 4 again with the same three
+choices and the same grant. That is the same counter, not a new refusal and
+not evidence that mission 1 failed to unlock.
+
+Mini input census for both clean variants was 995 before and 995 after. The
+designated tree had been short of the historical 994-file set, so the missing
+portion was restored before these runs; one extra file was already present
+and was left in place. No input bytes were committed. Release native
+configure/build `-j 4` and the three arm64 `template_debug` extensions
+(archive, level texture, creature animation) were rebuilt first. Godot
+remained 4.5.2.stable.official.6ce3de25a. No production source change, no
+push, and no PR.
+
+
+## Fresh repair validation (2026-10-29)
+
+Coordination: resumed only codex/play-progression at d77c01a9; inspected the
+complete 0bbcf15b..HEAD history, clean status, report, and full PPR2-1 audit.
+The one HIGH finding is addressed by d77c01a9's conservative menu-open latch
+and explicit Unknown refusal. Its 256 production Host/campaign/save controls
+are already committed; they do not claim a researched termination threshold.
+The old cancellation-completion claim remains withdrawn in this report.
+
+PENDING before this run: Release configure/build -j 4; focused production
+script-command tests; full CTest -j 3 with any timeouts rerun alone; Release
+GDExtension rebuild; strict development matrix including graphical cases;
+FULL_SAVE_LOAD 300/300 and unchanged FULL_TRACE; standard headless/rendered
+journeys compared against 80/81 steps and pickup inventory 10 to 11.
+The known inherited ui_layout_smoke four-argument diagnostic will remain a
+strict failure if reproduced; no test or diagnostic filter will be weakened.
+Fresh evidence directory: work/progression-r2/ppr2-1/2026-10-29/.
+Earlier logs remain retained evidence, not results of this run.
+
+Fresh native preflight PASS: Release configure 1.17 s; build -j 4, 2.91 s;
+focused dialog/script-commands selection 5/5, 1.58 s CTest wall time. Commands:
+`cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`,
+`cmake --build build/native -j 4`, and
+`ctest --test-dir build/native --output-on-failure -R '(dialog|script-commands)' -j 1`.
+The selected production script-commands target includes all 256 menu refusal
+controls. Evidence: configure.log, build.log, focused.log and native-preflight.json
+in the fresh evidence directory. Full CTest -j 3 is now running; later gates
+remain PENDING. No source/test change was needed after reviewing d77c01a9.
+
+Full native CTest PASS: 253/253, total test time 610.92 s, command
+`ctest --test-dir build/native --output-on-failure -j 3`, started 2026-10-29 01:41
+on the clean tree at be126413 (code identical to d77c01a9); no timeouts. Log:
+work/progression-r2/ppr2-1/2026-10-29/ctest.log. The job that started it was cut
+off by a provider limit; the orchestrator recorded the finished result. Still
+PENDING: Release GDExtension rebuild, strict development matrix, FULL_SAVE_LOAD
+300/300, FULL_TRACE, standard headless/rendered journeys vs 80/81 (pickup 10 to 11).
+
+Release GDExtension rebuild PASS on a8a27aef: all three existing development
+extensions rebuilt with Release optimization and template_debug ABI. Commands:
+`cmake --build build/godot-extension --config Release --parallel 3`, then the
+same command for build/level-texture-debug and build/creature-anim-debug.
+Elapsed: 2.87 s, 0.24 s and 0.54 s; all exit 0. Evidence: extension-build.json
+and each build-directory-named log in the fresh evidence directory. No native
+source changed; the completed 253/253 CTest result remains applicable. Strict
+matrix, save/load, trace and journeys remain PENDING.
+
+Strict Godot development matrix PASS on 170fa711: 54/54, including all six
+graphical cases; 124.65 s wall time, 124.53 s summed case durations.
+Command: `python3 tools/godot_matrix.py matrix --godot <local-engine> --captures
+--out work/progression-r2/ppr2-1/2026-10-29/matrix`. Godot version:
+4.5.2.stable.official.6ce3de25a. All 105 case/engine logs were additionally
+checked by the unchanged strict classifier: zero errors. ObjectDB shutdown
+warnings remain visible. The known inherited ui_layout_smoke four-argument
+diagnostic did not reproduce: existing ancestor d5001c5f replaced that invalid
+call with required-tint signature assertions (godot/tests/ui_layout_smoke.gd:84-91).
+No filter, allow-list, test or source change was made in this continuation.
+Evidence: matrix.log, matrix-run.json, matrix-verification.json and
+matrix/results.json in the fresh evidence directory. Save/load, trace and
+journey verification remain PENDING.
+
+FULL_SAVE_LOAD PASS: the freshly executed strict matrix's Full-combat case
+recorded 300/300 presentation frames and matching uninterrupted/continued
+presentation hashes cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573.
+The exact counts, both hashes and absence of a skipped presentation comparison
+were checked after the matrix commit; the complete case log has zero classified
+errors. Evidence: full-save-load.json and matrix/playable_wave_smoke_full_combat.log
+in the fresh evidence directory. This is synthetic mid-fight continuation, not
+real-level reload or campaign completion. Trace and journeys remain PENDING.
+
+FULL_TRACE PASS, unchanged: the freshly executed Full-combat case emitted
+36,402 bytes and SHA-256 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+Both values were checked exactly after the save/load commit. The driver computes
+the hash from its generated trace and checks byte-identical headless/drawing
+and save/continued traces; this continuation verified that fresh marker, not a
+separately saved raw-trace file. Evidence: full-trace.json and
+matrix/playable_wave_smoke_full_combat.log in the fresh evidence directory.
+
+Headless journey PASS (no regression) at c6f824d8: 80 steps vs 80 baseline, step
+outcomes and the 8 refusal kinds unchanged; pickup passed with inventory 10 to 11
+(drop produced, walked 52 ticks, picked up, 0 retries); 0 log errors; private-input
+file count 994 before and after; last step player_death = refused
+(saved_level_reloaded false), exit code 1 as in the baseline. Evidence:
+journey-headless-verification.json and journey/headless/ (result.json SHA-256
+7340195f9a58761d4feb813027750baa5a03d6ce5f3559369a30f8663dda5f37) in the fresh
+evidence directory. The run was verified by a job that was cut off by a provider
+limit before committing; the orchestrator recorded the result. Rendered journey
+(vs 81) was still PENDING at that checkpoint; its continuation follows.
+
+## Rendered journey continuation (2026-11-02)
+
+Ran only the rendered command from unchanged tools/run_loop_playthrough.py
+at f5718436, with its original 900-second timeout and standard options.
+The wrapper has no variant selector; its rendered Godot invocation was used
+directly to avoid repeating the completed headless gate. No native/Godot suite,
+FULL_SAVE_LOAD or FULL_TRACE was rerun. The engine remained
+4.5.2.stable.official.6ce3de25a. Runner SHA-256 matches the headless run:
+effc67e93946c938d808f8b09d59b82615c699ee9125138e91bf6a371faa729f.
+
+Final rendered result: 81/81 steps, pickup PASS with inventory 10 to 11,
+52 walking ticks, 0 retry kills and 0 diagnostic retry placements. All 81
+step outcomes match the retained rendered journey; every step field also
+matches after excluding only FPS, memory usage and combat wall-clock timing.
+There are 38 captures, 8 refusal reporting entries and zero classified log
+errors; the existing ObjectDB shutdown warning remains. Final step 81 is
+player_death = refused, saved_level_reloaded=false, process exit 1. Runtime
+51.97 s. This is a completed non-green journey, not campaign acceptance.
+
+The exact refusal-dictionary comparison did NOT pass: one otherwise identical
+later-action refusal diagnostic contains count=2 instead of retained count=3.
+The unchanged verify-journey.py raises at its refusal-equality assertion;
+journey-rendered-verification.json honestly retains refusals_unchanged=false.
+No assertion, fixture, runner, diagnostic classifier or baseline was changed.
+The separate detail review establishes identical step values without relabelling
+that stricter comparison PASS. The counter is emitted from the existing
+frame-yielding confirmation loop (godot/tests/loop_playthrough.gd:781-796),
+using the refusal-attempt counter in native/src/script_dialog.cpp:365-373.
+The exact cause of the raw counter difference is not established. No researched
+mission lifecycle or expected counter value is invented to eliminate it.
+
+Two earlier attempts are retained, not accepted as matching baselines:
+
+- Initial attempt: 81 steps, inventory 10 to 10, pickup refused, 245.23 s.
+  Native fight ticks stopped at 699; scene_paused=true, and the approach capture
+  shows the pause menu. Repeated submissions while paused explain absent enemy
+  damage and loot. The host focus-out handler pauses at
+  godot/scenes/session_sandbox.gd:173-177; docs/SESSION_CONTROL.md:30-37 documents
+  its input-release policy. Focus loss is the suspected trigger, not a recorded
+  notification from that attempt. A scoped process sample showed active script
+  work rather than an idle wait. No process was terminated.
+- First retry: pickup 10 to 11 recovered, but the dialog prompt was unavailable
+  and only 37 captures were written; 80.66 s. Its external focus observer failed
+  during application startup, so it is not accepted as focus-verified evidence.
+
+The final attempt activated only its own renderer and recorded OS focus changes.
+Activation was accepted at 0.56 s; focus was lost at 1.16 s and regained at
+5.11 s, then retained until 51.40 s near shutdown. This does not claim an
+uninterrupted foreground run. The pause and missing-prompt discrepancies did
+not recur; the raw refusal counter difference remains explicitly recorded.
+No in-game inputs, pause rules, timeouts or simulation values were overridden.
+No production change was justified by the recovered step/pickup results.
+The PPR2-1 research boundary remains
+research-mission-unlocks@950b2538:docs/spec/mission-unlocks.md:120-125 and
+docs/quests.md:193,197,357-358: suppression while running, with termination
+Unknown; neither cancellation arithmetic nor publication authorizes a grant.
+
+All three attempts preserved the 994-file private-input census and independently
+matched every input file's SHA-256 before/after; all tracked-file contents were
+also unchanged during each run. Input names/manifests, captures and logs remain
+ignored. Only this counts-only report is committed.
+
+Evidence root: work/progression-r2/ppr2-1/2026-11-02/.
+Initial run and first retry are in that root and foreground-retry/, respectively.
+The final run is under focus-verified/: journey-rendered-run.json,
+journey-rendered-verification.json, journey-rendered-detail-review.json and
+journey/rendered/{result.json,godot.log}. Final result.json SHA-256:
+b33f6e6500576f5855c4d7f88b1c90a918a01376b69995fa83c6d9583e11c2bb.
+The log's step rows exactly match result.json and the renderer reports macOS.
+Fresh final captures were visually inspected: the dialog prompt is drawn,
+the mission-menu view retains its refusal with no mission panel, and the load
+capture remains at the main menu. rendered_pickup_verified=false remains
+unchanged; the inventory assertion is not independent visual pickup proof.
+
+## PPR2-1 repair (2026-10-28)
+
+Reviewed starting commit 7df45143 and the interrupted +14/-7 source edit
+against the complete Round-2 audit (one HIGH finding; no other findings).
+Kept 7df45143's pending status and withdrawal of the false lifetime claim.
+Kept the interrupted implementation because it restores menu_open as a
+conservative admission latch and explicitly refuses bound hub openings and
+stale choices with `mission menu admission refused: run-task termination is Unknown`.
+Neither countdown sign nor destination publication clears admission suppression.
+This is an explicit Unknown boundary, not a claim that the original task runs forever.
+
+Authority for the unchanged supported contracts is
+research-mission-unlocks@950b2538: docs/spec/mission-unlocks.md:46-84
+(predicate table, ordering, variable reads), :88-118 (first/second choices),
+:120-125 (running-menu/recall suppressors); tools/difftest_mission_unlocks.py:175-178
+(recall byte). The same pin's docs/quests.md:176-197 describes opening,
+the observed countdown prefix and destination publication; :193,357-358
+explicitly leaves cancellation to zero untraced. No termination timing is added.
+
+Replaced the unsupported cancellation-completion test with 256 production-path
+controls over first/second offers, both choices, opening/stale-choice admission,
+and live/replacement Hosts. Cancellation checkpoints include 127, 63, 15,
+-1, -17 and -145 (the existing port's decrement-only arithmetic, not new
+original-executable evidence). Exact zero is a labelled authored imported save
+control: subtracting 16 from 127 does not naturally hit zero. Launch controls
+cover states 5/6/7/8 before, at and after publication; reopen controls preserve
+the old destination in states 0/1/2 and save/restore both before and after reopen.
+Every control asserts the explicit reason, no predicate dispatch, no create-zero
+reads, and byte-identical campaign saves after the refused attempt. Existing
+positive VM grants, all-node predicates, signed variables and recall controls stay.
+No fixture, baseline, journey runner or admission threshold is weakened.
+
+Fresh Release/focused/full CTest, extension, strict matrix, save/trace and journeys
+remain PENDING at this implementation checkpoint. Evidence will be retained under
+work/progression-r2/ppr2-1/ and results committed after each gate group.
+
+## Historical continuation before PPR2-1
+
+2026-10-27. Test continuation on codex/play-progression, clean at 5e0a5825.
+Round 2 started from c12ecc31. Implementation commits: 559bb17f, c48f4f2c,
+a1c2ab87. This continuation changes this report only; native code, tests,
+baselines, fixtures and the standard journey runner remain unchanged.
+
+Authority: research-mission-unlocks@950b2538, docs/spec/mission-unlocks.md;
+cursor-runs/audits/research-mission-unlocks.md records VERDICT: PASS.
+Round-1 audit PASS remains retained. Research files were read only; this test
+continuation is not a new research audit or original-executable comparison.
+
+## Implementation evidence
+
+559bb17f implements all 31 normal-mode predicates and bounded choice admission
+from live binder/save state. Resource identity uses the complete runtime
+predicate/public-offset structure and runtime-resolved variable strings.
+Physical actor/interaction binding is not inferred. First/second offer choices
+retain the supplied native VM and production quest writer; later actions refuse.
+Recall and mission-menu suppressors use live state, and the existing mission
+menu consumes campaign availability.
+
+c48f4f2c introduced an unsupported menu-lifetime proxy, now withdrawn by
+PPR2-1. Neither a nonpositive state-4 counter nor a published destination
+proves run-task termination. The former cancellation test incorrectly called
+17 decrement-only ticks completion and expected an admitted second offer.
+a1c2ab87 adds first-offer menu/save and stale-admission cases; those remain.
+
+The authored tests independently specify truth-node sets for all 31 predicates,
+raw bits 0..3 and signed variable values -128,-1,0,1,2,127. They include 160
+saved/replacement-host opening/choice cases across five difficulty rows,
+individual active variables, changed state after opening, mismatched resources,
+unknown later actions, create-zero reads and mission-menu/save publication.
+
+Retained private read-only probes: exactly one matching supplied resource and
+zero invalid bindings/state controls; 40 first/second choice paths across five
+rows, raw bytes 0/2 and both choices produced 40 grants and zero invalid/stalled
+paths. These use supplied resources with synthetic speaker/service binding,
+production VM/binder and campaign saves. They establish constructed-state
+binding/action evidence, not physical reachability or played completion.
+Evidence stays ignored under work/progression-r2/: binding-probe.cpp,
+binding-probe.log and action-probe.log. No extracted names, dialog or game bytes
+are included in this report.
+
+## Retained gates, inspected in this continuation
+
+- Release configure/build PASS; focused dialog/script-commands 2/2 PASS, 1.18 s
+  before the menu correction, then 2/2 PASS, 1.80 s after it. The first full
+  CTest was interrupted for that correction (verified CTest PID, SIGINT, exit
+  130); ctest-interrupted-menu-review.log remains an incomplete run.
+- Full CTest recorded by 339b5630: 253/253 PASS, 679.23 s, no timeouts.
+  Command: ctest --test-dir build/native --output-on-failure -j 3.
+  Evidence: work/progression-r2/ctest-resume.log. Not rerun here.
+- Independent predicate/admission review recorded by 97ba319b: no native or
+  fixture change required. Focused dialog/script-commands 2/2 PASS, 0.96 s;
+  GDExtension build -j 3 PASS. Evidence: test-focused.log and test-extension.log.
+- Strict Godot development matrix recorded by 5e0a5825: 54/54 PASS, including
+  six graphical cases; 136.58 s summed case durations. A read-only review of
+  all 54 case logs and 51 engine logs found zero classified diagnostic errors.
+  ObjectDB shutdown warnings remain; clean diagnostic classification does not
+  mean warning-free output. Evidence: test-matrix.log and test-matrix/results.json.
+- FULL_SAVE_LOAD is already present in that same completed matrix: 300/300
+  presentation frames with identical uninterrupted/continued hashes:
+  cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573.
+  This continuation parsed the marker, checked both counts/hashes and the log
+  diagnostics, and matched the passing matrix result. It did not repeat the
+  combined smoke, which would also rerun the already-completed FULL_TRACE gate.
+- Full combat: 2,645 checks, zero failures. FULL_TRACE remains 36,402 bytes,
+  SHA-256 9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659.
+  Retained Round-1/Round-2 markers match. This is recorded trace evidence, not a
+  new raw-trace rehash. Evidence for both trace and save/load:
+  work/progression-r2/test-matrix/playable_wave_smoke_full_combat.log.
+
+All short evidence names above are relative to work/progression-r2/.
+The synthetic save/load and trace gates do not prove physical campaign
+completion, a second offer following played completion, or real-level reload.
+
+## Predicate/admission review retained from 97ba319b
+
+Round-2 independent code review (2026-10-27, candidate 339b5630)
+
+Historical review (superseded for menu lifetime by PPR2-1). Reviewed commits 559bb17f, c48f4f2c,
+a1c2ab87 against audited research-mission-unlocks@950b2538. Authority references
+below all mean that revision's docs/spec/mission-unlocks.md (path:line).
+The 31 predicate expressions are bounded Inferred contracts backed by original
+execution, not exhaustive imported-state or played-campaign proofs (:37-44).
+
+- native/include/champions/hub_offers.hpp: all 31 entries match :55-79.
+  Active uses player 0/current difficulty, availability bit 0, completion bit 1,
+  twelve signed nonzero variables (:46-48). Duplicate predicates remain duplicate
+  nodes. Offer tests are !availability; pending tests require available, incomplete,
+  zero variable. Nodes 4/5/6 stay false in normal mode (:58-59,81-84).
+  All twelve runtime variable offsets match :57,61,63,65,67,69,71-73,75,77,79.
+  Signed controls derive from :39-40,120-125; absent reads create zero (:84).
+  Node-zero fallback is original dialog selection (:49-51), never a fallback grant.
+  File-order node priority does not establish mission order or adjacency.
+- Structural binding checks the complete predicate/public-offset sequence and
+  both second-offer action offsets (:53-79,107-112); strings resolve at runtime.
+  The first-offer writer remains original supplied VM execution (:88-92).
+  native/src/script_dialog.cpp revalidates current choice/admission/state, admits
+  first traversal 1/2/3 (:88-92), second node 7 (:99-112), and node-8 close
+  without a grant (:113). Later actions refuse. native/src/script_commands.cpp
+  admits only setMissionAvailable(1,1) or (2,1) for the respective action.
+  Opening never writes mission availability; completion and other difficulty rows remain preserved.
+- Recall and active mission-menu suppressors use live state (:120-125); recall
+  address is tools/difftest_mission_unlocks.py:175-178. The prior review
+  incorrectly accepted the implementation as menu-lifetime authority. At
+  research-mission-unlocks@950b2538, docs/quests.md:193,357-358 leaves the
+  cancellation boundary untraced; :197 proves destination publication only.
+  No termination or physical binding is inferred from these observations.
+- native/tests/hub_offer_host_tests.hpp drives production quest records and actual
+  campaign save/load, independently expected truth-node sets, signed suppressing
+  cases for each variable, recall/menu controls, state changes after opening,
+  mismatched binding refusal, later-action refusal, and absent-zero behavior.
+  First and second grants surface as selectable production mission-menu rows and
+  survive replacement-host save/load. Tests use authored synthetic resources;
+  existing ignored private probes corroborate supplied-resource binding and both
+  real VM action paths, without claiming physical interaction.
+
+## Fresh standard journeys at 5e0a5825
+
+The unchanged tools/run_loop_playthrough.py ran headless and rendered serially
+with the pinned Godot 4.5.2 runtime and the existing read-only input. No option
+changed the journey, combat, pickup or refusal expectations. Command (private
+paths supplied only at runtime):
+
+```sh
+python3 tools/run_loop_playthrough.py --godot <local-engine> --game-folder <read-only-input> --out work/progression-r2/final-journey
+```
+
+| Gate | Headless | Rendered |
+| --- | --- | --- |
+| Journey steps | 80 (baseline 80) | 81 (baseline 81) |
+| Process exit | 1 | 1 |
+| Classified log errors | 0 | 0 |
+| Result JSON written | yes | yes |
+| Refusal kinds | 8 (baseline 6) | 8 (baseline 6) |
+| Captures | 0 | 38 |
+| Pickup assertion | PASS, 10 to 11 | PASS, 10 to 11 |
+| Walked pickup | yes, 52 ticks | yes, 52 ticks |
+| Retry kills / diagnostic pickup placements | 0 / 0 | 0 / 0 |
+| Last step | 80: player_death, refused | 81: player_death, refused |
+| saved_level_reloaded | false | false |
+
+The wrapper exits 1; these are completed non-green journeys, not passing
+campaign acceptance. Evidence: final-journey.log, final-journey/run-summary.json,
+and each variant's result.json and godot.log, all under work/progression-r2/.
+The input file census remains 994 before / 994 after. File counts are the
+runner's read-only census, not a byte-for-byte content integrity measurement.
+
+Offer result: both runs show the existing first offer path (three choices
+close the dialog; one mission bit and one quest line are added). Mission 1
+is available at step 24 in both, exactly as in Round 1. No newly reachable
+second or later offer is demonstrated. First-act completion/return remains
+branch_unverified (headless step 57, rendered step 58), with no completed
+destination, queued return or loaded hub; the conditional post-return offer
+path is not reached.
+
+Ordinary progression stops at the hub portal: step 25 records
+refused autoPropSetState, and the later hub-trigger attempt records
+refused trigger. The mission menu remains closed with no host panel.
+The first-story request is not queued (headless step 40, rendered step 41).
+The unchanged harness continues through its diagnostic destination/fight
+branches; that continuation and its successful pickup do not establish travel
+through the ordinary mission route. The fight's own diagnostic placement is
+separate from the pickup's zero diagnostic retry placements.
+
+Both runs retain all six prior refusal kinds and add two reporting contexts
+(dialog confirmation and tick collection) for the same explicit boundary:
+hub actions beyond the documented first/second offers are Unknown. This is
+not a new successful offer or evidence for later writers. The difference is
+recorded without weakening the harness or changing any baseline.
+
+Real-level save/load remains refused: hub savepoint readback is incomplete;
+pickup inventory/equipment reload and creature death restoration remain
+unsupported. Existing-file preservation checks pass. The load_and_carry row
+has load_attempted=false, so unchanged experience/level/gold/HP fields are
+not a successful load. Cold reload, object roundtrip and revisit remain refused,
+and both final player_death rows have saved_level_reloaded=false. These are
+separate from the passing synthetic FULL_SAVE_LOAD fixture.
+
+Visual inspection used fresh rendered captures: 04-dialog-prompt.png shows
+an open dialog; 10-mission-menu.png shows the hub view with the later-action
+refusal and no mission panel; 09-loaded.png remains at the main menu.
+No game text/names or captures are committed. The harness still reports
+rendered_pickup_verified=false; the inventory assertion is not promoted to
+independent visual pickup verification. No presentation change was made.
+
+## Remaining refusals
+
+First-act completion, physical reachability, the full campaign prerequisite
+and travel graph, later availability writers including missions 8/9,
+demo-specific behavior and unsupported host services remain Unknown/refused
+(research authority, lines 129-142). Dialog node priority is not mission order.
+Constructed-state offers and native save composition do not remove those gates.
+
+## Historical disposition (before PPR2-1)
+
+All requested gate results are recorded. CTest, predicate/admission review,
+Godot matrix, FULL_TRACE and the already-completed FULL_SAVE_LOAD are retained
+evidence inspected in this continuation, not claimed as fresh reruns. Both
+standard journeys were freshly executed and compared against Round 1's 80/81
+steps; neither establishes a newly reachable offer or completed campaign.
+No native change required repeating the earlier suites.
+
+The only staged file is this report (explicit git add -f). Final diff/whitespace
+and content-boundary checks passed. Tests, baselines, fixtures and pickup
+assertions were unchanged; private inputs and captures remain uncommitted.
+No sibling checkout was modified, no process was killed, and no push or PR
+was performed.

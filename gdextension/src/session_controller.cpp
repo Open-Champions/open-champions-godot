@@ -1728,6 +1728,8 @@ Dictionary ChampionsSessionController::dialog_status() const {
   const auto &d = scripts_->dialog();
   out["open"] = d.is_open();
   out["node_index"] = int64_t(d.node_index);
+  out["bounded_hub_dialog"] = scripts_->bounded_hub_dialog();
+  out["bounded_hub_start"] = int64_t(scripts_->bounded_hub_start());
   out["visible_choices"] = int64_t(d.visible.size());
   out["cursor"] = int64_t(d.cursor);
   out["cursor_target"] = int64_t(d.cursor_target);

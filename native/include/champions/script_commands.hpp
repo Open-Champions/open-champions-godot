@@ -6,6 +6,7 @@
 // counted refusal. The composition census stays the 9649e6b table.
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
+#include "champions/hub_offers.hpp"
 #include "champions/ui_text_gaps.hpp"
 #include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
@@ -494,20 +495,25 @@ public:
   // binder.
   level_flow::ChangeResult change_level(const level_flow::ChangeOptions &);
   // One missionMenu_run tick. State 0 stores 1 in the binder's g_paused word
-  // 0x41b4f4. The state-8 tick copies the chosen level into the binder's
-  // pending name 0x41b6d0 with 0xff at 0x41b720, and into level flow's
-  // pending request with ORIENT_NONE. Returns true on that tick.
+  // 0x41b4f4. The negative closing step stores 0 there. The state-8 tick
+  // copies the chosen level into the binder's pending name 0x41b6d0 with
+  // 0xff at 0x41b720, and into level flow's pending request with ORIENT_NONE,
+  // then drops the run task. Returns true on that publishing tick.
   bool tick_mission_menu(int button, const quests::MenuInputs &inputs = {});
   // The campaign image (quests::Campaign::save) after copying the binder's
   // record and quest variables into it. load_campaign replaces the campaign
   // and writes its records and the whole quest-variable table into the
-  // binder. Neither is the PS2 card image.
+  // binder. The menu run-task bit is not in the image: same-process load
+  // keeps the live bit, and a new host stays unregistered. Neither is the
+  // PS2 card image.
   std::vector<std::uint8_t> save_campaign();
   void load_campaign(const std::vector<std::uint8_t> &);
 
   // ---- NPC dialog (docs/DIALOG.md) ----
   void attach_dialog(DialogLevel level, DialogServices services);
   bool dialog_attached() const { return dialog_attached_; }
+  bool bounded_hub_dialog() const { return bool(hub_offers_); }
+  int bounded_hub_start() const { return hub_offer_start_; }
   const dialog::Dialog &dialog() const { return dialog_; }
   const DialogCounts &dialog_counts() const { return dialog_counts_; }
   // Objects this level lets the player talk to: a documented creature class
@@ -704,6 +710,11 @@ private:
   amx::Cell last_value_ = 0;
   std::string last_fault_;
   bool dialog_attached_ = false;
+  std::optional<hub_offers::Binding> hub_offers_;
+  bool hub_opening_ = false;
+  int hub_offer_start_ = -1;
+  int hub_action_mission_ = 0;
+  bool hub_action_running_ = false;
   std::optional<dialog_gaps::View> camera_view_;
   std::optional<DialogCameraPose> camera_pose_;
   std::uint32_t box_word_ = 0;

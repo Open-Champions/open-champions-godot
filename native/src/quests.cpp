@@ -654,13 +654,46 @@ void Campaign::vars_clear() {
 }
 void Campaign::open_menu(int slot) {
   chooser_ = slot;
+  // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:205-216.
+  // Open re-registers; task_add de-duplicates an existing run task (:216-218).
   menu_.state = 0;
+  menu_.c0 = 0;
+  menu_.counter = 0;
+  menu_.mark = 0;
   menu_open_ = true;
+  menu_run_ = true;
   events_.menu_opens += 1;
 }
 bool Campaign::tick_menu(int button, const MenuInputs &inputs) {
   if (!menu_open_)
     throw Error("the mission menu is not open");
+  // A removed run task is not invoked again, and its residual fields stay.
+  // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:172-176.
+  if (!menu_run_)
+    return false;
+  // Exact zero is still registered. The following negative counter-16 result
+  // removes the task when the transition word is 0, clamps the counter to 0,
+  // and leaves state 4. research-mission-unlocks@e5c6176
+  // docs/spec/mission-unlocks.md:143-170.
+  // research-mission2-route@6dc8968 docs/mission2-compose.md:101-109.
+  // The older menu_tick field machine is unchanged for the quests vectors;
+  // this wrapper is the additive lifetime (ref_mission_lifecycle.py).
+  if (menu_.state == 4) {
+    const int left = menu_.counter - 16;
+    if (left >= 0) {
+      menu_.counter = left;
+    } else {
+      menu_.counter = 0;
+      menu_.paused = 0;
+      // Nonzero transition word: observed only as a constructed control.
+      // Natural reachability is Unknown (mission-unlocks.md:167-170).
+      if (menu_.c0 != 0)
+        menu_.state = 5;
+      else
+        menu_run_ = false;
+    }
+    return false;
+  }
   MenuWorld world;
   world.rows = rows_;
   world.evil = evil() != 0;
@@ -683,8 +716,13 @@ bool Campaign::tick_menu(int button, const MenuInputs &inputs) {
   }
   const bool launch = menu_.state == 8;
   menu_tick(menu_, button, world);
-  if (launch)
+  if (launch) {
     events_.menu_launches += 1;
+    // End of state 8's body: transition word cleared, destination published,
+    // run task removed. The tick that enters state 8 still has the task.
+    // research-mission-unlocks@e5c6176 docs/spec/mission-unlocks.md:196-201.
+    menu_run_ = false;
+  }
   return launch;
 }
 std::pair<int, int> Campaign::act_changed(const std::string &name) {
@@ -796,6 +834,8 @@ std::vector<std::uint8_t> Campaign::save() const {
   put_i32(out, menu_.paused);
   put_i32(out, menu_.orient);
   put_str(out, menu_.pending);
+  // The run-task registry is not in this image. The executed save_build body
+  // does not read it (mission-unlocks.md:245-250).
   return out;
 }
 Campaign Campaign::load(const std::vector<std::uint8_t> &bytes) {
