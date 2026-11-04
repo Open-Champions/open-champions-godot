@@ -61,8 +61,11 @@ A new character has mission 0 available and complete on difficulties 1..5
 An item with flag bit 39 is removed on an act change unless its name
 contains `bloodstone` or `shardof`, or is exactly `spiritrunes`, `emptybag`,
 `fullbag`, `pickaxe` or `twistedkey`. The comparison is case-sensitive.
-Equipped-pointer fixups from `inventory_removeItem` are not applied: that
-body was stubbed in the research.
+The campaign model's bag filter still drops those names without equipment
+pointers. The live binder path removes them through `inventory_removeItem`,
+so the equipment and weapon pointers follow the slide
+(`research-inventory-reset` `ce2e086`, `docs/inventory-reset.md`). No keep
+name outside that list was added.
 
 ## Menu, hub and acts
 

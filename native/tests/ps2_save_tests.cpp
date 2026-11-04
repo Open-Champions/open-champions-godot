@@ -947,6 +947,22 @@ void native_import() {
   refuses<Unknown>([&] { apply_load(variables, image); });
   CHECK(memory->word(NUM_PLAYERS) == 0 && memory->read(G_PLAYERS) == 0);
   memory->word(SHARE_QUEST_ITEMS, 0);
+  // A bound service runs inventory_shareQuestItems. This image's bag 2 is empty,
+  // so the copy does not call it, and the load is no longer the unbound refusal.
+  {
+    auto shared_memory = std::make_shared<builtins::Memory>();
+    builtins::Variables shared_variables(shared_memory);
+    shared_memory->word(SHARE_QUEST_ITEMS, 1);
+    bool called = false;
+    shared_variables.inventory_service = [&](const std::string &, const std::vector<builtins::Variables::InventoryValue> &)
+        -> builtins::Variables::InventoryResult {
+      called = true;
+      return 0u;
+    };
+    const auto loaded = apply_load(shared_variables, image);
+    CHECK(!called && shared_memory->s32(NUM_PLAYERS) > 0 && loaded.size() >= 1);
+    CHECK(shared_memory->s32(0x4d8af0 + 0x1330) == 1 && shared_memory->s32(0x4d8af0 + 0x130 + 2 * 0x1208 + 0x1200) == 0);
+  }
   auto negative = image;
   negative[0x6C] = 0x80;
   refuses<Unknown>([&] { apply_load(variables, negative); });

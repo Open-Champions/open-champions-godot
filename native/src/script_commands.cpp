@@ -1,3 +1,4 @@
+#include "champions/campaign_inventory.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
@@ -1081,8 +1082,21 @@ void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
 
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
   mirror();
-  auto result = quests::change_level(*campaign_, flow_, options, {});
+  // inventory-reset.md:59-94. The frontend word skips the act call. The latch
+  // byte stores the act and skips the clear. Neither word is written here.
+  const bool saved_frontend = flow_.frontend;
+  if (variables_->memory.u32(campaign_inventory::FRONTEND_WORD) != 0)
+    flow_.frontend = true;
+  auto opts = options;
+  if (variables_->memory.u8(campaign_inventory::CARD_LATCH) != 0)
+    opts.card_latch = true;
+  auto result = quests::change_level(*campaign_, flow_, opts, {});
+  flow_.frontend = saved_frontend;
   quests::mirror_to_variables(*campaign_, *variables_, player_currents_known_);
+  if (result.act_changed)
+    variables_->memory.w32(campaign_inventory::ACT_WORD, static_cast<std::uint32_t>(campaign_->act()));
+  if (result.reset_act)
+    campaign_inventory::clear_act_change_inventory(*variables_);
   return result;
 }
 bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {

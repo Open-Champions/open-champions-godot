@@ -1100,7 +1100,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       auto &new_memory = next->variables().memory;
       const auto record = rta::combat_runtime::PLAYERS;
       for (const auto span : {std::pair<unsigned, unsigned>{0x130, 3 * 0x1208},
-                             {0x43f0, 0x50}, {0x4a84, 4}})
+                             {0x43f0, 0x50}, {0x4a7c, 1}, {0x4a84, 4}})
         new_memory.write(record + span.first, old_memory.read(record + span.first, span.second));
     }
     // A fresh stream from the play session's configured shared seed; the
@@ -1120,7 +1120,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       campaign_entry = rta::script_commands::prepare_campaign_entry(
           *next, carried ? scripts_.get() : nullptr, *act_tables,
           level_name.to_lower().utf8().get_data(), mission2_story(level_name),
-          live_player && live_player->imported);
+          live_player && live_player->imported,
+          fight_ && fight_->death_view().running);
     }
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;

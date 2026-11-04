@@ -14,6 +14,8 @@ held guard and guard-swap into the shared World's real Player. Unarmed starting
 equipment remains labelled; heavy and the two ability-slot requests name their
 unbound learned-record prerequisites and refuse explicitly.
 
+Campaign act changes remove unkept flag-39 bag cells through the client's inventory removal, and a load shares bag 2's flag-39 cells. Same-act travel leaves bags in place. The arena item wipe is not on this client path.
+
 The default Godot scene is a bounded, Session-backed movement and health test with
 authored controls. A standalone C++17 archive inspector and archive browser remain
 available using the same parser through GDExtension. They list GOB/LMP

@@ -12,7 +12,7 @@ add_library(champions-ps2-save "${CHAMPIONS_PS2_SAVE_ROOT}/src/ps2_save.cpp"
     "${CHAMPIONS_PS2_SAVE_ROOT}/src/ps2_class_restore.cpp")
 target_include_directories(champions-ps2-save PUBLIC "${CHAMPIONS_PS2_SAVE_ROOT}/include")
 target_link_libraries(champions-ps2-save PUBLIC champions-script-builtins champions-items champions-core
-    champions-game-profiles champions-level-flow)
+    champions-game-profiles champions-level-flow champions-quests)
 set_target_properties(champions-ps2-save PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-ps2-save PRIVATE /W4 /utf-8)

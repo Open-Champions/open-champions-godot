@@ -1,5 +1,6 @@
 #include "champions/ps2_save.hpp"
 
+#include "champions/campaign_inventory.hpp"
 #include "champions/game_profile.hpp"
 
 #include <algorithm>
@@ -774,8 +775,16 @@ static std::vector<std::string> load_impl(builtins::Variables &variables, const 
   const auto slot = parse_slot(data, true);
   auto &memory = variables.memory;
   // Refusals that must happen before any write.
-  if (memory.word(SHARE_QUEST_ITEMS) == 1)
+  // inventory-reset.md:96-111. save_load calls inventory_shareQuestItems(0)
+  // when this word is 1. Without the client's inventory service the copy
+  // cannot run, so the load still refuses before a write. Flag bit 8 on a
+  // copied cell was not executed and also refuses before a write.
+  const bool share = memory.word(SHARE_QUEST_ITEMS) == 1;
+  if (share && !variables.inventory_service)
     throw Unknown("the word at 0x4f85b4 is 1, so save_load would call inventory_shareQuestItems(0), which is not modelled");
+  if (share && !slot.characters.empty() &&
+      campaign_inventory::share_copy_unexecuted(slot.characters[0].raw))
+    throw Unknown("inventory_shareQuestItems flag bit 8 on a copied cell is Unknown");
   const auto pending = qualified_name(slot.level_name, slot.subname);
   if (pending.size() + 1 > PENDING_LEVEL_ROOM)
     throw Error("qualified level name '" + pending + "' does not fit before the pending-level marker");
@@ -804,6 +813,8 @@ static std::vector<std::string> load_impl(builtins::Variables &variables, const 
     const auto base = PLAYERS + std::uint32_t(i) * std::uint32_t(RECORD_SIZE);
     memory.write(base, decode_loaded_record(slot.characters[i].raw, base));
   }
+  if (share && memory.s32(NUM_PLAYERS) > 0)
+    campaign_inventory::share_quest_items(variables, 0);
   // 5. script_clearDeferred, vars_clearAll, then vars_set for each record.
   variables.clear_deferred();
   variables.quest_clear_all();

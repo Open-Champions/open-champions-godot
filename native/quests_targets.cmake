@@ -6,7 +6,8 @@ if(NOT TARGET champions-quests)
   add_library(champions-quests
     "${CHAMPIONS_QUESTS_ROOT}/src/quests.cpp"
     "${CHAMPIONS_QUESTS_ROOT}/src/quests_flow.cpp"
-    "${CHAMPIONS_QUESTS_ROOT}/src/quests_bridge.cpp")
+    "${CHAMPIONS_QUESTS_ROOT}/src/quests_bridge.cpp"
+    "${CHAMPIONS_QUESTS_ROOT}/src/campaign_inventory.cpp")
   target_include_directories(champions-quests PUBLIC "${CHAMPIONS_QUESTS_ROOT}/include")
   target_link_libraries(champions-quests PUBLIC champions-level-flow champions-script-builtins)
   set_target_properties(champions-quests PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -25,6 +26,15 @@ if(BUILD_TESTING AND TARGET champions-script-commands AND NOT TARGET champions-q
   else()
     target_compile_options(champions-quests-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
   endif()
+  add_executable(champions-campaign-inventory-tests
+    "${CHAMPIONS_QUESTS_ROOT}/tests/campaign_inventory_tests.cpp")
+  target_link_libraries(champions-campaign-inventory-tests PRIVATE champions-script-commands)
+  if(MSVC)
+    target_compile_options(champions-campaign-inventory-tests PRIVATE /W4 /utf-8 /fp:strict)
+  else()
+    target_compile_options(champions-campaign-inventory-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+  endif()
+  add_test(NAME campaign-inventory COMMAND champions-campaign-inventory-tests)
   add_test(NAME quests COMMAND champions-quests-tests
     "${CHAMPIONS_QUESTS_ROOT}/tests/quests_vectors.tsv"
     "${CHAMPIONS_QUESTS_ROOT}/tests/quests_contract.json")

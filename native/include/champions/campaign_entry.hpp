@@ -1,13 +1,45 @@
 #pragma once
 
+#include "champions/campaign_inventory.hpp"
 #include "champions/mission_menu_table.hpp"
 #include "champions/script_commands.hpp"
 
 namespace champions::simulation::rta::script_commands {
-// The client owns one local player. Quest bridge records do not mirror the
-// live item bags (quests_bridge.cpp), so mission-2 carry supports an empty
-// modeled inventory only, including same-act entry. Never silently omit
-// item carry or flag-39 removal.
+// A live cell can be kept or removed only when its definition pointer is set.
+// A count with a zero definition is not a classified item (the planted-count
+// refusal). Campaign-model bags still have no equipment pointers.
+inline bool live_bags_classified(const builtins::Memory &memory) {
+  const auto players = memory.s32(script_items::G_NUM_PLAYERS);
+  if (players != 1)
+    return false;
+  for (int bag = 0; bag < script_items::BAGS; ++bag) {
+    const auto count = memory.s32(script_items::bag_count_at(0, bag));
+    if (count < 0 || count > script_items::BAG_SLOTS)
+      return false;
+    for (int index = 0; index < count; ++index)
+      if (memory.u32(script_items::bag_entry(0, bag, index)) == 0)
+        return false;
+  }
+  return true;
+}
+
+inline void copy_live_bags(Host &next, Host &previous) {
+  const auto &old_memory = previous.variables().memory;
+  auto &new_memory = next.variables().memory;
+  const auto players = old_memory.s32(script_items::G_NUM_PLAYERS);
+  for (int slot = 0; slot < players; ++slot) {
+    const auto base = script_items::rec(slot);
+    for (const auto span : {std::pair<unsigned, unsigned>{0x130, 3 * 0x1208},
+                            {0x43f0, 0x50}, {0x4a7c, 1}, {0x4a84, 4}})
+      new_memory.write(base + span.first, old_memory.read(base + span.first, span.second));
+  }
+}
+
+// The client owns one local player. Classified live cells travel and an act
+// change removes unkept flag-39 cells through inventory_removeItem
+// (inventory-reset.md:65-84). A count with no definition, a campaign-model
+// bag, or an imported record still refuses: those have no equipment pointers
+// to slide.
 inline int require_campaign_act_transfer(Host &previous, const quests::ActTables &tables,
                                          const std::string &destination, bool imported) {
   const auto current = previous.campaign().act();
@@ -20,10 +52,12 @@ inline int require_campaign_act_transfer(Host &previous, const quests::ActTables
   const auto &memory = previous.variables().memory;
   if (memory.s32(script_items::G_NUM_PLAYERS) != 1)
     throw std::runtime_error("Act transfer supports one local player.");
+  bool campaign_bags = false;
   for (int bag = 0; bag < script_items::BAGS; ++bag)
-    if (memory.u32(script_items::bag_count_at(0, bag)) != 0 ||
-        !previous.campaign().record(0).bags[std::size_t(bag)].empty())
-      throw std::runtime_error("Act transfer with inventory is refused: live bag carry and flag-39 migration are unported.");
+    if (!previous.campaign().record(0).bags[std::size_t(bag)].empty())
+      campaign_bags = true;
+  if (campaign_bags || !live_bags_classified(memory))
+    throw std::runtime_error("Act transfer with inventory is refused: live bag carry and flag-39 migration are unported.");
   return next;
 }
 
@@ -59,7 +93,7 @@ struct CampaignEntry {
 inline CampaignEntry prepare_campaign_entry(Host &next, Host *previous,
                                              const quests::ActTables &tables,
                                              const std::string &level, bool mission2,
-                                             bool imported) {
+                                             bool imported, bool death_task = false) {
   CampaignEntry out;
   if (previous && campaign_entry_requires_transfer(*previous, tables, level, mission2)) {
     const auto destination = require_campaign_act_transfer(*previous, tables, level, imported);
@@ -67,10 +101,19 @@ inline CampaignEntry prepare_campaign_entry(Host &next, Host *previous,
     next.level().acts = tables.flow;
     next.level().act = previous->campaign().act();
     next.level().pending.request(level);
+    copy_live_bags(next, *previous);
+    next.variables().memory.w32(campaign_inventory::FRONTEND_WORD,
+                                previous->variables().memory.u32(campaign_inventory::FRONTEND_WORD));
+    next.variables().memory.w8(campaign_inventory::CARD_LATCH,
+                               previous->variables().memory.u8(campaign_inventory::CARD_LATCH));
     level_flow::ChangeOptions options;
     options.hub = next.campaign().hub();
+    options.death_task = death_task;
     const auto change = next.change_level(options);
-    if (next.campaign().act() != destination)
+    // inventory-reset.md:59-63. A frontend word skips the act call, so the
+    // stored act stays the one already held and is not the destination's act.
+    if (next.variables().memory.u32(campaign_inventory::FRONTEND_WORD) == 0 &&
+        next.campaign().act() != destination)
       throw std::runtime_error("Campaign act lookups disagree.");
     next.level().prev = level_flow::qualified_name(previous->level().level, previous->level().sub);
     out.changed = change.act_changed;

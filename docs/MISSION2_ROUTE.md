@@ -29,11 +29,13 @@ The executable's documented act tables bind the campaign and level-flow
 models (`research-quests` `7efd3ce`). `campaign_entry.hpp` invokes the native
 act-change contract before the destination script: a cross-act entry clears
 the old journal and quest-variable values, while retaining mission/medal
-flags and player records. Same-act entry preserves that progress. The
-bridge supports one local player with a known empty inventory. Imported
-inventory, a nonempty live or campaign bag, and an unbound source act refuse
-before selection or loading; live bag carry and flag-39 migration are
-unported. It does not silently retain old-act quests or discard inventory.
+flags and player records. Same-act entry preserves that progress and leaves
+classified live bags untouched. A cross-act entry removes unkept flag-39
+cells through `inventory_removeItem` (`research-inventory-reset` `ce2e086`,
+`docs/inventory-reset.md`). The bridge supports one local player. Imported
+inventory, a live cell with no definition, a campaign-model bag, and an
+unbound source act still refuse before selection or loading. It does not
+silently retain old-act quests.
 
 `Host::require_complete_commands` is enabled for all four documented
 mission-2 story level identities. An unsupported command stops the script

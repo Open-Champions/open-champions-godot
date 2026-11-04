@@ -59,10 +59,13 @@ Native rules added here, each thrown as `ps2_save::Unknown`:
 
 - The 0x18 bytes at +0x16100 must be zero. What an eleventh level name does
   there was not executed.
-- `apply_load` refuses when the word at 0x4f85b4 is 1 (`save_load` would call
-  `inventory_shareQuestItems`, which is not modelled), a negative difficulty
-  byte (the width of its sign-extended store is not documented), and a
-  qualified level name that would reach the pending-level marker at 0x41b720.
+- `apply_load` runs `inventory_shareQuestItems(0)` when the word at 0x4f85b4
+  is 1 and the inventory service is bound (`research-inventory-reset`
+  `ce2e086`, `docs/inventory-reset.md`). It still refuses before any write
+  when that service is unbound, and when a copied bag-2 cell has flag bit 8.
+  A negative difficulty byte (the width of its sign-extended store is not
+  documented) and a qualified level name that would reach the pending-level
+  marker at 0x41b720 also refuse before any write.
 - `require_known_world` / `require_known_decal` refuse populated world and
   decal bodies (`world_writeRecords` and live decal fields were not executed).
 - `apply_camera` (the camera load is not documented), `voice_global_pairing`,
