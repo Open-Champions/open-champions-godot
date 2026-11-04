@@ -1,0 +1,20 @@
+        Start 150: cli-invalid
+254/260 Test #150: cli-invalid ..........................   Passed    0.00 sec
+        Start 201: spell-numerics
+255/260 Test #239: script-commands-measure-empty ........   Passed    0.00 sec
+        Start 149: cli-unicode-path
+256/260 Test #149: cli-unicode-path .....................   Passed    0.00 sec
+        Start 151: cli-help
+257/260 Test #151: cli-help .............................   Passed    0.00 sec
+        Start 152: cli-missing-arguments
+258/260 Test #152: cli-missing-arguments ................   Passed    0.00 sec
+259/260 Test #201: spell-numerics .......................   Passed    0.01 sec
+260/260 Test  #31: simulation-boundary ..................   Passed    0.05 sec
+
+100% tests passed, 0 tests failed out of 260
+
+Label Time Summary:
+fx             =   3.98 sec*proc (5 tests)
+native-fx-2    =   3.98 sec*proc (5 tests)
+
+Total Test time (real) = 727.55 sec
