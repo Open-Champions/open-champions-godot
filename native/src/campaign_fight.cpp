@@ -774,6 +774,12 @@ struct Fight::Impl {
     player_handle = world->retain(player);
     refuse("net_getCamFlag: host-sourced (1 only while a script dialog is open; inventory, shop and cutscene camera modes not covered)");
     refuse("net_getCamYaw: host-sourced (the Godot sandbox camera's yaw, not Camera_getYaw; movement is relative to the host camera)");
+    // The initializer's definition addresses are executed for bodies 0-11 at
+    // seeds 7 and 20973 and kinds -1 and 1
+    // (366b65a:docs/starting-equipment-r4.md:43-60). This fight does not run
+    // that initializer, and the route's seed, kind and saved inventory are
+    // not those controls. Weapon class 5 stays the unarmed stand-in. Damage
+    // or kill results in this mode are not campaign evidence.
     const Address def = read(player + 0x24);
     const auto table = PLAYER_DEFINITIONS.at(start.model_index);
     // The block the player's slot words are read from: lump word, then for

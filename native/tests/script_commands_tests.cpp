@@ -1727,6 +1727,188 @@ void test_loading_r3_resources() {
   }
 }
 
+namespace le = champions::simulation::rta::loading_equipment;
+
+bool has_reason(const std::vector<std::string> &reasons, const char *text) {
+  for (const auto &reason : reasons)
+    if (reason == text) return true;
+  return false;
+}
+
+void test_loading_r4_selection() {
+  // 366b65a:docs/starting-equipment-r4.md:43-160. Addresses only; no names.
+  const std::uint32_t weapons[12] = {
+      0x3f7f50, 0x3f7f50, 0x3f7650, 0x3f7650, 0x3f8910, 0x3f8910,
+      0x3f9250, 0x3f9250, 0x3f7a10, 0x3f7a10, 0x3f7f50, 0x3f87d0};
+  const int classes[12] = {0, 0, 3, 3, 1, 1, 4, 4, 2, 2, 5, 6};
+  const std::uint32_t deltas[12][3] = {
+      {0x4878, 0x4a08, 0x4ff8}, {0x28d8, 0x2a68, 0x3058},
+      {0x177f8, 0x17938, 0x17e38}, {0x159e8, 0x15b28, 0x16028},
+      {0xff68, 0x100a8, 0x105a8}, {0xe168, 0xe2a8, 0xe7a8},
+      {0xb448, 0xb588, 0xba88}, {0x9648, 0x9788, 0x9c88},
+      {0x86a8, 0x87f8, 0x8d28}, {0x6808, 0x6958, 0x6e88},
+      {0x13be8, 0x13d28, 0x14228}, {0x11de8, 0x11f28, 0x12428}};
+  const std::uint32_t caches[3] = {0x8659e8, 0x865b48, 0x865f68};
+  int selections = 0;
+  for (int body = 0; body < 12; ++body)
+    for (const auto seed : {7u, 20973u})
+      for (const int kind : {-1, 1}) {
+        const auto got = le::starting_selection(body, seed, kind);
+        const bool heavy = body == 6 || body == 7;
+        check(got.class_index == classes[body] &&
+                  got.weapon_slot == (body == 2 || body == 3 || heavy ? 2u : 0u) &&
+                  got.weapon_definition == weapons[body],
+              "starting class, weapon slot and definition");
+        for (int i = 0; i < 3; ++i) {
+          const auto armor = heavy ? std::uint32_t(i == 0 ? 0x3fa210 : i == 1 ? 0x3fa250 : 0x3fa310)
+                                   : std::uint32_t(i == 0 ? 0x3fb110 : i == 1 ? 0x3fb150 : 0x3fb210);
+          check(got.armor_slots[i] == (i == 0 ? 4u : i == 1 ? 10u : 12u) &&
+                    got.armor_definitions[i] == armor &&
+                    got.armor_header_deltas[i] == deltas[body][i] &&
+                    got.armor_caches[i] == caches[i] &&
+                    le::armor_header_delta(body, got.armor_slots[i]) == deltas[body][i],
+                "starting armor slot, definition, header delta and cache");
+        }
+        ++selections;
+      }
+  check(selections == 48, "executed initializer matrix is 48 selections");
+  auto refuses = [](auto call) {
+    try { call(); return false; }
+    catch (const a::HostFault &) { return true; }
+  };
+  check(refuses([] { (void)le::starting_selection(12, 7, -1); }) &&
+            refuses([] { (void)le::starting_selection(-1, 7, -1); }) &&
+            refuses([] { (void)le::starting_selection(0, 0, -1); }) &&
+            refuses([] { (void)le::starting_selection(0, 8, 1); }) &&
+            refuses([] { (void)le::starting_selection(11, 20973, 0); }),
+        "unexecuted body, seed or kind stays refused");
+  for (const auto count : {1u, 2u})
+    for (const int over : {0, 1}) {
+      const auto header = le::header_choice(count, over);
+      const auto primary = count < 2 && over == 0 ? 0x535c08u : 0x535bf8u;
+      check(header.primary == primary && header.primary_groups == le::header_group_count(primary) &&
+                header.secondary == 0x535c28 && header.secondary_groups == 155 &&
+                le::header_group_count(0x535c08) == 243 && le::header_group_count(0x535bf8) == 245,
+            "executed header combinations keep the three group counts");
+    }
+  check(refuses([] { (void)le::header_choice(4, 0); }) &&
+            refuses([] { (void)le::header_choice(1, 2); }) &&
+            refuses([] { (void)le::header_group_count(0x535c00); }) &&
+            refuses([] { (void)le::armor_header_delta(0, 0); }) &&
+            refuses([] { (void)le::armor_header_delta(12, 4); }),
+        "unexecuted header and armor domains stay refused");
+  const auto span = le::cache_span(2, 4, 1);
+  check(span.offset == 0x1000 && span.size == 0x1800, "cache span uses the executed sector formula");
+  check(le::generic_weapon_index(5, false, 9) == 5 && le::generic_weapon_index(5, true, 9) == 14 &&
+            le::generic_weapon_index(-2, true, 1) == -1 &&
+            le::GENERIC_ROW_BASE == 0x3e9ce0 && le::GENERIC_SOURCE == 0x520030,
+        "generic weapon index adds the variant only when flag bit 36 is set");
+  check(refuses([] { (void)le::generic_weapon_index(1, true, 2147483647); }),
+        "generic weapon index overflow stays refused");
+}
+
+void test_loading_r4_arrival() {
+  // 366b65a:docs/loading-arrival-r4.md:78-109 and 154-191.
+  sc::Host host;
+  auto &m = host.variables().memory;
+  auto &v = host.variables();
+  m.word(0x86da78, 3);
+  m.word(0x86da7c, 4);
+  m.word(0x4f8690, 7);
+  m.word(0x50605c, 9);
+  m.string(0x86fa80, "authored_post");
+  m.word(0x4d8ae0, 2);
+  m.word(0x4f719c, 4);
+  m.byte(0x4d8af0 + 0x4bbf, 0x5a);
+  le::reset_arrival_queue(m);
+  check(m.word(0x86da78) == 0 && m.word(0x86da7c) == 0 && m.word(0x4f8690) == 0 &&
+            m.word(0x50605c) == 0 && m.read(0x86fa80) == 0 && m.word(0x4d8ae0) == 2 &&
+            m.word(0x4f719c) == 4 && m.read(0x4d8af0 + 0x4bbf) == 0x5a,
+        "reset clears queue, parity, inhibit and post byte only");
+  for (int n = 0; n < 64; ++n)
+    v.queue_deferred("authored_" + std::to_string(n));
+  const auto last_name = 0x86b278u + 0x50u * (64u + 63u);
+  check(m.word(0x86da7c) == 64 && m.cstr(last_name) == "authored_63",
+        "sixty-four deferred names are retained");
+  v.queue_deferred("authored_overflow");
+  check(m.word(0x86da7c) == 64 && m.cstr(last_name) == "authored_63",
+        "the sixty-fifth deferred name is rejected before copying");
+  le::reset_arrival_queue(m);
+
+  const std::vector<std::uint32_t> route0 = {0x1473b4, 0x1420d0, 0x1420a4};
+  const std::vector<std::uint32_t> route2 = {0x142084, 0x142044, 0x1433c8, 0x1420d0,
+                                             0x143540, 0x143540, 0x143ee4, 0x142010, 0x143500};
+  const std::vector<std::uint32_t> route2_done = {0x142084, 0x1420d0, 0x143540, 0x143540,
+                                                  0x143ee4, 0x142010, 0x143500};
+  auto run = [&](le::ArrivalControl control, le::ArrivalPrefix &got) {
+    try {
+      le::run_arrival_prefix(v, control, got);
+      return std::string();
+    } catch (const a::HostFault &error) {
+      return std::string(error.what());
+    }
+  };
+  le::ArrivalControl bad;
+  bad.route = 3;
+  le::ArrivalPrefix got;
+  check(run(bad, got) == "route state" && got.executed.empty(),
+        "an unlisted route ordinal stays route state");
+  le::ArrivalControl base;
+  base.mission = 3;
+  base.save_inhibit = 9;
+  base.available_on = 1;
+  base.quest_title = "authored_quest";
+  base.quest_text = "authored_text";
+  base.var_name = "authored_var";
+  base.var_first = 4;
+  base.var_second = 6;
+  base.post_name = "authored_post";
+  for (int slot = 0; slot < 4; ++slot)
+    m.byte(v.mission_byte(slot, 1, 3), 0x10);
+  base.route = 0;
+  check(run(base, got) == "object load" && got.executed == route0 && got.boundary == 0x142320 &&
+            got.missing_entry == -1 && !got.post_action && m.word(0x50605c) == 9 &&
+            m.read(v.mission_byte(0, 1, 3)) == 0x13 &&
+            m.read(v.mission_byte(1, 1, 3)) == 0x12 &&
+            m.word(0x86da78) == 0 && m.word(0x86da7c) == 0 && m.word(0x4f8690) == 0,
+        "route 0 runs the observed prefix and stops at object load");
+  base.route = 1;
+  check(run(base, got) == "resource bootstrap" && got.executed.empty() &&
+            got.boundary == 0x14222c && got.missing_entry == 0 && !got.post_action,
+        "route 1 stops at resource bootstrap before any native");
+  for (const bool complete : {false, true})
+    for (const bool choice : {false, true})
+      for (const bool full : {false, true}) {
+        base.route = 2;
+        base.completion_set = complete;
+        base.choice_bit = choice;
+        base.quest_list_full = full;
+        const auto reason = run(base, got);
+        const int quests = full ? 8 : complete ? 0 : 1;
+        check(reason == "cutscene runtime" && got.boundary == 0x143f1c && got.post_action &&
+                  got.missing_entry == -1 && got.quest_count == quests &&
+                  got.executed == (complete ? route2_done : route2) &&
+                  m.read(0x4f8698) == 1 && m.read(0x86fa80) == 0 &&
+                  v.quest_get("authored_var") == 6 &&
+                  m.word(0x86da78) == 0 && m.word(0x86da7c) == 0 && m.word(0x4f8690) == 0,
+              "route 2 prefix follows completion and stops at cutscene runtime");
+      }
+  auto plain = host.loading_readiness("synthetic_destination");
+  auto named = host.loading_readiness("synthetic_destination", true);
+  check(plain.deferred_complete == named.deferred_complete &&
+            plain.equipment_pending == named.equipment_pending &&
+            plain.peers_ready == named.peers_ready &&
+            plain.stores_complete == named.stores_complete &&
+            plain.save_gate_ready == named.save_gate_ready &&
+            !has_reason(plain.refusals, "normal deferred census") &&
+            has_reason(named.refusals, "normal deferred census") &&
+            has_reason(named.refusals, "route state") &&
+            has_reason(named.refusals, "object load") &&
+            has_reason(named.refusals, "resource bootstrap") &&
+            has_reason(named.refusals, "cutscene runtime"),
+        "naming arrival limits does not change readiness booleans");
+}
+
 void test_prestart_before_objects() {
   auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
   sc::Host host;
@@ -2031,6 +2213,8 @@ int main(int argc, char **argv) {
   test_loading_r2_deferred();
   test_loading_r2_equipment();
   test_loading_r3_resources();
+  test_loading_r4_selection();
+  test_loading_r4_arrival();
   test_prestart_before_objects();
   test_stub_objects();
   test_refused_result_stops_entry();

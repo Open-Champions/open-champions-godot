@@ -1974,7 +1974,10 @@ Dictionary ChampionsSessionController::loading_prerequisite_state() const {
       unavailable.push_back(field);
     out["error"] = "Loading script host unavailable.";
   } else {
-    const auto state = scripts_->loading_readiness(fight_level_);
+    // Round-4 limits stay named on the live path. The prefix is not applied:
+    // the destination's route ordinal is Unknown.
+    // 366b65a:docs/loading-arrival-r4.md:184-207.
+    const auto state = scripts_->loading_readiness(fight_level_, true);
     out["deferred_complete"] = state.deferred_complete;
     const auto field = [&](const char *name, std::optional<bool> value) {
       if (value) out[name] = *value;
