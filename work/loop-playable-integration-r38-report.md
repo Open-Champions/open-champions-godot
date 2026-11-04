@@ -1,0 +1,37 @@
+STATUS: MORE — wave 38 merges are committed. Remote gates have not run yet.
+
+# Playable integration wave 38 — 2026-11-03
+
+## Scope, evidence and merges
+
+Assigned clean `codex/playable-integration` at wave-37-verified `70d2de19`. Read the wave 37 report and `work/playable-wave37/` method, the three PASS audits named in the wave 38 section of the merge list, and the three branch reports before merging. Full no-ff merges in the requested order. No omissions or aborts. Builds and tests run on the Mac mini from an rsynced tree that excludes `.git`, `build/` and `work/`, and keeps `godot/.godot`. Private disc read-only, counts only. No push, PR, sibling edits, or process-name termination.
+
+| Branch | Audited tip | PASS audit | Merge commit | Conflicts |
+| --- | --- | --- | --- | --- |
+| `codex/play-progression` | `c583578a` | `play-progression-r3` | `91c96fd1` | `native/src/script_commands.cpp` |
+| `codex/play-loading-readiness` | `5ab36040` | `play-loading-readiness-r4` | `27925364` | `native/src/campaign_fight.cpp` |
+| `codex/play-mission2-route` | `cbcb264e` | `play-mission2-route-r1` | `b7e8e827` | none; ort auto-merge |
+
+All three audited tips are ancestors of merge HEAD `b7e8e827`.
+
+## Conflict resolutions
+
+Non-trivial resolutions, both sides' behaviour kept:
+
+- Progression into wave 37: `Host::load` resets both the existing Mission 1 contract (`mission1_`, `mission1_sites_reached_`) and the incoming hub-offer latch (`hub_offers_`, start, opening, action mission, action-running). The run-task save/load retain, the `setMissionAvailable` hub-action guard, and the Mission 1 dispatch stay in the same file. `script_commands.hpp` kept Mission 1 and loading-readiness members and added the hub-offer binding. `session_controller.cpp` kept the existing fight observation and added `bounded_hub_dialog` / `bounded_hub_start`.
+- Loading readiness into that result: `loading_readiness` gained `report_arrival_limits` (default false) and the five named limits. Existing one-argument tests still compile. `session_controller.cpp` asks for those names on the live readiness string and still reports `fight_starting_equipment = runtime_record`. `frontend.cpp` took the round-4 creation note. `script_commands_tests.cpp` kept the integration cases and the round-4 selection controls.
+- `campaign_fight.cpp` `setup_player`: round 4 replaced the comment above `refuse("starting_equipment: refused_unknown ...")`. That call is unchanged from round 3 (`d07f7e4e`). Integration removed the same call in `2707fa64` when `pickups::give_starting_items` replaced the unported stand-in, and wave 37's merge of round 3 kept that deletion because round 3 had not edited the lines. This resolution keeps the round-4 comment, so the fight records that it does not run initializer `0x1b1d70`, and does not restore the refuse call. Restoring it would label the ported grant "not ported" while `fight_observation` still publishes `runtime_record` / `inventory_equipItem`. `give_starting_items` stays.
+
+Mission 2 did not conflict. Its new files are the direct-call route, the CMake test, and the route note.
+
+## One admission path
+
+Dialog admission reads the menu run task in one place: `native/src/script_dialog.cpp` sets `dialog_host_.mission_menu` from `campaign_->menu_run_registered()`. The campaign image does not carry that bit; `Host::load_campaign` retains the live bit on the same process. Mission 2 does not copy that path. `mission2_route::portal_row0` accepts row 0 through the existing `level_flow::GateTravel` counter and the pre-load stop. It does not call `missionMenu_run` or `menu_run_registered`. The scene does not call `mission2_route`.
+
+## Non-merge code changes
+
+None. Source changes are the incoming audited work and the resolutions above. No post-merge source correction was necessary.
+
+## Gates
+
+Pending. Evidence will land under ignored `work/playable-wave38/`.
