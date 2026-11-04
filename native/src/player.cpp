@@ -4,6 +4,7 @@
 // Champions contributors. Documented entry/scripted and independently callable helpers.
 // Reference copyright (c) 2026 TrustlessMike and contributors, MIT license.
 #include "champions/player.hpp"
+#include "champions/spell_numerics.hpp"
 #include <utility>
 namespace champions::simulation::rta::player {
 namespace {
@@ -1084,7 +1085,13 @@ void Tick::cast_skill(std::uint32_t player, std::uint32_t ability) {
   auto cost = vcall(Service::SkillCost, skill, 0x60, 5, {rank});
   if (signed32(Address(skill) + 8) == 1) cost = mul(cost, 0x3c888888);
   auto r = rec(signed32(p + 0x3c8));
-  write(r + 0xc0, 4, sub(u32(r + 0xc0), cost));
+  // Zero-cast debit, including one pattern below the cost. Recast above zero
+  // and the prediction copy already returned. research-spells-r3
+  // docs/spec/player-spells-numeric-r3.md:97-107.
+  const auto pay = spell_numeric::debit_after_zero_cast(
+      u32(r + 0xc0), cost, 0,
+      static_cast<std::uint16_t>(mem.load(Address(skill) + 0xc, 2) & 0xffffu), false);
+  write(r + 0xc0, 4, pay.mana);
   call(Service::HandleClear, {StackHandle{}});
 }
 // Bounded action-state family. Services remain supplied synchronous callbacks.

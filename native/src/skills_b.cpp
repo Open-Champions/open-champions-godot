@@ -1,4 +1,5 @@
 #include "champions/skills_b.hpp"
+#include "champions/spell_numerics.hpp"
 #include "champions/detail/skill_kernel.hpp"
 #include "champions/detail/skill_spell_kernel.hpp"
 #include "champions/detail/skill_handle_kernel.hpp"
@@ -659,7 +660,7 @@ Raw Model::obj_move_and_collide(Address object, Address vel) {
 namespace {
 constexpr Raw PLAYERS=0x4d8af0, REC_SIZE=0x4c30, REC_OBJ=0x43d8;
 constexpr Raw ALIVE_COUNT=0x4f8420, ALIVE_LIST=0x4f8440;
-constexpr Raw DT=0x3c888888, PERCENT=0x3c23d70a, HEAL_RATE=0x3c71aa2e;
+constexpr Raw DT=0x3c888888, PERCENT=0x3c23d70a;
 Raw level_byte(const Memory &m, Address spell) {
   auto b=static_cast<Raw>(m.load(spell,1));
   return b&0x80 ? b|0xffffff00u : b;
@@ -859,11 +860,12 @@ void Model::healing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
     percent=stat_for(word(mem,offset(spell,8)),0,level_byte(mem,spell),owner,20);
     most=word(mem,offset(word(mem,offset(spell,0xc)),0x22c));
   }
-  mem.store(offset(spell,0x1c),4,mul(mul(most,HEAL_RATE),mul(from_int(percent),PERCENT)));
+  // ID 55 owner product. research-spells-r3 docs/spec/player-spells-numeric-r3.md:81-88.
+  mem.store(offset(spell,0x1c),4,spell_numeric::owner_heal_product(most, percent));
 }
 Raw Model::heal_share(Address spell, Raw most) {
   auto percent=stat_for(word(mem,offset(spell,8)),2,level_byte(mem,spell),word(mem,offset(spell,0xc)),20);
-  return mul(mul(most,HEAL_RATE),mul(from_int(percent),PERCENT));
+  return spell_numeric::owner_heal_product(most, percent);
 }
 void Model::healing_run(Address spell, Raw, Raw) {
   auto skill=word(mem,offset(spell,8));
@@ -913,7 +915,8 @@ void Model::healing_run(Address spell, Raw, Raw) {
         auto hp=word(mem,offset(rec,0xac));
         auto amount=word(mem,offset(rec,REC_OBJ))==word(mem,offset(spell,0xc)) ?
           word(mem,offset(spell,0x1c)) : heal_share(spell,word(mem,offset(rec,0xb0)));
-        mem.store(offset(rec,0xac),4,add(hp,amount));
+        // One add of the cached owner product. player-spells-numeric-r3.md:83-84 and :123.
+        mem.store(offset(rec,0xac),4,spell_numeric::add_cached_heal(hp, amount));
       }
       if (early()) heal_tint(mem,word(mem,offset(rec,REC_OBJ)));
     }

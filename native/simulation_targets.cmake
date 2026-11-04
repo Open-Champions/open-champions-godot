@@ -119,6 +119,14 @@ else()
     target_compile_options(champions-creature-hp PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+add_library(champions-spell-numerics "${CHAMPIONS_SIMULATION_ROOT}/src/spell_numerics.cpp")
+target_link_libraries(champions-spell-numerics PUBLIC champions-combat champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-spell-numerics PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-spell-numerics PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Original RTA creature collision/water step; callbacks and Session wiring are explicit.
 add_library(champions-creature-movement "${CHAMPIONS_SIMULATION_ROOT}/src/creature_movement.cpp")
 target_include_directories(champions-creature-movement PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
