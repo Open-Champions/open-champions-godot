@@ -1,4 +1,5 @@
 #include "champions/vendor_stock.hpp"
+#include "champions/item_generation.hpp"
 #include <algorithm>
 #include <cstring>
 
