@@ -48,7 +48,7 @@ else()
     target_compile_options(champions-animation-clock PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
-add_library(champions-items "${CHAMPIONS_SIMULATION_ROOT}/src/items.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/item_generation.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/item_names.cpp")
+add_library(champions-items "${CHAMPIONS_SIMULATION_ROOT}/src/items.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/item_generation.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/item_names.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/vendor_stock.cpp")
 target_include_directories(champions-items PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 target_link_libraries(champions-items PUBLIC champions-core)
 if(MSVC)

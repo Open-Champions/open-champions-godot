@@ -7,6 +7,7 @@
 #include "champions/campaign_entry.hpp"
 #include "champions/script_effects.hpp"
 #include "champions/script_items.hpp"
+#include "vendor_stock_fixture.hpp"
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -1343,6 +1344,43 @@ void test_loading_readiness() {
         "faulted absent machine cannot certify loading");
 }
 
+// research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:326-336.
+// A bound synthetic shop regenerates on every matching load. Resource
+// completion stays refused. An unbound host keeps the previous refusal.
+void test_vendor_stock_load() {
+  namespace fx = champions::simulation::rta::items::vendor_fixture;
+  auto stock = fx::ready(7, 7);
+  std::array<std::string, 4> names;
+  for (std::size_t i = 0; i < names.size(); ++i)
+    names[i] = "synthetic_stock_" +
+               std::to_string(champions::simulation::rta::items::kShopDestinationAddresses[i]);
+  stock.set_destinations(names);
+  sc::Host host;
+  host.set_vendor_stock(&stock);
+  champions::simulation::rta::level_factory::Executable exe;
+  exe.string = [](std::uint32_t address) {
+    return std::string("synthetic_stock_") + std::to_string(address);
+  };
+  host.set_executable(exe);
+  auto first = host.loading_readiness(names[0]);
+  check(first.stores_complete == true && stock.generations() == 1,
+        "a matching load generates session stock");
+  bool resource = false;
+  for (const auto &reason : first.refusals)
+    resource = resource || reason.find("resource completion unavailable") != std::string::npos;
+  check(resource, "resource completion stays refused after generation");
+  auto again = host.loading_readiness(names[3]);
+  check(again.stores_complete == true && again.refusals.size() >= 1 && stock.generations() == 2,
+        "the next shop destination regenerates");
+  auto miss = host.loading_readiness("synthetic_destination");
+  check(miss.stores_complete == true && stock.generations() == 2,
+        "a non-matching destination does not generate");
+  sc::Host unbound;
+  unbound.set_executable(exe);
+  check(!unbound.loading_readiness(names[0]).stores_complete,
+        "an unbound shop still refuses generation");
+}
+
 // d6f035fa:docs/loading-arrival-r2.md:11-43: authored scripts run the production
 // VM/queue; discriminate per-entry errors, promotion and native fault stops.
 void test_loading_r2_deferred() {
@@ -2028,6 +2066,7 @@ int main(int argc, char **argv) {
   test_refusals();
   test_wait_then_complete();
   test_loading_readiness();
+  test_vendor_stock_load();
   test_loading_r2_deferred();
   test_loading_r2_equipment();
   test_loading_r3_resources();

@@ -157,6 +157,11 @@ LoadedLevel SessionAdapter::change(const ChangeOptions &opts,
     hooks_.event("deferred_calls");
     hooks_.event("network_barrier");
     hooks_.event("shop_stock");
+    // research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:17-24,326-329.
+    // Every load of a shop destination can regenerate. An empty hook keeps
+    // the fixture path that has no shop tables.
+    if (hooks_.shop_stock)
+      hooks_.shop_stock(state_.level);
     hooks_.event("loading_screen_off");
     hooks_.event("environment_upload_if_resident");
     clear_travel_next_tick_ = state_.travel.ticks != 0;

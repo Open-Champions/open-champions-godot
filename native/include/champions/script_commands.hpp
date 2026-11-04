@@ -38,6 +38,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::items {
+class VendorStock;
+}
+
 namespace champions::simulation::rta::script_commands {
 namespace builtins = champions::simulation::rta::builtins;
 inline constexpr const char *POLICY = "rta-script-commands-v2";
@@ -292,6 +296,9 @@ public:
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.
   void set_executable(level_factory::Executable);
+  // Opt-in session stock. Without it a matching destination still refuses
+  // generation. research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:326-336.
+  void set_vendor_stock(items::VendorStock *stock) { vendor_stock_ = stock; }
   // The selected level and its monsters.bal payload, read from the owner's
   // game folder at run time. The executable supplies the level table. Until
   // both are present, a constructed creature's statistics remain unknown.
@@ -649,6 +656,7 @@ private:
   SharedRandom *external_seed_ = nullptr;
   SeedPolicy seed_policy_ = SeedPolicy::Exact;
   std::unique_ptr<level_factory::Executable> exe_;
+  items::VendorStock *vendor_stock_ = nullptr;
   struct BalanceRow {
     std::uint16_t hash = 0;
     std::array<std::uint32_t, 5> factors{};

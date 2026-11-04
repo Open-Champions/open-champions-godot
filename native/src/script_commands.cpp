@@ -1,5 +1,6 @@
 #include "champions/script_commands.hpp"
 #include "champions/objects.hpp"
+#include "champions/vendor_stock.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
 #include <algorithm>
@@ -1351,13 +1352,26 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination) {
   } else {
     try {
       bool match = false;
-      for (const auto address : {0x554678u, 0x554680u, 0x554688u, 0x554698u}) {
-        const auto identifier = exe_->string(address);
-        if (identifier.empty()) throw std::runtime_error("empty stock identifier");
-        match = match || destination == identifier;
+      std::array<std::string, 4> identifiers;
+      for (std::size_t i = 0; i < items::kShopDestinationAddresses.size(); ++i) {
+        identifiers[i] = exe_->string(items::kShopDestinationAddresses[i]);
+        if (identifiers[i].empty()) throw std::runtime_error("empty stock identifier");
+        match = match || destination == identifiers[i];
       }
       if (!match) out.stores_complete = true;
-      else out.refusals.push_back("Applicable transition stock generation/RNG unavailable.");
+      else if (!vendor_stock_) {
+        // research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:326-329.
+        out.refusals.push_back("Applicable transition stock generation/RNG unavailable.");
+      } else {
+        vendor_stock_->set_destinations(identifiers);
+        const auto stock = vendor_stock_->on_load(destination);
+        if (stock.generated) out.stores_complete = true;
+        else if (stock.refused) out.refusals.push_back(stock.reason);
+        else out.refusals.push_back("Applicable transition stock generation/RNG unavailable.");
+        // docs/spec/vendor-stock.md:220-222,341. The resource request is not completion.
+        if (stock.resource_requested && !stock.resource_completed)
+          out.refusals.push_back(stock.resource_reason);
+      }
     } catch (const std::exception &) {
       out.refusals.push_back("Store applicability unavailable: identifier read failed.");
     }
