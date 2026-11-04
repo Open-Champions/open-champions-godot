@@ -34,4 +34,9 @@ None. Source changes are the incoming audited work and the resolutions above. No
 
 ## Gates
 
-Pending. Evidence will land under ignored `work/playable-wave38/`.
+Evidence under ignored `work/playable-wave38/`. Native configure/build and the extension builds ran on the mini from the rsynced tree. Godot is the mini's 4.5.2 runtime. Registered CTest count before execution is 260 (`mission2-route` plus the wave-37 set of 259). Progression and loading round 4 extended existing tests in place.
+
+- Native Release configure/build **PASS**, exit 0, 121.31 s wall for the remote configure and `-j 4` build. Evidence `configure.log`, `build.log`. New binary `champions-mission2-route-tests` is present. `champions-mission2-route` linked.
+- GDExtensions **PASS**, exit 0, 317.59 s wall, parallelism 4, `arm64` and `x86_64`. Archive and level-texture `template_debug` / `template_release` each configured and linked. `lipo -archs` reports both architectures on all five libraries. Evidence `template_debug-*.log`, `template_release-*.log`, `texture-template_debug-*.log`, `texture-template_release-*.log`. Creature-animation `template_debug` **PASS**, universal, linked to `godot/creature_anim/bin`. Evidence `creature-template_debug-configure.log`, `creature-template_debug-build.log`.
+
+Full CTest `-j 3` is running (260 registered). Strict matrix, combat, save/load, trace, and journeys are not started.
