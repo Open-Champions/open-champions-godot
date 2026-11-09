@@ -92,7 +92,10 @@ The listed entries then run through the existing commands:
 - `playerHasItem` is the client's `inventory_countItemByName` over the real
   bag, the one stub-dependent service that is a client service
   (`:469-474`, `:686-706`). `addHelpMessage` keeps its text-table and chime
-  requirements. `activateStore` stays refused.
+  requirements. `activateStore` stays refused without an attached dialog.
+- `autoPropSetState`, `killMonster`, `soundSequence` and `preloadResource`
+  run the level-commands port in these levels (`docs/LEVEL_COMMANDS.md`,
+  research `t3/research-level-commands` `8efa13d`).
 - Travel entries write their level, entrance and orientation `0xff`
   (`:430-440`, `:454-463`, `:638-670`, `:832-848`). Research ran each listed
   travel entry through the original binder and recorded the pending level it
@@ -102,20 +105,21 @@ The listed entries then run through the existing commands:
   gated level the host therefore reads offset 0 as the binder does; only
   listed entries can start there. The mission 2 `newWorld(0)` refusal stays
   for ungated levels.
-- **Mission 3 play gap:** `islgnome` `entrance1`-`entrance3` with
-  `startedQuest` 1 and `finishedQuest` absent or 0. Research: the entrance
-  makes eight `killMonster` calls and still requests `islc2` with its door
-  (`:454-463`). The client does not port `killMonster` (a Partial row the
-  host does not route), so the entrance stops at the first `killMonster`,
-  before `islc2` is requested. With the gnome quest started and not
-  finished, the client cannot leave `islgnome` through these entrances. The
-  private probe reports the research outcome as failures (`m3-gnome-kill`)
-  and the client stop separately (`m3-gnome-kill-client-stop`).
-  `killMonster` is under separate research and is not ported here.
-- `tormenta` `start` reaches `autoPropSetState`, which the client still
-  refuses, before its `setMissionAvailable(5, 1)`. The research ran that
-  native's original body. So mission 5 does not become available from its
-  level start in the client yet; the private probe reports this case.
+- **Mission 3:** `islgnome` `entrance1`-`entrance3` with `startedQuest` 1
+  and `finishedQuest` absent or 0 make eight `killMonster` calls and still
+  request `islc2` with their door (`:454-463`). The client now runs those
+  calls (`docs/LEVEL_COMMANDS.md`). **Remaining play gap:** no Gnome
+  constructor is ported, so with the level's records adopted, the gnome
+  targets are stubs and the first `killMonster` refuses before any store.
+  The probe checks the research outcome (`m3-gnome-kill`) and this play stop
+  (`m3-gnome-kill-stub-refusal`).
+- **Mission 5:** `tormenta` `start` runs its five `autoPropSetState` calls
+  and then `setMissionAvailable(5, 1)`. **Remaining play gap:** no AutoProp
+  constructor is ported, so with the records adopted, the first call finds a
+  stub and refuses before the availability store (`m5-start-stub-refusal`).
+  `preloadResource` in `preStart` is a recorded no-op when the game folder
+  has the lump. The play session does not supply that listing yet, so in play
+  it still stops there.
 
 The hub and hub2 entries that make missions 4, 5 and 6 available are listed
 in `story_route::availability_entries` (`:504-510`, `:861-878`). Research says
@@ -139,7 +143,7 @@ a research-cited table and replay the listed shapes.
 | Object use and triggers in those levels | Not run (see above). |
 | Missions 6-12 in-level beats | Not established (`:322-326`, `:349-354`). |
 | Medal and bonus levels of missions 3-12 | Columns 1 and 2 not re-run (`:268`); `watmedal` and `tormedal` not run (`:562-563`). |
-| `killMonster` | Not ported; stops the `islgnome` kill-state entrances (above). |
+| `killMonster`, `autoPropSetState` on stub targets | No Gnome or AutoProp constructor is ported; the fields the ports read were set by hand in the research (`docs/LEVEL_COMMANDS.md`). |
 
 ## Private acceptance
 
@@ -149,7 +153,6 @@ of its level, and replays the executed cases with the gate on, one player,
 mission bytes 3..6 planted at `0xA0` and the pending level, entrance and
 orientation at the research's sentinels. Quest titles are compared with each
 other at run time and never printed. Output is group counts and case numbers.
-The probe exits nonzero while the two disclosed gaps stand: `m5-start` (the
-`tormenta` `start` stop at `autoPropSetState`) and `m3-gnome-kill` (the
-`islgnome` stop at `killMonster`). Each has a matching `-client-stop` group
-that checks where the client stops.
+`m5-start` and `m3-gnome-kill` check the research outcomes with no object
+adopted. The `-stub-refusal` groups adopt the level's `objects.ob` as stubs
+and check the remaining play stop.
