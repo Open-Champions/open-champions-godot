@@ -170,6 +170,11 @@ about 30–38 throughout, from other agents.
    `campaign-fight-adopt`, `campaign-fight-boundaries`, `campaign-rewards`,
    `player-death-flow` (`ctest-focused.out`).
 
+3. **Full CTest `-j 3`: PASS, 259/259, 1,704 s**, exit 0, stdin closed
+   (`ctest.out`). 259 tests registered, the same as wave 37. The run took longer
+   than wave 37's 694 s under a mini load average of about 30–38
+   (`netplay` 402 s, `player-exact` 179 s).
+
 GATES_PENDING
 
 ## Final
