@@ -925,26 +925,51 @@ func run() -> void:
 			if str(scene.real.levels[index].stem) == "hub2": alternate_index = index
 		var alternate_loaded: bool = alternate_index >= 0 and scene.load_real_level(alternate_index, true)
 		var alternate_refused := false
+		var alternate_table := false
+		var alternate_detail := {}
 		var alternate_point := false
 		if alternate_loaded:
 			scene.start_play()
 			help_close()
 			var alternate_use: Dictionary = scene.controller.dialog_use()
+			# research-hub-npcs fbbfe65 docs/hub-services.md:196-245: hub2's NPC now
+			# plays its researched table; physical use still refuses (vehicle/grid).
 			var alternate_talk: Dictionary = scene.controller.dialog_talk_to(0)
-			alternate_refused = not alternate_use.get("ok", true) and not alternate_talk.get("ok", true)
+			for i in range(30): scene.advance_step()
+			var alternate_research: Dictionary = scene.controller.hub_service_research()
+			alternate_table = alternate_talk.get("ok", false) and alternate_research.get("dialog_table_bound", false) \
+				and str(alternate_research.get("dialog_table", "")) == "hub2" \
+				and alternate_research.get("dedupe_tables_match", false)
+			alternate_refused = not alternate_use.get("ok", true)
+			alternate_detail = {"talk_ok": alternate_talk.get("ok", false), "talk_error": safe(alternate_talk.get("error", "")),
+				"opened": scene.controller.dialog_status().get("open", false),
+				"bound": alternate_research.get("dialog_table_bound", false),
+				"start": int(alternate_research.get("dialog_table_start", -2))}
+			# Close it through confirms, as the primary-hub conversation does.
+			for i in range(1200):
+				await process_frame
+				help_close()
+				if scene.paused and not scene.stopped: scene.resume_session()
+				if i % 8 == 0: game_key(KEY_ENTER)
+				advance()
+				if not scene.controller.dialog_status().get("open", false): break
+			alternate_detail["closed"] = not scene.controller.dialog_status().get("open", true)
+			alternate_detail["choices_taken"] = int(scene.controller.dialog_status().get("counts", {}).get("choices_taken", 0))
+			alternate_detail["fence_refusals"] = scene.controller.hub_service_research().get("dialog_action_refusals", {}).size()
+			alternate_table = alternate_table and not scene.controller.dialog_status().get("open", true)
 			for target in scene.controller.hub_service_targets():
 				if str(target.kind) == "PushTrigger":
-					var alternate_action: Dictionary = scene.controller.script_run_exit(int(target.index))
-					alternate_refused = alternate_refused and not alternate_action.get("ok", true)
+					alternate_table = alternate_table and target.get("record_matches_research", false)
 				elif str(target.kind) == "Savepoint":
 					var alternate_save: Dictionary = scene.controller.hub_service_use(int(target.index), false)
 					alternate_point = alternate_save.get("ok", false) and alternate_save.get("request_save", false)
-		mark("alternate_hub_services", "bounded" if alternate_loaded and alternate_refused and alternate_point else "refused",
-			{"loaded": alternate_loaded, "unknown_routes_refused": alternate_refused, "direct_savepoint_accepted": alternate_point})
+		mark("alternate_hub_services", "bounded" if alternate_loaded and alternate_refused and alternate_point and alternate_table else "refused",
+			{"loaded": alternate_loaded, "unknown_routes_refused": alternate_refused, "direct_savepoint_accepted": alternate_point,
+			"researched_table_bound": alternate_table, "hub2_dialog": alternate_detail})
 		save_json()
 		scene.queue_free()
 		await process_frame
-		quit(0 if hub_controls_visible and hub_quest_changed and hub_no_debit and service_refusals and point_carried and point_saved and point_unchanged and point_menu_refused and not point_busy.get("ok", true) and not point_bad.get("ok", true) and alternate_loaded and alternate_refused and alternate_point else 1)
+		quit(0 if hub_controls_visible and hub_quest_changed and hub_no_debit and service_refusals and point_carried and point_saved and point_unchanged and point_menu_refused and not point_busy.get("ok", true) and not point_bad.get("ok", true) and alternate_loaded and alternate_refused and alternate_point and alternate_table else 1)
 		return
 	help_close()
 	if fe.screen() == "pause": tap(START)
