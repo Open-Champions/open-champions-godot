@@ -25,10 +25,10 @@
 namespace champions::simulation::rta::hub_dialog {
 
 enum class Hub : std::uint8_t { Hub, Hub2 };
-// Predicate kinds, HS:85-97 and RHS:20-26.
+// Predicate kinds, HS:85-97 and RHS:21-26.
 enum class Kind : std::uint8_t { Active, Offer, Pending, Demo, Intro, Done, NotDone };
 enum class Var : std::uint8_t { None, Demo, Intro };
-// Action effects, HS:112-125 and RHS:30-35.
+// Action effects, HS:112-125 and RHS:33-37.
 struct Effect {
   int avail = 0; // mission whose bit 0 is set; 0 = none
   bool quest = false, store = false;
@@ -57,11 +57,11 @@ struct ActionRow {
 namespace detail {
 constexpr ChoiceRow close(int action) { return {NONE, Kind::Offer, 0, action, -1}; }
 constexpr ChoiceRow more(int action, int next) { return {NONE, Kind::Offer, 0, action, next}; }
-// SHOP -> store, END -> none (status/reminder node). RHS:42-47.
+// SHOP -> store, END -> none (status/reminder node). RHS:43-48.
 constexpr NodeRow status(int cond, Kind k, int n, int store) {
   return {cond, k, n, 2, {close(store), close(NONE)}};
 }
-// END -> end_action, SHOP -> shop_action (offer node). RHS:50-51.
+// END -> end_action, SHOP -> shop_action (offer node). RHS:51-52.
 constexpr NodeRow offer(int cond, int n, int end_action, int shop_action) {
   return {cond, Kind::Offer, n, 2, {close(end_action), close(shop_action)}};
 }
@@ -73,7 +73,7 @@ constexpr Effect E(int avail = 0, bool quest = false, bool store = false, Var va
 }
 } // namespace detail
 
-// Node tables HS:160-225 (hub H1.N00..N30, hub2 H2.N00..N25), RHS:58-123.
+// Node tables HS:160-225 (hub H1.N00..N30, hub2 H2.N00..N25), RHS:59-120.
 inline constexpr std::array<NodeRow, 31> HUB_NODES{{
     {0x3F0, Kind::Active, 0, 2, {detail::close(0x1DF8), detail::close(NONE)}},
     detail::chain(0x11C, Kind::Offer, 1, 2),
@@ -137,7 +137,7 @@ inline constexpr std::array<NodeRow, 26> HUB2_NODES{{
     detail::offer(0x3F48, 12, 0x3FC4, 0x4888),
     detail::status(0x40AC, Kind::Pending, 12, 0x41B4),
 }};
-// Action effects, Executed with recorded writes (HS:112-125, 160-225; RHS:125-151).
+// Action effects, Executed with recorded writes (HS:112-125, 160-225; RHS:123-149).
 inline constexpr std::array<ActionRow, 22> HUB_ACTIONS{{
     {0x1DF8, detail::E(0, false, true)}, {0x598, detail::E(0, false, false, Var::Demo)},
     {0x1FC0, detail::E(0, false, true, Var::Demo)},
@@ -181,7 +181,7 @@ inline constexpr int push_radius(Hub hub) { return hub == Hub::Hub ? 79 : 78; }
 // 13 cells (bounds limits 9 and 12, Observed); the loops visit 9 and 12 cells
 // (Executed), so each table's last cell is never checked.
 inline constexpr int SHARD_TABLE = 10, BLOOD_TABLE = 13, SHARD_LIST = 9, BLOOD_LIST = 12;
-// K.poll (HS:374-383, RHS:331-349): counted unpaused runs before the menu call.
+// K.poll (HS:374-383, RHS:343-360): counted unpaused runs before the menu call.
 inline constexpr int WARN_POLL_RUNS = 6;
 // Hub public of the one cutScene literal (HS:66-69).
 inline constexpr int CUTSCENE_ENTRY = 0x34A4;
@@ -428,7 +428,7 @@ struct Binding {
     return b;
   }
 
-  // HS:85-97 / RHS:200-216. Player 0's mission byte at the current difficulty.
+  // HS:85-97 / RHS:176-191. Player 0's mission byte at the current difficulty.
   bool predicate(Kind kind, int n, builtins::Variables &state) const {
     const auto d = amx::s32(state.memory.word(0x4f719c));
     (void)quests::mission_index(d, 1); // keep the campaign's out-of-domain refusal
@@ -462,7 +462,8 @@ struct Binding {
       return std::nullopt;
     return predicate(found->second.kind, found->second.mission, state);
   }
-  // dialog_onMsg: node 0 first, then file order; node 0 when none (HS:79-83).
+  // dialog_onMsg: node 0 first, then file order; node 0 when none (HS:79-83,
+  // RHS:194-200).
   int start(builtins::Variables &state) const {
     for (std::size_t i = 0; i < node_conditions.size(); ++i)
       if (*condition(node_conditions[i], state))

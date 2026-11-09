@@ -86,7 +86,7 @@ LOW). Only Observed or Executed rows are ported; the code is
 
 - **Dialog tables.** Both live dialogs bind field by field to the researched
   tables: 31 hub and 26 hub2 nodes, their condition offsets, choice counts,
-  choice-condition and action offsets and next links (HS:160-228, RHS:58-123).
+  choice-condition and action offsets and next links (HS:160-228, RHS:59-120).
   Variable names come from the script's literal `getv` sites, as the research
   difftest resolves them (HS:23-35); no name is stored. Node and choice
   conditions answer from the researched predicates (HS:85-101), the start node
