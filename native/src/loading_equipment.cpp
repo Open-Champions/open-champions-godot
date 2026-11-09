@@ -473,6 +473,9 @@ void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPref
         out.callees.push_back(0x23d7ac);
         if (c.slot19_value)
           finish(out, 0x23d7ac, "slot 19 with a nonzero value", m, {0, 0, 0});
+        // r6:107: slot 19 "is called once and returns"; its stores are not
+        // recorded, so none are applied.
+        out.unmodeled.push_back(0x23d7ac);
       }
     }
     out.executed.push_back(0x142320);
@@ -607,14 +610,27 @@ void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPref
   if (obj) {
     if (!(m.word(obj->addr + 0xc) & 0x20))
       reject("delete of a non-creature object was not executed");
+    // 0x144b44 dispatches slot 1 through the object's own table (the
+    // builtin's virtual_call(obj, 1, 3)). 0x14cf90 is slot 1 only of the
+    // GameObject table: the research's object is GameObject_ctor 0x14cb10
+    // plus the creature flag (r6:127-136; 56a6760:tools/
+    // difftest_arrival_stage_r6.py:114-124). Any other table's slot 1 was
+    // not executed.
+    if (m.word(obj->addr + 0x48) != kGameObjectTable)
+      reject("delete of an object outside the GameObject table was not executed");
     // r6:138-140: a property list takes the walk this fixture skips.
     if (m.word(obj->addr + 0x2c) || obj->props)
       finish(out, 0x3b91d8, "delete with a property list", m, {0, 0, 0});
     // GameObject_dtor 0x14cf90 through the three handle clears; no free and
-    // no name-count store (r6:129-136).
+    // no name-count store (r6:129-136, 175-177). The no-free part relies on
+    // round 6's "does not call pool_free 0x150470". Round 7 (4487a88, still
+    // under audit) disputes that; it is not ported here. See the round-5
+    // fix report.
     out.callees.push_back(0x14cf90);
     m.w32(obj->addr + 0x48, kGameObjectTable);
     for (int k = 0; k < 3; ++k) out.callees.push_back(0x1a1698);
+    // r6:132: handle_clear's stores are not recorded; none are applied.
+    out.unmodeled.push_back(0x1a1698);
   }
   out.executed.push_back(0x144b44);
   m.byte(kInPost, 0);

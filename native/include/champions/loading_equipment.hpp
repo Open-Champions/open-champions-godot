@@ -109,10 +109,16 @@ struct ArrivalPrefix {
   int quest_count = 0;
   // through_round 6 only: original callees the stages report reaching, in
   // order (grid, dtor, handle-clear, hide-mask, cut_start, frame calls).
-  // A callee listed here ran as the research records it; callees whose
-  // stores the notes do not give (0x1a1698, 0x23d7ac) are listed, not modeled.
+  // Being listed means only that the research records the call being reached
+  // and returning; it does not mean the callee's stores were applied.
   std::vector<std::uint32_t> callees;
   bool loader_promoted = false;
+  // through_round 6 only: callees reached and returned from whose stores the
+  // research does not record, so none of their stores are applied: slot 19
+  // 0x23d7ac (56a6760:docs/loading-arrival-r6.md:107) and handle_clear
+  // 0x1a1698 (r6:132). One entry per stage that reached them; the stage
+  // continues only to the boundary the research gives after that call.
+  std::vector<std::uint32_t> unmodeled;
 };
 void run_arrival_prefix(builtins::Variables &, const ArrivalControl &, ArrivalPrefix &);
 // 56a6760:docs/loading-arrival-r6.md:82-98 (model_buildHideMask 0x179550):

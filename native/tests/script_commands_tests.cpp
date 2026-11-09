@@ -2097,6 +2097,8 @@ void test_loading_r6_arrival() {
             m.u64(at + 0xc8) == 0xfffffffffffffffaull && !stored_at(m, at + 0x128, before_mask) &&
             queue() == Q{0, 2, 0},
         "a planted header stores the show mask, skips the zero clip and appends");
+  check(got.unmodeled == std::vector<std::uint32_t>{0x23d7ac},
+        "slot 19 runs to a return and is reported as unmodeled");
   seal();
   m.w32(at + 0x90, header);
   m.w32(at + 0x128, 1);
@@ -2111,6 +2113,7 @@ void test_loading_r6_arrival() {
     check(run_arrival(passable, v, got) == "slot 19 with a nonzero value" &&
               got.boundary == 0x23d7ac && queue() == Q{0, 0, 0},
           "slot 19 with a nonzero value stays refused");
+    check(got.unmodeled.empty(), "a refused slot 19 is not reported as run");
   }
   seal();
   m.w32(at + 0x90, header);
@@ -2209,18 +2212,61 @@ void test_loading_r6_arrival() {
            m.word(camera + 0x38) == 0xa5a5a5a5 && m.word(camera + 0x3c) == 0xa5a5a5a5 &&
            m.word(camera + 0x98) == 0xa5a5a5a5;
   };
+  // Audit PLR5-2: every zero-valued final (r5:136-151;
+  // difftest_arrival_stage_r5.py:43-49,84-94) gets a nonzero sentinel first,
+  // so finals() can only see 0 there if cut_start stored it.
+  const auto zero_words =
+      std::vector<std::uint32_t>{0x44fd2c, 0x44fd28, 0x44fcfc, 0x44fd00, 0x44fce8, 0x83d198, 0x83d18c};
+  const auto zero_bytes = std::vector<std::uint32_t>{0x44fcd2, 0x44fcec};
+  auto seal_finals = [&] {
+    for (const auto a : zero_words) m.w32(a, 0xa5a5a5a5);
+    for (const auto a : zero_bytes) m.w8(a, 0xa5);
+  };
+  auto finals_stored = [&](std::size_t from) {
+    bool all = true;
+    for (const auto a : zero_words) all = all && stored_at(m, a, from);
+    for (const auto a : zero_bytes) all = all && stored_at(m, a, from);
+    return all;
+  };
   for (int slot = 0; slot < 4; ++slot) m.byte(v.mission_byte(slot, 1, 3), 0x10);
   m.word(v.player_record(0) + 0x43d0, 0);
+  seal_finals();
+  check(m.word(0x44fd2c) == 0xa5a5a5a5 && m.word(0x83d18c) == 0xa5a5a5a5 && m.read(0x44fcd2) == 0xa5 &&
+            m.read(0x44fcec) == 0xa5,
+        "the zero-valued cut_start finals hold nonzero sentinels before route 2");
+  const auto before_finals = m.writes.size();
   seal_camera();
   check(run_arrival(base, v, got) == "cut_runFrame tasks" && got.boundary == 0x199944 &&
             got.executed == route2 && got.callees == cut_calls && finals() &&
             got.quest_count == 1 && v.quest_get("authored_var") == 7 &&
             m.read(0x86fa80) == 0 && m.read(0x4f8698) == 0 && queue() == Q{0, 0, 0},
         "route 2 applies the cut_start finals and the replacement returns on an empty table");
+  check(finals_stored(before_finals) && got.unmodeled.empty(),
+        "cut_start stores every zero-valued final over its sentinel; an empty delete leaves nothing unmodeled");
   auto doomed = v.new_object({"authored_del"}, 0x20);
   const auto names = v.object_names.count;
   seal_camera();
+  seal_finals();
+  // Audit PLR5-1: 0x14cf90 is reached only as slot 1 of the GameObject table
+  // (r6:127-136; difftest_arrival_stage_r6.py:114-124). A different table
+  // is refused before any dtor store.
+  m.w32(doomed->addr + 0x48, 0x5133c0);
+  const auto before_foreign = m.writes.size();
+  check(run_arrival(base, v, got) == "delete of an object outside the GameObject table was not executed" &&
+            got.callees == cut_calls && got.unmodeled.empty() && m.word(doomed->addr + 0x48) == 0x5133c0 &&
+            !stored_at(m, doomed->addr + 0x48, before_foreign) && v.object_names.count == names,
+        "delete of an object outside the GameObject table stays refused");
   m.w32(doomed->addr + 0x48, 0);
+  check(run_arrival(base, v, got) == "delete of an object outside the GameObject table was not executed" &&
+            m.word(doomed->addr + 0x48) == 0,
+        "a zero table word is not the GameObject table");
+  doomed->props = std::make_shared<std::vector<std::string>>(std::vector<std::string>{"authored=1"});
+  check(run_arrival(base, v, got) == "delete of an object outside the GameObject table was not executed",
+        "the table is checked before the property list");
+  doomed->props = nullptr;
+  seal_camera();
+  seal_finals();
+  m.w32(doomed->addr + 0x48, 0x5122a8);
   const auto before_delete = m.writes.size();
   auto with_dtor = cut_calls;
   with_dtor.insert(with_dtor.end(), {0x14cf90, 0x1a1698, 0x1a1698, 0x1a1698});
@@ -2229,6 +2275,8 @@ void test_loading_r6_arrival() {
             v.object_names.count == names && v.find("authored_del", 0x200).size() == 1 &&
             stored_at(m, doomed->addr + 0x48, before_delete),
         "delete with no property list runs the dtor store and frees nothing");
+  check(got.unmodeled == std::vector<std::uint32_t>{0x1a1698} && finals_stored(before_delete),
+        "the handle clears are reported as unmodeled");
   doomed->props = std::make_shared<std::vector<std::string>>(std::vector<std::string>{"authored=1"});
   check(run_arrival(base, v, got) == "delete with a property list" && got.boundary == 0x3b91d8,
         "delete with a property list stays refused");
@@ -2240,8 +2288,12 @@ void test_loading_r6_arrival() {
     le::ArrivalControl frame = base;
     frame.first_frame = argument;
     seal_camera();
+    seal_finals();
     m.w32(0x4039ac, 0x11111111);
+    const auto before_frame = m.writes.size();
     const auto reason = run_arrival(frame, v, got);
+    check(finals_stored(before_frame) && got.unmodeled.empty(),
+          "the first-frame run also stores every zero-valued final over its sentinel");
     std::size_t post = 0;
     for (std::size_t k = 0; k < m.writes.size(); ++k)
       if (m.writes[k].first == 0x4f8698) post = k;
