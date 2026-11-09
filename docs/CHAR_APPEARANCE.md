@@ -33,8 +33,8 @@ reference module come from `tools/ref_char_attachment.py` at the same commit
 | Shell parameters | bit 33 clear: count 0, block untouched; set: count 2, bytes 49/55, floats ×200/×100 | CCA:300-311 |
 | Draw argument | absolute projection; 5 at ≥360, else `5-(360-m)*0x3c93e93e`, at least 1; inventory caller 1.5 | CCA:313-320 |
 | `0x174e78` gate | part flag `0x20` and a positive count | CCA:322-325, 421-426 |
-| Creation restart | bit `0x80` and count < 2; bit `0x08` picks the marked format; import literal → race slot byte+1 in 0..12; `anim_start(0.2, …, 3)` | CCA:331-347 |
-| Inventory stand | lump by model, idle by class, flags `0x43`; a current clip is not restarted; one unit step gives time `0x3f7fffff`, weight 1 | CCA:375-388 |
+| Creation restart | bit `0x80` and count < 2; bit `0x08` picks the marked format; import literal → race slot byte+1 in 0..12; `anim_start` with flags 3 and the blend word at `0x225584`, read from the executable (forced to 0 on an empty state, kept at count 1) | CCA:331-347 |
+| Inventory stand | lump by model, idle by class, flags `0x43`, blend word at `0x1c4078` forced off for cell 0; a current clip is not restarted; one unit step gives time `0x3f7fffff`, weight 1 | CCA:375-388 |
 | `player_resetIdleAnim` | guards; four definition clips at `class*0x68+{0x44,0x4c,0x54,0x5c}`; count 4; cell 0 weight/life 1; flags `0x1205`; `+0x462` idled cell 0; time and rate not written | CCA:389-401 |
 
 ## Client use
@@ -75,5 +75,10 @@ reference module come from `tools/ref_char_attachment.py` at the same commit
 - **Pixel parity.** The shell packet image, the projection's three factors,
   and VU/GS output are not modelled (CCA:317, 433-434, 458-461). Only the
   shell parameters and the gate are.
+- **Blend words.** The spec names the 0.2 and 0.1 blend loads only by
+  address (CCA:345, 382), so the API takes them as caller input. The executed
+  count-1 rate `0x3daaaaab` (CCA:346-347) is not reproduced from an assumed
+  `0x3e4ccccd`: under the project's PS2 arithmetic that word gives
+  `0x3daaaaaa`. No word is embedded.
 - **Transition setups** (CCA:366-373) and the menu count/handoff rules
   (CCA:44-136) are outside this round's requested scope.

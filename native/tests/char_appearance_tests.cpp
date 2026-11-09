@@ -331,19 +331,24 @@ void poses() {
   check(ca::creation_clip_name("race", "%s_stand.anm") == "race_stand.anm", "leading %s");
   refuses([] { ca::creation_clip_name("r", "x%s"); }, "format must lead with %s");
 
-  // CCA:342-347 install: sentinels cleared, rate 1 empty, 0x3daaaaab at count 1.
+  // CCA:342-347 install: sentinels cleared; the blend is forced to 0 on an
+  // empty state and kept at count 1. Blend words are synthetic here; the
+  // original word at 0x225584 is caller input from the executable.
+  const Raw blend = 0x3e800000; // synthetic 0.25
   ac::AnimState empty(8);
   plant(empty.tracks[0]);
-  auto *t = ca::install_creation_clip(empty, clip());
+  auto *t = ca::install_creation_clip(empty, clip(), blend);
   check(t && t->time == ZERO && t->weight == ZERO && t->rate == ONE && t->flags == 3 && empty.count == 1,
         "creation install on empty state");
   ac::AnimState one(8);
   one.count = 1;
   one.tracks[0].clip = clip();
   plant(one.tracks[1]);
-  t = ca::install_creation_clip(one, clip());
-  check(t == &one.tracks[1] && t->time == ZERO && t->weight == ZERO && t->rate == 0x3daaaaab,
-        "creation install keeps the 0.2 blend at count 1");
+  t = ca::install_creation_clip(one, clip(), blend);
+  namespace rta = champions::simulation::rta;
+  check(t == &one.tracks[1] && t->time == ZERO && t->weight == ZERO &&
+            t->rate == rta::div(ONE, rta::mul(blend, ac::SIXTY)) && t->rate != ONE && one.count == 2,
+        "creation install keeps the blend at count 1");
 
   // CCA:375-386 inventory stand.
   check(ca::inventory_lump_address(0) == 0x538488 && ca::inventory_lump_address(11) == 0x538528, "lump table");
@@ -355,13 +360,13 @@ void poses() {
   ac::AnimState inv(8);
   plant(inv.tracks[0]);
   auto idle = clip();
-  t = ca::inventory_select_idle(inv, idle);
+  t = ca::inventory_select_idle(inv, idle, blend);
   check(t && t->time == ZERO && t->weight == ZERO && t->rate == ONE && t->flags == 0x43, "inventory install");
   inv.tracks[0].time = 0x11111111;
-  check(!ca::inventory_select_idle(inv, idle) && inv.tracks[0].time == 0x11111111, "same clip keeps its frame");
+  check(!ca::inventory_select_idle(inv, idle, blend) && inv.tracks[0].time == 0x11111111, "same clip keeps its frame");
   ac::AnimState fresh(8);
   plant(fresh.tracks[0]);
-  ca::inventory_select_idle(fresh, clip());
+  ca::inventory_select_idle(fresh, clip(), blend);
   ac::AnimSystem system;
   ca::inventory_draw_step(system, fresh);
   check(fresh.tracks[0].time == 0x3f7fffff && fresh.tracks[0].weight == ONE, "first inventory frame");

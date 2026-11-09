@@ -254,7 +254,9 @@ inline constexpr std::uint32_t CREATION_FORMAT = 0x53ff68,
                                CREATION_FORMAT_MARKED = 0x53ff58,
                                CREATION_IMPORT_LITERAL = 0x53fd38,
                                CREATION_RACE_BYTE = 0x8e2c91;
-inline constexpr Raw CREATION_BLEND = 0x3e4ccccd;   // 0.2 at 0x225584
+// The 0.2 blend word is loaded at 0x225584 (CCA:344-347). The spec does not
+// publish its bits, so callers read it from the owner's executable.
+inline constexpr std::uint32_t CREATION_BLEND_SITE = 0x225584;
 inline constexpr std::uint32_t CREATION_FLAGS = 3;  // addiu 3 at 0x225580
 // Thirteen race slots, twelve distinct addresses (REF:326-329).
 inline constexpr std::array<std::uint32_t, 13> CREATION_RACE_LITERALS{{
@@ -273,13 +275,17 @@ std::optional<CreationStart> creation_restart(std::uint16_t object_0x11a,
                                               std::int8_t race_byte);
 // Both formats are a leading %s plus a fixed suffix (REF:353-357).
 std::string creation_clip_name(const std::string &name, const std::string &format);
-// anim_start(0.2, state, clip, 3): time 0, weight 0; rate 1 on an empty state,
-// 0x3daaaaab when one cell is present. No anim_advance is added (CCA:482-485).
-anim_clock::Track *install_creation_clip(anim_clock::AnimState &state, anim_clock::ClipPtr clip);
+// anim_start(blend, state, clip, 3): time 0, weight 0; on an empty state the
+// blend is forced to 0 (rate 1); with one cell present the cell keeps the blend
+// (the spec's executed rate there is 0x3daaaaab). No anim_advance is added
+// (CCA:482-485).
+anim_clock::Track *install_creation_clip(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
+                                         Raw blend_word);
 
 // inventory_selectIdleAnim 0x1c3f08 (CCA:375-388): lump by model, clip by
 // weapon class, flags 0x43, 0.1 blend (forced off for cell 0).
-inline constexpr Raw INVENTORY_BLEND = 0x3dcccccd;
+// The 0.1 blend word is loaded at 0x1c4078; forced off for cell 0 (CCA:382).
+inline constexpr std::uint32_t INVENTORY_BLEND_SITE = 0x1c4078;
 inline constexpr std::uint32_t INVENTORY_FLAGS = 0x43;
 inline constexpr std::array<std::uint32_t, 12> INVENTORY_LUMPS{{
     0x538488, 0x538478, 0x538508, 0x5384d8, 0x5384f8, 0x5384c8,
@@ -287,7 +293,8 @@ inline constexpr std::array<std::uint32_t, 12> INVENTORY_LUMPS{{
 std::uint32_t inventory_lump_address(std::int32_t model);
 std::uint32_t inventory_idle_address(std::int32_t weapon_class);
 // Already the current track: nothing is written (returns nullptr).
-anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_clock::ClipPtr clip);
+anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
+                                         Raw blend_word);
 // The inventory draw's one unit step from 0x1c0a10, before model_draw. From a
 // fresh cell this gives time 0x3f7fffff and weight 1.
 std::int32_t inventory_draw_step(anim_clock::AnimSystem &system, anim_clock::AnimState &state);

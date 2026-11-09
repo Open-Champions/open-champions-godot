@@ -335,8 +335,9 @@ std::string creation_clip_name(const std::string &name, const std::string &forma
   return name + format.substr(2);
 }
 
-anim_clock::Track *install_creation_clip(anim_clock::AnimState &state, anim_clock::ClipPtr clip) {
-  return anim_clock::anim_start(CREATION_BLEND, state, std::move(clip), CREATION_FLAGS);
+anim_clock::Track *install_creation_clip(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
+                                         Raw blend_word) {
+  return anim_clock::anim_start(blend_word, state, std::move(clip), CREATION_FLAGS);
 }
 
 std::uint32_t inventory_lump_address(std::int32_t model) {
@@ -358,11 +359,12 @@ std::uint32_t inventory_idle_address(std::int32_t weapon_class) {
   }
 }
 
-anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_clock::ClipPtr clip) {
+anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
+                                         Raw blend_word) {
   // CCA:379-382: an already-current clip keeps its frame.
   if (const auto *top = state.top(); top && clip && top->clip == clip)
     return nullptr;
-  return anim_clock::anim_start(INVENTORY_BLEND, state, std::move(clip), INVENTORY_FLAGS);
+  return anim_clock::anim_start(blend_word, state, std::move(clip), INVENTORY_FLAGS);
 }
 
 std::int32_t inventory_draw_step(anim_clock::AnimSystem &system, anim_clock::AnimState &state) {
