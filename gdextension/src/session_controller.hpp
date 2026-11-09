@@ -125,6 +125,20 @@ private:
   std::uint32_t gate_arrival_seed_ = 0;
   std::string gate_prompt_refusal_;
   champions::simulation::rta::level_object_state::Directory level_states_;
+  // Death reload, client round 2 (research-death-reload@98ea7a6
+  // docs/death-reload-client-path.md). A card load copies its image into the
+  // live save buffer (:103-108), so the last card-loaded level key marks the
+  // live header; level_states_ is the live directory that departure stores
+  // keep writing. The owner (scene) performs the load the death task requests.
+  bool live_checkpoint_ = false;
+  std::string live_checkpoint_key_;
+  std::int64_t live_checkpoint_act_ = -1, live_checkpoint_act_resets_ = 0;
+  std::string death_reload_key_, death_reload_refusal_;
+  bool death_reload_done_ = false;
+  void bind_death_reload();
+  // Step 9's stopped-slot rule on level_states_ (save-world.md:44-52): throws
+  // the precise gap-slot refusal; true when the key restores a saved slot.
+  bool require_level_state_restorable(const std::string &key) const;
   std::size_t restored_object_fields_ = 0;
   std::string level_object_key_;
   // Presentation word retained when an opt-in level script host is replaced.
@@ -277,6 +291,12 @@ public:
   godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes,
                                                 const godot::String &required_key = godot::String());
   godot::Dictionary level_object_state_status() const;
+  // Death reload: a card load marks the live save buffer; the death task's
+  // reload request is reported here and the owner reports the loaded key.
+  godot::Dictionary set_live_checkpoint(const godot::String &qualified_key);
+  godot::Dictionary death_reload_status() const;
+  godot::Dictionary finish_death_reload(const godot::String &loaded_key,
+                                        const godot::String &refusal = godot::String());
   godot::Dictionary script_mission1_status() const;
   // Explicit diagnostic entries/sites, never physical interaction or a
   // continuous campaign route. All indices are addressed contract indices.

@@ -145,6 +145,12 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_level_object_directory, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("level_object_state_status"),
                        &ChampionsSessionController::level_object_state_status);
+  ClassDB::bind_method(D_METHOD("set_live_checkpoint", "qualified_key"),
+                       &ChampionsSessionController::set_live_checkpoint);
+  ClassDB::bind_method(D_METHOD("death_reload_status"),
+                       &ChampionsSessionController::death_reload_status);
+  ClassDB::bind_method(D_METHOD("finish_death_reload", "loaded_key", "refusal"),
+                       &ChampionsSessionController::finish_death_reload, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -1174,6 +1180,9 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::size_t restored_fields = 0;
     const std::string key = level_name.utf8().get_data();
     if (!mission1_stopped && !key.empty()) {
+      // A miss after ten keys meets the written gap slot: refused, not loaded
+      // fresh (research-save-world@31a0ca6 docs/save-world.md:44-52,314-316).
+      require_level_state_restorable(key);
       if (const auto *slot = level_states_.lookup(key))
         restored_fields = next->restore_built_object_fields(slot->records);
     }
@@ -1357,6 +1366,7 @@ void ChampionsSessionController::start_fight(const rta::session_control::Observa
   } else {
     start.hp = state.hp;
   }
+  bind_death_reload();
   if (fight_->start(start).empty()) {
     starting_items_pending_ = false;
     inventory_record_revision_ = player_record_revision_;
@@ -1490,6 +1500,106 @@ Dictionary ChampionsSessionController::load_level_object_directory(const PackedB
   } catch (const std::exception &e) { return failure(e); }
 }
 
+bool ChampionsSessionController::require_level_state_restorable(const std::string &key) const {
+  if (level_states_.lookup(key)) return true;
+  // The search stops at the first empty slot (fresh) or after ten misses at
+  // gap slot 10; a written gap restores its body for every miss.
+  if (level_states_.count() == rta::level_object_state::Directory::READABLE) {
+    if (const auto *gap = level_states_.overflow_gap())
+      throw rta::combat_runtime::Unsupported(
+          "gap-slot restore refused: '" + key + "' misses directory slots 0..9, so the original "
+          "loader stops at gap slot 10, which holds '" + gap->key + "', and restores that body "
+          "for every missing name (research-save-world@31a0ca6 docs/save-world.md:44-52); "
+          "the port must choose a gap-slot policy (save-world.md:314-316) and none is chosen");
+  }
+  return false;
+}
+void ChampionsSessionController::bind_death_reload() {
+  if (!fight_) return;
+  rta::campaign_fight::DeathReloadOwner owner;
+  owner.reload = [this] {
+    // deathTask phase 1, act found: save_load on the live buffer
+    // (client-path.md:89-90). Refusals are thrown as the Fight records them.
+    if (!live_checkpoint_)
+      throw rta::combat_runtime::Unsupported(
+          "death reload refused: the live save buffer holds no checkpoint (no card load and no "
+          "save_game build in this session); the original's uninitialised-buffer behaviour is "
+          "Unknown (research-death-reload@98ea7a6 docs/death-reload-client-path.md:183)");
+    if (scripts_) {
+      const auto &campaign = scripts_->campaign();
+      if (std::int64_t(campaign.act()) != live_checkpoint_act_ ||
+          std::int64_t(campaign.events().act_resets) > live_checkpoint_act_resets_)
+        throw rta::combat_runtime::Unsupported(
+            "death reload refused: an act change since the checkpoint would have run "
+            "save_clearBuffer(0), which keeps only directory slot 0 (research-save-world@31a0ca6 "
+            "docs/save-world.md:194, 293-296); this client's object directory is not cleared "
+            "on an act change, so its other bodies would not come back fresh");
+    }
+    require_level_state_restorable(live_checkpoint_key_);
+    death_reload_key_ = live_checkpoint_key_;
+    death_reload_refusal_.clear();
+    death_reload_done_ = false;
+  };
+  owner.restart = [] {
+    // Step 5b (client-path.md:91): request the current level, refill HP, keep
+    // every other record byte. This scene's level load rebuilds the
+    // shared-World player from its start values, not from the dying record.
+    throw rta::combat_runtime::Unsupported(
+        "same-level death restart refused: the level is in no act row, and this client has no "
+        "current-level reload that keeps the dying record with only HP refilled "
+        "(research-death-reload@98ea7a6 docs/death-reload-client-path.md:91)");
+  };
+  owner.names_match = [this] { return death_reload_done_; };
+  fight_->bind_death_reload(std::move(owner));
+}
+Dictionary ChampionsSessionController::set_live_checkpoint(const String &qualified_key) {
+  try {
+    const std::string key = qualified_key.utf8().get_data();
+    if (key.empty()) throw std::runtime_error("A live checkpoint needs the loaded level key.");
+    live_checkpoint_ = true;
+    live_checkpoint_key_ = key;
+    live_checkpoint_act_ = scripts_ ? std::int64_t(scripts_->campaign().act()) : -1;
+    live_checkpoint_act_resets_ = scripts_ ? std::int64_t(scripts_->campaign().events().act_resets) : 0;
+    Dictionary out;
+    out["ok"] = true;
+    out["key"] = qualified_key;
+    out["act"] = live_checkpoint_act_;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::death_reload_status() const {
+  Dictionary out;
+  out["live_checkpoint"] = live_checkpoint_;
+  out["checkpoint_key"] = String::utf8(live_checkpoint_key_.c_str());
+  out["requested"] = !death_reload_key_.empty();
+  out["key"] = String::utf8(death_reload_key_.c_str());
+  out["done"] = death_reload_done_;
+  out["refusal"] = String::utf8(death_reload_refusal_.c_str());
+  const auto *slot = death_reload_key_.empty() ? nullptr : level_states_.lookup(death_reload_key_);
+  out["live_records"] = slot ? int64_t(slot->records.size()) : int64_t(-1);
+  return out;
+}
+Dictionary ChampionsSessionController::finish_death_reload(const String &loaded_key, const String &refusal) {
+  Dictionary out;
+  const std::string loaded = loaded_key.utf8().get_data();
+  if (death_reload_key_.empty()) {
+    out["ok"] = false;
+    out["error"] = "No death reload was requested.";
+    return out;
+  }
+  // deathTask phase 2 (client-path.md:99): the request is consumed and the
+  // loaded qualified name matches the requested one.
+  death_reload_done_ = refusal.is_empty() && loaded == death_reload_key_;
+  death_reload_refusal_ = death_reload_done_ ? std::string()
+      : (refusal.is_empty() ? "death reload loaded '" + loaded + "', not '" + death_reload_key_ + "'"
+                            : std::string(refusal.utf8().get_data()));
+  out["ok"] = death_reload_done_;
+  out["done"] = death_reload_done_;
+  out["key"] = String::utf8(death_reload_key_.c_str());
+  if (!death_reload_done_) out["error"] = String::utf8(death_reload_refusal_.c_str());
+  death_reload_key_.clear();
+  return out;
+}
 Dictionary ChampionsSessionController::level_object_state_status() const {
   Dictionary result;
   result["slots"] = int64_t(level_states_.count());
@@ -3595,6 +3705,8 @@ Dictionary ChampionsSessionController::fight_observation() const {
   out["fight_death_task"] = death.running;
   out["fight_death_phase"] = int64_t(death.phase);
   out["fight_death_error"] = String::utf8(death.refusal.c_str());
+  out["fight_death_reload_requested"] = death.reload_requested;
+  out["fight_death_restart_requested"] = death.restart_requested;
   out["fight_death_countdown"] = int64_t(death.wipe_countdown);
   out["fight_dead_countdown"] = int64_t(death.dead_countdown);
   out["fight_death_fade"] = int64_t(death.fade);

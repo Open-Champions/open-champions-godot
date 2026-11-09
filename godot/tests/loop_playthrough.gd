@@ -1955,7 +1955,26 @@ func run() -> void:
 	# It queues Player_takeDamage; no HP/body/state/clip word is forced. The
 	# source is one of the live factory enemies, whose attack AI is unported.
 	var death_loaded: bool = cold.load_session_file(save_path)
+	# Death reload (client round 2): a card load fills the live save buffer
+	# (research-save-screen@c8895e2 docs/save-screen.md:258-279). When the
+	# journey's own save was refused (dead built-Creature state), the
+	# revisited level was loaded fresh, so a card save there is not that
+	# refusal; its card load becomes the checkpoint the death reload reads.
+	var checkpoint_path := save_path
+	var checkpoint_saved := false
+	var checkpoint_scripted := false
+	if not death_loaded and revisited and refused_without_output:
+		# The death task and its reload need the level script's shared World.
+		cold.level_script.set_pressed_no_signal(true)
+		checkpoint_scripted = cold.load_real_level(level_before) and \
+			cold.controller.get_play_capabilities().get("level_script_enabled", false)
+		checkpoint_path = out_dir.path_join("death-checkpoint.ocplay")
+		for suffix in ["", ".level", ".campaign", ".worldstate", ".player", ".fight"]:
+			if FileAccess.file_exists(checkpoint_path + suffix): DirAccess.remove_absolute(checkpoint_path + suffix)
+		checkpoint_saved = checkpoint_scripted and cold.save_session_file(checkpoint_path)
+		death_loaded = checkpoint_saved and cold.load_session_file(checkpoint_path)
 	if death_loaded:
+		var checkpoint_position: Vector3 = cold.controller.get_presentation().get("current_position", Vector3.ZERO)
 		cold.start_play()
 		cold.diagnostic_player_death = true
 		scene = cold
@@ -1974,6 +1993,7 @@ func run() -> void:
 		await capture("12-player-death-fade")
 		advance(0, 100)
 		var dead: Dictionary = cold.controller.get_observation()
+		var reload_requested: bool = dead.get("fight_death_reload_requested", false)
 		var retained: bool = int(dead.get("gold", -1)) == int(death_before.get("gold", -2)) \
 			and int(dead.get("experience", -1)) == int(death_before.get("experience", -2)) \
 			and int(dead.get("level", -1)) == int(death_before.get("level", -2))
@@ -1982,11 +2002,38 @@ func run() -> void:
 			and menu_closed and dead.get("fight_death_animation_started", false) \
 			and int(dead.get("fight_death_animation_steps", 0)) > 0 \
 			and int(dead.get("fight_death_countdown", -1)) == 0 and int(dead.get("fight_dead_countdown", -1)) == 0 \
-			and int(dead.get("fight_death_fade", -1)) == 128 and int(dead.get("fight_death_phase", -1)) == 1 \
-			and not str(dead.get("fight_death_error", "")).is_empty() and retained \
-			and not dead.get("fight_failed", true)
-		mark("player_death", "blocked_death_reload" if sequence else "refused",
-			{"diagnostic_lethal_hit": true, "death_sequence_verified": sequence,
+			and int(dead.get("fight_death_fade", -1)) == 128 \
+			and ((int(dead.get("fight_death_phase", -1)) == 1 and not str(dead.get("fight_death_error", "")).is_empty()) \
+				or (int(dead.get("fight_death_phase", -1)) == 2 and reload_requested and str(dead.get("fight_death_error", "")).is_empty())) \
+			and retained and not dead.get("fight_failed", true)
+		# Phase 1 found the level: the scene runs the card load fed from the
+		# live buffer, then the death task's phase 2 name match ends it.
+		var reloaded := false
+		var reload_fields := {}
+		if sequence and reload_requested:
+			var reload_done: bool = cold.run_death_reload()
+			var reload_position: Vector3 = cold.controller.get_presentation().get("current_position", Vector3.ZERO)
+			advance(0, 30)
+			var back: Dictionary = cold.controller.get_observation()
+			var checkpoint_hp := float(death_before.get("hp", -1.0))
+			reload_fields = {"death_reload_done": reload_done,
+				"death_reload_error": str(cold.death_reload_result.get("error", "")),
+				"checkpoint_saved": checkpoint_saved, "checkpoint_scripted": checkpoint_scripted,
+				"level_index_after": cold.real.current,
+				"hp_after": float(back.get("hp", -1.0)), "hp_checkpoint": checkpoint_hp,
+				"gold_after": int(back.get("gold", -1)), "experience_after": int(back.get("experience", -1)),
+				"position_error": reload_position.distance_to(checkpoint_position),
+				"fight_player_ready": back.get("fight_player_ready", false),
+				"death_task_after": back.get("fight_death_task", true),
+				"death_error_after": str(back.get("fight_death_error", ""))}
+			reloaded = reload_done and cold.real.current == level_before \
+				and float(back.get("hp", -1.0)) > 0.0 and is_equal_approx(float(back.get("hp", -1.0)), checkpoint_hp) \
+				and int(back.get("gold", -1)) == int(death_before.get("gold", -2)) \
+				and int(back.get("experience", -1)) == int(death_before.get("experience", -2)) \
+				and float(reload_fields.position_error) < 0.01 \
+				and back.get("fight_player_ready", false) and not back.get("fight_death_task", true) \
+				and str(back.get("fight_death_error", "")).is_empty() and not back.get("fight_failed", true)
+		var death_fields := {"diagnostic_lethal_hit": true, "death_sequence_verified": sequence,
 			"actors": dead.get("fight_enemies", []).size(), "menu_closed": menu_closed,
 			"hp_zero": float(dead.get("hp", -1)) == 0.0,
 			"native_clip_started": dead.get("fight_death_animation_started", false),
@@ -1995,8 +2042,11 @@ func run() -> void:
 			"wipe_countdown": dead.get("fight_death_countdown", -1), "fade": dead.get("fight_death_fade", -1),
 			"phase": dead.get("fight_death_phase", -1), "record_values_retained": retained,
 			"reload_refused": not str(dead.get("fight_death_error", "")).is_empty(),
-			"respawn_completed": false})
-		await capture("13-player-reload-refused")
+			"reload_requested": reload_requested, "death_error": str(dead.get("fight_death_error", "")),
+			"respawn_completed": reloaded}
+		death_fields.merge(reload_fields)
+		mark("player_death", "reloaded" if reloaded else ("blocked_death_reload" if sequence else "refused"), death_fields)
+		await capture("13-player-death-reloaded" if reloaded else "13-player-reload-refused")
 	else:
 		mark("player_death", "refused", {"saved_level_reloaded": false})
 	cold.queue_free()

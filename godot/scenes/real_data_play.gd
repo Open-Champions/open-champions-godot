@@ -42,6 +42,14 @@ var mission_menu_target := -1
 var _level_change_queued := false
 var _level_change_loading := false
 var _refused_level_request := ""
+# Death reload (client round 2). A card load copies its image into the live
+# save buffer; the death task then reloads it with each level's latest body
+# from the live object directory (research-death-reload@98ea7a6
+# docs/death-reload-client-path.md:101-161).
+var _live_checkpoint_path := ""
+var _death_reload_live_directory := false
+var _death_reload_queued := false
+var death_reload_result: Dictionary = {}
 var last_campaign_carried := false
 var last_campaign_image_restored := false
 var last_level_script_attached := false
@@ -519,12 +527,17 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Load refused: per-level object companion is absent or differs."
 			return false
 		object_state = object_file.get_buffer(object_file.get_length())
-		var directory: Dictionary = controller.load_level_object_directory(object_state, str(level.stem))
-		if not directory.get("ok", false):
-			status_label.text = "Load refused: per-level object directory is invalid."
-			return false
-		expected_object_records = int(directory.get("required_records", -1))
-	else:
+		if _death_reload_live_directory:
+			# A death reload keeps the live directory: later departure stores
+			# wrote into it after the card load (client-path.md:55-63,120-124).
+			expected_object_records = maxi(0, int(controller.death_reload_status().get("live_records", -1)))
+		else:
+			var directory: Dictionary = controller.load_level_object_directory(object_state, str(level.stem))
+			if not directory.get("ok", false):
+				status_label.text = "Load refused: per-level object directory is invalid."
+				return false
+			expected_object_records = int(directory.get("required_records", -1))
+	elif not _death_reload_live_directory:
 		controller.load_level_object_directory(PackedByteArray())
 	level_script.set_pressed_no_signal(scripted)
 	restoring_real_level = true
@@ -573,8 +586,36 @@ func load_session_file(path: String) -> bool:
 			status_label.text = "Session replaced; shared-World player could not be restored: " + str(put.get("error", "unknown"))
 			return false
 		_observe(controller.get_observation())
+	# The card image is now the live save buffer's header (save-screen.md:258-279).
+	var marked: Dictionary = controller.set_live_checkpoint(str(level.stem))
+	_live_checkpoint_path = path if marked.get("ok", false) else ""
 	status_label.text = "Loaded level, player, quests, position and confirmed Creature fields. Other object effects refused; scripts restart."
 	return true
+
+# deathTask phase 1 found the level in the act table and the controller
+# accepted the live buffer: run the card load fed from it. The header (player,
+# quests, pose, HP) comes from the last card-loaded image; each level body
+# from the live directory; the dying level is not stored (restoring_real_level
+# skips the departure store, client-path.md:92). Phase 2 ends the task once
+# the loaded key matches the request (client-path.md:99).
+func run_death_reload() -> bool:
+	_death_reload_queued = false
+	if controller == null or real == null: return false
+	var status: Dictionary = controller.death_reload_status()
+	if not status.get("requested", false): return false
+	var was_playing: bool = play_mode and session_started and not stopped
+	var ok := false
+	if _live_checkpoint_path.is_empty():
+		status_label.text = "Death reload refused: no card-loaded image is the live save buffer."
+	else:
+		_death_reload_live_directory = true
+		ok = load_session_file(_live_checkpoint_path)
+		_death_reload_live_directory = false
+	var loaded_key := str(real.levels[real.current].stem) if ok and real.current >= 0 else ""
+	death_reload_result = controller.finish_death_reload(loaded_key, "" if ok else status_label.text)
+	if ok and was_playing: start_play()
+	if ok: status_label.text = "Death reload: checkpoint player, quests and pose with each level's latest stored state."
+	return bool(death_reload_result.get("done", false))
 
 func _prepare_native_save(path: String) -> Dictionary:
 	return controller.prepare_save_file(path, restoring_real_level)
@@ -940,6 +981,10 @@ func _observe(result: Dictionary) -> void:
 		# HUD/menu Controls are added later as a level is configured. Preserve
 		# the fade's final overlay order when those children change.
 		viewport.move_child(death_fade, viewport.get_child_count() - 1)
+	if result.get("fight_death_reload_requested", false) and not _death_reload_queued and \
+			controller != null and controller.death_reload_status().get("requested", false):
+		_death_reload_queued = true
+		call_deferred("run_death_reload")
 	if not _level_change_loading and controller != null:
 		_refresh_mission_menu()
 		var pending: Dictionary = controller.script_level_request()
