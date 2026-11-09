@@ -149,6 +149,10 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::built_save_refusal_census);
   ClassDB::bind_method(D_METHOD("set_live_checkpoint", "qualified_key"),
                        &ChampionsSessionController::set_live_checkpoint);
+  ClassDB::bind_method(D_METHOD("mark_card_save_checkpoint", "qualified_key"),
+                       &ChampionsSessionController::mark_card_save_checkpoint);
+  ClassDB::bind_method(D_METHOD("campaign_act_of", "qualified_key"),
+                       &ChampionsSessionController::campaign_act_of);
   ClassDB::bind_method(D_METHOD("invalidate_live_checkpoint", "reason"),
                        &ChampionsSessionController::invalidate_live_checkpoint);
   ClassDB::bind_method(D_METHOD("death_reload_status"),
@@ -1605,6 +1609,51 @@ Dictionary ChampionsSessionController::set_live_checkpoint(const String &qualifi
     out["act"] = live_checkpoint_act_;
     return out;
   } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::campaign_act_of(const String &qualified_key) const {
+  try {
+    if (!executable_) throw std::runtime_error("The act table needs the selected executable.");
+    const auto tables = rta::quests::read_act_tables(*executable_);
+    Dictionary out;
+    out["ok"] = true;
+    out["act"] = int64_t(rta::quests::find_act(qualified_key.utf8().get_data(), -1, tables.names));
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::mark_card_save_checkpoint(const String &qualified_key) {
+  // research-saves@8d43286 docs/save-format.md:37, 55-60;
+  // research-save-screen@c8895e2 docs/save-screen.md:229.
+  if (scripts_ && scripts_->variables().memory.u8(0x4f85c5)) {
+    Dictionary out = invalidate_live_checkpoint(
+        "the card save ran with the completed-game flag set, so save_build named the header "
+        "gameComplete (research-saves@8d43286 docs/save-format.md:37); its reload is not researched");
+    out["marked"] = false;
+    out["invalidated"] = true;
+    return out;
+  }
+  const Dictionary act = campaign_act_of(qualified_key);
+  if (!bool(act.get("ok", false))) {
+    const std::string why = std::string("the card save's act lookup could not run (") +
+                            String(act.get("error", "")).utf8().get_data() + ")";
+    Dictionary out = invalidate_live_checkpoint(String::utf8(why.c_str()));
+    out["marked"] = false;
+    out["invalidated"] = true;
+    return out;
+  }
+  if (int64_t(act["act"]) < 0) {
+    // save_build returns without writing: the live header is unchanged.
+    Dictionary out;
+    out["ok"] = true;
+    out["marked"] = false;
+    out["invalidated"] = false;
+    out["act"] = int64_t(-1);
+    out["kept_checkpoint"] = live_checkpoint_;
+    return out;
+  }
+  Dictionary out = set_live_checkpoint(qualified_key);
+  out["marked"] = bool(out.get("ok", false));
+  out["invalidated"] = false;
+  return out;
 }
 Dictionary ChampionsSessionController::invalidate_live_checkpoint(const String &reason) {
   const std::string why = reason.utf8().get_data();

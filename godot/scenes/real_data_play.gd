@@ -393,9 +393,14 @@ func save_session_file(path: String) -> bool:
 		return super.save_session_file(path)
 	var saved := _save_real_session_file(path)
 	if not saved:
-		# The original's offline card save rebuilds g_saveBuffer with save_build
-		# before it writes (save-screen.md:229). This save was refused, so the
-		# live header that a death reload reads is unknown here.
+		# Every refused save clears the mark. This is conservative: only the
+		# refusals at or after the save step (the object directory, the card
+		# write and its companions) correspond to the original's save_build
+		# rebuild of g_saveBuffer before the write (save-screen.md:229). The
+		# earlier ones (an open dialog or help box, unverifiable source data,
+		# campaign capture) come before that step, where the original's
+		# header would be unchanged. Clearing there refuses a later death
+		# reload rather than guessing which header it would read.
 		controller.invalidate_live_checkpoint(str(status_label.text))
 		_live_checkpoint_path = ""
 	return saved
@@ -467,11 +472,19 @@ func _save_real_session_file(path: String) -> bool:
 			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
 		status_label.text = "Save refused: level association could not be written."
 		return false
-	# An offline card save runs save_build into g_saveBuffer first, so the
-	# saved image is now the live save buffer's header (save-screen.md:229):
-	# a later death reload reads this file, not an earlier card load.
-	var marked: Dictionary = controller.set_live_checkpoint(str(level.stem))
-	_live_checkpoint_path = path if marked.get("ok", false) else ""
+	# An offline card save runs save_build into g_saveBuffer first
+	# (save-screen.md:229). In a level an act row prefixes, the saved image is
+	# now the live header: a later death reload reads this file. Outside every
+	# act save_build writes nothing (save-format.md:55-58), so the previous
+	# mark stays. A completed game or a failed act lookup clears it.
+	var marked: Dictionary = controller.mark_card_save_checkpoint(str(level.stem))
+	if marked.get("marked", false):
+		_live_checkpoint_path = path
+	elif not marked.get("ok", false):
+		controller.invalidate_live_checkpoint(str(marked.get("error", "card save checkpoint mark failed")))
+		_live_checkpoint_path = ""
+	elif marked.get("invalidated", false):
+		_live_checkpoint_path = ""
 	status_label.text = "Saved level, player, quests, position and confirmed Creature fields. Other object and in-flight script effects refused."
 	return true
 

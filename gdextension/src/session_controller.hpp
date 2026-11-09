@@ -304,6 +304,16 @@ public:
   // Death reload: a card load marks the live save buffer; the death task's
   // reload request is reported here and the owner reports the loaded key.
   godot::Dictionary set_live_checkpoint(const godot::String &qualified_key);
+  // A successful card save: the original's offline save runs save_build
+  // first (save-screen.md:229), which writes nothing when the game is not
+  // complete and no act row prefixes the level (save-format.md:55-58). So
+  // the mark moves only for a level in an act; outside every act the
+  // previous mark is kept. A completed game (byte 0x4f85c5) or a missing act
+  // table invalidates it, because that header is not researched here.
+  godot::Dictionary mark_card_save_checkpoint(const godot::String &qualified_key);
+  // Read-only: the act whose row prefixes the name (save_findAct; only the
+  // comparison with -1 is used), or -1.
+  godot::Dictionary campaign_act_of(const godot::String &qualified_key) const;
   godot::Dictionary invalidate_live_checkpoint(const godot::String &reason);
   godot::Dictionary death_reload_status() const;
   godot::Dictionary finish_death_reload(const godot::String &loaded_key,
