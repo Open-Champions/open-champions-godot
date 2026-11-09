@@ -85,6 +85,14 @@ The listed entries then run through the existing commands:
   requirements. `activateStore` stays refused.
 - Travel entries write their level, entrance and orientation `0xff`
   (`:430-440`, `:454-463`, `:638-670`, `:832-848`).
+  Several pass data offset 0 as the level string. In a gated level the host
+  reads it as the binder does, since the research executed these calls and
+  recorded their level; the mission 2 `newWorld(0)` refusal stays for
+  ungated levels.
+- `tormenta` `start` reaches `autoPropSetState`, which the client still
+  refuses, before its `setMissionAvailable(5, 1)`. The research ran that
+  native's original body. So mission 5 does not become available from its
+  level start in the client yet; the private probe reports this case.
 
 The hub and hub2 entries that make missions 4, 5 and 6 available are listed
 in `story_route::availability_entries` (`:504-510`, `:861-880`). The hubs keep
