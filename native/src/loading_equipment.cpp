@@ -409,6 +409,13 @@ void set_state_clip(builtins::Memory &m, ArrivalPrefix &out, std::uint32_t obj, 
   const auto length = m.word(clip + 4);
   if (capacity == 4 && length != 5)
     finish(out, 0x170bc8, "anim entry +0x18 for a clip length other than 5 was not executed", m, {0, 0, 0});
+  // Capacity 0's "no store touches +0xa0..+0xbf" ran only with clip +4 = 5
+  // (r7:303-306; difftest_arrival_stage_r7.py:380-388). The r8 props runs at
+  // 9 and 0x40 assert +0x17c alone, with no entry sentinel
+  // (difftest_arrival_stage_r8.py:414-419), so another length is refused at
+  // anim_push before any store.
+  if (capacity == 0 && length != 5)
+    finish(out, 0x170838, "anim_push at capacity 0 with a clip length other than 5 was not executed", m, {0, 0, 0});
   const std::uint32_t mode = (m.word(obj + 0x12c) & 2) ? 3 : 6; // r7:273-275, 310
   // r7:340-341 (R10-2): the depth clear is `sb zero` at 0x23d6f8, Observed
   // static by field only. Its effect is inferred from the executed second
@@ -444,8 +451,11 @@ void set_state_clip(builtins::Memory &m, ArrivalPrefix &out, std::uint32_t obj, 
   m.w32(obj + 0x17c, length + 1);
 }
 
-// The executed property list (r7:375-384): one other entry, then one
-// "name=" entry whose value names this object. Anything else is refused.
+// The executed property list (r7:375-384; difftest_arrival_stage_r7.py:450-458):
+// "kind=1", then one "name=" entry whose value names this object. The keys
+// the six strncmp 0x3b91d8 calls compare against are not recorded, so any
+// other first entry is refused at 0x3b91d8 before any store, as is any other
+// shape.
 // The memory layout is +0x2c -> null-terminated array of string pointers
 // (difftest_arrival_stage_r7.py delete); a host list is the same entries.
 std::string delete_name_entry(builtins::Variables &v, ArrivalPrefix &out, objects::GameObject *obj) {
@@ -462,7 +472,7 @@ std::string delete_name_entry(builtins::Variables &v, ArrivalPrefix &out, object
     entries = *obj->props;
   }
   const auto named = [](const std::string &s) { return s.rfind("name=", 0) == 0; };
-  if (entries.size() != 2 || named(entries[0]) || !named(entries[1]))
+  if (entries.size() != 2 || entries[0] != "kind=1" || !named(entries[1]))
     finish(out, 0x3b91d8, "delete with this property list was not executed", m, {0, 0, 0});
   const auto value = entries[1].substr(5);
   const auto found = v.find(value, 0x200);
@@ -846,7 +856,19 @@ void run_arrival_staged(builtins::Variables &v, const ArrivalControl &c, Arrival
       // r7:362-371 and difftest_arrival_stage_r8.py free_head: pool_free
       // 0x150470 links the block at the head word 0x403a1c + 16 x bucket.
       // Only bucket 1 with a non-zero head was executed (a 0x250-byte
-      // GameObject); the client accepts only its pool's class-1 blocks.
+      // GameObject); the client accepts only addresses inside its pool's
+      // class-1 range, on block boundaries.
+      // Not connected to the client's allocator: the host Pool keeps its
+      // heads and links as members and exposes no memory (core_state.hpp
+      // Pool, core_state.cpp Pool::free), and no client code writes the
+      // class table 0x403a10 (only this stage and its test name 0x403a1c).
+      // So the stage applies only the two recorded memory stores below;
+      // World::pool / Variables::world->pool is not told of the free. The
+      // memory head and the host head[1] are separate states with no
+      // recorded mapping, and setup objects (Variables::new_object) are not
+      // Pool blocks, so freeing in the host Pool too would be a guess.
+      // Outside a fixture that plants the head word it is 0, and the stage
+      // refuses below.
       if (obj->addr < kPoolClass1 || obj->addr >= kPoolClass1End ||
           (obj->addr - kPoolClass1) % Pool::CLASSES[1][0])
         finish(out, 0x150470, "pool_free of a block outside pool class 1 was not executed", m, {0, 0, 0});

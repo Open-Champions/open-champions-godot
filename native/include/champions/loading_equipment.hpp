@@ -70,6 +70,12 @@ void reset_arrival_queue(builtins::Memory &);
 // clip and slot 19's value from +0x12c bit 0 (r7:270-351), and the delete
 // that removes a name= value and frees the block (r7:353-387). Round 6 stays
 // as its own pin; its "does not free" is withdrawn by r7:355-360.
+// The free applies only pool_free's two recorded memory stores, at the
+// bucket-1 head word 0x403a2c and the block's first word. The client's
+// allocator (World::pool, a host Pool with no memory image) is not told, and
+// no client code writes that head word, so the free is reached only when a
+// fixture plants it; otherwise it is 0 and the delete refuses.
+// The accepted property list is exactly {"kind=1", "name=<this object>"}.
 struct ArrivalControl {
   int route = 0;
   int through_round = 4; // 4, 6 or 7; anything else is refused

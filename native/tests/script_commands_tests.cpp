@@ -2554,7 +2554,7 @@ void test_loading_r7_arrival() {
     return m.writes.size();
   };
   const auto stop = "removePlayerItem after object load";
-  for (const std::uint32_t length : {5u, 9u, 0x40u}) {
+  for (const std::uint32_t length : {5u}) {
     const auto from = seal(length, 0, 0, 0x100);
     bool untouched = true;
     for (std::uint32_t k = 0; k < 0x20; ++k) untouched = untouched && !stored_at(m, entry + k, from);
@@ -2564,6 +2564,17 @@ void test_loading_r7_arrival() {
               m.u16(at + 0x9e) == 0x100 && queue() == Q{0, 2, 0},
           "capacity 0 pushes nothing and sets +0x17c to clip +4 + 1, not added to the old value");
     check(got.unmodeled == U{0x170838, 0x23d7ac}, "capacity 0's +0x9e stores are reported as unmodeled");
+  }
+  // PLR7-2: capacity 0 left the entry untouched only at clip +4 = 5
+  // (r7:303-306); the r8 runs at 9 and 0x40 checked +0x17c alone.
+  for (const std::uint32_t length : {9u, 0x40u}) {
+    const auto from = seal(length, 0, 0, 0x100);
+    bool untouched = true;
+    for (std::uint32_t k = 0; k < 0x20; ++k) untouched = untouched && !stored_at(m, entry + k, from);
+    check(run_arrival(base, v, got) == "anim_push at capacity 0 with a clip length other than 5 was not executed" &&
+              got.boundary == 0x170838 && untouched && !stored_at(m, at + 0x9c, from) &&
+              !stored_at(m, at + 0x9e, from) && m.word(at + 0x17c) != length + 1 && queue() == Q{0, 0, 0},
+          "capacity 0 with a clip length other than 5 stays refused before any push store");
   }
   bool all_fields = true, or_mode = true;
   for (const auto &[flags, mode] : std::vector<std::pair<std::uint32_t, std::uint16_t>>{{0, 6}, {2, 3}}) {
@@ -2730,6 +2741,34 @@ void test_loading_r7_arrival() {
            reason == "delete whose name= value names another object was not executed") &&
               got.boundary == 0x3b91d8 && !stored_at(m, odd->addr + 0x48, mark) && v.find("authored_odd", 0x200).size() == 1,
           "an unexecuted property list stays refused before any store");
+  }
+  // PLR7-1: only the executed first entry "kind=1" is accepted (r7:375-384).
+  for (const auto &list : std::vector<std::vector<std::string>>{
+           {"authored_key=1", "name=authored_odd"}, {"kind=2", "name=authored_odd"}, {"kind=1 ", "name=authored_odd"}}) {
+    odd->props = std::make_shared<std::vector<std::string>>(list);
+    mark = m.writes.size();
+    const auto names_before = v.object_names.count;
+    check(run_arrival(base, v, got) == "delete with this property list was not executed" &&
+              got.boundary == 0x3b91d8 && !stored_at(m, odd->addr + 0x48, mark) && !stored_at(m, head, mark) &&
+              !stored_at(m, odd->addr, mark) && v.object_names.count == names_before &&
+              v.find("authored_odd", 0x200).size() == 1,
+          "a host list with another first entry stays refused before any store");
+  }
+  {
+    odd->props = nullptr;
+    const std::uint32_t other_list = 0x00ca0300, other_key = 0x00ca0400, other_name = 0x00ca0500;
+    m.string(other_key, "authored_key=1");
+    m.string(other_name, "name=authored_odd");
+    m.w32(other_list, other_key);
+    m.w32(other_list + 4, other_name);
+    m.w32(other_list + 8, 0);
+    m.w32(odd->addr + 0x2c, other_list);
+    mark = m.writes.size();
+    check(run_arrival(base, v, got) == "delete with this property list was not executed" &&
+              got.boundary == 0x3b91d8 && !stored_at(m, odd->addr + 0x48, mark) && !stored_at(m, head, mark) &&
+              v.find("authored_odd", 0x200).size() == 1,
+          "a memory list with another first entry stays refused before any store");
+    m.w32(odd->addr + 0x2c, 0);
   }
   odd->props = std::make_shared<std::vector<std::string>>(std::vector<std::string>{"kind=1", "name=authored_odd"});
   m.w32(odd->addr + 0x2c, plist);
