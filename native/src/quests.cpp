@@ -462,12 +462,18 @@ void Campaign::quest_remove(const std::string &title) {
     --rec.quest_count;
   }
 }
-void Campaign::clear_for_act_change() {
+void Campaign::quest_clear_all() {
   for (int slot = 0; slot < num_players_; ++slot) {
     auto &rec = players_[static_cast<std::size_t>(slot)];
     auto cleared = clear_quest_list(rec.quests, rec.quest_count);
     rec.quests = cleared.first;
     rec.quest_count = cleared.second;
+  }
+}
+void Campaign::clear_for_act_change() {
+  quest_clear_all();
+  for (int slot = 0; slot < num_players_; ++slot) {
+    auto &rec = players_[static_cast<std::size_t>(slot)];
     for (auto &bag : rec.bags) {
       const auto before = bag.size();
       bag = flag39_remaining(bag);
