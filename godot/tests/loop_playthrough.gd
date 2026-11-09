@@ -956,13 +956,80 @@ func run() -> void:
 			alternate_detail["closed"] = not scene.controller.dialog_status().get("open", true)
 			alternate_detail["choices_taken"] = int(scene.controller.dialog_status().get("counts", {}).get("choices_taken", 0))
 			alternate_detail["fence_refusals"] = scene.controller.hub_service_research().get("dialog_action_refusals", {}).size()
-			alternate_table = alternate_table and not scene.controller.dialog_status().get("open", true)
+			# HS:112-117: hub2's actions run only the five fenced natives, so no fence
+			# refusal. HS:201-203: from the intro node H2.N01 (start 1, as in round 1)
+			# every path takes MORE and then END or SHOP, so at least two choices.
+			alternate_table = alternate_table and not scene.controller.dialog_status().get("open", true) \
+				and int(alternate_detail.fence_refusals) == 0 and int(alternate_detail.start) == 1 \
+				and int(alternate_detail.choices_taken) >= 2
+			# Services in hub2's record order, as wave 38 and round 1 used them:
+			# Savepoint (6) before PushTrigger (7). Once a mission menu has opened,
+			# its residual menu-open state holds the savepoint's menu gate
+			# (mission-unlocks.md:172-176), so the savepoint comes first here, as
+			# it does in the full journey.
 			for target in scene.controller.hub_service_targets():
-				if str(target.kind) == "PushTrigger":
-					alternate_table = alternate_table and target.get("record_matches_research", false)
-				elif str(target.kind) == "Savepoint":
+				if str(target.kind) == "Savepoint":
 					var alternate_save: Dictionary = scene.controller.hub_service_use(int(target.index), false)
 					alternate_point = alternate_save.get("ok", false) and alternate_save.get("request_save", false)
+					alternate_detail["savepoint_error"] = safe(alternate_save.get("error", ""))
+			var alternate_trigger := false
+			var trigger_detail := {}
+			# A SHOP choice opens the store at dialog end (HS:249-262). Close it as
+			# the player does (ESC, as at game_menu_q) before the next service.
+			alternate_detail["store_open_after_dialog"] = scene.game_menus.open
+			if scene.game_menus.open:
+				game_key(KEY_ESCAPE)
+				for i in range(4): await process_frame
+			alternate_detail["store_closed"] = not scene.game_menus.open
+			alternate_detail["mutex_before_trigger"] = scene.controller.dialog_status().get("mutex_held", true)
+			for target in scene.controller.hub_service_targets():
+				if str(target.kind) != "PushTrigger": continue
+				alternate_table = alternate_table and target.get("record_matches_research", false)
+				# HS:373: with no warning, the action writes the entrance
+				# (setEntrance) and opens the mission menu. Run it, then close it.
+				var counts_before: Dictionary = scene.controller.script_command_counts().get("executed", {})
+				var menu_before_trigger: Dictionary = scene.controller.script_mission_menu_state()
+				var trigger_action: Dictionary = scene.controller.script_run_exit(int(target.index))
+				alternate_detail["mutex_after_trigger"] = scene.controller.dialog_status().get("mutex_held", true)
+				var counts_after: Dictionary = scene.controller.script_command_counts().get("executed", {})
+				var menu_after_trigger: Dictionary = scene.controller.script_mission_menu_state()
+				var entrance_writes := int(counts_after.get("setEntrance", 0)) - int(counts_before.get("setEntrance", 0))
+				var menu_calls := int(counts_after.get("activateMissionMenu", 0)) - int(counts_before.get("activateMissionMenu", 0))
+				# The warning branch writes no entrance and calls no menu (HS:373), so
+				# entrance_writes == 1 already excludes it; no warn refusal either.
+				var warned: bool = not scene.controller.hub_service_research().get("warn_refusals", {}).is_empty()
+				var opened_menu: bool = menu_after_trigger.get("ok", false) and menu_after_trigger.get("open", false)
+				scene._refresh_mission_menu()
+				# Drive the menu's frames as _process does (automatic_steps is off
+				# here). Once it takes input (state 2), cancel it with the call the
+				# scene's menu-key branch makes, CIRCLE (0x20). Then run frames until
+				# it has closed.
+				var cancel_owner := {}
+				var cancel_sent := false
+				var menu_closed := false
+				var menu_state := -1
+				for i in range(240):
+					await process_frame
+					var state: Dictionary = scene.controller.script_mission_menu_state()
+					menu_state = int(state.get("state", -1))
+					if not state.get("open", false):
+						menu_closed = true
+						break
+					if menu_state == 2 and not cancel_sent:
+						cancel_owner = {"frontend_active": fe.active(), "game_menus_open": scene.game_menus.open,
+							"help_open": scene.controller.text_hud().get("help_open", false)}
+						cancel_sent = scene.controller.script_mission_menu_tick(0x20, -1).get("ok", false)
+					else:
+						scene.mission_menu_frame()
+				alternate_detail["mutex_after_menu"] = scene.controller.dialog_status().get("mutex_held", true)
+				alternate_trigger = trigger_action.get("ok", false) and not menu_before_trigger.get("open", true) \
+					and entrance_writes == 1 and menu_calls == 1 and opened_menu and not warned and menu_closed
+				trigger_detail = {"action_ok": trigger_action.get("ok", false), "entrance_writes": entrance_writes,
+					"menu_calls": menu_calls, "menu_opened": opened_menu, "warned": warned, "menu_closed": menu_closed,
+					"cancel_sent": cancel_sent, "cancel_owner": cancel_owner, "menu_state": menu_state, "panel_assets_valid": scene.mission_menu_panel.assets_valid,
+					"error": safe(trigger_action.get("error", ""))}
+			alternate_detail["push_trigger"] = trigger_detail
+			alternate_table = alternate_table and alternate_trigger
 		mark("alternate_hub_services", "bounded" if alternate_loaded and alternate_refused and alternate_point and alternate_table else "refused",
 			{"loaded": alternate_loaded, "unknown_routes_refused": alternate_refused, "direct_savepoint_accepted": alternate_point,
 			"researched_table_bound": alternate_table, "hub2_dialog": alternate_detail})
