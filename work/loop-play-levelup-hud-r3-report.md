@@ -31,3 +31,4 @@ These three refusals and the gap were added by this branch in round 1; no pre-br
 - Focused CTest (`levelup-hud|menus|ui-layout|strings|hud`): **PASS 7/7** (`work/r3/focused-ctest.log`). `levelup-hud` 190 checks (137 in round 2), `menus-exact` 338 (331).
 - Strict Godot matrix `--captures --timeout 1200` (exit status and log diagnostics as gates): **PASS 54/54**, exit 0, first run (`work/r3/matrix/results.json`). `menu_smoke` 135 checks, 0 failures (115 in round 2). It ran alongside the full CTest.
 - Full synthetic combat: **2,645 checks, 0 failures** (`work/r3/matrix/playable_wave_smoke_full_combat.log`).
+- FULL_SAVE_LOAD: **PASS 300/300**; continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical to rounds 1 and 2 and wave 37.
