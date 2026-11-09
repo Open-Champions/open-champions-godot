@@ -181,6 +181,14 @@ about 30–38 throughout, from other agents.
    finds 0 diagnostics (`matrix/results.json`, `matrix.out`). Full synthetic
    combat: 2,645 checks, 0 failures.
 
+5. **FULL_SAVE_LOAD: PASS, 300/300.** Continued and uninterrupted
+   presentation SHA-256 are identical, `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`,
+   the same as wave 37 (`matrix/playable_wave_smoke_full_combat.log`).
+6. **FULL_TRACE: PASS, unchanged.** 36,402 bytes, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No
+   baseline was edited. The combat trace does not go through
+   `LevelStates` / `begin_change`.
+
 GATES_PENDING
 
 ## Final
