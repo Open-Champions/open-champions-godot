@@ -131,3 +131,55 @@ These stay refused:
 
 List save/load and a nonzero act-change on this boundary stay unexecuted.
 The older destination-list walk in level flow is unchanged.
+
+## Hub2 objects, the particle reset, and the archive open
+
+Research pin: `research-mission2-route` `d17b46f` (audit
+`research-mission2-route-r3r4-fix.md` PASS), `docs/mission2-compose.md` and
+`docs/mission2-round4.md`. `mission2_objects` is a direct-call contract like
+the hub-return list. The session does not call it: the level load stops
+before these objects exist in play (`docs/mission2-round4.md:47-69`). Public
+tests are synthetic: authored rows, variables, seeds and names. Every path
+the research did not execute throws `Refused`.
+
+- hub2 dialog. A cold open (mission 0 at 3, mission 1 at 0 or 3, missions
+  3..12 clear, variables absent) follows mission 2's byte: 0 or 2 is node 1
+  with one choice, 1 is node 4, 3 is node 5. Node 1's choice runs `0x29bc`,
+  grants nothing, and lands on node 2, or on node 3 when mission 1 is
+  complete. Node 4's choices change no mission byte. Node 5's two choices
+  make mission 3 available. Reopening after the node-3 landing selects
+  node 3, and both of its choices make mission 2 available
+  (`docs/mission2-compose.md:124-155`). Whether the node-2 landing stores
+  a variable was not read back, so that reopen refuses.
+- Key `0x98` opens on any mission 1..11 available and not complete, or
+  mission 12 available (`docs/mission2-compose.md:159-165`).
+- Action `0x54` calls `0x2210`, whose gate `0x1a84` is a mission 1..12 that
+  is available, not complete, and has its own quest variable set. Gate 0
+  calls `setEntrance` `evilstart` then `activateMissionMenu`; gate 1 enters
+  `0x22d0` (`addHelpMessage`, `addDeferedCall`). Both return 0
+  (`docs/mission2-compose.md:167-190`). The `dialog_isOpen` split by seed is
+  the seeded responder stub, so the menu open is not decided.
+- `particle_resetAll` after init returns 1, keeps slot 0, frees 1..31,
+  clears both handles, sets both generations to 1, and releases a claimed
+  definition. The init ran with `0x19e4a0` and `0x173768` stubbed to 0
+  (`tools/difftest_mission2_compose.py:486-495`). Before init it refuses
+  with the menu-image fault (`docs/mission2-compose.md:192-210`).
+- The archive open is a read-list check: the first read is `0x800` bytes at
+  offset 0 of the `.gob`, one read is `0x5000` bytes at offset 0 of the name
+  in `g_levelTexName` plus `.tex`, every read hits one file, and the lump
+  count goes from 0 to 3. An unset tex name refuses
+  (`docs/mission2-round4.md:12-45`). The existing level loader is unchanged.
+- `handle_initPool` after `pool_init` sets the free-list head. Then the
+  GameObject constructor takes one shared-seed step, and the PushTrigger,
+  Trigger and NPC constructors return their flags
+  (`docs/mission2-round4.md:71-92`).
+- `Player_interact` with zero hit points returns the player record and makes
+  no calls (`docs/mission2-compose.md:228-235`). After the null-`r11`
+  character init with a linked object, a PushTrigger in range is prompted
+  once, the prompt returns 1, and the use function is not entered
+  (`docs/mission2-round4.md:94-125`).
+
+Refused: the PushTrigger use `0x1ecc70` (the test that skips it is Unknown),
+the portal constructor (its lump is not resident), `game_loadLevel` at the
+`texcache_reset` write or the `sceSifSetDma` call (the DMA result is not
+invented), arrival, and NPC or Trigger prompts.
