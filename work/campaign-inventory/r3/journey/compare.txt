@@ -1,0 +1,107 @@
+##### headless: wave 37 -> r3
+steps 80 vs 80
+step/result pairs identical: True
+[18] dialog_choice_close=closed | dialog_choice_close=closed
+    choices_taken: 5 -> 4
+[27] hub_trigger_mission_menu=refused | hub_trigger_mission_menu=refused
+    script_executed_commands.addQuest: 3 -> 2
+    script_executed_commands.setMissionAvailable: 4 -> 3
+[57] walk_in_exit_trigger=refused | walk_in_exit_trigger=refused
+refusal kinds 6 -> 6
+##### headless: r2 -> r3
+steps 80 vs 80
+step/result pairs identical: True
+[57] walk_in_exit_trigger=refused | walk_in_exit_trigger=refused
+    entered_without_change: 1 -> 0
+    exit_targets: 9 -> 20
+    level_index_after: 48 -> 22
+    navigation_stalls: 6 -> 3
+    quest_vars_after: 19 -> 14
+    quest_vars_before: 19 -> 14
+    sources_examined: 4 -> 2
+    trigger_samples: 56 -> 162
+    walk_attempts: 7 -> 3
+[60] fight_level_departure=refused | fight_level_departure=refused
+    reason: "Level change refused: this level has Creature death state that cannot be restored yet." -> "Level change refused: per-level object directory is full or unreadable."
+[64] loot_pickup=passed | loot_pickup=passed
+    walk_ticks: 26 -> 52
+[65] enemy_fight=passed | enemy_fight=passed
+    enemy_hp_after_total: 31536.6003675461 -> 31588.2799329758
+    enemy_hp_before_total: 31753.0666809082 -> 31804.7462463379
+    fight_counts.boar_attack_entries: 257 -> 231
+    fight_counts.boar_hit_events: 221 -> 201
+    fight_counts.boar_state_changes: 553 -> 495
+    fight_counts.player_animation_advances: 5914 -> 5940
+    fight_counts.prompts: 477 -> 501
+    fight_counts.ticks: 5916 -> 5942
+    fight_refusals.WarBoar chase: path_requestToPoint: a runtime path-search service is not supplied: null -> 1
+    fight_refusals.WarBoar outgoing player damage: normal-route min/max/rating and victim equipment are not established; damage dispatch refused before shared RNG or HP writes: 87 -> 43
+    fight_refusals.WarBoar wander: path_requestToPoint: a runtime path-search service is not supplied: null -> 72
+    fight_refusals.model_getAttachPoint: pose transform not ported (spark origin is the actor position): 11832 -> 11884
+    fight_refusals.unconstructed host stub left out of a collision/target box (class not ported): 166101 -> 120634
+    loot_ground_drops[0].position: "(829.8558, 4056.892, 6.647608)" -> "(581.442, 2833.219, 7.660075)"
+    matched_enemy_hp_after_total: 31536.6003675461 -> 31588.2799329758
+    player_end: "(816.8802, 4071.976, 10.0)" -> "(562.1902, 2842.444, 0.0)"
+    ready_ticks: 5916 -> 5942
+    target_handle: 6465216 -> 6462656
+refusal kinds 8 -> 6
+  only before: "tick: scene Script after an act change with items stopped: refused deleteMonster"
+  only before: "tick: scene Script after an act change with items stopped: refused preloadResource"
+  only before: "walk_in_exit_trigger: scene Level change refused: this level has Creature death state that cannot be restored yet."
+  only after: "walk_in_exit_trigger: scene Level change refused: per-level object directory is full or unreadable."
+##### rendered: wave 37 -> r3
+steps 81 vs 81
+step/result pairs identical: True
+[18] dialog_choice_close=closed | dialog_choice_close=closed
+    choices_taken: 5 -> 4
+[27] hub_trigger_mission_menu=refused | hub_trigger_mission_menu=refused
+    script_executed_commands.addQuest: 3 -> 2
+    script_executed_commands.setMissionAvailable: 4 -> 3
+[58] walk_in_exit_trigger=refused | walk_in_exit_trigger=refused
+refusal kinds 6 -> 6
+##### rendered: r2 -> r3
+steps 81 vs 81
+step/result pairs identical: True
+[18] dialog_choice_close=closed | dialog_choice_close=closed
+    choices_taken: 3 -> 4
+[27] hub_trigger_mission_menu=refused | hub_trigger_mission_menu=refused
+    script_executed_commands.addQuest: 1 -> 2
+    script_executed_commands.setMissionAvailable: 2 -> 3
+[58] walk_in_exit_trigger=refused | walk_in_exit_trigger=refused
+    entered_without_change: 1 -> 0
+    exit_targets: 9 -> 20
+    level_index_after: 48 -> 22
+    navigation_stalls: 6 -> 3
+    quest_vars_after: 19 -> 14
+    quest_vars_before: 19 -> 14
+    sources_examined: 4 -> 2
+    trigger_samples: 56 -> 162
+    walk_attempts: 7 -> 3
+[61] fight_level_departure=refused | fight_level_departure=refused
+    reason: "Level change refused: this level has Creature death state that cannot be restored yet." -> "Level change refused: per-level object directory is full or unreadable."
+[65] loot_pickup=passed | loot_pickup=passed
+    walk_ticks: 26 -> 52
+[66] enemy_fight=passed | enemy_fight=passed
+    enemy_hp_after_total: 31536.6003675461 -> 31588.2799329758
+    enemy_hp_before_total: 31753.0666809082 -> 31804.7462463379
+    fight_counts.boar_attack_entries: 257 -> 231
+    fight_counts.boar_hit_events: 221 -> 201
+    fight_counts.boar_state_changes: 553 -> 495
+    fight_counts.player_animation_advances: 5914 -> 5940
+    fight_counts.prompts: 477 -> 501
+    fight_counts.ticks: 5916 -> 5942
+    fight_refusals.WarBoar chase: path_requestToPoint: a runtime path-search service is not supplied: null -> 1
+    fight_refusals.WarBoar outgoing player damage: normal-route min/max/rating and victim equipment are not established; damage dispatch refused before shared RNG or HP writes: 87 -> 43
+    fight_refusals.WarBoar wander: path_requestToPoint: a runtime path-search service is not supplied: null -> 72
+    fight_refusals.model_getAttachPoint: pose transform not ported (spark origin is the actor position): 11832 -> 11884
+    fight_refusals.unconstructed host stub left out of a collision/target box (class not ported): 166101 -> 120634
+    loot_ground_drops[0].position: "(829.8558, 4056.892, 6.647608)" -> "(581.442, 2833.219, 7.660075)"
+    matched_enemy_hp_after_total: 31536.6003675461 -> 31588.2799329758
+    player_end: "(816.8802, 4071.976, 10.0)" -> "(562.1902, 2842.444, 0.0)"
+    ready_ticks: 5916 -> 5942
+    target_handle: 6465216 -> 6462656
+refusal kinds 8 -> 6
+  only before: "tick: scene Script after an act change with items stopped: refused deleteMonster"
+  only before: "tick: scene Script after an act change with items stopped: refused preloadResource"
+  only before: "walk_in_exit_trigger: scene Level change refused: this level has Creature death state that cannot be restored yet."
+  only after: "walk_in_exit_trigger: scene Level change refused: per-level object directory is full or unreadable."
