@@ -1,7 +1,7 @@
 // Synthetic vectors for docs/LEVELUP_HUD.md. The experience table is authored
 // (i * 100); no executable word is copied. Expected values are the rules in
-// research-levelup 98a8a47 docs/spec/levelup.md and research-hud-inputs
-// fb24f5e docs/spec/hud-live-producers.md, cited per case.
+// research-levelup 8d38a0b docs/spec/levelup.md and research-hud-inputs
+// 8f06b2d docs/spec/hud-live-producers.md, cited per case.
 #include "champions/levelup_hud.hpp"
 #include "champions/core_arithmetic.hpp"
 #include "champions/hud_dynamic.hpp"
@@ -64,7 +64,7 @@ ExperienceState alive_at(int level, std::int32_t experience) {
   return state;
 }
 
-// levelup.md:47-54, hud-live-producers.md:86-112.
+// levelup.md:47-54, hud-live-producers.md:97-122.
 void experience() {
   const auto table = rising_table();
   const std::pair<int, int> bands[] = {{5, 1}, {6, 2}, {15, 2}, {16, 3}, {25, 3},
@@ -149,7 +149,7 @@ SkillAsk skill_row(int class_id, std::uint64_t ident) {
   return ask;
 }
 
-// levelup.md:92-164.
+// levelup.md:127-218.
 void skills() {
   // The two rows the task names, plus the class key of the table.
   auto knight = skill_row(4, 95);
@@ -170,7 +170,7 @@ void skills() {
   expect(!skill_screen(wrong_class).recalc, "the skill-18 alternative belongs to class 4");
   // Every executed alternative row, with and without its rank, on the chain
   // it was executed on: the passive-0x40 rows on the passive-prerequisite
-  // chain, the skill rows on the skill chain. levelup.md:118-119, 133-138.
+  // chain, the skill rows on the skill chain. levelup.md:166-167, 181-186.
   for (const auto &alt : alternatives()) {
     auto row = skill_row(alt.class_id, alt.ident);
     row.kind = alt.kind;
@@ -185,7 +185,7 @@ void skills() {
     expect(!skill_screen(row).sent, "alternative row without the extra rank does not send");
   }
   // Mixed chains. The passive-0x40 compare is only on the passive-prerequisite
-  // chain, so a skill prerequisite does not see it (levelup.md:133-136).
+  // chain, so a skill prerequisite does not see it (levelup.md:181-184).
   for (const int cls : {2, 3}) {
     auto passive40 = skill_row(cls, 0x40);
     passive40.kind = 0;
@@ -227,7 +227,7 @@ void skills() {
   plain.skill_rank = [](int) { return 1; };
   expect(!skill_screen(plain).recalc, "a row without an alternative stays locked");
   expect(alternatives().size() == 9, "nine executed alternatives");
-  // Class 1 ident 55: mask 0x40 does not send. levelup.md:133-136.
+  // Class 1 ident 55: mask 0x40 does not send. levelup.md:181-184.
   auto ident55 = skill_row(1, 55);
   ident55.passive_rank = [](std::uint64_t mask) { return mask == 0x40 ? 1 : 0; };
   const auto i55 = skill_screen(ident55);
@@ -292,7 +292,7 @@ void skills() {
   chain.skill_rank = [](int id) { return id == 7 ? 1 : 0; };
   expect(skill_screen(chain).sent, "skill prerequisite needs that id's rank");
   // Prerequisite -1 is a value: it passes on either kind; a negative kind with
-  // another value is not executed. levelup.md:114.
+  // another value is not executed. levelup.md:162.
   auto none = cost;
   none.pre_kind = 0;
   expect(skill_screen(none).sent, "prerequisite value -1 passes with kind 0");
@@ -339,10 +339,25 @@ void skills() {
   reject([&] { skill_screen(unordered); }, "outside cursor that would change the latch is refused");
   unordered.gate = 2;
   expect(skill_screen(unordered).gate == 2, "outside cursor with an unchanged latch leaves it");
+  // The missing-resource exit is not ordered against the latch store either
+  // (levelup.md:129-131; the only probe has held 0, gate 0): refuse when the
+  // order would change the word, leave it when it would not.
   auto no_art = cost;
   no_art.held = 2;
   no_art.resource = false;
-  expect(skill_screen(no_art).gate == 0, "missing resource leaves before the latch store");
+  reject([&] { skill_screen(no_art); }, "missing resource that would change the latch is refused");
+  no_art.gate = 2;
+  const auto kept_art = skill_screen(no_art);
+  expect(!kept_art.sent && !kept_art.recalc && kept_art.gate == 2,
+         "missing resource with an unchanged latch leaves it");
+  no_art.held = 0;
+  no_art.gate = 0;
+  const auto zero_art = skill_screen(no_art);
+  expect(!zero_art.sent && !zero_art.recalc && zero_art.gate == 0,
+         "missing resource with held 0 and gate 0 leaves the word and does not send");
+  no_art.page = 0;
+  no_art.held = 2;
+  expect(skill_screen(no_art).gate == 0, "missing resource on page 0 does not latch");
   page.page = 0;
   expect(skill_screen(page).sent, "page 0 does not latch held bit 2");
   page.held = 0;
@@ -362,18 +377,85 @@ void skills() {
   auto outside = cost;
   outside.cursor = Cursor::Outside;
   expect(!skill_screen(outside).recalc, "a point outside the tree does not send");
-  // Refused, not guessed.
+  // Box edges are inside. levelup.md:139-151.
   auto box = cost;
   box.cursor = Cursor::Edge;
-  reject([&] { skill_screen(box); }, "inclusive cursor-box edges stay refused");
+  const auto on_edge = skill_screen(box);
+  expect(on_edge.sent && on_edge.recalc && on_edge.kind == 1 && on_edge.value == skill_screen(cost).value,
+         "a point on the cursor-box edge sends like an interior point");
+  // Row kinds other than 0 and 1 have no send. levelup.md:198-204.
+  auto odd_row = cost;
+  odd_row.kind = 2;
+  reject([&] { skill_screen(odd_row); }, "row kind 2 is refused");
+  odd_row.kind = -1;
+  reject([&] { skill_screen(odd_row); }, "row kind -1 is refused");
+  auto passive_odd = cost;
+  passive_odd.kind = 3;
+  passive_odd.virtual_float_planted = false;
+  reject([&] { skill_screen(passive_odd); }, "row kind 3 is refused before any float check");
+  // A 0 low word with a nonzero high word: width not executed.
+  auto high_zero = cost;
+  high_zero.pre = 0x0000000100000000ull;
+  high_zero.skill_rank = [](int id) { return id == 60 ? 1 : 0; };
+  reject([&] { skill_screen(high_zero); }, "a 0 low word with a high word is refused");
+  high_zero.pre_kind = 0;
+  reject([&] { skill_screen(high_zero); }, "a 0 low word with a high word is refused on kind 0");
+  high_zero.pre = 0;
+  expect(skill_screen(high_zero).sent, "a full 0 prerequisite still passes on skill 60");
+  // Refused, not guessed.
   auto body = cost;
   body.virtual_float_planted = false;
   reject([&] { skill_screen(body); }, "per-skill virtual bodies stay refused");
 }
 
+// skills_screen box 0x1d4aac-0x1d4af4: the probe's 14 points per
+// (panel +0, panel +0x28), on an authored row. levelup.md:139-151,
+// tools/difftest_progression.py:362-391.
+void cursor_box_edges() {
+  const int row_x = 37, row_y = 21;
+  const int pairs[3][2] = {{0, 0}, {40, 13}, {-24, -13}};
+  for (const auto &pair : pairs) {
+    const int panel_x = pair[0], scroll = pair[1];
+    const int x_lo = panel_x + row_x, x_hi = x_lo + 0x32;
+    const int y_lo = row_y + 0x9e, y_hi = row_y + 0xd0;
+    const float xm = float((x_lo + x_hi) / 2), ym = float((y_lo + y_hi) / 2);
+    // The probe stores y - scroll at panel +0x48; the screen adds scroll back.
+    const auto at = [&](float x, float y) {
+      return cursor_box(panel_x, scroll, row_x, row_y, bits(x), bits(y - float(scroll)));
+    };
+    const struct { float x, y; bool hit; const char *name; } cases[] = {
+        {float(x_lo), ym, true, "low x edge is inside"},
+        {float(x_lo - 1), ym, false, "one left of the low x edge is outside"},
+        {float(x_hi), ym, true, "high x edge is inside"},
+        {float(x_hi + 1), ym, false, "one right of the high x edge is outside"},
+        {xm, float(y_lo), true, "low y edge is inside"},
+        {xm, float(y_lo - 1), false, "one above the low y edge is outside"},
+        {xm, float(y_hi), true, "high y edge is inside"},
+        {xm, float(y_hi + 1), false, "one below the high y edge is outside"},
+        {float(x_lo), float(y_lo), true, "low corner is inside"},
+        {float(x_hi), float(y_hi), true, "high corner is inside"},
+        {float(x_hi) + 0.75f, ym, true, "x_hi + 0.75 truncates inside"},
+        {float(x_hi) + 1.25f, ym, false, "x_hi + 1.25 truncates outside"},
+        {xm, float(y_hi) + 0.75f, true, "y_hi + 0.75 truncates inside"},
+        // Truncation is toward zero, so below a stored zero it rounds up.
+        {xm, float(y_lo) - 0.25f, y_lo - scroll <= 0, "y_lo - 0.25 truncates toward zero"},
+    };
+    for (const auto &c : cases)
+      expect((at(c.x, c.y) == Cursor::Inside) == c.hit, c.name);
+  }
+  // The x edges move with panel +0; the y edges do not.
+  expect(cursor_box(40, 0, row_x, row_y, bits(float(row_x + 40)), bits(float(row_y + 0x9e))) == Cursor::Inside &&
+             cursor_box(0, 0, row_x, row_y, bits(float(row_x + 40 + 0x32 + 1)), bits(float(row_y + 0x9e))) ==
+                 Cursor::Outside,
+         "panel +0 moves the x edges");
+  expect(cursor_box(0, 13, row_x, row_y, bits(float(row_x)), bits(float(row_y + 0x9e - 13))) == Cursor::Inside &&
+             cursor_box(0, 0, row_x, row_y, bits(float(row_x)), bits(float(row_y + 0x9e - 13))) == Cursor::Outside,
+         "panel +0x28 shifts only the cursor");
+}
+
 // The existing bar, message and alpha producers against the observed rules.
 void hud_rules() {
-  // trunc(S + cur/max*99), S = origin + 15, x = 27. hud-live-producers.md:40-55.
+  // trunc(S + cur/max*99), S = origin + 15, x = 27. hud-live-producers.md:51-66.
   const auto origins = L::hudOrigins(false, {true, false, false, false}, 1);
   expect(origins[0] + 15 == 27, "offline slot 0 S is 27");
   expect(L::barClipRight(27, 0.f, 4.f) == 27, "empty bar right edge is S");
@@ -382,7 +464,7 @@ void hud_rules() {
   expect(L::barClipRight(27, 40.f, 0.f) == 0x7fffffff, "health 40 over maximum 0 saturates");
   expect(L::barClipRight(27, -5.f, 0.f) == std::numeric_limits<int>::min(), "mana -5 over maximum 0 saturates");
   expect(L::barClipRight(27, -1.f, 2.f) == -22, "negative current is not clamped");
-  // Green bar: acknowledged level, wrapped differences. hud-live-producers.md:114-118.
+  // Green bar: acknowledged level, wrapped differences. hud-live-producers.md:125-129.
   auto green = [](const std::vector<L::HudLayer> &layers) {
     for (const auto &layer : layers)
       if (layer.draw.resource.rfind("bar_green", 0) == 0)
@@ -396,7 +478,7 @@ void hud_rules() {
   const auto equal = L::hudBaseLayers(12, 0, 1, 1, 1, 1, 450, 400, 400, 4);
   expect(green(equal) == 0x7fffffff, "equal thresholds divide by zero and saturate");
   // cvt.s.w of differences above 2^24 goes through the core from_int, not the
-  // host's round-to-nearest cast. hud-live-producers.md:116-117.
+  // host's round-to-nearest cast. hud-live-producers.md:127-128.
   auto as_float = [](std::uint32_t word) {
     float out = 0;
     std::memcpy(&out, &word, 4);
@@ -407,7 +489,7 @@ void hud_rules() {
   const int host_fill = L::barClipRight(27, static_cast<float>(16777218), static_cast<float>(16777219));
   expect(core_fill != host_fill && green(wide) == core_fill, "green differences convert with the core from_int");
 
-  // hud_showMessage / hud_tickMessage, 360 frames and force 0. hud-live-producers.md:169-186.
+  // hud_showMessage / hud_tickMessage, 360 frames and force 0. hud-live-producers.md:179-196.
   S::Hud hud;
   const S::Units text = {'L', 'v'};
   hud.inputs.local_menu = true;
@@ -424,7 +506,7 @@ void hud_rules() {
   hud.inputs.suppressed = true;
   hud.tick_message();
   expect(hud.msg_frames == 359, "suppressed HUD holds the timer");
-  // Alpha 0x4f66ec. hud-live-producers.md:188-193.
+  // Alpha 0x4f66ec. hud-live-producers.md:198-203.
   namespace H = champions::hud_dynamic;
   expect(H::messageFrame(360, 10, false, false, 211).alpha == 13, "alpha rises by 3");
   expect(H::messageFrame(31, 9, false, false, 211).alpha == 124, "below 32 frames alpha is 4 * timer");
@@ -435,7 +517,7 @@ void hud_rules() {
   expect(H::messageFrame(360, 40, true, true, 211).alpha == 43, "suppressed with a force byte still steps");
 }
 
-// hud-live-producers.md:146-165; tools/ref_hud_inputs.py:77-132.
+// hud-live-producers.md:156-173; tools/ref_hud_inputs.py:77-132.
 void automap() {
   std::vector<std::uint16_t> grid(static_cast<std::size_t>(kAutomapSide * kAutomapSide), 0x0abc);
   reveal_world(grid, 16, 16, 0, 0, 0, 0);
@@ -473,6 +555,7 @@ int main() {
   try {
     experience();
     skills();
+    cursor_box_edges();
     hud_rules();
     automap();
   } catch (const std::exception &error) {

@@ -258,14 +258,17 @@ public:
   void spend_skill(int is_skill, std::uint32_t value);
   // skills_screen sender for the owner's record. The record supplies class,
   // points, acknowledged level, maximum mana and ranks; the ledger supplies the
-  // panel page (it must be the level-up page 5) and keeps the latch word at
-  // 0x4f4878 between calls; the caller supplies the tree row, cursor and pad.
-  // levelup.md:92-164. Cursor edges and virtual bodies stay refused.
+  // panel page (0 or the level-up page 5, the two executed pages) and keeps the
+  // latch word at 0x4f4878 between calls; the caller supplies the tree row,
+  // cursor and pad. levelup.md:127-218. Box edges are inside; the virtual
+  // bodies are not ported, so a skill row needs a planted float.
   levelup_hud::SkillDecision skill_screen(levelup_hud::SkillAsk ask);
   std::uint32_t skill_latch() const;
   // g_localMenuOpen 0x41b69d as the level-up message store sees it. Until a
   // caller states it, the store is not decided (LevelNotice::undecided).
   void set_local_menu_open(bool open);
+  // Back to unknown: the level message store is undecided again.
+  void forget_local_menu();
   bool local_menu_known() const { return local_menu_known_; }
   bool local_menu_open() const { return local_menu_open_; }
   // What player_giveExp's hud_showMessage calls left on this machine.

@@ -296,7 +296,7 @@ std::vector<Gap> gaps() {
       {"item-info-frame",
        "One category-dependent frame submission was executed; its second call site and full localized fields remain unexecuted."},
       {"skill-confirm-input",
-       "Ledger::skill_screen follows the executed sender (levelup.md:92-164), but the play skills page does not read the class trees from the selected executable, so it never calls it. The handler spends one point and ignores the displayed cost."},
+       "Ledger::skill_screen follows the executed sender (levelup.md:127-218), but the play skills page does not read the class trees from the selected executable, so it never calls it. The handler spends one point and ignores the displayed cost."},
       {"pause-frames", "Pause-menu frame positions were not executed."},
       {"memory-card-frames", "Memory-card browser frame positions were not executed."},
       {"button-scheme-writer", "The writer of the byte at 0x41b69c was not found."},
@@ -319,9 +319,7 @@ std::vector<Gap> gaps() {
       {"inventory-localized-fields", "The original text content and modifier/gem/requirement fields are unknown."},
       {"inventory-icon-pulse", "The selected icon uses the observed frame-zero alpha; the running frame source is not wired."},
       {"skill-virtual-bodies",
-       "The original per-skill virtual bodies were not run. A skill row sends only when the caller plants the mana float."},
-      {"skill-cursor-edges",
-       "The inclusive cursor-box edges of skills_screen were not probed."},
+       "The per-skill mana-cost bodies are not ported. A skill row sends only when the caller plants the mana float."},
       {"inventory-live-parity", "No original running-game pixel comparison has been made."},
       {"inventory-live-drop", "World placement and item prop construction are not wired to the imported player record."},
   };
@@ -666,8 +664,13 @@ void Ledger::set_local_menu_open(bool open) {
   local_menu_known_ = true;
 }
 
+void Ledger::forget_local_menu() {
+  local_menu_open_ = false;
+  local_menu_known_ = false;
+}
+
 namespace {
-// The word skills_screen latches on page 5. levelup.md:107-111.
+// The word skills_screen latches on page 5. levelup.md:155-159.
 constexpr std::uint32_t SKILL_LATCH = 0x4f4878;
 } // namespace
 
@@ -675,9 +678,12 @@ std::uint32_t Ledger::skill_latch() const { return machine_->u32(SKILL_LATCH); }
 
 levelup_hud::SkillDecision Ledger::skill_screen(levelup_hud::SkillAsk ask) {
   // The screen reads the panel page +0x50 and the owner's record.
-  // levelup.md:94-98, 107-111, 140-158.
-  if (page() != 5)
-    throw Refusal("skills_screen needs the level-up page 5 open on this ledger");
+  // levelup.md:129-133, 155-159, 188-203.
+  // The screen was executed on page 0 (no latch; a preset word suppresses)
+  // and on page 5 (the latch). tools/difftest_levelup.py:240-243,
+  // levelup.md:155-159. No other page was run.
+  if (page() != 0 && page() != 5)
+    throw Refusal("skills_screen runs on page 0 or the level-up page 5 only");
   if (ask.page != page())
     throw Refusal("the caller's panel page is not the ledger's page");
   ask.slot = 0;
@@ -705,7 +711,7 @@ levelup_hud::SkillDecision Ledger::skill_screen(levelup_hud::SkillAsk ask) {
     ensure_recalc_supported();
     machine_->w32(SKILL_LATCH, decision.gate);
     // The screen's own player_recalcStats (0x1d5950). Message 7 then goes to
-    // inventory_onSkillPoint, which does not recalculate. levelup.md:160-173.
+    // inventory_onSkillPoint, which does not recalculate. levelup.md:214-227.
     recalc_level_stats();
     if (decision.sent)
       machine_->on_skill_point(decision.slot, decision.kind, decision.value);
@@ -836,7 +842,7 @@ int Ledger::give_xp(std::int32_t amount) {
     machine_->w32(r + 0xc0, result.state.mana);
     // One hud_showMessage(text, 360, slot, 0) per step. This ledger is the
     // owning machine; a zero force with the local menu open keeps the
-    // previous message. hud-live-producers.md:120-122, 169-179.
+    // previous message. hud-live-producers.md:131-133, 179-189.
     level_notice_.calls += result.steps;
     if (result.steps > 0 && !local_menu_known_) {
       // Nothing has stated g_localMenuOpen, so the store is not decided.

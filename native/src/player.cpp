@@ -698,7 +698,7 @@ void Tick::hud_notice(unsigned index, std::uint32_t frames) {
   auto row = call(Service::NoticeCount, {std::uint32_t(slot()), index});
   write(indexed(0x41b8a8, std::int64_t(slot()) * 0x20 + index * 4), 4, row);
 }
-// Player_regenHealth 0x1b3b90. hud-live-producers.md:60-82.
+// Player_regenHealth 0x1b3b90. hud-live-producers.md:71-93.
 void Tick::regen_health(std::uint32_t player) {
   const Address p = player;
   if (u32(p + 0xc) & 0x20000) return;
@@ -741,7 +741,7 @@ void Tick::regen_health(std::uint32_t player) {
     if (lt(left, ZERO)) write(r + 0xb4, 4, ZERO);
   }
 }
-// Player_regenMana 0x1b3900. Class 0 clears natural mana. hud-live-producers.md:65-78.
+// Player_regenMana 0x1b3900. Class 0 clears natural mana. hud-live-producers.md:76-89.
 void Tick::regen_mana(std::uint32_t player) {
   const Address p = player;
   if (u32(p + 0xc) & 0x20000) return;

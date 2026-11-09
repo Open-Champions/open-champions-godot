@@ -115,6 +115,7 @@ protected:
     ClassDB::bind_method(D_METHOD("spend_skill", "is_skill", "value"), &ChampionsMenuService::spend_skill);
     ClassDB::bind_method(D_METHOD("skill_screen", "row"), &ChampionsMenuService::skill_screen);
     ClassDB::bind_method(D_METHOD("set_local_menu_open", "open"), &ChampionsMenuService::set_local_menu_open);
+    ClassDB::bind_method(D_METHOD("forget_local_menu"), &ChampionsMenuService::forget_local_menu);
     ClassDB::bind_method(D_METHOD("press_stat", "screen_arg", "row", "edge", "panel_gate", "elapsed"), &ChampionsMenuService::press_stat);
     ClassDB::bind_method(D_METHOD("give_xp", "amount"), &ChampionsMenuService::give_xp);
     ClassDB::bind_method(D_METHOD("give_kill_xp", "creature_experience", "creature_max_hp"), &ChampionsMenuService::give_kill_xp);
@@ -487,11 +488,17 @@ public:
     local_menu_open_ = open;
     ledger_->set_local_menu_open(open);
   }
+  // The host no longer knows g_localMenuOpen: back to undecided.
+  void forget_local_menu() {
+    local_menu_known_ = false;
+    local_menu_open_ = false;
+    ledger_->forget_local_menu();
+  }
   Dictionary skill_screen(const Dictionary &row) {
     try {
       // The tree row, panel and pad come from the caller; none is defaulted.
       // Only the confirm mask is the executable's constant 0x40.
-      // levelup.md:94-111, 233-236.
+      // levelup.md:129-159, 552-555.
       for (const char *key : {"kind", "need", "ident", "pre_kind", "pre", "page", "resource", "in_table",
                               "cursor", "edge", "held", "panel30"})
         if (!row.has(key))
@@ -500,10 +507,14 @@ public:
         return failure(std::runtime_error("the 0x4f4878 latch word is kept by the ledger"));
       champions::levelup_hud::SkillAsk ask;
       ask.kind = int(row.get("kind", Variant()));
+      // Only kind 0 (passive) and kind 1 (skill) rows send. levelup.md:198-204.
+      if (ask.kind != 0 && ask.kind != 1)
+        return failure(std::runtime_error("skill_screen row kind is 0 or 1"));
       ask.need = int(row.get("need", Variant()));
       ask.ident = static_cast<std::uint64_t>(int64_t(row.get("ident", Variant())));
       ask.pre_kind = int(row.get("pre_kind", Variant()));
       ask.pre = static_cast<std::uint64_t>(int64_t(row.get("pre", Variant())));
+      // "edge" is a point on the box edge, which is inside (levelup.md:139-151).
       const String cursor = row.get("cursor", Variant());
       if (cursor == "edge")
         ask.cursor = champions::levelup_hud::Cursor::Edge;
@@ -520,7 +531,7 @@ public:
       ask.panel30 = int(row.get("panel30", Variant()));
       ask.resource = bool(row.get("resource", Variant()));
       ask.in_table = bool(row.get("in_table", Variant()));
-      // Raw float word the skill's vtable+0x28 entry returned (levelup.md:150-158).
+      // Raw float word the skill's vtable+0x28 entry returned (levelup.md:198-203).
       if (row.has("virtual_float")) {
         ask.virtual_float = static_cast<std::uint32_t>(int64_t(row.get("virtual_float", 0)));
         ask.virtual_float_planted = true;

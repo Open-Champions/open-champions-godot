@@ -915,7 +915,7 @@ void observed_level_vectors() {
   }
   {
     // A zero force with the local menu open keeps the previous message.
-    // hud-live-producers.md:120-122, 174-176.
+    // hud-live-producers.md:131-133, 184-186.
     Ledger book;
     Ledger::Adopted hero;
     hero.level = 5;
@@ -1022,9 +1022,7 @@ void observed_level_vectors() {
     ask.cursor = champions::levelup_hud::Cursor::Outside;
     const auto missed = book.skill_screen(ask);
     expect(!missed.sent && !missed.recalc && book.skill_points() == 3, "outside cursor does not send");
-    ask.cursor = champions::levelup_hud::Cursor::Edge;
-    reject([&] { book.skill_screen(ask); }, "cursor-box edge stays refused");
-    // The page comes from the ledger. levelup.md:107-111.
+    // The page comes from the ledger. levelup.md:155-159.
     ask.cursor = champions::levelup_hud::Cursor::Inside;
     ask.page = 0;
     reject([&] { book.skill_screen(ask); }, "a caller page that is not the ledger's is refused");
@@ -1049,7 +1047,7 @@ void observed_level_vectors() {
            "page 5 without bit 2 clears the word and sends");
   }
   {
-    // The screen's recalc runs before message 7 (levelup.md:160-173). With the
+    // The screen's recalc runs before message 7 (levelup.md:214-227). With the
     // passive-0x40 row the load word +0x124 reads that rank, so it shows which
     // rank recalc saw: 135 + 15 * 2, not 15 * 3.
     Ledger book;
@@ -1069,6 +1067,66 @@ void observed_level_vectors() {
     expect(sent.sent && sent.recalc && book.passive_level_at(0x40) == 3 && book.skill_points() == 3,
            "passive 0x40 row sends and the handler raises the rank");
     expect(book.record_word(0x124) == 0x43250000u, "recalc ran before the message-7 handler");
+  }
+  {
+    // Box edges are inside (levelup.md:139-151), and the screen also runs on
+    // page 0 (tools/difftest_levelup.py:240-243, levelup.md:155-159).
+    Ledger book;
+    book.set_xp_rules(table, formulas);
+    book.set_page(5);
+    champions::levelup_hud::SkillAsk ask;
+    ask.kind = 0;
+    ask.need = 1;
+    ask.ident = 1;
+    ask.pre = champions::levelup_hud::SkillAsk::kNoPrerequisite;
+    ask.cursor = champions::levelup_hud::Cursor::Edge;
+    ask.edge = 0x40;
+    ask.page = 5;
+    const auto edge = book.skill_screen(ask);
+    expect(edge.sent && edge.kind == 0 && edge.value == 1 && book.skill_points() == 3,
+           "a cursor on the box edge sends");
+    ask.cursor = champions::levelup_hud::Cursor::Inside;
+    book.set_page(0);
+    ask.page = 0;
+    ask.held = 2;
+    const auto page0 = book.skill_screen(ask);
+    expect(page0.sent && page0.gate == 0 && book.skill_latch() == 0 && book.skill_points() == 2,
+           "page 0 sends and does not latch held bit 2");
+    ask.held = 0;
+    ask.kind = 2;
+    reject([&] { book.skill_screen(ask); }, "row kind 2 is refused by the ledger");
+    ask.kind = 0;
+    ask.resource = false;
+    const auto no_art = book.skill_screen(ask);
+    expect(!no_art.sent && !no_art.recalc && book.skill_points() == 2 && book.skill_latch() == 0,
+           "missing resource on page 0 leaves the word and the points");
+    ask.resource = true;
+    book.set_page(1);
+    ask.page = 1;
+    reject([&] { book.skill_screen(ask); }, "pages other than 0 and 5 are refused");
+    book.set_page(5);
+    ask.page = 5;
+    ask.held = 2;
+    ask.resource = false;
+    reject([&] { book.skill_screen(ask); }, "missing resource that would change the ledger latch is refused");
+    expect(book.skill_latch() == 0 && book.skill_points() == 2, "the refused call leaves the word and the points");
+  }
+  {
+    // A stated menu can become unknown again; the store is then undecided.
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = 5;
+    hero.acknowledged = 4;
+    hero.experience = 499;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    book.set_local_menu_open(true);
+    book.forget_local_menu();
+    expect(!book.local_menu_known() && book.give_xp(1) == 1 && !book.level_notice().stored &&
+               book.level_notice().undecided == 1,
+           "a forgotten menu state leaves the level message undecided");
   }
 }
 

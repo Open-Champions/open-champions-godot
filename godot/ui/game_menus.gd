@@ -12,6 +12,13 @@ var layout_service: Object
 var dynamic_service: Object
 var open := false
 var screen := "inventory"
+# Host screens that stand for the documented g_localMenuOpen (0x41b69d)
+# writers: the menu_openInventory 0x1c15c8 pages and shop_openOrStock
+# (claims-audit.md:103, FINDINGS K2; hud-live-producers.md:273 sets it to 1).
+# The mapping from host screens to those openers is Inferred.
+const LOCAL_MENU_SCREENS := ["inventory", "shop", "shop-bag", "skills", "stats", "level-up"]
+# True while the shown host screen is one of LOCAL_MENU_SCREENS.
+var local_menu_screen := false
 var mode := 2
 var font_bytes := PackedByteArray()
 var font_texture: ImageTexture
@@ -37,8 +44,10 @@ func _ready() -> void:
 	set_anchors_preset(PRESET_FULL_RECT)
 	if ClassDB.class_exists("ChampionsMenuService"):
 		service = ClassDB.instantiate("ChampionsMenuService")
-		# The host menu stands for g_localMenuOpen (0x41b69d) in the level-up
-		# message store; its original writer was not identified.
+		# The host menu states g_localMenuOpen (0x41b69d) for the level-up
+		# message store. Its writers are menu_openInventory, shop_openOrStock
+		# and shop_close, and inventory_close clears it (claims-audit.md:103,
+		# :287; FINDINGS K2). Closed before any of them ran is Inferred.
 		service.set_local_menu_open(false)
 	if ClassDB.class_exists("ChampionsUiLayoutService"):
 		layout_service = ClassDB.instantiate("ChampionsUiLayoutService")
@@ -214,8 +223,9 @@ func _shop_art(resource: String) -> Dictionary:
 func open_screen(which: String) -> void:
 	if service == null:
 		return
+	var was_open := open
 	open = true
-	service.set_local_menu_open(true)
+	_state_local_menu(which, was_open)
 	mouse_filter = MOUSE_FILTER_STOP
 	opener.visible = false
 	host.visible = true
@@ -266,12 +276,26 @@ func open_vendor_shop() -> Dictionary:
 		return adopted
 	return {"ok": true, "stock_refusal": "Fixed stock count and generation budget are unknown."}
 
+# Only the inventory and shop screens write the flag. Pause, Save index and any
+# other host screen leave it. Switching to one of those straight from an
+# inventory or shop screen has no original path that closes that menu first,
+# so the flag's value is not known there and the store stays undecided.
+func _state_local_menu(which: String, was_open: bool) -> void:
+	if LOCAL_MENU_SCREENS.has(which):
+		service.set_local_menu_open(true)
+		local_menu_screen = true
+	elif was_open and local_menu_screen:
+		service.forget_local_menu()
+		local_menu_screen = false
+
 func close_menu() -> void:
 	var was_vendor := vendor_open
 	var resume := was_vendor and vendor_resume
 	open = false
-	if service != null:
+	if service != null and local_menu_screen:
+		# inventory_close / shop_close clear it (claims-audit.md:103, :287).
 		service.set_local_menu_open(false)
+	local_menu_screen = false
 	vendor_open = false
 	vendor_resume = false
 	mouse_filter = MOUSE_FILTER_IGNORE

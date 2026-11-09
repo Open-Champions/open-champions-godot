@@ -208,7 +208,7 @@ int countActiveNotices(const std::array<int, 8> &timers, int except_index) {
 }
 int messageAlphaStep(int timer, int alpha) {
   // Signed halfword. Below 32 frames alpha becomes 4*timer; otherwise +3.
-  // A result that is not below 129 becomes 128. hud-live-producers.md:188-193.
+  // A result that is not below 129 becomes 128. hud-live-producers.md:198-203.
   const auto ticks = static_cast<std::int16_t>(static_cast<std::uint16_t>(timer));
   if (ticks <= 0)
     return alpha;
