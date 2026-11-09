@@ -134,3 +134,7 @@ Commit `76758a35` fixes VS-1..VS-7. Research is still only
 
 1. Release native build `--clean-first -j 4`: **PASS**, exit 0, 829 s (the mini's load average was about 88). GDExtensions `mac-template_debug`, `mac-template_release`, `level-texture-template_debug`, `level-texture-template_release`, `creature-template_debug`: **PASS**, every library `x86_64 arm64`, total 2,578 s.
 2. Focused CTest (`vendor-stock-exact`, `items-exact`, `messages-exact`, `messages-api`, `menus-exact`, `level-flow-exact`, `script-commands`, `script-items`), `-j 3`: **PASS 8/8**.
+4. Headless editor import (exit 0), then the unchanged strict Godot dev matrix (`tools/godot_matrix.py matrix --captures --timeout 1200`): **PASS 54/54**, exit 0. It ran next to the full CTest on a heavily loaded mini.
+5. FULL_SAVE_LOAD: **PASS 300/300** presents. Continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical. Full synthetic combat 2,645 checks, 0 failures.
+6. FULL_TRACE: **PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+7. Journeys, unchanged `tools/run_loop_playthrough.py` against the read-only disc: headless **80** steps and rendered **81** (38 captures), pickup **10→11**, 52 walk ticks, 0 log errors, 6 refusal kinds, disc files 994/994. Step/result pairs and refusal maps are identical to round 2 (and so to wave 37) at every index. Wrapper exit 1 is the retained death-reload refusal, as before.
