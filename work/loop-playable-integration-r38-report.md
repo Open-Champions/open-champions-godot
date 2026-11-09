@@ -1,6 +1,6 @@
-STATUS: MORE — wave 38 merges are committed. Remote gates have not run yet.
+STATUS: VERIFIED — WAVE 38 (2026-11-08). Three audited tips integrated; native CTest 260/260, strict Godot 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged. Journeys 80/81 with pickup 10→11, ending at the death-reload refusal. One mission-menu admission path. No non-merge code changes.
 
-# Playable integration wave 38 — 2026-11-03
+# Playable integration wave 38 — 2026-11-03, gates finished 2026-11-08
 
 ## Scope, evidence and merges
 
@@ -28,6 +28,8 @@ Mission 2 did not conflict. Its new files are the direct-call route, the CMake t
 
 Dialog admission reads the menu run task in one place: `native/src/script_dialog.cpp` sets `dialog_host_.mission_menu` from `campaign_->menu_run_registered()`. The campaign image does not carry that bit; `Host::load_campaign` retains the live bit on the same process. Mission 2 does not copy that path. `mission2_route::portal_row0` accepts row 0 through the existing `level_flow::GateTravel` counter and the pre-load stop. It does not call `missionMenu_run` or `menu_run_registered`. The scene does not call `mission2_route`.
 
+Rechecked on the merged tree (2026-11-08): `dialog_host_.mission_menu` has exactly one writer, `native/src/script_dialog.cpp:285`, reading `campaign_->menu_run_registered()`. Its readers are the two suppression points (`script_dialog.cpp:300,310`) and the open-time gate (`script_dialog.cpp:447`). `menu_run_` is set only by the quest run task (`native/src/quests.cpp:664,693,724`) and retained across same-process load (`native/src/script_commands.cpp:1124-1126`). `native/src/mission2_route.cpp` does not reference the run task or `mission_menu`, and nothing outside its own files and test calls `mission2_route`. `hud_round3.cpp:329` copies a caller-supplied `mission_menu` into the medal prompt for presentation; it is not an admission path.
+
 ## Non-merge code changes
 
 None. Source changes are the incoming audited work and the resolutions above. No post-merge source correction was necessary.
@@ -46,4 +48,23 @@ Evidence under ignored `work/playable-wave38/`. Native configure/build and the e
 - FULL_SAVE_LOAD **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical, the same as wave 37.
 - FULL_TRACE **PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, headless renderer. No baseline was edited.
 
-Journeys are pending.
+- Journeys: unchanged `tools/run_loop_playthrough.py`, serial headless then rendered, standard input closed, read-only disc. A headless editor import ran first (`--editor --quit-after 120 --frame-delay 50`, exit 0, 10 s, `editor-import.log`). Wrapper exit 1, 94 s wall. Evidence `playthrough.out`, `playthrough/run-summary.json`, `playthrough/*/result.json`, `playthrough/*/godot.log`.
+
+## Journey result
+
+| Variant | Steps | Godot exit | Ending | Pickup | Refused rows | Refusal kinds | Log errors | Captures |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Headless | 80 | 1 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks, 0 retries | 27 | 8 | 0 | 0 |
+| Rendered | 81 | 1 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks, 0 retries | 28 | 8 | 0 | 38 |
+
+Disc file count **994 before / 994 after**. Step name and result pairs match wave 37 at every index in both variants. The refused-row counts match too: 27 headless, 28 rendered. Wrapper exit 1 is the retained full-journey refusal, as in wave 37.
+
+Refusal kinds 6→8. This comes from a merged branch. The two added kinds are the hub-action refusal that `codex/play-progression` introduced, `native/src/script_dialog.cpp:320` (`hub action beyond documented first/second offers is Unknown`). It is reported once by the dialog confirm and once by the tick. The six wave-37 kinds are unchanged. Progression round 3's audited report records the same eight kinds on its own journeys (`work/loop-play-progression-r3-report.md:47`). Mission 2 round 1 recorded six because it did not contain progression. The node-3 retry count is headless 2 and rendered 3. That is within the expected 1–4 range. Progression explains it as the close-fade retry, not a second grant (`work/loop-play-progression-r3-report.md:34`). Neither variant has a `run-task termination` refusal.
+
+Host-only differences versus wave 37, not simulation results: headless loot `fps` 134→103 and `enemy_fight` `swing_wall_msec` 25024→26021; rendered loot `fps` 2→4 and `swing_wall_msec` 27173→24342 (`Time.get_ticks_msec()` around the swing loop, `godot/tests/loop_playthrough.gd:1740`). `memory_bytes` also moved slightly. Other agents share the mini.
+
+`rendered_pickup_verified` remains false, as in wave 37. Successful death reload remains refused at the dead-Creature save guard, as in wave 37.
+
+## Remaining boundaries
+
+All three requested no-ff merges are committed in order, and every audited tip is an ancestor. No source, test, baseline, or fixture was changed beyond those merges and the conflict resolutions above; this gate session made no code change. Unknown arrival commands, the hub2 dialog and loader body, continuous Mission 1 execution, live arena/PvP, and successful death reload stay refused. No values were invented. No push, PR, private-disc write, edit under `~/champions-re`, or process-name termination. The mini's w38 `build/` was deleted after verification.
