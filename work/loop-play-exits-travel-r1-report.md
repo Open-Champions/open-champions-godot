@@ -175,6 +175,12 @@ about 30–38 throughout, from other agents.
    than wave 37's 694 s under a mini load average of about 30–38
    (`netplay` 402 s, `player-exact` 179 s).
 
+4. **Strict Godot matrix: 54/54 PASS**, exit 0, `--captures --timeout 1200`,
+   295 s, after one headless import (exit 0, 25 s; `editor-import.log`).
+   Rechecking every one of the 105 matrix logs with the unchanged `check-log`
+   finds 0 diagnostics (`matrix/results.json`, `matrix.out`). Full synthetic
+   combat: 2,645 checks, 0 failures.
+
 GATES_PENDING
 
 ## Final
