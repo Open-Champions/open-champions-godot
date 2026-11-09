@@ -1,0 +1,24 @@
+{
+  "classes": [
+    "Kobold",
+    "WarWraith",
+    "Orc",
+    "Goblin",
+    "Ogre",
+    "Warrior",
+    "Clockwork",
+    "Droid",
+    "IronGuardian",
+    "Froglock",
+    "Amphian",
+    "SeaMonster"
+  ],
+  "compressed_sha256": "289878ed4a35a72c1141b6747c2bc7d4eb45c9780503f5a60da40c844f74e858",
+  "expanded_bytes": 4664161,
+  "expanded_sha256": "c0590ad3f1484de889d9893374eefc9d1dce89d0f618129c9deccb258c7127b6",
+  "generator_sha256": "8b54a4e0bee2088cb5ff93cce0c53e1a2d7b5f1ed2c3859f7c6b7ce1c55918bb",
+  "paths": 24206,
+  "research_revision": "fbb2e1db4598fa3d2e48d070d1ddda78a954fb55",
+  "scope": "Research decision models only, on a sample of the research's synthetic context grid; no executable, level or disc input.",
+  "seed": 20973
+}
