@@ -1,0 +1,24 @@
+STATUS: IN PROGRESS — play-levelup-hud round 2 (2026-11-09), FIX of audit play-levelup-hud-r1 (MEDIUM LU-1, LOW LU-2..LU-9).
+
+# play-levelup-hud round 2
+
+Branch `codex/play-levelup-hud`, from round-1 tip `047c4ec5` (wave 37 `70d2de19`). Edited and committed on the MacBook; every build and test ran on the mini in the rsynced copy. Evidence only from `research-levelup` `98a8a47` (`docs/spec/levelup.md`) and `research-hud-inputs` `fb24f5e` (`docs/spec/hud-live-producers.md`, `tools/ref_hud_inputs.py`). Logs are in ignored `work/r2/`.
+
+## Fixes
+
+- **LU-1 (MEDIUM)** `levelup_hud::skill_screen`: an alternative applies only on the prerequisite chain it was executed on (levelup.md:118-119, 133-138): the two passive-`0x40` rows with a kind-0 prerequisite, the seven skill rows with a kind-1 prerequisite. A passive-`0x40` row with a skill prerequisite is not unlocked (the `0x40` compare is only on the passive chain, levelup.md:133-136). A skill alternative with a passive prerequisite, an alternative after a failed prerequisite-0 check, and an alternative ident on a row of the other kind refuse. The test now runs each alternative on its executed chain (0 for passive `0x40`, 1 for skill rows) and adds the negative mixed-chain cases.
+- **LU-2** Prerequisite `-1` is a value test (all 64 bits), passing on either kind (levelup.md:114). A kind other than 0/1 with a real value, and a `-1` low word with a nonzero high word, refuse. Tests and `menu_smoke` use `pre = -1`, not `pre_kind = -1`.
+- **LU-3** The Godot `skill_screen(row)` binding requires `kind`, `need`, `ident`, `pre_kind`, `pre`, `page`, `resource`, `in_table` and also `cursor`, `edge`, `held`, `panel30`, and refuses a row without one (checked per key in `menu_smoke`). Only the confirm mask `0x40` is a constant. A `gate` key is refused: the ledger owns that word.
+- **LU-4** `SkillDecision::gate` returns the `0x4f4878` word after the call; `Ledger::skill_screen` keeps it in ledger memory between calls (`Ledger::skill_latch`). The panel page is the ledger's own `+0x50`; it must be the level-up page 5, and a caller page that differs refuses. The missing-resource exit (0x1d47b4) leaves before the latch store; an outside-cursor or confirm-miss exit whose order against the store would change the word refuses (levelup.md:105-111 give no order).
+- **LU-5** `Ledger::give_xp` writes each step's refilled `+0xac` / `+0xc0` before the next `player_recalcStats` (levelup.md:31-41). New ledger multi-level cases with HP > 0 check both currents: falling maxima (health 3 then -3, mana min(5, 4) = 4, which was 1 before) and rising maxima (55 / 19 at level 8).
+- **LU-6** The green bar converts the wrapped differences with the core `rta::from_int` (`cvt.s.w`), not the host cast (hud-live-producers.md:116-117). `champions-ui-layout` now links `champions-core`. A test with differences above 2^24 (16777218 / 16777219) fails with the host cast.
+- **LU-7** No real-zero signal exists in the play observation (the imported record path and every other source use max 0 for "not available"), so this stays a stated limit. `docs/LEVELUP_HUD.md` now says a real zero maximum is not drawn in play, and that the green bar is drawn only when `experience_next > experience_base`.
+- **LU-8** `godot/ui/game_menus.gd` states `g_localMenuOpen` from the host menu: closed at start, open in `open_screen`, closed in `close_menu`. The menu service keeps it across a new ledger (`reset`, `adopt_record`). Until something states it, the ledger does not decide the store and counts the calls as `level_message_undecided` (native and `menu_smoke` cases). The doc says the original writer of `0x41b69d` is not in the notes.
+- **LU-9** New ledger case: class-0 passive row 0 authored as mask `0x40` (rank 2), page 5, a passive-`0x40` send. `+0x124` must be `135 + 15*2 = 165` (`0x43250000`), the rank recalc saw before message 7 raised it to 3.
+
+Mutation check on the mini copy only (then restored, re-synced, touched and rebuilt, GDExtensions rebuilt incrementally): swapping recalc and message 7 fails `menus` ("recalc ran before the message-7 handler"); dropping the refill write-back fails `menus` ("the refill of one step reaches the next recalc"); the host cast fails `levelup-hud` ("green differences convert with the core from_int").
+
+## Gates (mini, synced copy)
+
+- Native Release configure/build `-j 4`: **PASS**, exit 0 (`work/r2/build.log`). GDExtensions: **PASS**, exit 0; archive and level-texture `template_debug` / `template_release`, creature-animation `template_debug`, all `lipo -archs` = `x86_64 arm64` (`work/r2/gdext.log`).
+- Focused CTest (`levelup-hud|menus|ui-layout|strings|hud`): **PASS 7/7** (`work/r2/focused-ctest.log`). `levelup-hud` 137 checks (117 in round 1), `menus-exact` 331 (317).
