@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — save-screen round 2 fixes all ten findings of audit `play-save-screen-r1` (0 HIGH, 5 MEDIUM, 5 LOW). Gates below are filled as they finish on the Mac mini.
+STATUS: PASS — save-screen round 2 fixes all ten findings of audit `play-save-screen-r1` (0 HIGH, 5 MEDIUM, 5 LOW). Every gate is green on the Mac mini: Release build and five universal GDExtensions, focused 6/6, CTest 260/260, strict matrix 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, and journeys step for step equal to wave 38 (80/81, pickup 10→11, death-reload refusal kept).
 
 # Play save screen round 2 — 2026-11-09
 
@@ -49,9 +49,11 @@ gains the list-input row, the corrected slot-name/write/saved-box/cancel/load
 rows, two disclosed native links (step-3 flag, host countdown) and a round-2
 "Refused" table with the reason for each. No disc text in tracked files: only
 the card identifiers, lookup keys and research level names round 1 already
-used. Nothing outside the module, its test and its doc changed, so the
-`Flow`, the session save/load path, the GDExtensions and the Godot project are
-untouched.
+used. Nothing outside the module, its test and its doc changed. The module
+compiles into `champions-frontend`, which the archive GDExtension links, but
+`git grep` finds no caller outside the module, its test and its CMake line. So
+`Flow`, the session save/load path, the bindings and the Godot project behave as
+before.
 
 ## Gates (Mac mini)
 
@@ -99,4 +101,45 @@ untouched.
    `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline was
    edited.
 
-GATES_REST
+8. **Journeys: PASS, step for step equal to wave 38.** Unchanged
+   `tools/run_loop_playthrough.py --godot … --game-folder ../../private-validation/rta-disc
+   --out work/pss2/playthrough`, serial headless then rendered, standard input closed,
+   read-only disc, after the import above. Wrapper exit 1, 168 s (`work/pss2/playthrough.out`,
+   `work/pss2/playthrough/*/result.json`; the 38 rendered PNGs stay in the mini's
+   ignored `work/` and are not tracked).
+
+   | Variant | Steps | Exit | Ending | Pickup | Log errors | Captures | Refused rows | Refusal kinds |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | Headless | 80 | 1 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks, 0 retries | 0 | 0 | 27 | 6 |
+   | Rendered | 81 | 1 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks, 0 retries | 0 | 38 | 28 | 6 |
+
+   Disc files 994 before and 994 after. Compared index by index with wave 38's
+   `work/playable-wave38/playthrough/{headless,rendered}/result.json` (integration
+   branch): **every step name and result is identical** in both variants (80 and 81
+   steps), as are the refused-row counts (27 and 28), the pickup rows and the ending.
+   - Refusal kinds are 6 here and 8 in wave 38. The two missing kinds are both the
+     hub-action refusal (`hub action beyond documented … offers is Unknown`, from
+     dialog confirm and from the tick) that wave 38 merged from `codex/play-progression`.
+     This branch is based on wave 37 and does not contain that merge. Its six kinds, and
+     the count of each, equal wave 38's six shared kinds and wave 37's six exactly.
+   - Two non-result fields differ. Step 18 `dialog_choice_close` `choices_taken` is
+     headless 5 (wave 38: 3, wave 37: 5) and rendered 3 (wave 38: 3, wave 37: 6). Step 27
+     `hub_trigger_mission_menu` `script_executed_commands` follows the same dialog
+     re-runs (`getMissionAvailable`, `callScript`, `addQuest`, `setMissionAvailable`).
+     These counts already move between waves 37 and 38 on the same native code. Wave 38
+     attributes them to the close-fade dialog retry (`loop-playable-integration-r38-report.md`;
+     `loop-play-progression-r3-report.md:34`). The headless run equals wave 37 in every
+     field. Nothing on this path calls the memcard module.
+   - `fps` and `memory_bytes` are host-only and moved, as in every wave.
+
+## Remaining
+
+Same as round 1: no host card directory source binds the contract, so `Flow`
+still uses host files and PS2 import. Now refused with reasons, pending research:
+the state-4 cancel back fade, the delete confirm, combined presses, the repeat
+and 0x80 outside the settled fixture, the saved-box key split (needs the
+0x8e1ad8 writer), a stale 0x4f8f29, net-path step 2, count 0 with a named
+directory, and a negative countdown. Plus round 1's list: load steps 0/1/3, the
+fade integration, and the writers of 0x88d3b0 and 0x8e1ad8. Death reload stays
+refused. The mini `build/` was deleted at the end. No push, PR, sibling edit,
+private-disc write or process-name kill.
