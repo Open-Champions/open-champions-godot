@@ -77,4 +77,26 @@ untouched.
    about 80–120 from other jobs. `netplay` alone took 278.95 s. `memcard-screen` passed
    in 0.01 s.
 
+4. **Strict Godot matrix: PASS, 54/54**, exit 0, 175 s. `python3 -u tools/godot_matrix.py
+   matrix --godot ~/malik-champions/runtime/Godot.app/Contents/MacOS/Godot --out
+   work/pss2/matrix --captures --timeout 1200`, standard input closed
+   (`work/pss2/matrix.out`, `work/pss2/matrix/results.json`). The unchanged `check-log`
+   found 0 diagnostic errors in all 105 logs. Case names, order and results are
+   identical to wave 38's `results.json` (54 cases). Nothing was filtered or
+   allowlisted. A first run was 29/54: this fresh checkout had no `.godot` import cache,
+   and the editor pass (`--editor --quit-after 120 --frame-delay 50`, exit 0, 21 s) did
+   not import `res://assets/open_champions_avatar.png`. All 25 failures were that one
+   missing `.ctex` (84 log lines; the same cause as round 1's first matrix). That run is
+   kept as `work/pss2/matrix-stale-import*`. One `--headless --path godot --import`
+   (exit 0, 2 s, `work/pss2/godot-import.log`) fixed the cache. No file, test or
+   allowlist changed before the 54/54 rerun.
+5. **Combat: PASS, 2,645 checks, 0 failures** (`PLAYABLE_PLAY_RESULT`,
+   `matrix/playable_wave_smoke_full_combat.log`), the same as wave 38.
+6. **FULL_SAVE_LOAD: PASS, 300/300.** Continued and uninterrupted presentation SHA-256
+   `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical to each
+   other and to waves 37 and 38.
+7. **FULL_TRACE: PASS, unchanged**, 36,402 bytes, headless, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline was
+   edited.
+
 GATES_REST
