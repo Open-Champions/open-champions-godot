@@ -16,8 +16,8 @@ Implementation commit: `3b77dc8b`. The new code is opt-in through `ArrivalContro
   - `0x1504bc`: the block goes into the head word `0x403a1c` + 16 × bucket;
   - `0x1504c4`: the previous head goes into the block's first word.
   The name table is not touched, so the name still finds the freed object (r7:373).
-- **Bucket.** Only bucket 1 was executed, with a non-zero previous head, for a 0x250-byte GameObject. The client accepts only blocks of its own pool's class 1 (`core_state.hpp` `Pool`: the 0x500-byte class, `0x6288c0`–`0x6c88c0`, on block boundaries). Anything else is refused at `0x150470`, before any dtor store: `pool_free of a block outside pool class 1 was not executed`. An empty bucket-1 list is refused the same way: `pool_free onto an empty free list was not executed`.
-- **Property list** (r7:375-384). The executed list is one other entry and then one `name=` entry whose value names this object. That list is accepted in either of two forms:
+- **Bucket.** Only bucket 1 was executed, with a non-zero previous head, for a 0x250-byte GameObject. The client accepts only addresses in the class-1 range of its pool layout (`core_state.hpp` `Pool`: the 0x500-byte class, `0x6288c0`–`0x6c88c0`, on block boundaries). Only the address layout is shared with the client's pool; the allocator itself is not told of the free (fix round, PLR7-3, below). Anything else is refused at `0x150470`, before any dtor store: `pool_free of a block outside pool class 1 was not executed`. An empty bucket-1 list is refused the same way: `pool_free onto an empty free list was not executed`.
+- **Property list** (r7:375-384). The executed list is `kind=1`, then one `name=` entry whose value names this object (fix round, PLR7-1: any other first entry is refused). That list is accepted in either of two forms:
   - the research layout, `+0x2c` → a null-terminated array of string pointers;
   - the host `props` list, which the client's object load already registers by `name=`.
 
@@ -52,7 +52,7 @@ At state 0 (r5:61-65), on the AutoProp path after the hide mask:
   - `+0x1c` mode (`0x1708a0`), `+0x1e` 0 (`0x170888`).
 
   The depth becomes 1. `+0x9e` becomes the old halfword **OR** the mode (`0x17087c`, r7:326-339), so a second push ORs in a second mode.
-- **Capacity 0.** Nothing is pushed and no entry byte is stored. Its `+0x9e` stores were not checked (R10-2), so none are applied and `0x170838` is listed in `ArrivalPrefix::unmodeled`.
+- **Capacity 0.** Nothing is pushed and no entry byte is stored. That result ran only with clip `+4` = 5, so since the fix round (PLR7-2) any other length at capacity 0 is refused at `0x170838`. Its `+0x9e` stores were not checked (R10-2), so none are applied and `0x170838` is listed in `ArrivalPrefix::unmodeled`.
 - **`+0x17c`** is **set** to clip `+4` + 1 (`0x23d764`, r7:279-299), never added to an older value.
 - **Slot 19.** The value is `+0x12c` bit 0 (r7:275-276). Round 7 refuses the old `slot19_value` control. With value 1 and `+0x11c` bit 0 clear, `+0xc` bit 0 is set (`0x23d878`, r7:345-346). The entry then stops before `0x14598c` as in round 6.
 - **Slot 19 = 1 with `+0x11c` bit 0 is refused.** With the world word `0x44fdc8` = 0, the refusal is at `0x182b08` (`slot 19 collision: 0x182b00 faults on a null world 0x44fdc8`), before the `+0xc` store, as executed (r7:347-349). With a non-zero world word, the refusal is at `0x182b00`, because a real collision world is Unknown (r7:351).
@@ -165,3 +165,43 @@ The mini's `build/` was deleted after the gates.
 - `work/loop-play-loading-r5-report.md`: the stale-wording fix.
 
 Nothing was pushed and no PR was opened. No process was killed by name. Nothing was installed. On the mini, work stayed inside `~/malik-champions`, with no `/tmp`. The private disc was read only, by the journeys.
+
+## Fix round (audit `play-loading-r7.md`: FIX, 1 MEDIUM, 2 LOW)
+
+Base `09501cbe`. Fix commit `f9a30114`. The research pin is still `f8c780b`.
+
+### PLR7-1 (MEDIUM): only `kind=1` as the first property entry
+
+The research ran one list, `{"kind=1", "name=<that name>", 0}` (r7:375-384; `difftest_arrival_stage_r7.py:450-458`). It does not record which keys the six `strncmp` `0x3b91d8` calls compare against. `delete_name_entry` used to accept any first entry that did not start with `name=`. It now accepts only the exact string `kind=1`. Any other first entry is refused at `0x3b91d8`, before the `+0x48` store, the name removal and the free stores, with the existing reason `delete with this property list was not executed`. The comment above `delete_name_entry` and the report text above now say "`kind=1`, then one `name=` entry".
+
+New refusal checks:
+- host lists `{"authored_key=1", …}`, `{"kind=2", …}` and `{"kind=1 ", …}`, each followed by `name=authored_odd`;
+- the memory layout at `+0x2c` with `authored_key=1` first.
+
+Each check asserts boundary `0x3b91d8`, no store at `+0x48`, at the head word or at the block's first word, an unchanged name count, and that the name still finds the object.
+
+### PLR7-2 (LOW): capacity 0 with a clip length other than 5 is refused
+
+The capacity-0 result "no store touches `obj+0xa0`–`+0xbf`" ran only with clip `+4` = 5 (r7:303-306; `difftest_arrival_stage_r7.py:380-388`). The r8 `props` runs at 9 and `0x40` (`difftest_arrival_stage_r8.py:414-419`) plant no entry sentinel and assert only `+0x17c`. No research shows the entry untouched at 9 or `0x40`, so the stage now refuses capacity 0 with any length other than 5 at `0x170838`, with `anim_push at capacity 0 with a clip length other than 5 was not executed`. The refusal comes before the depth clear, the push and the `+0x17c` set.
+
+**One existing test line changed.** The capacity-0 loop asserted acceptance for lengths 5, 9 and `0x40`. Lengths 9 and `0x40` are now refused, so that loop now runs length 5 only (its assertions are unchanged). A new loop checks that 9 and `0x40` refuse: boundary `0x170838`, no store in the entry, at `+0x9c` or at `+0x9e`, `+0x17c` not set to length + 1, and an empty queue. This is the only changed or removed line in the tests. The executed `+0x17c` result at 9 and `0x40` is no longer reached by the client. That is the cost of refusing.
+
+### PLR7-3 (LOW): the free is not connected to the client's allocator
+
+The stage applies only `pool_free`'s two recorded memory stores: `0x1504bc` puts the block in the bucket-1 head word `0x403a2c` (`0x403a1c` + 16), and `0x1504c4` puts the old head in the block's first word. **The client's allocator is not told of the free.**
+
+- The client's pool is `World::pool` (`objects.hpp:236`), a host `Pool` (`core_state.hpp:48-63`, "No host memory is exposed"). It keeps `head` and `link` as members, and `Pool::free` (`core_state.cpp:62-66`) updates only them.
+- No client code writes the class table `0x403a10` to memory. `git grep` for `403a10`, `403a1c` and `403a2c` outside `work/` finds only this stage, its header comment and its test (the other hits are float bit patterns in `tests/vectors/*.tsv`).
+- So outside a fixture that plants the head word, `0x403a2c` is 0 and the stage refuses with `pool_free onto an empty free list was not executed`. The accepted path needs a planted free-list head.
+
+**Not connected, because connecting would mean guessing.** The memory head word and the host `head[1]` are two separate states, and nothing recorded maps one to the other. Also, the round-7 test's objects are setup objects (`Variables::new_object`, `script_builtins.cpp:293-306`), whose addresses come from `next_address` or the caller, not from `Pool::allocate` (loaded objects do use it, `script_commands_objects.cpp:257`). Those class-1 test addresses are still on the host pool's free list, so also calling `Pool::free` would link them twice. This is said in the comment at the free (`loading_equipment.cpp`, round-7 block) and in the `ArrivalControl` header comment.
+
+### Fix-round gates
+
+All gates ran on the Mac mini in `~/malik-champions/open-champions/worktrees/play-loading-r7`, at `f9a30114`. The three changed files were synced with `rsync -rlp --checksum` and touched, and their sha256 sums matched the MacBook's. Before the build, `df -h ~/malik-champions` showed 23 GiB free at first, so the build waited until 33 GiB were free (34 GiB at the start of the gate script). There was one `build/` root, with `-j 4` and CTest `-j 3`, and standard input closed. Logs are in the ignored `work/plr7-fix/`, with the home path replaced by `~/`. The scripts are round 7's `work/plr7/gates-*.sh` with `W=work/plr7-fix`, run in order by `gates-all.sh`. Every step logs `uptime` before and after it.
+
+| Gate | Result | Load (1-min) before → after |
+|---|---|---|
+| Native Release configure and build, `-j 4`, clean `build/native` | **PASS**, exit 0, 2 s + 121 s. 0 warnings in the changed files (10 in the whole build, all in other files, as in round 7) | 15.9 → 22.2 |
+| Focused `ctest -R ^script-commands` | **PASS**, 3/3, 1 s | 22.2 → 22.2 |
+| GDExtensions | **PASS**, each exit 0. Archive `template_debug` 96 s, `template_release` 94 s; level texture 20 s / 19 s; creature animation `template_debug` 62 s. `lipo -archs` gives `x86_64 arm64` for all five libraries | 22.2 → 11.5 |
