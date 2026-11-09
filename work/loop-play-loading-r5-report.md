@@ -132,7 +132,7 @@ Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pl
 
 ## Fix round (audit `play-loading-r5`, VERDICT FIX)
 
-Audit: `cursor-runs/audits/play-loading-r5.md` (0 HIGH, 2 MEDIUM, 2 LOW). Base of the fix: `dd7a01e2`. Fix commit: `e947eb4`. Every behaviour cites the PASS research `research-loading-readiness@56a6760` (`docs/loading-arrival-r5.md`, `-r6.md` and their difftests). Nothing is ported from round 7 (`4487a88`), which is still under audit.
+Audit: `cursor-runs/audits/play-loading-r5.md` (0 HIGH, 2 MEDIUM, 2 LOW). Base of the fix: `dd7a01e2`. Fix commit: `e947eb4`. Every behaviour cites the PASS research `research-loading-readiness@56a6760` (`docs/loading-arrival-r5.md`, `-r6.md` and their difftests). Nothing is ported from round 7 here. *(Updated 2026-11-09: round 7 passed its audit at `f8c780b` (`research-loading-readiness-r7-fix2`, PASS); it was then under audit at `4487a88`. The port is `codex/play-loading-r7`, `work/loop-play-loading-r7-report.md`.)*
 
 ### PLR5-1 (MEDIUM): the route-2 delete did not check the object's table
 
@@ -142,7 +142,7 @@ Audit: `cursor-runs/audits/play-loading-r5.md` (0 HIGH, 2 MEDIUM, 2 LOW). Base o
   - table word 0;
   - table 0 with a property list, which shows the table is checked first.
 - **Evidence.** In `work/plr5-fix/mutations.txt`, M1 deletes the gate. Exactly the three new refusal checks fail. With the fix: `script-commands ok`.
-- **Flag: "does not free".** The passing delete still frees nothing and stores no name count, as r6:129-136 and 175-177 ("do not free it or store the name count") say. Round 7 (`4487a88`, under audit) corrects that claim: it says `0x14cf90(obj, 3)` tail-jumps to `pool_free` `0x150470`. As instructed, I did not implement freeing. The no-free model is kept and flagged here and in a code comment at the delete. If round 7 passes its audit, this stage needs a port (free-list stores), or it should be refused until then.
+- **Flag: "does not free".** The passing delete still frees nothing and stores no name count, as r6:129-136 and 175-177 ("do not free it or store the name count") say. Round 7 (`4487a88` at the time; PASS at `f8c780b` since 2026-11-09) corrects that claim: it says `0x14cf90(obj, 3)` tail-jumps to `pool_free` `0x150470`. As instructed, I did not implement freeing. The no-free model is kept and flagged here and in a code comment at the delete. If round 7 passes its audit, this stage needs a port (free-list stores), or it should be refused until then. *(2026-11-09: it passed; `through_round = 7` on `codex/play-loading-r7` frees the block. Round 6 is kept as its own pin.)*
 
 ### PLR5-2 (MEDIUM): zero-valued `cut_start` finals were not discriminated
 

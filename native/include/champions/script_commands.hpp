@@ -409,7 +409,8 @@ public:
   };
   // report_arrival_limits names the round-4 Unknowns
   // (366b65a:docs/loading-arrival-r4.md:184-207) and the round-6 ones
-  // (56a6760:docs/loading-arrival-r6.md:181-185) without changing the
+  // (56a6760:docs/loading-arrival-r6.md:181-185) and round 7
+  // (f8c780b:docs/loading-arrival-r7.md:519-529) without changing the
   // booleans above.
   LoadingReadiness loading_readiness(const std::string &destination,
                                      bool report_arrival_limits = false);

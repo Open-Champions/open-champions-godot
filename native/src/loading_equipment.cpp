@@ -1,4 +1,5 @@
 #include "champions/loading_equipment.hpp"
+#include "champions/core_state.hpp"
 #include <limits>
 #include <tuple>
 #include <variant>
@@ -384,7 +385,153 @@ void show_hide(builtins::Variables &v, ArrivalPrefix &out, const std::string &na
   out.executed.push_back(hide ? 0x144c00 : 0x144db8);
 }
 
-void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPrefix &out) {
+// ---- Round 7. Every line below cites research-loading-readiness@f8c780b
+// (audit research-loading-readiness-r7-fix2 PASS): docs/loading-arrival-r7.md
+// as r7:<line>, and its difftests tools/difftest_arrival_stage_r7.py,
+// _r8.py and _r9.py where the note defers a layout to them.
+constexpr std::uint32_t kWarmup = 0x506048, kLoadscreenByte = 0x5060a0, kCutByte = 0x44fcd0;
+constexpr std::uint32_t kFreeTable = 0x403a1c;
+// The client's pool layout (core_state.hpp Pool, ref_core.Pool): class 1 is
+// the 0x500-byte class, where a 0x250-byte GameObject is allocated.
+constexpr std::uint32_t kPoolClass1 = Pool::BASE + Pool::CLASSES[0][0] * Pool::CLASSES[0][1];
+constexpr std::uint32_t kPoolClass1End = kPoolClass1 + Pool::CLASSES[1][0] * Pool::CLASSES[1][1];
+
+// setState 0x23d680 at state 0 with a nonzero clip (r7:272-350). The entry is
+// state 0, so the clip is +0x128 and its flag word +0x12c (r7:272-276).
+void set_state_clip(builtins::Memory &m, ArrivalPrefix &out, std::uint32_t obj, std::uint32_t clip) {
+  // r7:303-310: only capacity bytes 0 and 4 were executed. r7:309, r8
+  // prop_case: every push ran with clip +4 = 5, and 0x170bc8 stores 5.0 at
+  // entry +0x18; the source of that value is not recorded, so another clip
+  // length is refused rather than given a constant.
+  const auto capacity = m.read(obj + 0x9d);
+  if (capacity != 0 && capacity != 4)
+    finish(out, 0x170838, "anim_push capacity other than 0 or 4 was not executed", m, {0, 0, 0});
+  const auto length = m.word(clip + 4);
+  if (capacity == 4 && length != 5)
+    finish(out, 0x170bc8, "anim entry +0x18 for a clip length other than 5 was not executed", m, {0, 0, 0});
+  const std::uint32_t mode = (m.word(obj + 0x12c) & 2) ? 3 : 6; // r7:273-275, 310
+  // r7:340-341 (R10-2): the depth clear is `sb zero` at 0x23d6f8, Observed
+  // static by field only. Its effect is inferred from the executed second
+  // push (r7:342-344): depth 1 and the entry rewritten at +0xa0.
+  m.w8(obj + 0x9c, 0);
+  out.callees.push_back(0x170838);
+  const std::uint32_t entry = obj + 0xa0;
+  if (capacity == 4) {
+    // r7:307-326 and r8 props: each field and the store that writes it.
+    m.w32(entry, clip);                                                    // 0x170878
+    m.w16(obj + 0x9e, std::uint32_t(m.u16(obj + 0x9e)) | mode);            // 0x17087c, OR (r7:326-339)
+    m.w32(entry + 0x18, 0);                                                // 0x170880
+    m.w16(entry + 0x1e, 0);                                                // 0x170888
+    if (const auto link = m.word(entry + 4)) {
+      m.w32(link + 0x14, 0);                                               // 0x17088c
+      m.w32(entry + 4, 0);                                                 // 0x170890
+    }
+    m.w16(entry + 0x1c, mode);                                             // 0x1708a0
+    m.w32(entry + 0xc, 0);                                                 // 0x1708a4
+    m.w32(entry + 8, 0x3f800000);                                          // 0x1708a8
+    m.w32(entry + 0x10, 0x3f800000);                                       // 0x1708ac
+    m.w32(entry + 0x14, 0);                                                // 0x1708b0
+    m.w8(obj + 0x9c, 1);                                                   // r7:307-308
+  } else {
+    // r7:303-306: capacity 0 pushes nothing and stores nothing in the entry.
+    // Its +0x9e stores were not checked (audit R10-2), so none are applied.
+    out.unmodeled.push_back(0x170838);
+  }
+  out.callees.push_back(0x170bc8);
+  if (capacity == 4) m.w32(entry + 0x18, 0x40a00000);                      // 0x170c1c, 5.0
+  // r7:279-299: +0x17c was zeroed at 0x23d6ac; 0x23d764 stores it + clip +4
+  // + 1, so it is set to clip +4 + 1, never added to an older value.
+  m.w32(obj + 0x17c, length + 1);
+}
+
+// The executed property list (r7:375-384): one other entry, then one
+// "name=" entry whose value names this object. Anything else is refused.
+// The memory layout is +0x2c -> null-terminated array of string pointers
+// (difftest_arrival_stage_r7.py delete); a host list is the same entries.
+std::string delete_name_entry(builtins::Variables &v, ArrivalPrefix &out, objects::GameObject *obj) {
+  auto &m = v.memory;
+  std::vector<std::string> entries;
+  if (const auto list = m.word(obj->addr + 0x2c)) {
+    if (obj->props) finish(out, 0x3b91d8, "delete with two property lists was not executed", m, {0, 0, 0});
+    for (std::uint32_t k = 0; k < 3; ++k) {
+      const auto at = m.word(list + 4 * k);
+      if (!at) break;
+      entries.push_back(m.cstr(at, 64));
+    }
+  } else {
+    entries = *obj->props;
+  }
+  const auto named = [](const std::string &s) { return s.rfind("name=", 0) == 0; };
+  if (entries.size() != 2 || named(entries[0]) || !named(entries[1]))
+    finish(out, 0x3b91d8, "delete with this property list was not executed", m, {0, 0, 0});
+  const auto value = entries[1].substr(5);
+  const auto found = v.find(value, 0x200);
+  if (value.empty() || found.size() != 1 || found.front() != obj)
+    finish(out, 0x3b91d8, "delete whose name= value names another object was not executed", m, {0, 0, 0});
+  return value;
+}
+}
+
+// r7:141-151, 153-158: game_getHubName at the current difficulty.
+std::string new_game_destination(builtins::Variables &v) {
+  auto &m = v.memory;
+  // r7:137-139: the select flag 0x4f70a0 and PvP mode B 0x4f7120 take other
+  // paths; only both clear reaches the destination below.
+  if (m.word(0x4f70a0) || m.word(0x4f7120)) reject("player select with the select flag or PvP mode B was not executed");
+  const auto difficulty = m.word(kDifficulty);
+  if (difficulty < 1 || difficulty > 5) reject("hub name outside difficulties 1-5 was not executed");
+  // r7:134-135: frontend_startPlayerSelect 0x1e3ba0 stores the destination at
+  // 0x4fdc30. r7:153-155: playerSel_finish(0) copies it to the request
+  // 0x41b6d0 and stores orientation 0xff at 0x41b720.
+  m.string(0x4fdc30, "hub");
+  m.string(0x41b6d0, "hub");
+  m.w8(0x41b720, 0xff);
+  // r7:144-151 and difftest_arrival_stage_r7.py producer A2: the decision
+  // bit (+0x4c1b) and choice bit (+0x4c1a) are bit `difficulty`; the
+  // completion bit is 0x2 of the mission-1 byte at that difficulty.
+  const auto record = v.player_record(0);
+  const bool decision = m.read(record + 0x4c1b) & (1u << difficulty);
+  const bool choice = m.read(record + 0x4c1a) & (1u << difficulty);
+  const bool complete = m.read(v.mission_byte(0, difficulty, 1)) & 2;
+  if (decision && choice && complete) m.string(0x41b6d0, "hub2");
+  return m.cstr(0x41b6d0, 0x50);
+}
+// r7:166, 181-184: row 0 +8 of g_missionTable 0x4fe540. Row 0's evil
+// alternative +0x0c is null; a non-null one was not executed. The menu state
+// that copies it into the request is not executed (r7:193-197).
+std::string mission_one_start(const builtins::Memory &m) {
+  if (m.word(0x4fe540 + 0x0c)) reject("mission row 0 evil alternative was not executed");
+  const auto name = m.word(0x4fe540 + 8);
+  if (!name) reject("mission row 0 start level absent");
+  return m.cstr(name, 0x50);
+}
+// r7:167-172, 187-188: main copies the boot request; offline, frontend_start
+// replaces it with the front end's request before a session runs. The
+// online path was not executed.
+std::string boot_request(builtins::Memory &m, bool offline) {
+  if (!offline) reject("online boot request was not executed");
+  m.string(0x41b6d0, "intro");
+  return "intro";
+}
+// r7:160-163, 177-185: mainloop_loadRequestedWorld 0x320edc copies the
+// request into g_levelName 0x41b721 and 0x44fe18 and clears its first byte.
+// Only the three executed names split; each names a route ordinal.
+ArrivalRequest split_request(builtins::Memory &m) {
+  const auto name = m.cstr(0x41b6d0, 0x50);
+  ArrivalRequest out;
+  if (name == "hub") out.route = 0;
+  else if (name == "strife") out.route = 1;
+  else if (name == "blood1") out.route = 2;
+  else reject("request split for this level was not executed");
+  m.string(kLevel, name);
+  m.string(0x44fe18, name);
+  m.w8(0x41b6d0, 0);
+  out.level = name;
+  return out;
+}
+
+namespace {
+void run_arrival_staged(builtins::Variables &v, const ArrivalControl &c, ArrivalPrefix &out, int round) {
   auto &m = v.memory;
   // r5:18-21: player count 1, difficulty 1, network byte 0, player object 0.
   if (m.read(kNet) || m.word(kPlayerObject))
@@ -468,13 +615,32 @@ void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPref
           finish(out, 0x179550, "prop hide-mask record walk was not executed", m, {0, 0, 0});
         m.w64(obj->addr + 0xc8, arrival_hide_mask(m, model, 0));
         // r6:105-107: a zero clip word is not stored and anim_push is skipped.
-        if (m.word(obj->addr + 0x128))
+        const auto clip = m.word(obj->addr + 0x128);
+        // Round 7: slot 19's value is bit 0 of +0x12c (r7:275-276).
+        const auto value = round < 7 ? c.slot19_value : (m.word(obj->addr + 0x12c) & 1);
+        if (clip && round < 7)
           finish(out, 0x170838, "anim_push with a nonzero clip", m, {0, 0, 0});
+        // r7:301-349: a clip and slot-19 value 1 ran only separately.
+        if (clip && value)
+          finish(out, 0x170838, "a clip with slot-19 value 1 was not executed", m, {0, 0, 0});
+        if (clip) set_state_clip(m, out, obj->addr, clip);
         out.callees.push_back(0x23d7ac);
-        if (c.slot19_value)
+        if (value && round < 7)
           finish(out, 0x23d7ac, "slot 19 with a nonzero value", m, {0, 0, 0});
-        // r6:107: slot 19 "is called once and returns"; its stores are not
-        // recorded, so none are applied.
+        if (value) {
+          // r7:347-349: with +0x11c bit 0, 0x182b00 is called with the world
+          // word 0x44fdc8 and faults at 0x182b08 when it is 0. A real
+          // collision world is Unknown (r7:351). Both stay refused.
+          if (m.word(obj->addr + 0x11c) & 1) {
+            if (!m.word(0x44fdc8))
+              finish(out, 0x182b08, "slot 19 collision: 0x182b00 faults on a null world 0x44fdc8", m, {0, 0, 0});
+            finish(out, 0x182b00, "slot 19 collision with a collision world was not executed", m, {0, 0, 0});
+          }
+          // r7:345-346: +0xc bit 0 is set (store at 0x23d878).
+          m.w32(obj->addr + 0xc, m.word(obj->addr + 0xc) | 1u);
+        }
+        // r6:107: slot 19 "is called once and returns"; its other stores are
+        // not recorded, so none are applied.
         out.unmodeled.push_back(0x23d7ac);
       }
     }
@@ -514,12 +680,62 @@ void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPref
     // so it promotes the two names and runs none of them.
     if (m.word(kDeferCount) != 0 || m.word(kDeferQueued) != 2 || m.word(kParity) != 0)
       reject("arrival prefix disturbed the deferred queue");
+    if (round < 7) {
+      v.run_deferred();
+      out.callees.push_back(0x1eda24);
+      out.loader_promoted = true;
+      // r6:76-78 and 181-185: dbg_printf 0x355490 and the warm-up loop are not
+      // entered; the 48 0x145690 tests belong to a later pass.
+      finish(out, 0x355490, "dbg_printf/warm-up", m, {2, 0, 1});
+    }
+    // Round 7, the loader from 0x322e58 (r7:199-252). The reads the passes
+    // test are the fixture's: camera word 0, cut byte 0, one player whose
+    // pointer is 0 (checked above), net byte 0 (r7:213, 232-238, 245).
+    if (m.word(kCamera)) finish(out, 0x203400, "Camera_update in the warm-up loop was not executed", m, {0, 2, 0});
+    if (m.read(kCutByte)) finish(out, 0x199944, "cut_runFrame in the warm-up loop was not executed", m, {0, 2, 0});
+    // r7:207-213: startWarmup stores 10, dbg_printf, the one promote (front
+    // 2, back 0, parity 1, no native run), dbg_printf, the stack check.
+    m.w32(kWarmup, 10);
+    out.callees.push_back(0x322934);
+    out.callees.push_back(0x355490);
     v.run_deferred();
     out.callees.push_back(0x1eda24);
     out.loader_promoted = true;
-    // r6:76-78 and 181-185: dbg_printf 0x355490 and the warm-up loop are not
-    // entered; the 48 0x145690 tests belong to a later pass.
-    finish(out, 0x355490, "dbg_printf/warm-up", m, {2, 0, 1});
+    out.callees.push_back(0x355490);
+    out.callees.push_back(0x19d9f8);
+    // r7:215-229: ten passes of six calls while 0x17fe88 returns 0; the
+    // counter falls by one per pass through stores at 0x322f30. The timer-0
+    // store at 0x322f04 is a hardware register in the research's fixture map
+    // (r7:44-46) and is not applied to client memory.
+    constexpr std::uint32_t pass[6] = {0x1e72f8, 0x1ebc18, 0x172ca8, 0x17d830, 0x17fce0, 0x17fe88};
+    for (std::uint32_t left = 10; left-- > 0;) {
+      for (const auto call : pass) out.callees.push_back(call);
+      m.w32(kWarmup, left);
+      ++out.warmup_passes;
+    }
+    // None of the six records its stores (r7:265-268).
+    for (const auto call : pass) out.unmodeled.push_back(call);
+    // r7:243-248: the second stack check, dbg_printf, the net byte, then the
+    // shop test by level name.
+    out.callees.push_back(0x19d9f8);
+    out.callees.push_back(0x355490);
+    const auto level = m.cstr(kLevel, 16);
+    if (level == "hub") {
+      // r7:254-263: shop_openOrStock 0x1c7af8 (a1 = 1) -> lump_load 0x173558,
+      // stopped before the disc lookup.
+      out.callees.push_back(0x1c7af8);
+      out.callees.push_back(0x173558);
+      finish(out, 0x1724fc, "cd_findFile", m, {2, 0, 1});
+    }
+    // r7:246-248: only the empty name was executed past the four compares.
+    if (!level.empty()) finish(out, 0x323074, "shop test for this level name was not executed", m, {2, 0, 1});
+    // r7:248-252: dbg_printf, then loadscreen_stop 0x3224d8 stores 1 at
+    // 0x5060a0 and waits in ReferThreadStatus on a thread this path has not
+    // started (r7:265-267, 504-505).
+    out.callees.push_back(0x355490);
+    out.callees.push_back(0x3224d8);
+    m.w8(kLoadscreenByte, 1);
+    finish(out, 0x3528e4, "loadscreen_stop: ReferThreadStatus on an unstarted thread", m, {2, 0, 1});
   }
 
   // Route 2: the round-4 prefix (366b65a:docs/loading-arrival-r4.md:154-179).
@@ -619,18 +835,52 @@ void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPref
     if (m.word(obj->addr + 0x48) != kGameObjectTable)
       reject("delete of an object outside the GameObject table was not executed");
     // r6:138-140: a property list takes the walk this fixture skips.
-    if (m.word(obj->addr + 0x2c) || obj->props)
+    const bool listed = m.word(obj->addr + 0x2c) || obj->props;
+    if (listed && round < 7)
       finish(out, 0x3b91d8, "delete with a property list", m, {0, 0, 0});
-    // GameObject_dtor 0x14cf90 through the three handle clears; no free and
-    // no name-count store (r6:129-136, 175-177). The no-free part relies on
-    // round 6's "does not call pool_free 0x150470". Round 7 (4487a88, still
-    // under audit) disputes that; it is not ported here. See the round-5
-    // fix report.
+    // Round 7 refusals come before any dtor store.
+    std::string removed;
+    if (listed) removed = delete_name_entry(v, out, obj);
+    std::uint32_t head = 0, previous = 0;
+    if (round >= 7) {
+      // r7:362-371 and difftest_arrival_stage_r8.py free_head: pool_free
+      // 0x150470 links the block at the head word 0x403a1c + 16 x bucket.
+      // Only bucket 1 with a non-zero head was executed (a 0x250-byte
+      // GameObject); the client accepts only its pool's class-1 blocks.
+      if (obj->addr < kPoolClass1 || obj->addr >= kPoolClass1End ||
+          (obj->addr - kPoolClass1) % Pool::CLASSES[1][0])
+        finish(out, 0x150470, "pool_free of a block outside pool class 1 was not executed", m, {0, 0, 0});
+      head = kFreeTable + 16 * 1;
+      previous = m.word(head);
+      if (!previous) finish(out, 0x150470, "pool_free onto an empty free list was not executed", m, {0, 0, 0});
+    }
+    // GameObject_dtor 0x14cf90. Round 6 (r6:129-136, 175-177) recorded no
+    // free and no name-count store and is kept as its pin. Round 7 withdraws
+    // the no-free claim (r7:355-360, 512-513): 0x144b44 calls slot 1 with
+    // a1 = 3 and 0x14cf90 tail-jumps to pool_free at 0x14d1fc.
     out.callees.push_back(0x14cf90);
     m.w32(obj->addr + 0x48, kGameObjectTable);
+    if (listed) {
+      // r7:375-383: six strncmp calls, then objNames_remove 0x14be58 once
+      // with the value after "name=" and the object (the client's name table
+      // model). Afterwards the name finds no object.
+      for (int k = 0; k < 6; ++k) out.callees.push_back(0x3b91d8);
+      out.callees.push_back(0x14be58);
+      const auto names = v.object_names.count;
+      v.object_names.remove(removed, obj);
+      if (v.object_names.count != names - 1 || !v.find(removed, 0x200).empty())
+        reject("objNames_remove left the name in the table");
+    }
     for (int k = 0; k < 3; ++k) out.callees.push_back(0x1a1698);
     // r6:132: handle_clear's stores are not recorded; none are applied.
     out.unmodeled.push_back(0x1a1698);
+    if (round >= 7) {
+      // r7:364-371: exactly two stores. 0x1504bc puts the block in the head
+      // word; 0x1504c4 puts the previous head in the block's first word.
+      out.callees.push_back(0x150470);
+      m.w32(head, obj->addr);
+      m.w32(obj->addr, previous);
+    }
   }
   out.executed.push_back(0x144b44);
   m.byte(kInPost, 0);
@@ -643,11 +893,15 @@ void run_arrival_prefix(builtins::Variables &v, const ArrivalControl &c, Arrival
   // 366b65a:docs/loading-arrival-r4.md:154-191. Difficulty one and one player
   // are the initialized-record controls. An unlisted route is "route state".
   if (c.route < 0 || c.route > 2) throw amx::HostFault("route state");
-  if (c.through_round != 4 && c.through_round != 6) reject("arrival round was not audited");
-  if (c.through_round == 6) {
+  if (c.through_round != 4 && c.through_round != 6 && c.through_round != 7)
+    reject("arrival round was not audited");
+  if (c.through_round >= 6) {
     if (c.mission < 0 || c.mission > 12 || (c.available_on != 0 && c.available_on != 1))
       reject("arrival prefix arguments were not supplied");
-    run_arrival_r6(v, c, out);
+    // Round 7 reads slot 19's value from +0x12c bit 0 (r7:275-276).
+    if (c.through_round == 7 && c.slot19_value)
+      reject("slot19_value is a round-6 control; round 7 reads +0x12c bit 0");
+    run_arrival_staged(v, c, out, c.through_round);
   }
   if (c.mission < 0 || c.mission > 12 || (c.available_on != 0 && c.available_on != 1))
     reject("arrival prefix arguments were not supplied");

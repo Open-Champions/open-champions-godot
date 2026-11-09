@@ -11,10 +11,12 @@
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace sc = champions::simulation::rta::script_commands;
@@ -2335,6 +2337,420 @@ void test_loading_r6_arrival() {
     check(has_reason(named.refusals, reason), std::string("live readiness names ") + reason);
 }
 
+// f8c780b:docs/loading-arrival-r7.md (audit research-loading-readiness-r7-fix2
+// PASS). Every name and value below is a synthetic control; addresses are the
+// note's. Level names are the client's existing ones (frontend.cpp,
+// level_flow.cpp), not disc text.
+std::string refusal_of(const std::function<void()> &run) {
+  try {
+    run();
+    return std::string();
+  } catch (const a::HostFault &error) {
+    return std::string(error.what());
+  }
+}
+
+void test_loading_r7_request() {
+  sc::Host host;
+  auto &v = host.variables();
+  auto &m = v.memory;
+  const auto record = v.player_record(0);
+  // r7:141-151: hub2 only with all three bits, at each difficulty 1-5.
+  bool every = true;
+  for (std::uint32_t d = 1; d <= 5; ++d) {
+    m.w32(0x4f719c, d);
+    for (int combo = 0; combo < 8; ++combo) {
+      m.byte(record + 0x4c1b, (combo & 1) ? (1u << d) | 0x40 : 0x40 & ~(1u << d));
+      m.byte(record + 0x4c1a, (combo & 2) ? (1u << d) : 0);
+      m.byte(v.mission_byte(0, d, 1), (combo & 4) ? 2 | 1 : 1);
+      m.w8(0x41b720, 0);
+      const auto got = le::new_game_destination(v);
+      every = every && got == (combo == 7 ? "hub2" : "hub") && m.cstr(0x41b6d0) == got &&
+              m.cstr(0x4fdc30) == "hub" && m.read(0x41b720) == 0xff;
+    }
+  }
+  check(every, "the new game is hub, and hub2 only with decision, choice and completion bits");
+  // A bit at another difficulty does not count.
+  m.w32(0x4f719c, 2);
+  m.byte(record + 0x4c1b, 1u << 3);
+  m.byte(record + 0x4c1a, 1u << 3);
+  m.byte(v.mission_byte(0, 2, 1), 0);
+  m.byte(v.mission_byte(0, 3, 1), 2);
+  check(le::new_game_destination(v) == "hub", "bits at another difficulty leave hub");
+  for (const std::uint32_t d : {0u, 6u}) {
+    m.w32(0x4f719c, d);
+    check(refusal_of([&] { (void)le::new_game_destination(v); }) ==
+              "hub name outside difficulties 1-5 was not executed",
+          "difficulties outside 1-5 stay refused");
+  }
+  m.w32(0x4f719c, 1);
+  for (const std::uint32_t flag : {0x4f70a0u, 0x4f7120u}) {
+    m.w32(flag, 1);
+    check(refusal_of([&] { (void)le::new_game_destination(v); }) ==
+              "player select with the select flag or PvP mode B was not executed",
+          "the select flag and PvP mode B stay refused");
+    m.w32(flag, 0);
+  }
+  // r7:160-163, 177-185: the split and the route ordinals.
+  m.byte(record + 0x4c1b, 0);
+  check(le::new_game_destination(v) == "hub", "new game request");
+  m.string(0x41b721, "sentinel_level");
+  m.string(0x44fe18, "sentinel_level");
+  const auto mark = m.writes.size();
+  const auto hub = le::split_request(m);
+  check(hub.level == "hub" && hub.route == 0 && m.cstr(0x41b721) == "hub" && m.cstr(0x44fe18) == "hub" &&
+            m.read(0x41b6d0) == 0 && stored_at(m, 0x41b721, mark) && stored_at(m, 0x44fe18, mark),
+        "a new game splits into g_levelName and 0x44fe18 and selects route 0");
+  m.string(0x41b6d0, "hub2");
+  check(refusal_of([&] { (void)le::split_request(m); }) == "request split for this level was not executed" &&
+            m.cstr(0x41b6d0) == "hub2" && m.cstr(0x41b721) == "hub",
+        "hub2's route was not executed and stays refused without a store");
+  const std::uint32_t row = 0x4fe540, start = 0x00c80000;
+  m.string(start, "blood1");
+  m.w32(row + 8, start);
+  m.w32(row + 0x0c, 0);
+  const auto mission = le::mission_one_start(m);
+  m.string(0x41b6d0, mission);
+  const auto story = le::split_request(m);
+  check(mission == "blood1" && story.route == 2 && m.cstr(0x41b721) == "blood1",
+        "the mission-1 start is row 0 +8 and selects route 2");
+  m.w32(row + 0x0c, start);
+  check(refusal_of([&] { (void)le::mission_one_start(m); }) == "mission row 0 evil alternative was not executed",
+        "a non-null evil alternative stays refused");
+  m.w32(row + 0x0c, 0);
+  m.string(0x41b6d0, "strife");
+  check(le::split_request(m).route == 1, "the boot request selects route 1");
+  check(le::boot_request(m, true) == "intro" && m.cstr(0x41b6d0) == "intro" &&
+            refusal_of([&] { (void)le::split_request(m); }) == "request split for this level was not executed",
+        "offline, the front end replaces the boot request with intro, which is not an arrival route");
+  check(refusal_of([&] { (void)le::boot_request(m, false); }) == "online boot request was not executed",
+        "the online boot stays refused");
+}
+
+void test_loading_r7_arrival() {
+  sc::Host host;
+  auto &v = host.variables();
+  auto &m = v.memory;
+  le::ArrivalPrefix got;
+  le::ArrivalControl base;
+  base.through_round = 7;
+  base.mission = 3;
+  base.save_inhibit = 9;
+  base.available_on = 1;
+  base.quest_title = "authored_quest";
+  base.quest_text = "authored_text";
+  base.var_name = "authored_var";
+  base.var_first = 4;
+  base.var_second = 6;
+  base.post_name = "authored_post";
+  base.object_name = "authored_prop";
+  base.deferred_names = {"authored_def_a", "authored_def_b"};
+  for (int k = 0; k < 17; ++k) base.remove_items.push_back("authored_item_" + std::to_string(k));
+  base.cut_name = "cutnam";
+  base.var_after_cut = 7;
+  base.replacement_name = "authored_repl";
+  base.delete_name = "authored_del";
+  auto queue = [&] {
+    return std::array<std::uint32_t, 3>{m.word(0x86da78), m.word(0x86da7c), m.word(0x4f8690)};
+  };
+  using Q = std::array<std::uint32_t, 3>;
+  using U = std::vector<std::uint32_t>;
+  {
+    le::ArrivalControl eight = base;
+    eight.through_round = 8;
+    check(run_arrival(eight, v, got) == "arrival round was not audited", "only rounds 4, 6 and 7 run");
+    le::ArrivalControl control = base;
+    control.slot19_value = 1;
+    check(run_arrival(control, v, got) == "slot19_value is a round-6 control; round 7 reads +0x12c bit 0",
+          "round 7 takes no slot-19 value control");
+  }
+  v.inventory_service = [&](const std::string &, const std::vector<builtins::Variables::InventoryValue> &)
+      -> builtins::Variables::InventoryResult { return std::array<std::uint32_t, 2>{0xffffffffu, 0u}; };
+
+  // ---- Route 0, empty name table: the loader to loadscreen_stop (r7:199-252).
+  base.route = 0;
+  const auto route0_full = repeat(
+      repeat(repeat(repeat({0x1473b4, 0x1420d0, 0x1420a4, 0x142320, 0x144160, 0x143534,
+                            0x144160, 0x143500, 0x143540}, 0x14598c, 17), 0x143500, 3),
+             0x1416d4, 4), 0x143500, 2);
+  const U pass = {0x1e72f8, 0x1ebc18, 0x172ca8, 0x17d830, 0x17fce0, 0x17fe88};
+  U loader = {0x322934, 0x355490, 0x1eda24, 0x355490, 0x19d9f8};
+  for (int k = 0; k < 10; ++k) loader.insert(loader.end(), pass.begin(), pass.end());
+  loader.insert(loader.end(), {0x19d9f8, 0x355490});
+  auto loader_stop = loader;
+  loader_stop.insert(loader_stop.end(), {0x355490, 0x3224d8});
+  auto counter_stores = [&](std::size_t from) {
+    int n = 0;
+    for (std::size_t k = from; k < m.writes.size(); ++k)
+      if (m.writes[k].first == 0x506048 && m.writes[k].second == 4) ++n;
+    return n;
+  };
+  m.w32(0x506048, 0xa5a5a5a5);
+  m.w8(0x5060a0, 0xa5);
+  auto mark = m.writes.size();
+  check(run_arrival(base, v, got) == "loadscreen_stop: ReferThreadStatus on an unstarted thread" &&
+            got.boundary == 0x3528e4 && got.executed == route0_full && got.callees == loader_stop &&
+            got.loader_promoted && got.warmup_passes == 10 && queue() == Q{2, 0, 1},
+        "route 0 runs the warm-up, ten passes and the shop test, and stops in loadscreen_stop");
+  check(m.word(0x506048) == 0 && counter_stores(mark) == 11 && m.read(0x5060a0) == 1 &&
+            stored_at(m, 0x5060a0, mark),
+        "the warm-up counter is stored 10, then 9 to 0, and loadscreen_stop stores 1 at 0x5060a0");
+  {
+    U six = pass;
+    check(got.unmodeled == six, "the six pass callees are reported as unmodeled");
+  }
+  m.string(0x41b721, "hub");
+  m.w8(0x5060a0, 0xa5);
+  mark = m.writes.size();
+  {
+    auto shop = loader;
+    shop.insert(shop.end(), {0x1c7af8, 0x173558});
+    check(run_arrival(base, v, got) == "cd_findFile" && got.boundary == 0x1724fc && got.callees == shop &&
+              got.warmup_passes == 10 && m.word(0x506048) == 0 && m.read(0x5060a0) == 0xa5 &&
+              !stored_at(m, 0x5060a0, mark) && queue() == Q{2, 0, 1},
+          "for hub, the shop's lump load stops before the disc lookup");
+  }
+  m.string(0x41b721, "authored");
+  check(run_arrival(base, v, got) == "shop test for this level name was not executed" &&
+            got.boundary == 0x323074,
+        "another level name stays refused at the shop test");
+  m.w8(0x41b721, 0);
+  m.w32(0x506048, 0xa5a5a5a5);
+  m.w32(0x4f8450, 0x00c40000);
+  mark = m.writes.size();
+  check(run_arrival(base, v, got) == "Camera_update in the warm-up loop was not executed" &&
+            got.boundary == 0x203400 && !stored_at(m, 0x506048, mark) && queue() == Q{0, 2, 0},
+        "a camera object stays refused before the warm-up");
+  m.w32(0x4f8450, 0);
+  m.w8(0x44fcd0, 1);
+  check(run_arrival(base, v, got) == "cut_runFrame in the warm-up loop was not executed" &&
+            got.boundary == 0x199944 && !stored_at(m, 0x506048, mark),
+        "an active cut stays refused before the warm-up");
+  m.w8(0x44fcd0, 0);
+
+  // ---- Route 0 with an AutoProp: setState with a clip and slot 19 (r7:270-351).
+  const auto route0_head = U{0x1473b4, 0x1420d0, 0x1420a4, 0x142320, 0x144160, 0x143534,
+                             0x144160, 0x143500, 0x143540};
+  auto prop = v.new_object({"authored_prop"}, 0x10000000);
+  const auto at = prop->addr, entry = at + 0xa0;
+  const std::uint32_t header = 0x00c10000, clip = 0x00c11000, linked = 0x00c12000;
+  m.w64(header + 8, 0x5);
+  m.w16(header + 0x10, 0);
+  auto seal = [&](std::uint32_t length, std::uint32_t flags, std::uint8_t capacity, std::uint16_t high) {
+    m.w32(at + 0xc, 0x10000000);
+    m.w32(at + 0x48, 0x5133c0);
+    m.w32(at + 0x120, 100);
+    m.w32(at + 0x90, header);
+    m.w32(clip + 4, length);
+    m.w32(at + 0x128, length ? clip : 0);
+    m.w32(at + 0x12c, flags);
+    m.w32(at + 0x11c, 0);
+    m.w8(at + 0x9c, 0);
+    m.w8(at + 0x9d, capacity);
+    m.w16(at + 0x9e, high);
+    m.w32(at + 0x17c, 0x22222222);
+    for (std::uint32_t k = 0; k < 0x20; ++k) m.w8(entry + k, 0x5a);
+    m.w32(entry + 4, 0);
+    return m.writes.size();
+  };
+  const auto stop = "removePlayerItem after object load";
+  for (const std::uint32_t length : {5u, 9u, 0x40u}) {
+    const auto from = seal(length, 0, 0, 0x100);
+    bool untouched = true;
+    for (std::uint32_t k = 0; k < 0x20; ++k) untouched = untouched && !stored_at(m, entry + k, from);
+    check(run_arrival(base, v, got) == stop && got.boundary == 0x14598c && got.executed == route0_head &&
+              got.callees == U{0x23d680, 0x179550, 0x170838, 0x170bc8, 0x23d7ac} &&
+              m.word(at + 0x17c) == length + 1 && m.read(at + 0x9c) == 0 && untouched &&
+              m.u16(at + 0x9e) == 0x100 && queue() == Q{0, 2, 0},
+          "capacity 0 pushes nothing and sets +0x17c to clip +4 + 1, not added to the old value");
+    check(got.unmodeled == U{0x170838, 0x23d7ac}, "capacity 0's +0x9e stores are reported as unmodeled");
+  }
+  bool all_fields = true, or_mode = true;
+  for (const auto &[flags, mode] : std::vector<std::pair<std::uint32_t, std::uint16_t>>{{0, 6}, {2, 3}}) {
+    for (const bool link : {false, true}) {
+      auto from = seal(5, flags, 4, 0x100);
+      if (link) {
+        for (std::uint32_t k = 0; k < 0x20; ++k) m.w8(linked + k, 0x5a);
+        m.w32(entry + 4, linked);
+        from = m.writes.size();
+      }
+      const bool ran = run_arrival(base, v, got) == stop && got.boundary == 0x14598c &&
+                       got.unmodeled == U{0x23d7ac};
+      all_fields = all_fields && ran && m.read(at + 0x9c) == 1 && m.u16(at + 0x9e) == (0x100 | mode) &&
+                   m.word(entry) == clip && m.word(entry + 4) == 0 && m.word(entry + 8) == 0x3f800000 &&
+                   m.word(entry + 0xc) == 0 && m.word(entry + 0x10) == 0x3f800000 &&
+                   m.word(entry + 0x14) == 0 && m.word(entry + 0x18) == 0x40a00000 &&
+                   m.u16(entry + 0x1c) == mode && m.u16(entry + 0x1e) == 0 && m.word(at + 0x17c) == 6 &&
+                   stored_at(m, entry + 4, from) == link &&
+                   (!link || (m.word(linked + 0x14) == 0 && m.word(linked + 0x10) == 0x5a5a5a5a));
+    }
+  }
+  check(all_fields, "capacity 4 writes all 32 entry bytes, mode 3 or 6, and clears a linked block's +0x14");
+  for (const auto &[mode, high, want] : std::vector<std::tuple<std::uint32_t, std::uint16_t, std::uint16_t>>{
+           {6, 0x105, 0x107}, {6, 0x1ff, 0x1ff}, {6, 0x106, 0x106}, {6, 0, 6},
+           {3, 0x104, 0x107}, {3, 0x103, 0x103}, {3, 0x1ff, 0x1ff}}) {
+    seal(5, mode == 3 ? 2 : 0, 4, high);
+    or_mode = or_mode && run_arrival(base, v, got) == stop && m.u16(at + 0x9e) == want;
+  }
+  check(or_mode, "the mode is ORed into +0x9e (r7:327-339)");
+  // r7:340-344: a second push starts at depth 0 again and ORs a second mode.
+  seal(5, 0, 4, 0x100);
+  (void)run_arrival(base, v, got);
+  m.w32(at + 0x12c, 2);
+  check(m.u16(at + 0x9e) == 0x106 && m.read(at + 0x9c) == 1 && run_arrival(base, v, got) == stop &&
+            m.read(at + 0x9c) == 1 && m.u16(at + 0x9e) == 0x107 && m.u16(entry + 0x1c) == 3,
+        "a second push rewrites the entry at depth 0 and keeps the earlier mode bits");
+  seal(5, 0, 2, 0);
+  check(run_arrival(base, v, got) == "anim_push capacity other than 0 or 4 was not executed" &&
+            got.boundary == 0x170838 && queue() == Q{0, 0, 0},
+        "a capacity other than 0 or 4 stays refused");
+  {
+    const auto from = seal(9, 0, 4, 0);
+    check(run_arrival(base, v, got) == "anim entry +0x18 for a clip length other than 5 was not executed" &&
+              got.boundary == 0x170bc8 && !stored_at(m, entry, from) && !stored_at(m, at + 0x9e, from),
+          "a pushed clip of another length stays refused before the entry");
+  }
+  seal(5, 1, 0, 0);
+  check(run_arrival(base, v, got) == "a clip with slot-19 value 1 was not executed",
+        "a clip with slot-19 value 1 stays refused");
+  // Slot 19 value 1 (r7:345-349).
+  seal(0, 1, 0, 0);
+  check(run_arrival(base, v, got) == stop && m.word(at + 0xc) == 0x10000001 &&
+            got.callees == U{0x23d680, 0x179550, 0x23d7ac} && got.unmodeled == U{0x23d7ac} &&
+            queue() == Q{0, 2, 0},
+        "slot-19 value 1 sets +0xc bit 0 and the entry stops at removePlayerItem");
+  seal(0, 1, 0, 0);
+  m.w32(at + 0x11c, 1);
+  m.w32(0x44fdc8, 0);
+  check(run_arrival(base, v, got) == "slot 19 collision: 0x182b00 faults on a null world 0x44fdc8" &&
+            got.boundary == 0x182b08 && m.word(at + 0xc) == 0x10000000 && got.unmodeled.empty() &&
+            queue() == Q{0, 0, 0},
+        "value 1 with +0x11c bit 0 refuses at the 0x182b08 fault without setting +0xc");
+  m.w32(0x44fdc8, 0x00c13000);
+  check(run_arrival(base, v, got) == "slot 19 collision with a collision world was not executed" &&
+            got.boundary == 0x182b00,
+        "a collision world stays refused");
+  m.w32(0x44fdc8, 0);
+  m.w32(at + 0x120, 0);
+
+  // ---- Route 2: delete with frees (r7:353-387).
+  base.route = 2;
+  m.string(0x41b721, "authored");
+  m.string(0x7b9480, "authored.lmp");
+  const std::uint32_t image = 0x00c30000, label = 0x00c30100, data = 0x00c30200;
+  m.w32(0x7b9480 + 0x10, image);
+  m.w32(0x7b9480 + 0x14, 0);
+  m.w32(0x41bf7c, 1);
+  m.w16(image, 1);
+  m.w32(image + 4, label);
+  m.w32(image + 8, data);
+  m.w32(image + 12, 16);
+  m.string(label, "cutnam.cut");
+  m.w32(data, 0);
+  m.w32(0x4f8450, 0x00c40000);
+  for (int slot = 0; slot < 4; ++slot) m.byte(v.mission_byte(slot, 1, 3), 0x10);
+  const U cut_calls = {0x3b7ef0, 0x3b7ef0, 0x17365c, 0x19b4dc, 0x322934, 0x1eb000, 0x19a62c, 0x18617c,
+                       0x2072e8, 0x18619c, 0x3a59a8, 0x3a59a8, 0x3a59a8, 0x19e4a0, 0x19e4a0};
+  const std::uint32_t head = 0x403a1c + 16, previous = 0x00c90000;
+  const std::uint32_t class1 = 0x5f88c0 + 0x180 * 512;
+  // Outside the pool's class-1 blocks: refused before any dtor store.
+  auto outside = v.new_object({"authored_del"}, 0x20);
+  m.w32(outside->addr + 0x48, 0x5122a8);
+  m.w32(head, previous);
+  mark = m.writes.size();
+  check(run_arrival(base, v, got) == "pool_free of a block outside pool class 1 was not executed" &&
+            got.boundary == 0x150470 && !stored_at(m, outside->addr + 0x48, mark) && !stored_at(m, head, mark),
+        "a block outside pool class 1 stays refused");
+  m.w32(outside->addr + 0xc, 0);
+  m.w32(outside->addr + 0x48, 0);
+  base.delete_name = "authored_freed";
+  auto freed = v.new_object({"authored_freed"}, 0x20, {}, 0, "10GameObject", {}, class1 + 0x500 * 3, 0x250);
+  m.w32(freed->addr + 0x48, 0x5122a8);
+  m.w32(freed->addr, 0xa5a5a5a5);
+  m.w32(head, 0);
+  check(run_arrival(base, v, got) == "pool_free onto an empty free list was not executed" &&
+            m.word(freed->addr) == 0xa5a5a5a5,
+        "an empty free list stays refused");
+  m.w32(head, previous);
+  const auto names = v.object_names.count;
+  mark = m.writes.size();
+  auto with_free = cut_calls;
+  with_free.insert(with_free.end(), {0x14cf90, 0x1a1698, 0x1a1698, 0x1a1698, 0x150470});
+  check(run_arrival(base, v, got) == "cut_runFrame tasks" && got.boundary == 0x199944 &&
+            got.callees == with_free && got.unmodeled == U{0x1a1698} && m.word(freed->addr + 0x48) == 0x5122a8 &&
+            queue() == Q{0, 0, 0},
+        "delete with no property list runs the dtor and pool_free");
+  check(m.word(head) == freed->addr && m.word(freed->addr) == previous && stored_at(m, head, mark) &&
+            stored_at(m, freed->addr, mark) && v.object_names.count == names &&
+            v.find("authored_freed", 0x200).size() == 1,
+        "pool_free stores the block at the bucket-1 head and the old head in its first word; names stay");
+  // A memory property list {"kind=1", "name=<name>", 0} at +0x2c (r7:375-384).
+  base.delete_name = "authored_listed";
+  auto listed = v.new_object({"authored_listed"}, 0x20, {}, 0, "10GameObject", {}, class1 + 0x500 * 5, 0x250);
+  m.w32(listed->addr + 0x48, 0x5122a8);
+  const std::uint32_t plist = 0x00ca0000, kind = 0x00ca0100, named = 0x00ca0200;
+  m.string(kind, "kind=1");
+  m.string(named, "name=authored_listed");
+  m.w32(plist, kind);
+  m.w32(plist + 4, named);
+  m.w32(plist + 8, 0);
+  m.w32(listed->addr + 0x2c, plist);
+  const auto before_list = v.object_names.count;
+  const auto first_head = m.word(head);
+  auto with_names = cut_calls;
+  with_names.push_back(0x14cf90);
+  for (int k = 0; k < 6; ++k) with_names.push_back(0x3b91d8);
+  with_names.insert(with_names.end(), {0x14be58, 0x1a1698, 0x1a1698, 0x1a1698, 0x150470});
+  check(run_arrival(base, v, got) == "cut_runFrame tasks" && got.callees == with_names &&
+            v.object_names.count == before_list - 1 && v.find("authored_listed", 0x200).empty() &&
+            m.word(head) == listed->addr && m.word(listed->addr) == first_head,
+        "delete with a property list removes the name and then frees");
+  // A host property list is the same entries. new_object registers its
+  // name= entry, as the client's object load does, so no separate name.
+  base.delete_name = "authored_hosted";
+  auto hosted = v.new_object({}, 0x20, {}, 0, "10GameObject",
+                             std::make_shared<std::vector<std::string>>(
+                                 std::vector<std::string>{"kind=1", "name=authored_hosted"}),
+                             class1 + 0x500 * 7, 0x250);
+  m.w32(hosted->addr + 0x48, 0x5122a8);
+  check(run_arrival(base, v, got) == "cut_runFrame tasks" && got.callees == with_names &&
+            v.find("authored_hosted", 0x200).empty() && m.word(head) == hosted->addr,
+        "a host property list removes the name the same way");
+  // Other lists stay refused, before the dtor store.
+  base.delete_name = "authored_odd";
+  auto odd = v.new_object({"authored_odd"}, 0x20, {}, 0, "10GameObject", {}, class1 + 0x500 * 9, 0x250);
+  m.w32(odd->addr + 0x48, 0x5122a8);
+  for (const auto &list : std::vector<std::vector<std::string>>{
+           {"name=authored_odd"}, {"kind=1", "name=authored_odd", "name=authored_odd"},
+           {"name=authored_odd", "kind=1"}, {"kind=1", "name=authored_other"}}) {
+    odd->props = std::make_shared<std::vector<std::string>>(list);
+    mark = m.writes.size();
+    const auto reason = run_arrival(base, v, got);
+    check((reason == "delete with this property list was not executed" ||
+           reason == "delete whose name= value names another object was not executed") &&
+              got.boundary == 0x3b91d8 && !stored_at(m, odd->addr + 0x48, mark) && v.find("authored_odd", 0x200).size() == 1,
+          "an unexecuted property list stays refused before any store");
+  }
+  odd->props = std::make_shared<std::vector<std::string>>(std::vector<std::string>{"kind=1", "name=authored_odd"});
+  m.w32(odd->addr + 0x2c, plist);
+  check(run_arrival(base, v, got) == "delete with two property lists was not executed",
+        "a memory and a host list together stay refused");
+  {
+    le::ArrivalControl frame = base;
+    frame.first_frame = 0;
+    check(run_arrival(frame, v, got) == "cut_setup" && got.boundary == 0x14f498,
+          "the first cut frame still refuses at cut_setup");
+  }
+
+  auto named_limits = host.loading_readiness("synthetic_destination", true);
+  for (const char *reason : {"loadscreen_stop ReferThreadStatus at 0x3528e4", "the hub shop's disc lookup at 0x1724fc",
+                             "slot 19 0x182b00 with a collision world",
+                             "game_loadLevel and the loading-screen thread it starts",
+                             "the cut's .world, .ob and .scr entries", "the mission-menu copy for mission 1",
+                             "dbg_printf/warm-up after the 0x322e6c promote"})
+    check(has_reason(named_limits.refusals, reason), std::string("live readiness names ") + reason);
+}
+
 void test_prestart_before_objects() {
   auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
   sc::Host host;
@@ -2643,6 +3059,8 @@ int main(int argc, char **argv) {
   test_loading_r4_arrival();
   test_loading_r6_hide_mask();
   test_loading_r6_arrival();
+  test_loading_r7_request();
+  test_loading_r7_arrival();
   test_prestart_before_objects();
   test_stub_objects();
   test_refused_result_stops_entry();

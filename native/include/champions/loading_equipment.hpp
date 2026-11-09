@@ -62,16 +62,25 @@ void reset_arrival_queue(builtins::Memory &);
 // the default and is unchanged. Every extra argument is the caller's
 // synthetic control: names, quest values and the slot-19 value argument are
 // never copied from a private script.
+//
+// through_round 7 extends round 6 with the PASS round-7 stages
+// (research-loading-readiness@f8c780b:docs/loading-arrival-r7.md, audit
+// research-loading-readiness-r7-fix2 PASS): the loader from 0x322e58 to
+// loadscreen_stop or the hub shop's disc lookup (r7:199-263), setState with a
+// clip and slot 19's value from +0x12c bit 0 (r7:270-351), and the delete
+// that removes a name= value and frees the block (r7:353-387). Round 6 stays
+// as its own pin; its "does not free" is withdrawn by r7:355-360.
 struct ArrivalControl {
   int route = 0;
-  int through_round = 4; // 4 or 6; anything else is refused
+  int through_round = 4; // 4, 6 or 7; anything else is refused
   // Route 0 (r5:51-56, r6:37-54): 0x142320 argument, two 0x144160 names,
   // 17 removePlayerItem names. var_name/var_first are the read and write.
   std::string object_name;
   std::vector<std::string> deferred_names;
   std::vector<std::string> remove_items;
   // AutoProp slot 19 0x23d7ac value argument. Only 0 was executed
-  // (r6:101-108, 181-185). Its source is not in the arrival notes.
+  // (r6:101-108, 181-185). Its source is not in the round-6 notes. Round 7
+  // reads it from +0x12c bit 0 (r7:275-276), so this must stay 0 there.
   std::uint32_t slot19_value = 0;
   // Route 1 (r5:97-108, r6:115-125): 0x14222c lump argument, one show and
   // three hide names.
@@ -118,7 +127,13 @@ struct ArrivalPrefix {
   // 0x23d7ac (56a6760:docs/loading-arrival-r6.md:107) and handle_clear
   // 0x1a1698 (r6:132). One entry per stage that reached them; the stage
   // continues only to the boundary the research gives after that call.
+  // Round 7 also lists the capacity-0 anim_push 0x170838 (its +0x9e stores
+  // were not checked, r7:303-306) and the six warm-up pass callees
+  // (r7:215-222, 265-268).
   std::vector<std::uint32_t> unmodeled;
+  // through_round 7 only: warm-up passes run, each storing the counter
+  // g_warmupFrames 0x506048 one lower (r7:224-229).
+  int warmup_passes = 0;
 };
 void run_arrival_prefix(builtins::Variables &, const ArrivalControl &, ArrivalPrefix &);
 // 56a6760:docs/loading-arrival-r6.md:82-98 (model_buildHideMask 0x179550):
@@ -127,6 +142,24 @@ void run_arrival_prefix(builtins::Variables &, const ArrivalControl &, ArrivalPr
 // model faults on the +0x10 load ("hide mask null model").
 std::uint64_t arrival_hide_mask(const builtins::Memory &, std::uint32_t model,
                                 std::uint32_t bits);
+// Round-7 request selection (f8c780b:docs/loading-arrival-r7.md:131-197,
+// 492-500). new_game_destination writes the destination 0x4fdc30, the
+// request 0x41b6d0 and orientation 0xff at 0x41b720; the request is "hub",
+// or "hub2" only when the decision, choice and mission-1 completion bits are
+// all set at the current difficulty (1-5 executed). mission_one_start reads
+// mission row 0 +8 and refuses a non-null +0x0c; it does not write the
+// request (the menu copy is not executed). boot_request writes the front
+// end's "intro" offline; online is refused. split_request copies the request
+// into g_levelName and 0x44fe18, clears it, and names the route ordinal:
+// hub 0, strife 1, blood1 2. Any other name is refused.
+struct ArrivalRequest {
+  std::string level;
+  int route = -1;
+};
+std::string new_game_destination(builtins::Variables &);
+std::string mission_one_start(const builtins::Memory &);
+std::string boot_request(builtins::Memory &, bool offline);
+ArrivalRequest split_request(builtins::Memory &);
 class Runtime {
 public:
   explicit Runtime(builtins::Memory &memory) : m(memory) {}

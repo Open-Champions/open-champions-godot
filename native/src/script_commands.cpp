@@ -1439,6 +1439,14 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination,
     out.refusals.push_back("deleteMonster with a property list");
     out.refusals.push_back("cut_setup at 0x14f498 onward");
     out.refusals.push_back("level-name bytes the loader stores");
+    // Round 7 runs the synthetic stages further; the live loader still
+    // applies none. Still Unknown: f8c780b:docs/loading-arrival-r7.md:519-529.
+    out.refusals.push_back("game_loadLevel and the loading-screen thread it starts");
+    out.refusals.push_back("loadscreen_stop ReferThreadStatus at 0x3528e4");
+    out.refusals.push_back("the hub shop's disc lookup at 0x1724fc");
+    out.refusals.push_back("slot 19 0x182b00 with a collision world");
+    out.refusals.push_back("the cut's .world, .ob and .scr entries");
+    out.refusals.push_back("the mission-menu copy for mission 1");
   }
   return out;
 }

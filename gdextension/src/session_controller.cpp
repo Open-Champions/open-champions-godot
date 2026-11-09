@@ -1975,7 +1975,8 @@ Dictionary ChampionsSessionController::loading_prerequisite_state() const {
     // Round-4 and round-6 limits stay named on the live path. No prefix is
     // applied: the destination's route ordinal is Unknown.
     // 366b65a:docs/loading-arrival-r4.md:184-207,
-    // 56a6760:docs/loading-arrival-r6.md:181-185.
+    // 56a6760:docs/loading-arrival-r6.md:181-185,
+    // f8c780b:docs/loading-arrival-r7.md:519-529.
     const auto state = scripts_->loading_readiness(fight_level_, true);
     out["deferred_complete"] = state.deferred_complete;
     const auto field = [&](const char *name, std::optional<bool> value) {
