@@ -1,0 +1,11 @@
+2026-11-09T00:53 native-build.log
+2026-11-09T00:56 native-build2.log
+2026-11-09T01:08 native-build3.log
+2026-11-09T02:03 native-build4.log
+2026-11-09T02:03 native-clean-configure.log
+2026-11-09T02:08 native-clean-build.log
+2026-11-09T02:01 ctest.out
+2026-11-09T02:36 ctest2.out
+2026-11-09T00:52 mac-template_debug-build.log
+2026-11-09T00:54 level-texture-template_debug-build.log
+2026-11-09T00:55 creature-template_debug-build.log

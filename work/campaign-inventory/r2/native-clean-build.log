@@ -1,0 +1,985 @@
+[  0%] Building CXX object CMakeFiles/champions-core.dir/src/core_arithmetic.cpp.o
+[  1%] Building CXX object CMakeFiles/champions-own-machines.dir/src/own_machines.cpp.o
+[  2%] Building CXX object CMakeFiles/champions-core.dir/src/core_math.cpp.o
+[  2%] Linking CXX static library libchampions-own-machines.a
+[  2%] Building CXX object CMakeFiles/champions-core.dir/src/core_state.cpp.o
+[  2%] Linking CXX static library libchampions-core.a
+[  2%] Built target champions-core
+[  2%] Building CXX object CMakeFiles/champions-native-fx.dir/src/fx/fx.cpp.o
+[  2%] Building CXX object CMakeFiles/champions-native-fx.dir/src/fx/fx_json.cpp.o
+[  2%] Built target champions-own-machines
+[  2%] Building CXX object CMakeFiles/champions-amx.dir/src/amx_image.cpp.o
+[  3%] Building CXX object CMakeFiles/champions-archive.dir/src/archive.cpp.o
+[  3%] Building CXX object CMakeFiles/champions-native-fx.dir/src/lighting/lighting.cpp.o
+[  3%] Building CXX object CMakeFiles/champions-archive.dir/src/resource_manager.cpp.o
+[  3%] Building CXX object CMakeFiles/champions-game-profiles.dir/src/game_profile.cpp.o
+[  3%] Linking CXX static library libchampions-game-profiles.a
+[  3%] Building CXX object CMakeFiles/champions-native-fx.dir/src/lighting/level_lights.cpp.o
+[  3%] Linking CXX static library libchampions-archive.a
+[  3%] Building CXX object CMakeFiles/champions-amx.dir/src/amx_execute.cpp.o
+[  3%] Built target champions-archive
+[  3%] Built target champions-game-profiles
+[  3%] Building CXX object CMakeFiles/champions-amx.dir/src/amx_host.cpp.o
+[  3%] Building CXX object CMakeFiles/champions-texture.dir/src/texture.cpp.o
+[  3%] Linking CXX static library libchampions-native-fx.a
+[  3%] Built target champions-native-fx
+[  3%] Building CXX object CMakeFiles/champions-texture.dir/src/texture_upscale.cpp.o
+[  4%] Building CXX object CMakeFiles/champions-model.dir/src/model.cpp.o
+[  4%] Linking CXX static library libchampions-amx.a
+[  4%] Built target champions-amx
+[  4%] Linking CXX static library libchampions-texture.a
+[  4%] Linking CXX static library libchampions-model.a
+[  4%] Building CXX object CMakeFiles/champions-world-geometry.dir/src/world_geometry.cpp.o
+[  4%] Building CXX object CMakeFiles/champions-animation.dir/src/animation.cpp.o
+[  4%] Built target champions-texture
+[  4%] Building CXX object CMakeFiles/champions-water-draw.dir/src/water_draw.cpp.o
+[  4%] Linking CXX static library libchampions-animation.a
+[  4%] Built target champions-model
+[  4%] Building CXX object CMakeFiles/champions-skinning.dir/src/skinning.cpp.o
+[  4%] Linking CXX static library libchampions-world-geometry.a
+[  4%] Linking CXX static library libchampions-water-draw.a
+[  5%] Linking CXX static library libchampions-skinning.a
+[  5%] Built target champions-world-geometry
+[  5%] Built target champions-water-draw
+[  5%] Building CXX object CMakeFiles/champions-data.dir/src/main.cpp.o
+[  5%] Building CXX object CMakeFiles/champions-resource-manager-tests.dir/tests/resource_manager_tests.cpp.o
+[  5%] Built target champions-animation
+[  5%] Built target champions-skinning
+[  6%] Linking CXX executable champions-resource-manager-tests
+[  7%] Linking CXX executable champions-data
+[  7%] Built target champions-resource-manager-tests
+[  8%] Building CXX object CMakeFiles/champions-fx-render.dir/src/fx/render.cpp.o
+[  8%] Built target champions-data
+[  8%] Building CXX object CMakeFiles/champions-fx-recipes.dir/src/fx/recipes.cpp.o
+[  8%] Linking CXX static library libchampions-fx-recipes.a
+[  8%] Linking CXX static library libchampions-fx-render.a
+[  8%] Building CXX object CMakeFiles/champions-fx-exact.dir/src/fx/exact_particles.cpp.o
+[  8%] Built target champions-fx-recipes
+[  8%] Built target champions-fx-render
+[  8%] Building CXX object CMakeFiles/champions-fx-exact.dir/src/fx/exact_decals.cpp.o
+[  8%] Building CXX object CMakeFiles/champions-fx-exact.dir/src/fx/exact_props.cpp.o
+[  9%] Linking CXX static library libchampions-fx-exact.a
+[  9%] Building CXX object CMakeFiles/champions-fx-skills.dir/src/fx/skills_fx.cpp.o
+[  9%] Building CXX object CMakeFiles/champions-arena-modes.dir/src/arena_modes.cpp.o
+[  9%] Building CXX object CMakeFiles/champions-fx-render-tests.dir/tests/fx_render_tests.cpp.o
+[  9%] Built target champions-fx-exact
+[  9%] Building CXX object CMakeFiles/champions-fx-recipes-tests.dir/tests/fx_recipes_tests.cpp.o
+[  9%] Building CXX object CMakeFiles/champions-arena-modes.dir/src/arena_executable.cpp.o
+[  9%] Linking CXX executable champions-fx-recipes-tests
+[  9%] Building CXX object CMakeFiles/champions-fx-skills.dir/src/fx/skill_recipes_json.cpp.o
+[  9%] Linking CXX executable champions-fx-render-tests
+[  9%] Linking CXX static library libchampions-arena-modes.a
+[  9%] Built target champions-fx-recipes-tests
+[  9%] Built target champions-fx-render-tests
+[ 10%] Building CXX object CMakeFiles/champions-native-fx-tests.dir/tests/native_fx_tests.cpp.o
+[ 10%] Building CXX object CMakeFiles/champions-game-profiles-tests.dir/tests/game_profile_tests.cpp.o
+[ 10%] Linking CXX static library libchampions-fx-skills.a
+[ 10%] Linking CXX executable champions-game-profiles-tests
+[ 10%] Linking CXX executable champions-native-fx-tests
+[ 10%] Built target champions-fx-skills
+[ 10%] Built target champions-game-profiles-tests
+[ 10%] Built target champions-arena-modes
+[ 11%] Building CXX object CMakeFiles/champions-core-state-tests.dir/tests/core_state_tests.cpp.o
+[ 11%] Built target champions-native-fx-tests
+[ 11%] Building CXX object CMakeFiles/champions-core-math-tests.dir/tests/core_math_tests.cpp.o
+[ 11%] Building CXX object CMakeFiles/champions-core-arithmetic-tests.dir/tests/core_arithmetic_tests.cpp.o
+[ 11%] Building CXX object CMakeFiles/champions-amx-image-tests.dir/tests/amx_image_tests.cpp.o
+[ 11%] Linking CXX executable champions-core-arithmetic-tests
+[ 11%] Linking CXX executable champions-core-math-tests
+[ 11%] Linking CXX executable champions-core-state-tests
+[ 11%] Built target champions-core-arithmetic-tests
+[ 11%] Built target champions-core-math-tests
+[ 11%] Building CXX object CMakeFiles/champions-amx-execute-tests.dir/tests/amx_execute_tests.cpp.o
+[ 12%] Building CXX object CMakeFiles/champions-amx-host-tests.dir/tests/amx_host_tests.cpp.o
+[ 12%] Linking CXX executable champions-amx-image-tests
+[ 12%] Built target champions-core-state-tests
+[ 13%] Built target champions-amx-image-tests
+[ 13%] Building CXX object CMakeFiles/champions-world-geometry-tests.dir/tests/world_geometry_tests.cpp.o
+[ 13%] Building CXX object CMakeFiles/champions-world-geometry-trace.dir/tools/world_geometry_trace.cpp.o
+[ 13%] Linking CXX executable champions-amx-execute-tests
+[ 13%] Linking CXX executable champions-amx-host-tests
+[ 13%] Linking CXX executable champions-world-geometry-tests
+[ 13%] Built target champions-amx-execute-tests
+[ 13%] Building CXX object CMakeFiles/champions-animation-trace.dir/tests/animation_trace.cpp.o
+[ 13%] Built target champions-amx-host-tests
+[ 13%] Built target champions-world-geometry-tests
+[ 13%] Building CXX object CMakeFiles/champions-animation-tests.dir/tests/animation_tests.cpp.o
+[ 13%] Building CXX object CMakeFiles/champions-skinning-tests.dir/tests/skinning_tests.cpp.o
+[ 13%] Linking CXX executable champions-animation-trace
+[ 13%] Linking CXX executable champions-skinning-tests
+[ 13%] Linking CXX executable champions-animation-tests
+[ 13%] Linking CXX executable champions-world-geometry-trace
+[ 13%] Built target champions-animation-trace
+[ 13%] Built target champions-skinning-tests
+[ 13%] Built target champions-animation-tests
+[ 13%] Built target champions-world-geometry-trace
+[ 13%] Building CXX object CMakeFiles/champions-texture-tests.dir/tests/texture_tests.cpp.o
+[ 13%] Building CXX object CMakeFiles/champions-model-tests.dir/tests/model_tests.cpp.o
+[ 13%] Building CXX object CMakeFiles/champions-texture-upscale-tests.dir/tests/texture_upscale_tests.cpp.o
+[ 13%] Building CXX object CMakeFiles/champions-data-tests.dir/tests/archive_tests.cpp.o
+[ 13%] Linking CXX executable champions-texture-upscale-tests
+[ 13%] Linking CXX executable champions-data-tests
+[ 14%] Linking CXX executable champions-texture-tests
+[ 14%] Built target champions-texture-upscale-tests
+[ 14%] Building CXX object CMakeFiles/champions-ui-font.dir/src/ui_font.cpp.o
+[ 14%] Built target champions-data-tests
+[ 14%] Built target champions-texture-tests
+[ 15%] Building CXX object CMakeFiles/champions-inventory-icons.dir/src/inventory_icons.cpp.o
+[ 15%] Linking CXX executable champions-model-tests
+[ 16%] Building CXX object CMakeFiles/champions-arena-modes-tests.dir/tests/arena_modes_tests.cpp.o
+[ 16%] Building CXX object CMakeFiles/champions-ui-font.dir/src/ui_art_shape.cpp.o
+[ 16%] Built target champions-model-tests
+[ 16%] Building CXX object CMakeFiles/champions-inventory-icons.dir/src/inventory_icon_assoc.cpp.o
+[ 16%] Building CXX object CMakeFiles/champions-own-machines-tests.dir/tests/own_machines_tests.cpp.o
+[ 16%] Building CXX object CMakeFiles/champions-ui-font.dir/src/ui_font_page.cpp.o
+[ 16%] Linking CXX executable champions-arena-modes-tests
+[ 16%] Linking CXX static library libchampions-inventory-icons.a
+[ 16%] Linking CXX static library libchampions-ui-font.a
+[ 16%] Linking CXX executable champions-own-machines-tests
+[ 16%] Built target champions-arena-modes-tests
+[ 16%] Built target champions-ui-font
+[ 16%] Building CXX object CMakeFiles/champions-model-texture-bind.dir/src/model_texture_bind.cpp.o
+[ 16%] Built target champions-own-machines-tests
+[ 17%] Linking CXX static library libchampions-model-texture-bind.a
+[ 17%] Built target champions-inventory-icons
+[ 17%] Built target champions-model-texture-bind
+[ 17%] Building CXX object CMakeFiles/champions-script-items-measure.dir/src/script_items_measure.cpp.o
+[ 17%] Linking CXX executable champions-script-items-measure
+[ 17%] Building CXX object CMakeFiles/champions-native-audio.dir/src/audio/native_audio.cpp.o
+[ 17%] Built target champions-script-items-measure
+[ 17%] Building CXX object CMakeFiles/champions-strings.dir/src/strings.cpp.o
+[ 18%] Building CXX object CMakeFiles/champions-ui-text-gaps.dir/src/ui_text_gaps.cpp.o
+[ 19%] Building CXX object CMakeFiles/champions-level-factory.dir/src/level_factory.cpp.o
+[ 19%] Building CXX object CMakeFiles/champions-native-audio.dir/src/audio/music_volume.cpp.o
+[ 19%] Linking CXX static library libchampions-level-factory.a
+[ 19%] Linking CXX static library libchampions-native-audio.a
+[ 19%] Linking CXX static library libchampions-strings.a
+[ 19%] Linking CXX static library libchampions-ui-text-gaps.a
+[ 19%] Built target champions-level-factory
+[ 19%] Built target champions-native-audio
+[ 19%] Building CXX object CMakeFiles/champions-dialog.dir/src/dialog.cpp.o
+[ 19%] Building CXX object CMakeFiles/champions-level-factory-tests.dir/tests/level_factory_tests.cpp.o
+[ 19%] Built target champions-ui-text-gaps
+[ 19%] Built target champions-strings
+[ 19%] Building CXX object CMakeFiles/champions-hub-services-tests.dir/tests/hub_services_tests.cpp.o
+[ 19%] Linking CXX executable champions-hub-services-tests
+[ 19%] Linking CXX executable champions-level-factory-tests
+[ 19%] Built target champions-hub-services-tests
+[ 19%] Linking CXX static library libchampions-dialog.a
+[ 19%] Built target champions-dialog
+[ 19%] Building CXX object CMakeFiles/champions-animation-decoder.dir/src/animation_decoder.cpp.o
+[ 19%] Built target champions-level-factory-tests
+[ 19%] Linking CXX static library libchampions-animation-decoder.a
+[ 19%] Building CXX object CMakeFiles/champions-creature-hp.dir/src/creature_hp.cpp.o
+[ 19%] Building CXX object CMakeFiles/champions-objects.dir/src/objects_lifetime.cpp.o
+[ 19%] Built target champions-animation-decoder
+[ 19%] Building CXX object CMakeFiles/champions-animation-clock.dir/src/animation_clock.cpp.o
+[ 19%] Linking CXX static library libchampions-animation-clock.a
+[ 19%] Linking CXX static library libchampions-creature-hp.a
+[ 19%] Building CXX object CMakeFiles/champions-items.dir/src/items.cpp.o
+[ 20%] Building CXX object CMakeFiles/champions-objects.dir/src/objects_scheduler.cpp.o
+[ 20%] Building CXX object CMakeFiles/champions-items.dir/src/item_generation.cpp.o
+[ 20%] Building CXX object CMakeFiles/champions-objects.dir/src/objects_queries.cpp.o
+[ 20%] Building CXX object CMakeFiles/champions-items.dir/src/item_names.cpp.o
+[ 20%] Linking CXX static library libchampions-objects.a
+[ 21%] Linking CXX static library libchampions-items.a
+[ 21%] Built target champions-items
+[ 21%] Built target champions-animation-clock
+[ 21%] Building CXX object CMakeFiles/champions-combat.dir/src/combat_common.cpp.o
+[ 21%] Building CXX object CMakeFiles/champions-netwire.dir/src/netwire_codec.cpp.o
+[ 21%] Built target champions-objects
+[ 22%] Building CXX object CMakeFiles/champions-combat.dir/src/combat_damage.cpp.o
+[ 22%] Building CXX object CMakeFiles/champions-netwire.dir/src/netwire_session.cpp.o
+[ 22%] Built target champions-creature-hp
+[ 22%] Building CXX object CMakeFiles/champions-combat.dir/src/combat_stats.cpp.o
+[ 22%] Building CXX object CMakeFiles/champions-netwire.dir/src/netwire_tick.cpp.o
+[ 22%] Linking CXX static library libchampions-combat.a
+[ 22%] Linking CXX static library libchampions-netwire.a
+[ 22%] Building CXX object CMakeFiles/champions-world-queries.dir/src/world_terrain.cpp.o
+[ 22%] Building CXX object CMakeFiles/champions-world-queries.dir/src/world_movement.cpp.o
+[ 22%] Building CXX object CMakeFiles/champions-world-queries.dir/src/world_raycast.cpp.o
+[ 22%] Building CXX object CMakeFiles/champions-messages.dir/src/messages.cpp.o
+[ 22%] Built target champions-combat
+[ 22%] Built target champions-netwire
+[ 22%] Building CXX object CMakeFiles/champions-blood1-actors.dir/src/blood1_actors.cpp.o
+[ 22%] Building CXX object CMakeFiles/champions-arena-monsters.dir/src/arena_monsters.cpp.o
+[ 23%] Linking CXX static library libchampions-world-queries.a
+[ 23%] Built target champions-world-queries
+[ 23%] Linking CXX static library libchampions-blood1-actors.a
+[ 24%] Linking CXX static library libchampions-messages.a
+[ 24%] Building CXX object CMakeFiles/champions-arena-match.dir/src/arena_match.cpp.o
+[ 24%] Built target champions-messages
+[ 24%] Building CXX object CMakeFiles/champions-skills-a.dir/src/skills_a.cpp.o
+[ 24%] Built target champions-blood1-actors
+[ 24%] Linking CXX static library libchampions-arena-match.a
+[ 24%] Built target champions-arena-match
+[ 24%] Building CXX object CMakeFiles/champions-skills-b.dir/src/skills_b.cpp.o
+[ 25%] Building CXX object CMakeFiles/champions-skills-c.dir/src/skills_c.cpp.o
+[ 25%] Linking CXX static library libchampions-arena-monsters.a
+[ 25%] Built target champions-arena-monsters
+[ 25%] Linking CXX static library libchampions-skills-a.a
+[ 25%] Building CXX object CMakeFiles/champions-amx-validate.dir/tools/amx_validate.cpp.o
+[ 25%] Built target champions-skills-a
+[ 25%] Building CXX object CMakeFiles/champions-animation-decoder-validate.dir/tools/animation_decoder_validate.cpp.o
+[ 25%] Linking CXX executable champions-amx-validate
+[ 25%] Linking CXX executable champions-animation-decoder-validate
+[ 25%] Built target champions-amx-validate
+[ 25%] Building CXX object CMakeFiles/champions-texture-fidelity.dir/src/texture_fidelity_cli.cpp.o
+[ 25%] Linking CXX static library libchampions-skills-c.a
+[ 25%] Built target champions-animation-decoder-validate
+[ 25%] Linking CXX static library libchampions-skills-b.a
+[ 25%] Linking CXX executable champions-texture-fidelity
+[ 25%] Built target champions-skills-b
+[ 25%] Building CXX object CMakeFiles/champions-model-forms-validate.dir/tools/model_forms_validate.cpp.o
+[ 25%] Building CXX object CMakeFiles/champions-level-texture.dir/src/level_texture/level_texture.cpp.o
+[ 25%] Built target champions-texture-fidelity
+[ 25%] Built target champions-skills-c
+[ 25%] Building CXX object CMakeFiles/champions-player-state.dir/src/player_state.cpp.o
+[ 25%] Building CXX object CMakeFiles/champions-blood1-actors-tests.dir/tests/blood1_actors_tests.cpp.o
+[ 25%] Linking CXX executable champions-model-forms-validate
+[ 25%] Built target champions-model-forms-validate
+[ 25%] Building CXX object CMakeFiles/champions-fx-sim.dir/src/fx/simulation.cpp.o
+[ 25%] Linking CXX static library libchampions-player-state.a
+[ 25%] Building CXX object CMakeFiles/champions-level-texture.dir/src/level_texture/material.cpp.o
+[ 25%] Building CXX object CMakeFiles/champions-level-texture.dir/src/level_texture/level_draw.cpp.o
+[ 25%] Linking CXX executable champions-blood1-actors-tests
+[ 25%] Built target champions-player-state
+[ 25%] Linking CXX static library libchampions-level-texture.a
+[ 25%] Building CXX object CMakeFiles/champions-fx-exact-tests.dir/tests/fx_exact_tests.cpp.o
+[ 25%] Built target champions-blood1-actors-tests
+[ 25%] Built target champions-level-texture
+[ 25%] Linking CXX static library libchampions-fx-sim.a
+[ 25%] Building CXX object CMakeFiles/champions-fx-skills-tests.dir/tests/fx_skills_tests.cpp.o
+[ 25%] Built target champions-fx-sim
+[ 26%] Building CXX object CMakeFiles/champions-level-texture-tests.dir/tests/level_texture_tests.cpp.o
+[ 27%] Building CXX object CMakeFiles/champions-level-lights-tests.dir/tests/level_lights_tests.cpp.o
+[ 27%] Linking CXX executable champions-fx-exact-tests
+[ 27%] Linking CXX executable champions-level-texture-tests
+[ 27%] Linking CXX executable champions-fx-skills-tests
+[ 27%] Built target champions-fx-exact-tests
+[ 27%] Building CXX object CMakeFiles/champions-level-draw-tests.dir/tests/level_draw_tests.cpp.o
+[ 27%] Built target champions-level-texture-tests
+[ 27%] Building CXX object CMakeFiles/champions-water-draw-tests.dir/tests/water_draw_tests.cpp.o
+[ 27%] Built target champions-fx-skills-tests
+[ 27%] Linking CXX executable champions-level-lights-tests
+[ 27%] Built target champions-level-lights-tests
+[ 27%] Building CXX object CMakeFiles/champions-messages-trace.dir/tools/messages_trace.cpp.o
+[ 27%] Building CXX object CMakeFiles/champions-messages-tests.dir/tests/messages_tests.cpp.o
+[ 27%] Linking CXX executable champions-level-draw-tests
+[ 27%] Linking CXX executable champions-water-draw-tests
+[ 27%] Built target champions-level-draw-tests
+[ 27%] Built target champions-water-draw-tests
+[ 27%] Building CXX object CMakeFiles/champions-arena-monsters-tests.dir/tests/arena_monsters_tests.cpp.o
+[ 27%] Building CXX object CMakeFiles/champions-items-tests.dir/tests/items_tests.cpp.o
+[ 27%] Linking CXX executable champions-messages-tests
+[ 27%] Linking CXX executable champions-items-tests
+[ 27%] Linking CXX executable champions-messages-trace
+[ 27%] Built target champions-messages-tests
+[ 28%] Building CXX object CMakeFiles/champions-item-generation-tests.dir/tests/item_generation_tests.cpp.o
+[ 28%] Built target champions-messages-trace
+[ 28%] Built target champions-items-tests
+[ 28%] Building CXX object CMakeFiles/champions-combat-common-tests.dir/tests/combat_common_tests.cpp.o
+[ 28%] Building CXX object CMakeFiles/champions-item-names-tests.dir/tests/item_names_tests.cpp.o
+[ 28%] Linking CXX executable champions-item-generation-tests
+[ 28%] Built target champions-item-generation-tests
+[ 28%] Linking CXX executable champions-item-names-tests
+[ 28%] Built target champions-item-names-tests
+[ 28%] Building CXX object CMakeFiles/champions-combat-stats-tests.dir/tests/combat_stats_tests.cpp.o
+[ 29%] Building CXX object CMakeFiles/champions-combat-damage-tests.dir/tests/combat_damage_tests.cpp.o
+[ 29%] Linking CXX executable champions-arena-monsters-tests
+[ 29%] Built target champions-arena-monsters-tests
+[ 29%] Linking CXX executable champions-combat-common-tests
+[ 30%] Building CXX object CMakeFiles/champions-netwire-codec-tests.dir/tests/netwire_codec_tests.cpp.o
+[ 30%] Built target champions-combat-common-tests
+[ 30%] Building CXX object CMakeFiles/champions-netwire-session-tests.dir/tests/netwire_session_tests.cpp.o
+[ 30%] Linking CXX executable champions-netwire-codec-tests
+[ 30%] Linking CXX executable champions-combat-damage-tests
+[ 30%] Built target champions-netwire-codec-tests
+[ 30%] Built target champions-combat-damage-tests
+[ 30%] Building CXX object CMakeFiles/champions-netwire-tick-tests.dir/tests/netwire_tick_tests.cpp.o
+[ 30%] Building CXX object CMakeFiles/champions-objects-tests.dir/tests/objects_tests.cpp.o
+[ 30%] Linking CXX executable champions-combat-stats-tests
+[ 30%] Built target champions-combat-stats-tests
+[ 30%] Building CXX object CMakeFiles/champions-objects-trace.dir/tools/objects_trace.cpp.o
+[ 30%] Linking CXX executable champions-netwire-session-tests
+[ 30%] Linking CXX executable champions-netwire-tick-tests
+[ 30%] Built target champions-netwire-session-tests
+[ 31%] Building CXX object CMakeFiles/champions-creature-hp-tests.dir/tests/creature_hp_tests.cpp.o
+[ 31%] Linking CXX executable champions-objects-tests
+[ 31%] Built target champions-netwire-tick-tests
+[ 31%] Built target champions-objects-tests
+[ 31%] Building CXX object CMakeFiles/champions-world-queries-tests.dir/tests/world_queries_tests.cpp.o
+[ 31%] Linking CXX executable champions-creature-hp-tests
+[ 31%] Built target champions-creature-hp-tests
+[ 31%] Linking CXX executable champions-world-queries-tests
+[ 31%] Building CXX object CMakeFiles/champions-world-queries-trace.dir/tools/world_queries_trace.cpp.o
+[ 31%] Built target champions-world-queries-tests
+[ 31%] Building CXX object CMakeFiles/champions-creature-hp-trace.dir/tools/creature_hp_trace.cpp.o
+[ 31%] Linking CXX executable champions-objects-trace
+[ 31%] Built target champions-objects-trace
+[ 31%] Building CXX object CMakeFiles/champions-animation-clock-api-tests.dir/tests/animation_clock_tests.cpp.o
+[ 31%] Building CXX object CMakeFiles/champions-world-raycast-tests.dir/tests/world_raycast_tests.cpp.o
+[ 31%] Linking CXX executable champions-creature-hp-trace
+[ 31%] Linking CXX executable champions-animation-clock-api-tests
+[ 31%] Linking CXX executable champions-world-queries-trace
+[ 31%] Built target champions-creature-hp-trace
+[ 31%] Built target champions-animation-clock-api-tests
+[ 32%] Building CXX object CMakeFiles/champions-animation-clock-trace.dir/tools/animation_clock_trace.cpp.o
+[ 32%] Built target champions-world-queries-trace
+[ 32%] Building CXX object CMakeFiles/champions-animation-decoder-api-tests.dir/tests/animation_decoder_tests.cpp.o
+[ 32%] Building CXX object CMakeFiles/champions-animation-decoder-trace.dir/tools/animation_decoder_trace.cpp.o
+[ 33%] Linking CXX executable champions-world-raycast-tests
+[ 33%] Built target champions-world-raycast-tests
+[ 34%] Building CXX object CMakeFiles/champions-skills-a-trace.dir/tools/skills_a_trace.cpp.o
+[ 34%] Linking CXX executable champions-animation-decoder-api-tests
+[ 34%] Linking CXX executable champions-animation-clock-trace
+[ 34%] Built target champions-animation-decoder-api-tests
+[ 34%] Building CXX object CMakeFiles/champions-skills-a-tests.dir/tests/skills_a_tests.cpp.o
+[ 34%] Built target champions-animation-clock-trace
+[ 34%] Building CXX object CMakeFiles/champions-skills-a-ctor-tests.dir/tests/skills_a_ctor_tests.cpp.o
+[ 35%] Linking CXX executable champions-animation-decoder-trace
+[ 35%] Built target champions-animation-decoder-trace
+[ 35%] Building CXX object CMakeFiles/champions-skill-kernel-tests.dir/tests/skill_kernel_tests.cpp.o
+[ 35%] Linking CXX executable champions-skills-a-trace
+[ 35%] Linking CXX executable champions-skills-a-ctor-tests
+[ 35%] Built target champions-skills-a-trace
+[ 35%] Building CXX object CMakeFiles/champions-skills-b-tests.dir/tests/skills_b_tests.cpp.o
+[ 35%] Built target champions-skills-a-ctor-tests
+[ 35%] Building CXX object CMakeFiles/champions-skills-c-api-tests.dir/tests/skills_c_tests.cpp.o
+[ 36%] Linking CXX executable champions-skill-kernel-tests
+[ 36%] Built target champions-skill-kernel-tests
+[ 36%] Building CXX object CMakeFiles/champions-skills-c-trace.dir/tools/skills_c_trace.cpp.o
+[ 36%] Linking CXX executable champions-skills-a-tests
+[ 36%] Built target champions-skills-a-tests
+[ 36%] Linking CXX executable champions-skills-c-trace
+[ 36%] Building CXX object CMakeFiles/champions-ui_font-tests.dir/tests/ui_font_tests.cpp.o
+[ 36%] Built target champions-skills-c-trace
+[ 36%] Building CXX object CMakeFiles/champions-ui_art_shape-tests.dir/tests/ui_art_shape_tests.cpp.o
+[ 36%] Linking CXX executable champions-skills-b-tests
+[ 37%] Linking CXX executable champions-ui_font-tests
+[ 37%] Linking CXX executable champions-ui_art_shape-tests
+[ 37%] Built target champions-skills-b-tests
+[ 37%] Building CXX object CMakeFiles/champions-ui-layout.dir/src/ui_layout.cpp.o
+[ 37%] Built target champions-ui_art_shape-tests
+[ 37%] Built target champions-ui_font-tests
+[ 37%] Building CXX object CMakeFiles/champions-menus.dir/src/menus.cpp.o
+[ 37%] Building CXX object CMakeFiles/champions-horsemen-mount-tests.dir/tests/horsemen_mount_tests.cpp.o
+[ 37%] Linking CXX static library libchampions-ui-layout.a
+[ 37%] Built target champions-ui-layout
+[ 38%] Linking CXX executable champions-horsemen-mount-tests
+[ 38%] Building CXX object CMakeFiles/champions-inventory-icons-tests.dir/tests/inventory_icons_tests.cpp.o
+[ 38%] Built target champions-horsemen-mount-tests
+[ 38%] Linking CXX static library libchampions-menus.a
+[ 38%] Building CXX object CMakeFiles/champions-inventory-icon-assoc-tests.dir/tests/inventory_icon_assoc_tests.cpp.o
+[ 38%] Linking CXX executable champions-inventory-icons-tests
+[ 38%] Built target champions-menus
+[ 38%] Built target champions-inventory-icons-tests
+[ 38%] Building CXX object CMakeFiles/champions-level-flow.dir/src/level_flow.cpp.o
+[ 38%] Building CXX object CMakeFiles/champions-arena-modes-damage-tests.dir/tests/arena_modes_damage_tests.cpp.o
+[ 38%] Linking CXX executable champions-inventory-icon-assoc-tests
+[ 38%] Linking CXX executable champions-skills-c-api-tests
+[ 38%] Built target champions-inventory-icon-assoc-tests
+[ 38%] Building CXX object CMakeFiles/champions-fx-world-save.dir/src/fx/world_save.cpp.o
+[ 38%] Built target champions-skills-c-api-tests
+[ 39%] Building CXX object CMakeFiles/champions-native-audio-tests.dir/tests/native_audio_tests.cpp.o
+[ 39%] Linking CXX executable champions-arena-modes-damage-tests
+[ 39%] Built target champions-arena-modes-damage-tests
+[ 39%] Building CXX object CMakeFiles/champions-music-volume-tests.dir/tests/music_volume_tests.cpp.o
+[ 40%] Linking CXX static library libchampions-fx-world-save.a
+[ 40%] Building CXX object CMakeFiles/champions-level-flow.dir/src/level_flow_loader.cpp.o
+[ 40%] Built target champions-fx-world-save
+[ 40%] Linking CXX executable champions-native-audio-tests
+[ 40%] Building CXX object CMakeFiles/champions-model-texture-bind-tests.dir/tests/model_texture_bind_tests.cpp.o
+[ 40%] Linking CXX executable champions-music-volume-tests
+[ 40%] Built target champions-native-audio-tests
+[ 41%] Building CXX object CMakeFiles/champions-strings-tests.dir/tests/strings_tests.cpp.o
+[ 42%] Linking CXX static library libchampions-level-flow.a
+[ 42%] Built target champions-music-volume-tests
+[ 42%] Building CXX object CMakeFiles/champions-strings-census.dir/src/strings_census.cpp.o
+[ 42%] Built target champions-level-flow
+[ 42%] Building CXX object CMakeFiles/champions-dialog-gaps.dir/src/dialog_gaps.cpp.o
+[ 42%] Linking CXX executable champions-model-texture-bind-tests
+[ 42%] Built target champions-model-texture-bind-tests
+[ 42%] Building CXX object CMakeFiles/champions-ui-text-gaps-tests.dir/tests/ui_text_gaps_tests.cpp.o
+[ 42%] Linking CXX static library libchampions-dialog-gaps.a
+[ 42%] Linking CXX executable champions-strings-census
+[ 42%] Linking CXX executable champions-strings-tests
+[ 42%] Built target champions-dialog-gaps
+[ 42%] Building CXX object CMakeFiles/champions-script-builtins.dir/src/script_builtins.cpp.o
+[ 42%] Built target champions-strings-census
+[ 42%] Built target champions-strings-tests
+[ 42%] Building CXX object CMakeFiles/champions-animation-runtime.dir/src/animation_runtime.cpp.o
+[ 42%] Building CXX object CMakeFiles/champions-combat-items.dir/src/combat_items.cpp.o
+[ 42%] Linking CXX executable champions-ui-text-gaps-tests
+[ 42%] Linking CXX static library libchampions-combat-items.a
+[ 42%] Built target champions-ui-text-gaps-tests
+[ 42%] Built target champions-combat-items
+[ 42%] Building CXX object CMakeFiles/champions-creature-movement.dir/src/creature_movement.cpp.o
+[ 42%] Linking CXX static library libchampions-animation-runtime.a
+[ 42%] Building CXX object CMakeFiles/champions-combat-creature.dir/src/combat_creature.cpp.o
+[ 42%] Built target champions-animation-runtime
+[ 42%] Linking CXX static library libchampions-creature-movement.a
+[ 42%] Building CXX object CMakeFiles/champions-raw-handles.dir/src/raw_handles.cpp.o
+[ 42%] Built target champions-creature-movement
+[ 42%] Linking CXX static library libchampions-raw-handles.a
+[ 42%] Linking CXX static library libchampions-script-builtins.a
+[ 42%] Building CXX object CMakeFiles/champions-terrain-file.dir/src/terrain_file.cpp.o
+[ 42%] Built target champions-raw-handles
+[ 42%] Built target champions-script-builtins
+[ 42%] Building CXX object CMakeFiles/champions-monsters-1.dir/src/monsters_1.cpp.o
+[ 42%] Linking CXX static library libchampions-combat-creature.a
+[ 42%] Built target champions-combat-creature
+[ 42%] Linking CXX static library libchampions-terrain-file.a
+[ 42%] Building CXX object CMakeFiles/champions-player.dir/src/player.cpp.o
+[ 42%] Built target champions-terrain-file
+[ 42%] Building CXX object CMakeFiles/champions-campaign-actors.dir/src/campaign_actors.cpp.o
+[ 42%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_ctors.cpp.o
+[ 42%] Building CXX object CMakeFiles/champions-campaign-actors.dir/src/minotaur.cpp.o
+[ 42%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_ctors_2.cpp.o
+[ 42%] Linking CXX static library libchampions-player.a
+[ 42%] Built target champions-player
+[ 42%] Building CXX object CMakeFiles/champions-level-draw-measure.dir/tools/level_draw_measure.cpp.o
+[ 43%] Building CXX object CMakeFiles/champions-campaign-actors.dir/src/warboar_ai.cpp.o
+[ 43%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_ctors_3.cpp.o
+[ 43%] Linking CXX static library libchampions-campaign-actors.a
+[ 43%] Linking CXX executable champions-level-draw-measure
+[ 43%] Built target champions-level-draw-measure
+[ 43%] Built target champions-campaign-actors
+[ 44%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_ctors_soul.cpp.o
+[ 45%] Building CXX object CMakeFiles/champions-player-state-tests.dir/tests/player_state_tests.cpp.o
+[ 45%] Linking CXX static library libchampions-monsters-1.a
+[ 45%] Built target champions-monsters-1
+[ 45%] Building CXX object CMakeFiles/champions-fx-sim-tests.dir/tests/fx_sim_tests.cpp.o
+[ 45%] Linking CXX executable champions-player-state-tests
+[ 45%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_weapon_holder.cpp.o
+[ 45%] Built target champions-player-state-tests
+[ 45%] Building CXX object CMakeFiles/champions-data-validate.dir/src/validate_data.cpp.o
+[ 45%] Building CXX object CMakeFiles/champions-script-builtins-tests.dir/tests/script_builtins_tests.cpp.o
+[ 45%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_death_ctors.cpp.o
+[ 46%] Linking CXX executable champions-fx-sim-tests
+[ 46%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_phprop_ctors.cpp.o
+[ 46%] Linking CXX executable champions-data-validate
+[ 46%] Built target champions-fx-sim-tests
+[ 46%] Building CXX object CMakeFiles/champions-combat-items-tests.dir/tests/combat_items_tests.cpp.o
+[ 46%] Built target champions-data-validate
+[ 46%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_rigidbody.cpp.o
+[ 46%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_hit_ctors.cpp.o
+[ 47%] Linking CXX executable champions-combat-items-tests
+[ 47%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_staticfire.cpp.o
+[ 47%] Building CXX object CMakeFiles/champions-creature-movement-tests.dir/tests/creature_movement_tests.cpp.o
+[ 47%] Built target champions-combat-items-tests
+[ 47%] Building CXX object CMakeFiles/champions-creature-movement-trace.dir/tools/creature_movement_trace.cpp.o
+[ 48%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_minion_place.cpp.o
+[ 48%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_phprop_run.cpp.o
+[ 48%] Linking CXX executable champions-creature-movement-tests
+[ 48%] Linking CXX executable champions-creature-movement-trace
+[ 48%] Built target champions-creature-movement-tests
+[ 48%] Linking CXX executable champions-script-builtins-tests
+[ 48%] Built target champions-creature-movement-trace
+[ 48%] Building CXX object CMakeFiles/champions-creature-turn-tests.dir/tests/creature_turn_tests.cpp.o
+[ 48%] Built target champions-script-builtins-tests
+[ 49%] Building CXX object CMakeFiles/champions-combat-creature-tests.dir/tests/combat_creature_tests.cpp.o
+[ 49%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_gold.cpp.o
+[ 49%] Linking CXX executable champions-creature-turn-tests
+[ 49%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_prop_dtors.cpp.o
+[ 49%] Built target champions-creature-turn-tests
+[ 49%] Linking CXX executable champions-combat-creature-tests
+[ 50%] Building CXX object CMakeFiles/champions-creature-turn-trace.dir/tools/creature_turn_trace.cpp.o
+[ 50%] Built target champions-combat-creature-tests
+[ 50%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_attach_matrix.cpp.o
+[ 50%] Building CXX object CMakeFiles/champions-combat-creature-trace.dir/tools/combat_creature_trace.cpp.o
+[ 50%] Building CXX object CMakeFiles/champions-combat-ctors.dir/src/combat_antwave.cpp.o
+[ 50%] Linking CXX static library libchampions-combat-ctors.a
+[ 50%] Linking CXX executable champions-creature-turn-trace
+[ 50%] Built target champions-combat-ctors
+[ 50%] Building CXX object CMakeFiles/champions-raw-handles-tests.dir/tests/raw_handles_tests.cpp.o
+[ 50%] Built target champions-creature-turn-trace
+[ 50%] Building CXX object CMakeFiles/champions-raw-handles-trace.dir/tools/raw_handles_trace.cpp.o
+[ 50%] Building CXX object CMakeFiles/champions-creature-movement-borrowed-tests.dir/tests/creature_movement_borrowed_tests.cpp.o
+[ 50%] Linking CXX executable champions-raw-handles-tests
+[ 50%] Linking CXX executable champions-combat-creature-trace
+[ 51%] Linking CXX executable champions-creature-movement-borrowed-tests
+[ 51%] Built target champions-raw-handles-tests
+[ 51%] Built target champions-combat-creature-trace
+[ 51%] Built target champions-creature-movement-borrowed-tests
+[ 51%] Building CXX object CMakeFiles/champions-animation-runtime-api-tests.dir/tests/animation_runtime_tests.cpp.o
+[ 51%] Linking CXX executable champions-raw-handles-trace
+[ 51%] Built target champions-raw-handles-trace
+[ 51%] Building CXX object CMakeFiles/champions-terrain-file-tests.dir/tests/terrain_file_tests.cpp.o
+[ 51%] Linking CXX executable champions-animation-runtime-api-tests
+[ 51%] Built target champions-animation-runtime-api-tests
+[ 51%] Building CXX object CMakeFiles/champions-player-tests.dir/tests/player_tests.cpp.o
+[ 51%] Building CXX object CMakeFiles/champions-terrain-file-trace.dir/tools/terrain_file_trace.cpp.o
+[ 52%] Building CXX object CMakeFiles/champions-animation-runtime-trace.dir/tools/animation_runtime_trace.cpp.o
+[ 52%] Linking CXX executable champions-terrain-file-tests
+[ 52%] Built target champions-terrain-file-tests
+[ 53%] Linking CXX executable champions-terrain-file-trace
+[ 53%] Built target champions-terrain-file-trace
+[ 53%] Linking CXX executable champions-player-tests
+[ 54%] Building CXX object CMakeFiles/champions-monsters-1-trace.dir/tools/monsters_1_trace.cpp.o
+[ 54%] Building CXX object CMakeFiles/champions-player-trace.dir/tests/player_trace.cpp.o
+[ 54%] Linking CXX executable champions-animation-runtime-trace
+[ 54%] Built target champions-player-tests
+[ 54%] Built target champions-animation-runtime-trace
+[ 54%] Linking CXX executable champions-player-trace
+[ 54%] Building CXX object CMakeFiles/champions-ui-layout-dynamic.dir/src/ui_text_layout.cpp.o
+[ 54%] Building CXX object CMakeFiles/champions-monsters-1-tests.dir/tests/monsters_1_tests.cpp.o
+[ 54%] Built target champions-player-trace
+[ 54%] Building CXX object CMakeFiles/champions-ui-layout-tests.dir/tests/ui_layout_tests.cpp.o
+[ 54%] Linking CXX executable champions-monsters-1-trace
+[ 54%] Building CXX object CMakeFiles/champions-ui-layout-dynamic.dir/src/hud_dynamic.cpp.o
+[ 54%] Built target champions-monsters-1-trace
+[ 55%] Building CXX object CMakeFiles/champions-ui-font-page-tests.dir/tests/ui_font_page_tests.cpp.o
+[ 55%] Linking CXX executable champions-ui-layout-tests
+[ 56%] Building CXX object CMakeFiles/champions-ui-layout-dynamic.dir/src/hud_round3.cpp.o
+[ 56%] Linking CXX executable champions-ui-font-page-tests
+[ 56%] Built target champions-ui-layout-tests
+[ 56%] Built target champions-ui-font-page-tests
+[ 56%] Building CXX object CMakeFiles/champions-menus-tests.dir/tests/menus_tests.cpp.o
+[ 56%] Building CXX object CMakeFiles/champions-combat-ctors-tests.dir/tests/combat_ctors_tests.cpp.o
+[ 56%] Linking CXX executable champions-monsters-1-tests
+[ 56%] Building CXX object CMakeFiles/champions-ui-layout-dynamic.dir/src/ui_composite.cpp.o
+[ 56%] Built target champions-monsters-1-tests
+[ 57%] Building CXX object CMakeFiles/champions-combat-ctors-2-tests.dir/tests/combat_ctors_2_tests.cpp.o
+[ 57%] Linking CXX executable champions-menus-tests
+[ 57%] Linking CXX executable champions-combat-ctors-tests
+[ 57%] Linking CXX static library libchampions-ui-layout-dynamic.a
+[ 57%] Built target champions-menus-tests
+[ 57%] Built target champions-combat-ctors-tests
+[ 57%] Building CXX object CMakeFiles/champions-combat-ctors-3-tests.dir/tests/combat_ctors_3_tests.cpp.o
+[ 57%] Building CXX object CMakeFiles/champions-session-level-flow.dir/src/session_level_flow.cpp.o
+[ 57%] Built target champions-ui-layout-dynamic
+[ 57%] Linking CXX static library libchampions-session-level-flow.a
+[ 57%] Linking CXX executable champions-combat-ctors-2-tests
+[ 57%] Built target champions-session-level-flow
+[ 57%] Built target champions-combat-ctors-2-tests
+[ 57%] Building CXX object CMakeFiles/champions-level-spawn-measure.dir/tools/level_spawn_measure.cpp.o
+[ 57%] Linking CXX executable champions-combat-ctors-3-tests
+[ 57%] Built target champions-combat-ctors-3-tests
+[ 58%] Building CXX object CMakeFiles/champions-arena-measure.dir/tools/arena_measure.cpp.o
+[ 58%] Building CXX object CMakeFiles/champions-quests.dir/src/quests.cpp.o
+[ 58%] Linking CXX executable champions-level-spawn-measure
+[ 59%] Building CXX object CMakeFiles/champions-quests.dir/src/quests_flow.cpp.o
+[ 59%] Building CXX object CMakeFiles/champions-script-items.dir/src/script_items.cpp.o
+[ 59%] Building CXX object CMakeFiles/champions-quests.dir/src/quests_bridge.cpp.o
+[ 59%] Linking CXX executable champions-arena-measure
+[ 59%] Built target champions-level-spawn-measure
+ld: warning: ignoring duplicate libraries: 'libchampions-arena-modes.a'
+[ 59%] Building CXX object CMakeFiles/champions-dialog-gaps-tests.dir/tests/dialog_gaps_tests.cpp.o
+[ 59%] Built target champions-arena-measure
+[ 59%] Building CXX object CMakeFiles/champions-mission2-actors.dir/src/mission2_actors.cpp.o
+[ 59%] Building CXX object CMakeFiles/champions-quests.dir/src/campaign_inventory.cpp.o
+[ 60%] Building CXX object CMakeFiles/champions-script-items.dir/src/monster_build.cpp.o
+[ 60%] Linking CXX static library libchampions-quests.a
+[ 60%] Linking CXX executable champions-dialog-gaps-tests
+[ 60%] Linking CXX static library libchampions-mission2-actors.a
+[ 60%] Building CXX object CMakeFiles/champions-script-items.dir/src/net_launch.cpp.o
+[ 60%] Built target champions-dialog-gaps-tests
+[ 60%] Built target champions-mission2-actors
+[ 60%] Built target champions-quests
+[ 60%] Building CXX object CMakeFiles/champions-minotaur-tests.dir/tests/minotaur_tests.cpp.o
+[ 60%] Building CXX object CMakeFiles/champions-creature-water.dir/src/creature_water.cpp.o
+[ 60%] Linking CXX static library libchampions-script-items.a
+[ 60%] Linking CXX static library libchampions-creature-water.a
+[ 60%] Building CXX object CMakeFiles/champions-hud-extras.dir/src/hud_extras.cpp.o
+[ 60%] Built target champions-creature-water
+[ 60%] Building CXX object CMakeFiles/champions-hud-extras.dir/src/hud_player.cpp.o
+[ 60%] Built target champions-script-items
+[ 60%] Building CXX object CMakeFiles/champions-session-recovery.dir/src/session_recovery.cpp.o
+[ 61%] Linking CXX static library libchampions-hud-extras.a
+[ 61%] Linking CXX static library libchampions-session-recovery.a
+[ 61%] Built target champions-hud-extras
+[ 62%] Linking CXX executable champions-minotaur-tests
+[ 62%] Built target champions-minotaur-tests
+[ 62%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/runtime.cpp.o
+[ 62%] Building CXX object CMakeFiles/champions-campaign-actors-tests.dir/tests/campaign_actors_tests.cpp.o
+[ 62%] Building CXX object CMakeFiles/champions-creature-water-tests.dir/tests/creature_water_tests.cpp.o
+[ 62%] Built target champions-session-recovery
+[ 62%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/pose.cpp.o
+[ 62%] Building CXX object CMakeFiles/champions-ui-layout-dynamic-tests.dir/tests/ui_layout_dynamic_tests.cpp.o
+[ 62%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/sound.cpp.o
+[ 62%] Linking CXX executable champions-creature-water-tests
+[ 62%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/creature.cpp.o
+[ 62%] Built target champions-creature-water-tests
+[ 62%] Linking CXX executable champions-ui-layout-dynamic-tests
+[ 62%] Linking CXX executable champions-campaign-actors-tests
+[ 62%] Building CXX object CMakeFiles/champions-player-wading-tests.dir/tests/player_wading_tests.cpp.o
+[ 62%] Built target champions-ui-layout-dynamic-tests
+[ 62%] Generating generated/level_flow_vectors_batched.inc
+[ 62%] Built target champions-campaign-actors-tests
+[ 62%] Building CXX object CMakeFiles/champions-level-flow-water-tests.dir/tests/level_flow_water_tests.cpp.o
+level-flow vectors: 2298 cases, 36 batches, payload unchanged
+[ 62%] Building CXX object CMakeFiles/champions-level-flow-tests.dir/tests/level_flow_tests.cpp.o
+[ 62%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/dispatch.cpp.o
+[ 62%] Linking CXX executable champions-level-flow-water-tests
+[ 62%] Built target champions-level-flow-water-tests
+[ 63%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/dispatch_data.cpp.o
+[ 63%] Building CXX object CMakeFiles/champions-real-world.dir/src/real_world.cpp.o
+[ 63%] Linking CXX executable champions-player-wading-tests
+[ 63%] Built target champions-player-wading-tests
+[ 63%] Building CXX object CMakeFiles/champions-script-commands.dir/src/script_commands.cpp.o
+[ 63%] Linking CXX static library libchampions-real-world.a
+[ 63%] Built target champions-real-world
+[ 63%] Building CXX object CMakeFiles/champions-net-launch-tests.dir/tests/net_launch_tests.cpp.o
+[ 63%] Linking CXX executable champions-net-launch-tests
+[ 63%] Built target champions-net-launch-tests
+[ 64%] Building CXX object CMakeFiles/champions-ps2-save.dir/src/ps2_save.cpp.o
+[ 64%] Building CXX object CMakeFiles/champions-script-commands.dir/src/level_object_state.cpp.o
+[ 64%] Building CXX object CMakeFiles/champions-ps2-save.dir/src/ps2_class_restore.cpp.o
+[ 65%] Building CXX object CMakeFiles/champions-script-commands.dir/src/mission1_scripts.cpp.o
+[ 65%] Linking CXX static library libchampions-ps2-save.a
+[ 65%] Building CXX object CMakeFiles/champions-script-commands.dir/src/script_commands_objects.cpp.o
+[ 65%] Built target champions-ps2-save
+[ 65%] Building CXX object CMakeFiles/champions-hud-extras-tests.dir/tests/hud_extras_tests.cpp.o
+[ 65%] Building CXX object CMakeFiles/champions-level-flow-tests.dir/tests/level_flow_check.cpp.o
+[ 65%] Linking CXX executable champions-hud-extras-tests
+[ 65%] Linking CXX executable champions-level-flow-tests
+ld: warning: ignoring duplicate libraries: 'libchampions-objects.a'
+[ 65%] Built target champions-hud-extras-tests
+[ 65%] Built target champions-level-flow-tests
+[ 65%] Building CXX object CMakeFiles/champions-script-commands.dir/src/loading_equipment.cpp.o
+[ 65%] Building CXX object CMakeFiles/champions-script-commands.dir/src/script_effects.cpp.o
+[ 67%] Building CXX object CMakeFiles/champions-real-data-measure.dir/src/real_data_measure.cpp.o
+[ 67%] Building CXX object CMakeFiles/champions-session.dir/src/session.cpp.o
+[ 67%] Building CXX object CMakeFiles/champions-script-commands.dir/src/script_dialog.cpp.o
+[ 67%] Linking CXX executable champions-real-data-measure
+ld: warning: ignoring duplicate libraries: 'libchampions-archive.a', 'libchampions-level-flow.a', 'libchampions-model.a', 'libchampions-terrain-file.a', 'libchampions-texture.a', 'libchampions-ui-font.a', 'libchampions-world-geometry.a'
+[ 67%] Linking CXX static library libchampions-script-commands.a
+[ 67%] Built target champions-script-commands
+[ 67%] Building CXX object CMakeFiles/champions-real-world-tests.dir/tests/real_world_tests.cpp.o
+[ 67%] Built target champions-real-data-measure
+[ 67%] Linking CXX executable champions-real-world-tests
+[ 67%] Built target champions-real-world-tests
+[ 67%] Building CXX object CMakeFiles/champions-mission1-scripts-tests.dir/tests/mission1_scripts_tests.cpp.o
+[ 67%] Building CXX object CMakeFiles/champions-creature-anim.dir/src/creature_anim/player_dispatch.cpp.o
+[ 67%] Building CXX object CMakeFiles/champions-script-commands-measure.dir/src/script_commands_measure.cpp.o
+[ 67%] Linking CXX static library libchampions-session.a
+[ 67%] Built target champions-session
+[ 67%] Building CXX object CMakeFiles/champions-script-effects-tests.dir/tests/script_effects_tests.cpp.o
+[ 67%] Linking CXX static library libchampions-creature-anim.a
+[ 67%] Linking CXX executable champions-mission1-scripts-tests
+[ 68%] Linking CXX executable champions-script-commands-measure
+[ 68%] Built target champions-mission1-scripts-tests
+[ 68%] Linking CXX executable champions-script-effects-tests
+ld: warning: ignoring duplicate libraries: 'libchampions-archive.a'
+[ 68%] Building CXX object CMakeFiles/champions-script-items-tests.dir/tests/script_items_tests.cpp.o
+[ 68%] Built target champions-script-commands-measure
+[ 68%] Built target champions-script-effects-tests
+[ 68%] Building CXX object CMakeFiles/champions-item-drops-tests.dir/tests/item_drops_tests.cpp.o
+[ 68%] Building CXX object CMakeFiles/champions-quests-tests.dir/tests/quests_tests.cpp.o
+[ 68%] Built target champions-creature-anim
+[ 68%] Building CXX object CMakeFiles/champions-quests-measure.dir/src/quests_measure.cpp.o
+[ 68%] Linking CXX executable champions-item-drops-tests
+[ 68%] Built target champions-item-drops-tests
+[ 69%] Building CXX object CMakeFiles/champions-dialog-tests.dir/tests/dialog_tests.cpp.o
+[ 70%] Linking CXX executable champions-quests-tests
+[ 70%] Linking CXX executable champions-quests-measure
+ld: warning: ignoring duplicate libraries: 'libchampions-archive.a'
+[ 70%] Built target champions-quests-tests
+[ 70%] Built target champions-quests-measure
+[ 71%] Building CXX object CMakeFiles/champions-dialog-census.dir/src/dialog_census.cpp.o
+[ 71%] Building CXX object CMakeFiles/champions-ps2-class-restore-tests.dir/tests/ps2_class_restore_tests.cpp.o
+[ 71%] Linking CXX executable champions-script-items-tests
+[ 71%] Built target champions-script-items-tests
+[ 71%] Building CXX object CMakeFiles/champions-frontend.dir/src/frontend.cpp.o
+[ 71%] Linking CXX executable champions-dialog-census
+[ 71%] Linking CXX executable champions-ps2-class-restore-tests
+ld: warning: ignoring duplicate libraries: 'libchampions-archive.a'
+[ 72%] Building CXX object CMakeFiles/champions-frontend.dir/src/frontend_layout.cpp.o
+[ 72%] Built target champions-dialog-census
+[ 72%] Built target champions-ps2-class-restore-tests
+[ 72%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_world.cpp.o
+[ 72%] Linking CXX executable champions-dialog-tests
+[ 73%] Building CXX object CMakeFiles/champions-session-control.dir/src/session_control.cpp.o
+[ 73%] Built target champions-dialog-tests
+[ 73%] Linking CXX static library libchampions-frontend.a
+[ 74%] Building CXX object CMakeFiles/champions-session-tests.dir/tests/session_tests.cpp.o
+[ 74%] Built target champions-frontend
+[ 74%] Building CXX object CMakeFiles/champions-session-replay.dir/tools/session_replay.cpp.o
+[ 74%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_horsemen.cpp.o
+[ 74%] Building CXX object CMakeFiles/champions-session-control.dir/src/control_anim_cache.cpp.o
+[ 74%] Linking CXX executable champions-session-tests
+[ 74%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_services.cpp.o
+[ 74%] Built target champions-session-tests
+[ 74%] Linking CXX static library libchampions-session-control.a
+[ 74%] Built target champions-session-control
+[ 74%] Linking CXX executable champions-session-replay
+[ 74%] Built target champions-session-replay
+[ 74%] Building CXX object CMakeFiles/champions-session-hp-tests.dir/tests/session_hp_tests.cpp.o
+[ 74%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_queries.cpp.o
+[ 75%] Building CXX object CMakeFiles/champions-session-objects-trace.dir/tools/session_objects_trace.cpp.o
+[ 75%] Building CXX object CMakeFiles/champions-session-objects-tests.dir/tests/session_objects_tests.cpp.o
+[ 75%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_terrain.cpp.o
+[ 76%] Linking CXX executable champions-session-hp-tests
+[ 76%] Built target champions-session-hp-tests
+[ 76%] Building CXX object CMakeFiles/champions-session-hp-trace.dir/tools/session_hp_trace.cpp.o
+[ 76%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_damage.cpp.o
+[ 76%] Linking CXX executable champions-session-objects-tests
+[ 76%] Built target champions-session-objects-tests
+[ 76%] Linking CXX executable champions-session-objects-trace
+[ 76%] Building CXX object CMakeFiles/champions-session-combat-tests.dir/tests/session_combat_tests.cpp.o
+[ 77%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_player.cpp.o
+[ 77%] Built target champions-session-objects-trace
+[ 77%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_api.cpp.o
+[ 77%] Building CXX object CMakeFiles/champions-session-combat-trace.dir/tools/session_combat_trace.cpp.o
+[ 77%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_adopt.cpp.o
+[ 77%] Linking CXX executable champions-session-hp-trace
+[ 77%] Linking CXX executable champions-session-combat-tests
+[ 77%] Built target champions-session-hp-trace
+[ 77%] Building CXX object CMakeFiles/champions-session-terrain-tests.dir/tests/session_terrain_tests.cpp.o
+[ 77%] Built target champions-session-combat-tests
+[ 77%] Building CXX object CMakeFiles/champions-session-terrain-trace.dir/tools/session_terrain_trace.cpp.o
+[ 77%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_move.cpp.o
+[ 77%] Linking CXX executable champions-session-terrain-tests
+[ 77%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_melee.cpp.o
+[ 77%] Built target champions-session-terrain-tests
+[ 77%] Building CXX object CMakeFiles/champions-session-creature-tests.dir/tests/session_creature_tests.cpp.o
+[ 77%] Linking CXX executable champions-session-combat-trace
+[ 77%] Built target champions-session-combat-trace
+[ 77%] Building CXX object CMakeFiles/champions-session-creature-trace.dir/tools/session_creature_trace.cpp.o
+[ 77%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_defence.cpp.o
+[ 77%] Linking CXX executable champions-session-terrain-trace
+[ 77%] Built target champions-session-terrain-trace
+[ 78%] Building CXX object CMakeFiles/champions-session-control-tests.dir/tests/session_control_tests.cpp.o
+[ 78%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_pickups.cpp.o
+[ 78%] Linking CXX executable champions-session-creature-tests
+[ 78%] Built target champions-session-creature-tests
+[ 78%] Building CXX object CMakeFiles/champions-session-control-trace.dir/tools/session_control_trace.cpp.o
+[ 79%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_tick.cpp.o
+[ 79%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_ranged.cpp.o
+[ 80%] Linking CXX executable champions-session-creature-trace
+[ 80%] Built target champions-session-creature-trace
+[ 80%] Linking CXX executable champions-session-control-tests
+[ 80%] Building CXX object CMakeFiles/champions-session-control-creature-tests.dir/tests/session_control_creature_tests.cpp.o
+[ 80%] Built target champions-session-control-tests
+[ 80%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_monsters.cpp.o
+[ 80%] Building CXX object CMakeFiles/champions-session-control-creature-trace.dir/tools/session_control_creature_trace.cpp.o
+[ 80%] Linking CXX executable champions-session-control-trace
+[ 80%] Built target champions-session-control-trace
+[ 80%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_spells.cpp.o
+[ 80%] Building CXX object CMakeFiles/champions-frame-clock-tests.dir/tests/frame_clock_tests.cpp.o
+[ 80%] Linking CXX executable champions-session-control-creature-tests
+[ 80%] Built target champions-session-control-creature-tests
+[ 80%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/session_combat_runtime_adapter.cpp.o
+[ 80%] Building CXX object CMakeFiles/champions-session-turn-tests.dir/tests/session_turn_tests.cpp.o
+[ 80%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_effect_hooks.cpp.o
+[ 80%] Linking CXX executable champions-session-control-creature-trace
+[ 80%] Built target champions-session-control-creature-trace
+[ 80%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_own.cpp.o
+[ 80%] Building CXX object CMakeFiles/champions-session-turn-trace.dir/tools/session_turn_trace.cpp.o
+[ 80%] Linking CXX executable champions-frame-clock-tests
+[ 80%] Built target champions-frame-clock-tests
+[ 80%] Building CXX object CMakeFiles/champions-session-anim-cache-tests.dir/tests/session_anim_cache_tests.cpp.o
+[ 81%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_round3.cpp.o
+[ 81%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_round4.cpp.o
+[ 81%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_round5.cpp.o
+[ 81%] Linking CXX executable champions-session-turn-tests
+[ 81%] Built target champions-session-turn-tests
+[ 81%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_potions.cpp.o
+[ 81%] Building CXX object CMakeFiles/champions-session-anim-cache-trace.dir/tools/session_anim_cache_trace.cpp.o
+[ 81%] Linking CXX executable champions-session-turn-trace
+[ 81%] Built target champions-session-turn-trace
+[ 81%] Building CXX object CMakeFiles/champions-session-animation-tests.dir/tests/session_animation_tests.cpp.o
+[ 81%] Building CXX object CMakeFiles/champions-combat-runtime.dir/src/combat_runtime_round6.cpp.o
+[ 81%] Linking CXX executable champions-session-anim-cache-tests
+[ 81%] Built target champions-session-anim-cache-tests
+[ 81%] Building CXX object CMakeFiles/champions-session-animation-trace.dir/tools/session_animation_trace.cpp.o
+[ 81%] Linking CXX static library libchampions-combat-runtime.a
+[ 81%] Built target champions-combat-runtime
+[ 81%] Building CXX object CMakeFiles/champions-level-play.dir/src/level_play.cpp.o
+[ 82%] Linking CXX executable champions-session-animation-tests
+[ 82%] Built target champions-session-animation-tests
+[ 82%] Building CXX object CMakeFiles/champions-creature-anim-tests.dir/tests/creature_anim_tests.cpp.o
+[ 82%] Linking CXX static library libchampions-level-play.a
+[ 82%] Linking CXX executable champions-session-anim-cache-trace
+[ 82%] Built target champions-level-play
+[ 82%] Building CXX object CMakeFiles/champions-creature-anim-trace.dir/tests/creature_anim_trace.cpp.o
+[ 82%] Built target champions-session-anim-cache-trace
+[ 82%] Linking CXX executable champions-creature-anim-tests
+[ 82%] Building CXX object CMakeFiles/champions-creature-dispatch-trace.dir/tests/creature_dispatch_trace.cpp.o
+[ 82%] Linking CXX executable champions-session-animation-trace
+[ 82%] Built target champions-creature-anim-tests
+[ 83%] Linking CXX executable champions-creature-anim-trace
+[ 83%] Building CXX object CMakeFiles/champions-creature-dispatch-tests.dir/tests/creature_dispatch_tests.cpp.o
+[ 83%] Built target champions-session-animation-trace
+[ 84%] Building CXX object CMakeFiles/champions-playable-audio-tests.dir/tests/playable_audio_tests.cpp.o
+[ 84%] Linking CXX executable champions-creature-dispatch-trace
+[ 84%] Built target champions-creature-anim-trace
+[ 84%] Built target champions-creature-dispatch-trace
+[ 84%] Linking CXX executable champions-playable-audio-tests
+[ 84%] Linking CXX executable champions-creature-dispatch-tests
+[ 84%] Built target champions-playable-audio-tests
+[ 84%] Built target champions-creature-dispatch-tests
+[ 84%] Building CXX object CMakeFiles/champions-level-objects-tests.dir/tests/level_objects_tests.cpp.o
+[ 84%] Building CXX object CMakeFiles/champions-campaign-fight-adopt-tests.dir/tests/campaign_fight_adopt_tests.cpp.o
+[ 84%] Building CXX object CMakeFiles/champions-mission2-actors-tests.dir/tests/mission2_actors_tests.cpp.o
+[ 84%] Building CXX object CMakeFiles/champions-script-commands-tests.dir/tests/script_commands_tests.cpp.o
+[ 84%] Linking CXX executable champions-mission2-actors-tests
+[ 84%] Built target champions-mission2-actors-tests
+[ 84%] Building CXX object CMakeFiles/champions-frontend-tests.dir/tests/frontend_tests.cpp.o
+[ 84%] Linking CXX executable champions-campaign-fight-adopt-tests
+[ 84%] Built target champions-campaign-fight-adopt-tests
+[ 84%] Linking CXX executable champions-level-objects-tests
+[ 84%] Building CXX object CMakeFiles/champions-campaign-inventory-tests.dir/tests/campaign_inventory_tests.cpp.o
+[ 84%] Built target champions-level-objects-tests
+[ 84%] Building CXX object CMakeFiles/champions-native-save.dir/src/native_save.cpp.o
+[ 84%] Linking CXX executable champions-frontend-tests
+[ 84%] Linking CXX executable champions-campaign-inventory-tests
+[ 84%] Built target champions-frontend-tests
+[ 84%] Building CXX object CMakeFiles/champions-combat-play.dir/src/combat_play.cpp.o
+[ 84%] Built target champions-campaign-inventory-tests
+[ 84%] Building CXX object CMakeFiles/champions-player-services.dir/src/player_services.cpp.o
+[ 84%] Linking CXX static library libchampions-native-save.a
+[ 84%] Linking CXX static library libchampions-player-services.a
+[ 84%] Linking CXX executable champions-script-commands-tests
+[ 84%] Built target champions-native-save
+[ 84%] Built target champions-player-services
+[ 84%] Building CXX object CMakeFiles/champions-combat-play.dir/src/play_animation.cpp.o
+[ 84%] Building CXX object CMakeFiles/champions-netplay.dir/src/netplay.cpp.o
+[ 84%] Built target champions-script-commands-tests
+[ 84%] Building CXX object CMakeFiles/champions-native-save-tests.dir/tests/native_save_tests.cpp.o
+[ 85%] Building CXX object CMakeFiles/champions-native-snapshot-tests.dir/tests/native_snapshot_tests.cpp.o
+[ 85%] Linking CXX static library libchampions-combat-play.a
+[ 85%] Linking CXX static library libchampions-netplay.a
+[ 85%] Built target champions-netplay
+[ 85%] Linking CXX executable champions-native-save-tests
+[ 85%] Building CXX object CMakeFiles/champions-arena-match-tests.dir/tests/arena_match_tests.cpp.o
+[ 85%] Built target champions-native-save-tests
+[ 85%] Building CXX object CMakeFiles/champions-arena-scheduler-tests.dir/tests/arena_scheduler_tests.cpp.o
+[ 85%] Built target champions-combat-play
+[ 85%] Building CXX object CMakeFiles/champions-session-recovery-tests.dir/tests/session_recovery_tests.cpp.o
+[ 85%] Linking CXX executable champions-arena-match-tests
+[ 85%] Linking CXX executable champions-native-snapshot-tests
+ld: warning: ignoring duplicate libraries: 'libchampions-arena-match.a'
+[ 86%] Linking CXX executable champions-arena-scheduler-tests
+[ 86%] Built target champions-native-snapshot-tests
+[ 86%] Built target champions-arena-match-tests
+ld: warning: ignoring duplicate libraries: 'libchampions-arena-match.a'
+[ 86%] Building CXX object CMakeFiles/champions-session-recovery-trace.dir/tests/session_recovery_trace.cpp.o
+[ 86%] Building CXX object CMakeFiles/champions-session-facing-tests.dir/tests/session_facing_tests.cpp.o
+[ 86%] Built target champions-arena-scheduler-tests
+[ 86%] Building CXX object CMakeFiles/champions-session-facing-trace.dir/tests/session_facing_trace.cpp.o
+[ 86%] Linking CXX executable champions-session-recovery-tests
+[ 86%] Built target champions-session-recovery-tests
+[ 87%] Linking CXX executable champions-session-recovery-trace
+[ 87%] Linking CXX executable champions-session-facing-tests
+[ 87%] Built target champions-session-recovery-trace
+[ 87%] Building CXX object CMakeFiles/champions-control-anim-cache-trace.dir/tests/control_anim_cache_trace.cpp.o
+[ 87%] Built target champions-session-facing-tests
+[ 87%] Building CXX object CMakeFiles/champions-control-anim-cache-tests.dir/tests/control_anim_cache_tests.cpp.o
+[ 88%] Building CXX object CMakeFiles/champions-control-anim-cache-legacy-bytes.dir/tests/control_anim_cache_legacy_bytes.cpp.o
+[ 88%] Linking CXX executable champions-session-facing-trace
+[ 88%] Built target champions-session-facing-trace
+[ 88%] Building CXX object CMakeFiles/champions-play-session-boundary-tests.dir/tests/play_session_boundary_tests.cpp.o
+[ 88%] Linking CXX executable champions-control-anim-cache-legacy-bytes
+[ 88%] Built target champions-control-anim-cache-legacy-bytes
+[ 88%] Building CXX object CMakeFiles/champions-play-session-tests.dir/tests/play_session_tests.cpp.o
+[ 88%] Linking CXX executable champions-play-session-boundary-tests
+[ 88%] Built target champions-play-session-boundary-tests
+[ 88%] Building CXX object CMakeFiles/champions-play-session-trace-1.dir/tools/play_session_trace.cpp.o
+[ 89%] Linking CXX executable champions-play-session-tests
+[ 89%] Built target champions-play-session-tests
+[ 89%] Building CXX object CMakeFiles/champions-play-session-trace-2.dir/tools/play_session_trace.cpp.o
+[ 89%] Linking CXX executable champions-control-anim-cache-trace
+[ 89%] Built target champions-control-anim-cache-trace
+[ 89%] Linking CXX executable champions-control-anim-cache-tests
+[ 89%] Building CXX object CMakeFiles/champions-play-session-measure.dir/tools/play_session_measure.cpp.o
+[ 89%] Built target champions-control-anim-cache-tests
+[ 89%] Building CXX object CMakeFiles/champions-horsemen-runtime-tests.dir/tests/horsemen_runtime_tests.cpp.o
+[ 89%] Linking CXX executable champions-play-session-measure
+[ 89%] Built target champions-play-session-measure
+[ 89%] Building CXX object CMakeFiles/champions-combat-runtime-tests.dir/tests/combat_runtime_tests.cpp.o
+[ 89%] Linking CXX executable champions-horsemen-runtime-tests
+[ 89%] Built target champions-horsemen-runtime-tests
+[ 90%] Building CXX object CMakeFiles/champions-combat-runtime-2-tests.dir/tests/combat_runtime_2_tests.cpp.o
+[ 90%] Linking CXX executable champions-combat-runtime-tests
+[ 90%] Linking CXX executable champions-play-session-trace-1
+[ 90%] Built target champions-combat-runtime-tests
+[ 90%] Building CXX object CMakeFiles/champions-combat-runtime-3-tests.dir/tests/combat_runtime_3_tests.cpp.o
+[ 90%] Built target champions-play-session-trace-1
+[ 90%] Building CXX object CMakeFiles/champions-combat-runtime-4-tests.dir/tests/combat_runtime_4_tests.cpp.o
+[ 90%] Linking CXX executable champions-play-session-trace-2
+[ 90%] Built target champions-play-session-trace-2
+[ 90%] Building CXX object CMakeFiles/champions-combat-runtime-5-tests.dir/tests/combat_runtime_5_tests.cpp.o
+[ 90%] Linking CXX executable champions-combat-runtime-2-tests
+[ 90%] Built target champions-combat-runtime-2-tests
+[ 90%] Linking CXX executable champions-combat-runtime-3-tests
+[ 90%] Building CXX object CMakeFiles/champions-combat-runtime-6-tests.dir/tests/combat_runtime_6_tests.cpp.o
+[ 90%] Linking CXX executable champions-combat-runtime-4-tests
+[ 90%] Built target champions-combat-runtime-3-tests
+[ 90%] Building CXX object CMakeFiles/champions-player-wading-runtime-tests.dir/tests/player_wading_runtime_tests.cpp.o
+[ 90%] Built target champions-combat-runtime-4-tests
+[ 90%] Building CXX object CMakeFiles/champions-combat-play-tests.dir/tests/combat_play_tests.cpp.o
+[ 91%] Linking CXX executable champions-player-wading-runtime-tests
+[ 92%] Linking CXX executable champions-combat-runtime-5-tests
+[ 92%] Built target champions-player-wading-runtime-tests
+[ 92%] Built target champions-combat-runtime-5-tests
+[ 92%] Building CXX object CMakeFiles/champions-combat-free-spot-tests.dir/tests/combat_free_spot_tests.cpp.o
+[ 92%] Building CXX object CMakeFiles/champions-play-spells-tests.dir/tests/play_spells_tests.cpp.o
+[ 93%] Linking CXX executable champions-combat-play-tests
+[ 93%] Linking CXX executable champions-combat-runtime-6-tests
+[ 93%] Built target champions-combat-play-tests
+[ 93%] Built target champions-combat-runtime-6-tests
+[ 93%] Building CXX object CMakeFiles/champions-netplay-tests.dir/tests/netplay_tests.cpp.o
+[ 93%] Linking CXX executable champions-play-spells-tests
+[ 93%] Built target champions-play-spells-tests
+[ 93%] Building CXX object CMakeFiles/champions-potion-ctors-tests.dir/tests/potion_ctors_tests.cpp.o
+[ 93%] Building CXX object CMakeFiles/champions-level-play-tests.dir/tests/level_play_tests.cpp.o
+[ 93%] Linking CXX executable champions-combat-free-spot-tests
+[ 93%] Built target champions-combat-free-spot-tests
+[ 93%] Linking CXX executable champions-netplay-tests
+[ 94%] Linking CXX executable champions-level-play-tests
+[ 94%] Built target champions-netplay-tests
+[ 94%] Building CXX object CMakeFiles/champions-animated-combat-play-tests.dir/tests/animated_combat_play_tests.cpp.o
+[ 94%] Building CXX object CMakeFiles/champions-netplay-level-measure.dir/tools/netplay_level_measure.cpp.o
+[ 94%] Built target champions-level-play-tests
+[ 94%] Linking CXX executable champions-potion-ctors-tests
+[ 94%] Built target champions-potion-ctors-tests
+[ 94%] Building CXX object CMakeFiles/champions-campaign-fight.dir/src/campaign_fight.cpp.o
+[ 94%] Building CXX object CMakeFiles/champions-player-services-tests.dir/tests/player_services_tests.cpp.o
+[ 95%] Linking CXX executable champions-netplay-level-measure
+[ 96%] Linking CXX executable champions-animated-combat-play-tests
+[ 96%] Built target champions-netplay-level-measure
+[ 96%] Built target champions-animated-combat-play-tests
+[ 96%] Linking CXX executable champions-player-services-tests
+[ 96%] Building CXX object CMakeFiles/champions-hud-player-tests.dir/tests/hud_player_tests.cpp.o
+[ 96%] Building CXX object CMakeFiles/champions-combat-play-effects.dir/src/combat_play_effects.cpp.o
+ld: warning: ignoring duplicate libraries: 'libchampions-archive.a'
+[ 96%] Built target champions-player-services-tests
+[ 96%] Building CXX object CMakeFiles/champions-campaign-fight.dir/src/player_death_flow.cpp.o
+[ 96%] Linking CXX executable champions-hud-player-tests
+[ 96%] Building CXX object CMakeFiles/champions-campaign-fight.dir/src/campaign_rewards.cpp.o
+[ 96%] Built target champions-hud-player-tests
+[ 97%] Building CXX object CMakeFiles/champions-campaign-fight.dir/src/pickups.cpp.o
+[ 97%] Linking CXX static library libchampions-combat-play-effects.a
+[ 97%] Built target champions-combat-play-effects
+[ 97%] Building CXX object CMakeFiles/champions-playable-combat-fx-tests.dir/tests/playable_combat_fx_tests.cpp.o
+[ 97%] Building CXX object CMakeFiles/champions-play-fixture-save.dir/src/play_fixture_save.cpp.o
+[ 97%] Linking CXX static library libchampions-campaign-fight.a
+[ 97%] Built target champions-campaign-fight
+[ 98%] Building CXX object CMakeFiles/champions-campaign-fight-probe.dir/src/campaign_fight_probe.cpp.o
+[ 98%] Building CXX object CMakeFiles/champions-campaign-fight-boundary-tests.dir/tests/campaign_fight_boundary_tests.cpp.o
+[ 99%] Linking CXX static library libchampions-play-fixture-save.a
+[ 99%] Linking CXX executable champions-playable-combat-fx-tests
+[ 99%] Built target champions-play-fixture-save
+[ 99%] Built target champions-playable-combat-fx-tests
+[ 99%] Linking CXX executable champions-campaign-fight-boundary-tests
+[ 99%] Building CXX object CMakeFiles/champions-pickups-tests.dir/tests/pickups_tests.cpp.o
+[ 99%] Building CXX object CMakeFiles/champions-player-death-flow-tests.dir/tests/player_death_flow_tests.cpp.o
+[ 99%] Built target champions-campaign-fight-boundary-tests
+[ 99%] Linking CXX executable champions-campaign-fight-probe
+[ 99%] Building CXX object CMakeFiles/champions-campaign-rewards-tests.dir/tests/campaign_rewards_tests.cpp.o
+[ 99%] Built target champions-campaign-fight-probe
+[ 99%] Building CXX object CMakeFiles/champions-ps2-save-tests.dir/tests/ps2_save_tests.cpp.o
+[100%] Linking CXX executable champions-player-death-flow-tests
+[100%] Linking CXX executable champions-campaign-rewards-tests
+[100%] Built target champions-campaign-rewards-tests
+[100%] Built target champions-player-death-flow-tests
+[100%] Building CXX object CMakeFiles/champions-fixture-save-tests.dir/tests/play_fixture_save_tests.cpp.o
+[100%] Linking CXX executable champions-fixture-save-tests
+[100%] Linking CXX executable champions-ps2-save-tests
+ld: warning: ignoring duplicate libraries: 'libchampions-ps2-save.a'
+[100%] Built target champions-fixture-save-tests
+[100%] Built target champions-ps2-save-tests
+[100%] Linking CXX executable champions-pickups-tests
+[100%] Built target champions-pickups-tests

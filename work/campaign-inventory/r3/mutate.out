@@ -1,0 +1,9 @@
+share-old-order: killed: ps2-save: line 1101: inv.seen && inv.pending_at_share == "crypt"
+refusal-as-card-error: killed: FAIL a client save refusal leaves no latch reading after returning to play
+refusal-as-card-error-fe: killed: 
+load-open-clear: killed: FAIL a client save refusal leaves no latch reading after returning to play
+load-slot-set: killed: 
+load-done-clear: killed: 
+load-refusal-unknown: killed: 
+unknown-latch-refusal: killed: FAIL an act transfer without a latch reading refuses
+mutate-done
