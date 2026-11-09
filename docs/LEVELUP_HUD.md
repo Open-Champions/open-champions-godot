@@ -70,8 +70,10 @@ These producers already existed and now follow the notes:
 - Bars: `ui_layout::barClipRight` is `trunc(S + current / maximum * 99)`,
   `S = origin + 15`, offline slot 0 `x = 27`. No clamp. A zero maximum
   saturates (40/0 gives `0x7fffffff`, -5/0 gives `0x80000000`)
-  (hud-live-producers.md:40-55). The HUD view no longer drops zero-max or
-  negative-current bars.
+  (hud-live-producers.md:40-55). The Godot HUD view still omits a bar whose
+  maximum is not above 0 or whose current is negative: the play scene uses a
+  zero maximum to mean that the value is not available (for example play mana),
+  so drawing it would paint a value the scene does not have.
 - Green bar: `hudBaseLayers` draws it from acknowledged level only, from
   `T[ack-1]..T[ack]`, with both differences wrapped as 32-bit integers
   (hud-live-producers.md:114-118).
