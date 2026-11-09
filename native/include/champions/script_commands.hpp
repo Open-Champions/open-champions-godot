@@ -352,6 +352,17 @@ public:
   // corpse animation and motion are deliberately outside this API.
   std::vector<level_object_state::Record> save_built_object_fields() const;
   std::size_t restore_built_object_fields(const std::vector<level_object_state::Record> &);
+  // Read-only census for the save refusal above: every live built record
+  // whose HP word +0x228 is not a float above 0, with its file ordinal,
+  // class and raw +0x228/+0x22c words, plus whether Creature_setStats had
+  // level data when the level was built (stats_ready).
+  struct BuiltHpEntry {
+    std::uint32_t ordinal = 0, hp_word = 0, max_hp_word = 0;
+    std::string cls;
+  };
+  std::vector<BuiltHpEntry> built_hp_not_above_zero() const;
+  std::size_t built_record_count() const { return built_records_.size(); }
+  bool creature_stats_ready() const { return stats_ready_; }
   // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
   // The ELF image starts this presentation word at zero. Replacement hosts

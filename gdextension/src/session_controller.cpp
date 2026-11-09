@@ -145,8 +145,12 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_level_object_directory, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("level_object_state_status"),
                        &ChampionsSessionController::level_object_state_status);
+  ClassDB::bind_method(D_METHOD("built_creature_hp_census"),
+                       &ChampionsSessionController::built_creature_hp_census);
   ClassDB::bind_method(D_METHOD("set_live_checkpoint", "qualified_key"),
                        &ChampionsSessionController::set_live_checkpoint);
+  ClassDB::bind_method(D_METHOD("invalidate_live_checkpoint", "reason"),
+                       &ChampionsSessionController::invalidate_live_checkpoint);
   ClassDB::bind_method(D_METHOD("death_reload_status"),
                        &ChampionsSessionController::death_reload_status);
   ClassDB::bind_method(D_METHOD("finish_death_reload", "loaded_key", "refusal"),
@@ -1448,6 +1452,26 @@ Dictionary ChampionsSessionController::fight_place_player(const Vector3 &positio
   if (!error.empty()) out["error"] = String::utf8(error.c_str());
   return out;
 }
+Dictionary ChampionsSessionController::built_creature_hp_census() const {
+  try {
+    if (!scripts_) throw std::runtime_error("No built level-script objects.");
+    Array rows;
+    for (const auto &e : scripts_->built_hp_not_above_zero()) {
+      Dictionary row;
+      row["ordinal"] = int64_t(e.ordinal);
+      row["class"] = String::utf8(e.cls.c_str());
+      row["hp_word"] = int64_t(e.hp_word);
+      row["max_hp_word"] = int64_t(e.max_hp_word);
+      rows.push_back(row);
+    }
+    Dictionary out;
+    out["ok"] = true;
+    out["built"] = int64_t(scripts_->built_record_count());
+    out["stats_ready"] = scripts_->creature_stats_ready();
+    out["hp_not_above_zero"] = rows;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
 Dictionary ChampionsSessionController::save_level_object_directory(const String &qualified_key) {
   try {
     if (!scripts_) throw std::runtime_error("No built level-script objects to save.");
@@ -1520,11 +1544,18 @@ void ChampionsSessionController::bind_death_reload() {
   owner.reload = [this] {
     // deathTask phase 1, act found: save_load on the live buffer
     // (client-path.md:89-90). Refusals are thrown as the Fight records them.
+    if (!live_checkpoint_ && !live_checkpoint_invalid_.empty())
+      throw rta::combat_runtime::Unsupported(
+          "death reload refused: the last card save was refused (" + live_checkpoint_invalid_ +
+          "), but the original's offline card save rebuilds the live save buffer with save_build "
+          "before writing (research-save-screen@c8895e2 docs/save-screen.md:229), so the live "
+          "header the death reload reads is unknown to this client");
     if (!live_checkpoint_)
       throw rta::combat_runtime::Unsupported(
-          "death reload refused: the live save buffer holds no checkpoint (no card load and no "
-          "save_game build in this session); the original's uninitialised-buffer behaviour is "
-          "Unknown (research-death-reload@98ea7a6 docs/death-reload-client-path.md:183)");
+          "death reload refused: the live save buffer holds no checkpoint (no card load, no card "
+          "save and no save_game build in this session); the original's uninitialised-buffer "
+          "behaviour is Unknown (research-death-reload@98ea7a6 "
+          "docs/death-reload-client-path.md:183)");
     if (scripts_) {
       const auto &campaign = scripts_->campaign();
       if (std::int64_t(campaign.act()) != live_checkpoint_act_ ||
@@ -1558,6 +1589,7 @@ Dictionary ChampionsSessionController::set_live_checkpoint(const String &qualifi
     if (key.empty()) throw std::runtime_error("A live checkpoint needs the loaded level key.");
     live_checkpoint_ = true;
     live_checkpoint_key_ = key;
+    live_checkpoint_invalid_.clear();
     live_checkpoint_act_ = scripts_ ? std::int64_t(scripts_->campaign().act()) : -1;
     live_checkpoint_act_resets_ = scripts_ ? std::int64_t(scripts_->campaign().events().act_resets) : 0;
     Dictionary out;
@@ -1567,9 +1599,20 @@ Dictionary ChampionsSessionController::set_live_checkpoint(const String &qualifi
     return out;
   } catch (const std::exception &e) { return failure(e); }
 }
+Dictionary ChampionsSessionController::invalidate_live_checkpoint(const String &reason) {
+  const std::string why = reason.utf8().get_data();
+  live_checkpoint_ = false;
+  live_checkpoint_key_.clear();
+  live_checkpoint_invalid_ = why.empty() ? std::string("no reason given") : why;
+  Dictionary out;
+  out["ok"] = true;
+  out["reason"] = String::utf8(live_checkpoint_invalid_.c_str());
+  return out;
+}
 Dictionary ChampionsSessionController::death_reload_status() const {
   Dictionary out;
   out["live_checkpoint"] = live_checkpoint_;
+  out["live_checkpoint_invalid"] = String::utf8(live_checkpoint_invalid_.c_str());
   out["checkpoint_key"] = String::utf8(live_checkpoint_key_.c_str());
   out["requested"] = !death_reload_key_.empty();
   out["key"] = String::utf8(death_reload_key_.c_str());

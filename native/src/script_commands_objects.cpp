@@ -154,6 +154,20 @@ std::vector<level_object_state::Record> Host::save_built_object_fields() const {
   return result;
 }
 
+std::vector<Host::BuiltHpEntry> Host::built_hp_not_above_zero() const {
+  std::vector<BuiltHpEntry> out;
+  auto &m = variables_->memory;
+  for (const auto &built : built_records_) {
+    const auto live = variables_->world->objects.find(built.address);
+    if (live == variables_->world->objects.end() || !live->second || !live->second->alive)
+      continue;
+    const auto hp = m.word(built.address + 0x228);
+    if (live_creature_hp(hp)) continue;
+    out.push_back({built.ordinal, hp, m.word(built.address + 0x22c), built.cls});
+  }
+  return out;
+}
+
 std::size_t Host::restore_built_object_fields(
     const std::vector<level_object_state::Record> &records) {
   // Validate the complete matching set before changing any memory. Missing

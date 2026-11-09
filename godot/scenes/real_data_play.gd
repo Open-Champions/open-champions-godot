@@ -286,7 +286,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	if record_departing_state and not restoring_real_level and real.current >= 0 and controller.get_play_capabilities().get("level_script_enabled", false):
 		var departing: Dictionary = controller.save_level_object_directory(str(real.levels[real.current].stem))
 		if not departing.get("ok", false) or not departing.get("readable", false):
-			status_label.text = "Level change refused: this level has Creature death state that cannot be restored yet." if \
+			status_label.text = "Level change refused: a built object's Creature HP word (+0x228) is not above 0; its save state is unverified." if \
 				str(departing.get("error", "")) == "dead built-Creature save state is unverified" else \
 				"Level change refused: per-level object directory is full or unreadable."
 			return false
@@ -393,6 +393,16 @@ func _show_ps2_import(result: Dictionary) -> Dictionary:
 func save_session_file(path: String) -> bool:
 	if real == null or real.current < 0:
 		return super.save_session_file(path)
+	var saved := _save_real_session_file(path)
+	if not saved:
+		# The original's offline card save rebuilds g_saveBuffer with save_build
+		# before it writes (save-screen.md:229). This save was refused, so the
+		# live header that a death reload reads is unknown here.
+		controller.invalidate_live_checkpoint(str(status_label.text))
+		_live_checkpoint_path = ""
+	return saved
+
+func _save_real_session_file(path: String) -> bool:
 	var talk: Dictionary = controller.dialog_status()
 	if talk.get("open", false) or talk.get("mutex_held", false) or controller.text_hud().get("help_open", false):
 		status_label.text = "Save refused: finish the current dialog or help box first."
@@ -416,7 +426,7 @@ func save_session_file(path: String) -> bool:
 		campaign = state.bytes
 		var objects_saved: Dictionary = controller.save_level_object_directory(str(level.stem))
 		if not objects_saved.get("ok", false) or not objects_saved.get("readable", false):
-			status_label.text = "Save refused: this level has Creature death state that cannot be restored yet." if \
+			status_label.text = "Save refused: a built object's Creature HP word (+0x228) is not above 0; its save state is unverified." if \
 				str(objects_saved.get("error", "")) == "dead built-Creature save state is unverified" else \
 				"Save refused: per-level object directory is full or unreadable."
 			return false
@@ -461,6 +471,11 @@ func save_session_file(path: String) -> bool:
 			not _write_companion(path + ".level", JSON.stringify(manifest).to_utf8_buffer()):
 		status_label.text = "Save refused: level association could not be written."
 		return false
+	# An offline card save runs save_build into g_saveBuffer first, so the
+	# saved image is now the live save buffer's header (save-screen.md:229):
+	# a later death reload reads this file, not an earlier card load.
+	var marked: Dictionary = controller.set_live_checkpoint(str(level.stem))
+	_live_checkpoint_path = path if marked.get("ok", false) else ""
 	status_label.text = "Saved level, player, quests, position and confirmed Creature fields. Other object and in-flight script effects refused."
 	return true
 
@@ -594,7 +609,8 @@ func load_session_file(path: String) -> bool:
 
 # deathTask phase 1 found the level in the act table and the controller
 # accepted the live buffer: run the card load fed from it. The header (player,
-# quests, pose, HP) comes from the last card-loaded image; each level body
+# quests, pose, HP) comes from the last card image this session loaded or
+# saved (save-screen.md:229, 258-279); each level body
 # from the live directory; the dying level is not stored (restoring_real_level
 # skips the departure store, client-path.md:92). Phase 2 ends the task once
 # the loaded key matches the request (client-path.md:99).
@@ -606,7 +622,7 @@ func run_death_reload() -> bool:
 	var was_playing: bool = play_mode and session_started and not stopped
 	var ok := false
 	if _live_checkpoint_path.is_empty():
-		status_label.text = "Death reload refused: no card-loaded image is the live save buffer."
+		status_label.text = "Death reload refused: no card image loaded or saved this session is the live save buffer."
 	else:
 		_death_reload_live_directory = true
 		ok = load_session_file(_live_checkpoint_path)
