@@ -5,7 +5,9 @@
 // docs/mission1-levels.md (cited below as doc:LINE) and its PASS audit
 // research-mission1-levels-fix2. Nothing here names a level, record or actor:
 // classes and positions come from the caller's cutscene file and objects.
+#include "champions/level_flow.hpp"
 #include <array>
+#include <map>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -104,6 +106,23 @@ Slot3 slot3_calls(const Cut &, std::size_t actor);
 // Actors with a show key (type 8), ascending and unique (doc:384-394 "Shows").
 std::vector<std::size_t> shown_actors(const Cut &);
 
+// ---- Record facts the levels rely on (doc:169-184, 223-228, 271-277; the
+// research asserts them as RECORD_FACTS, CLASS_KEYS, CLASS_VALUES and DROPS).
+struct RecordFacts {
+  std::map<std::string, std::size_t> drops;       // `dropitem` value -> records
+  std::map<std::string, std::size_t> propertyless; // class -> records with no properties
+  // class -> each record's property keys in record order
+  std::map<std::string, std::vector<std::vector<std::string>>> keys;
+};
+RecordFacts record_facts(const std::vector<level_flow::Record> &);
+// The value of `key` on the record whose `name` is `name` (and class `cls`),
+// when exactly one record matches; otherwise nullopt.
+std::optional<std::string> named_value(const std::vector<level_flow::Record> &, const std::string &cls,
+                                       const std::string &name, const std::string &key);
+// A record's `t`/`script` value names an entry only when it is not the record's
+// own placeholder `<empty>` (doc:178) and is non-empty.
+bool names_entry(const std::string &value);
+
 // ---- Unknowns that stay refused (doc:520-550).
 enum class Open {
   DoorStateAfterTrigger, // the door state after doors, cazic and bossdefeated
@@ -112,6 +131,7 @@ enum class Open {
   CutscenePlayback,      // real playback, length and camera
   UnrequestedCutscene,   // a cutscene file no script requests
   DemoBranch,            // exitzone's demoRunning branch
+  PropertylessLive,      // property-less creatures live from load (Inferred only)
 };
 const char *open_reason(Open);
 } // namespace champions::simulation::rta::mission1_levels

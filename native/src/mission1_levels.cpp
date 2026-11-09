@@ -1,4 +1,5 @@
 #include "champions/mission1_levels.hpp"
+#include "champions/objects.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -141,6 +142,32 @@ std::vector<std::size_t> shown_actors(const Cut &cut) {
   return out;
 }
 
+namespace {
+std::string key_of(const std::string &prop) { return prop.substr(0, prop.find('=')); }
+} // namespace
+RecordFacts record_facts(const std::vector<level_flow::Record> &records) {
+  RecordFacts out;
+  for (const auto &r : records) {
+    std::vector<std::string> keys;
+    for (const auto &p : r.props) keys.push_back(key_of(p));
+    if (keys.empty()) ++out.propertyless[r.cls];
+    out.keys[r.cls].push_back(std::move(keys));
+    if (const auto item = r.prop("dropitem")) ++out.drops[*item];
+  }
+  return out;
+}
+std::optional<std::string> named_value(const std::vector<level_flow::Record> &records, const std::string &cls,
+                                       const std::string &name, const std::string &key) {
+  const level_flow::Record *found = nullptr;
+  for (const auto &r : records)
+    if (r.cls == cls && objects::strip_quotes(r.prop("name").value_or("")) == name) {
+      if (found) return std::nullopt;
+      found = &r;
+    }
+  return found ? found->prop(key) : std::nullopt;
+}
+bool names_entry(const std::string &value) { return !value.empty() && value != "<empty>"; }
+
 const char *open_reason(Open o) {
   switch (o) {
   case Open::DoorStateAfterTrigger:
@@ -159,6 +186,9 @@ const char *open_reason(Open o) {
   case Open::UnrequestedCutscene:
     return "a cutscene file that no script requests; whether anything plays it is Unknown "
            "(docs/mission1-levels.md:396-399,549-550)";
+  case Open::PropertylessLive:
+    return "property-less creatures have no wait or hide, but that they are live from load is Inferred: "
+           "the constructor's default state was not executed (docs/mission1-levels.md:202-205,500)";
   case Open::DemoBranch:
     return "exitzone's demoRunning branch was modelled but not executed (docs/mission1-levels.md:425-428,530)";
   }

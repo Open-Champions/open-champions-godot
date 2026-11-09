@@ -398,6 +398,47 @@ void loader_marker_hub_checks() {
     check(c.hub()==(evil&&complete?q::HUB_EVIL:q::HUB_GOOD),"hub for evil, decision and mission 1 state");
   }
 }
+
+// Record facts (doc:169-184, 223-228, 271-277), authored shapes of the research tables.
+void record_fact_checks() {
+  namespace lf=r::level_flow;
+  auto rec=[](const std::string &cls,std::vector<std::string> props){lf::Record r;r.cls=cls;r.props=std::move(props);return r;};
+  std::vector<lf::Record> arena;
+  for(unsigned i=0;i<3;++i) arena.push_back(rec("authored-gladiator",{}));
+  arena.push_back(rec("authored-zek",{"name=authored-boss","dropitem=authored-shard"}));
+  arena.push_back(rec("authored-zek",{"name=\"authored-boss2\"","wait=1"}));
+  arena.push_back(rec("authored-portal",{"lump=authored-lump","script=authored-gate"}));
+  for(const auto *t:{"authored-entry-a","authored-entry-b","<empty>"})
+    arena.push_back(rec("authored-trigger",{"w=10","h=10",std::string("t=")+t}));
+  arena.push_back(rec("authored-crate",{}));
+  const auto facts=ml::record_facts(arena);
+  check(facts.drops==std::map<std::string,std::size_t>{{"authored-shard",1}},"one drop record in the arena");
+  check(facts.propertyless.at("authored-gladiator")==3 && facts.propertyless.at("authored-crate")==1 &&
+        !facts.propertyless.count("authored-zek"),"property-less records by class");
+  check(facts.keys.at("authored-portal")==std::vector<std::vector<std::string>>{{"lump","script"}},"portal key set");
+  check(facts.keys.at("authored-trigger").size()==3 &&
+        facts.keys.at("authored-trigger")[2]==std::vector<std::string>{"w","h","t"},"trigger keys w, h, t");
+  check(ml::named_value(arena,"authored-zek","authored-boss","dropitem")==std::optional<std::string>("authored-shard") &&
+        !ml::named_value(arena,"authored-zek","authored-boss","wait"),"the drop record has no wait");
+  check(ml::named_value(arena,"authored-zek","authored-boss2","wait").has_value() &&
+        !ml::named_value(arena,"authored-zek","authored-boss2","dropitem"),"the second record waits and drops nothing");
+  auto twice=arena; twice.push_back(rec("authored-zek",{"name=authored-boss"}));
+  check(!ml::named_value(twice,"authored-zek","authored-boss","dropitem"),"a duplicate name is not one record");
+  unsigned named=0;
+  for(const auto &r:arena) if(r.cls=="authored-trigger") named+=ml::names_entry(r.prop("t").value_or(""));
+  check(named==2 && !ml::names_entry("") && !ml::names_entry("<empty>"),"the placeholder names no entry");
+  std::vector<lf::Record> knights;
+  for(const auto *item:{"authored-potion-a","authored-potion-b","authored-potion-a","authored-potion-b"})
+    knights.push_back(rec("authored-knight",{"name=authored-knight","wait=1","deathscript=authored-k",std::string("dropitem=")+item}));
+  check(ml::record_facts(knights).drops==std::map<std::string,std::size_t>{{"authored-potion-a",2},{"authored-potion-b",2}},
+        "drop multiset");
+  check(!ml::named_value(knights,"authored-knight","authored-knight","dropitem"),"four same-named records are not one");
+  check(std::string(ml::open_reason(ml::Open::PropertylessLive)).find("Inferred")!=std::string::npos,"live-from-load stays Inferred");
+  // A placeholder value run as an entry finds nothing (case-sensitive lookup).
+  a::ImageOptions options; options.publics={{"start",0}};
+  sc::Host h;
+  check(h.load(a::build_image({0x2e,0x59,0x30},options)) && h.run("<empty>")==sc::Stop::Missing,"placeholder entry is missing");
+}
 } // namespace
 int main() {
   try {
@@ -524,6 +565,7 @@ int main() {
           "unknown bytecode cannot overwrite addressed count before refusal");
     cutscene_checks();
     death_checks();
+    record_fact_checks();
     loader_marker_hub_checks();
     // Ordinary scripts retain their existing interpreter path.
     sc::Host generic;
