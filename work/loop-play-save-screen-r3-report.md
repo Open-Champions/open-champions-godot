@@ -1,4 +1,4 @@
-STATUS: PENDING — gates running.
+STATUS: PASS — save-screen round 3 fixes all four findings of audit `play-save-screen-r2` (0 HIGH, 1 MEDIUM, 3 LOW). Every gate is green on the Mac mini: Release build and five universal GDExtensions, focused 6/6, CTest 260/260, strict matrix 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged (36,402 bytes, `9c7922b2…c659`), and journeys step for step equal to round 2 (80/81, pickup 10→11, death-reload refusal kept).
 
 # Play save screen round 3 — 2026-11-09
 
@@ -66,7 +66,11 @@ caller outside itself, its test and its CMake line.
    '^(memcard-screen|frontend-exact|ps2-save|ps2-class-restore|menus-exact|native-save)$'
    -j 3`, standard input closed (`work/pss3/focused.log`). `memcard-screen` 211
    checks (round 2: 166). 260 tests registered (unchanged).
-3. **Full CTest:** running (recorded in the next commit).
+3. **Full CTest: PASS, 260/260**, `ctest --test-dir build/native --output-on-failure
+   -j 3`, standard input closed, 1,945.11 s, exit 0 (`work/pss3/ctest.out`). Baseline
+   260/260. No test timed out, and none needed a rerun. It ran next to the GDExtension
+   builds, the matrix and the journeys (two heavy jobs at most) on a mini at load average
+   about 60–90 from other jobs. `netplay` took 310.62 s. `memcard-screen` passed.
 4. **GDExtensions: PASS.** The round-2 script with logs in `work/pss3`
    (`~/malik-champions/runtime/godot-cpp`, `-DCMAKE_BUILD_TYPE=Release`,
    `CMAKE_OSX_ARCHITECTURES=arm64;x86_64`, `-j 4`, one reused `build/gdx`,
@@ -124,3 +128,17 @@ caller outside itself, its test and its CMake line.
      module.
    - `enemy_fight` `swing_wall_msec` (wall-clock time on a loaded mini) in both
      variants.
+
+## Remaining
+
+Same as round 2. No host card directory source binds the contract, so `Flow`
+still uses host files and PS2 import. These stay refused pending research:
+the state-4 cancel back fade, the delete confirm, combined presses, the
+repeat and 0x80 outside the settled fixture (now including 0x80 with a
+scroll), split edge and repeat words, the saved-box key split (needs the
+0x8e1ad8 writer), a stale 0x4f8f29, net-path step 2, count 0 with a named
+directory, a negative countdown, load steps 0/1/3, the fade integration, and
+the writers of 0x88d3b0 and 0x8e1ad8. Death reload stays refused. The mini
+`build/` was deleted at the end. No push, PR, sibling edit, private-disc
+write, install, `/tmp` use or process-name kill. Only PIDs this run started
+were waited on.
