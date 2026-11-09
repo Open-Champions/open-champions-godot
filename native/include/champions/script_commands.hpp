@@ -138,6 +138,18 @@ struct Counts {
   // by command).
   std::array<std::uint64_t, COMMANDS> stopped{};
 
+  // Story-route level commands (level_commands.hpp; research
+  // t3/research-level-commands 8efa13d docs/level-commands.md). Executions the
+  // host recorded without modelling a callee: soundSequence (res_find Unknown,
+  // :354-357) and preloadResource of a lump the game folder has (:373-396).
+  // Each is also in executed[].
+  std::array<std::uint64_t, COMMANDS> recorded_noops{};
+  // Level-command refusals by reason (a subset of callee_refusals).
+  std::map<std::string, std::uint64_t> level_command_refusals;
+  // killMonster: kills the arena-only state gate refused (only the handler's
+  // flags and hit points stored, :254-257), and deathscripts run (:265-268).
+  std::uint64_t arena_gate_refusals = 0;
+  std::uint64_t death_scripts_run = 0;
 };
 
 // One particle_spawn the binder asked for. Words are the binder's, unscaled
@@ -441,6 +453,19 @@ public:
   // Applies to every entry start: run, run_start/run_prestart, post actions,
   // deferred calls and callScript. Not reset by load().
   void set_entry_gate(std::optional<EntryGate> gate) { entry_gate_ = std::move(gate); }
+  // In a story-route level (entry gate set), autoPropSetState, killMonster,
+  // soundSequence and preloadResource run the level_commands port instead of
+  // being refused (research t3/research-level-commands 8efa13d). preloadResource
+  // needs this listing of the owner's game folder: a present lump is a recorded
+  // no-op, and a missing one or no listing is refused (the original stops the
+  // emulated run there; on hardware Unknown; docs/level-commands.md:384-386,
+  // audit LC-4).
+  void set_lump_exists(std::function<bool(const std::string &)> exists) { lump_exists_ = std::move(exists); }
+  // True once a soundSequence was recorded as a no-op: the original takes a
+  // sound player and advances the handle serial when res_find answers a
+  // sequence, so later sound handles and free players may differ from the
+  // original's (docs/level-commands.md:336-357, audit LC-3).
+  bool sound_players_diverged() const { return sound_players_diverged_; }
   bool has_entry_gate() const { return entry_gate_.has_value(); }
   // Object-driven script starter (Trigger_run / obj_runActionScripts): sets
   // the selected object and active player globals around a named public.
@@ -634,6 +659,13 @@ private:
   std::uint32_t create_object(const std::string &class_name, const std::array<std::uint32_t, 3> &pos,
                               std::int32_t angle, std::uint32_t props_word);
   void refuse(std::size_t index, amx::Machine &machine, const char *reason = nullptr);
+  // The first level_commands case on this call's targets research did not run.
+  std::optional<std::string> level_command_refusal(const std::string &name, amx::Machine &machine);
+  enum class LevelCommand : std::uint8_t { None, AutoProp, Kill, Sequence, Preload };
+  LevelCommand level_command_ = LevelCommand::None;
+  std::function<bool(const std::string &)> lump_exists_;
+  bool sound_players_diverged_ = false;
+  std::string callee_reason_;
   Stop stopped() const;
   std::uint32_t scene(const std::string &name,
                       const std::vector<builtins::Variables::ServiceValue> &args);

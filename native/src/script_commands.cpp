@@ -1,4 +1,5 @@
 #include "champions/script_commands.hpp"
+#include "champions/level_commands.hpp"
 #include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
@@ -58,7 +59,11 @@ const StubRead kStubReads[] = {
     // ScriptGenerator record is built (Host::build_generator), so only an
     // unbuilt one can hide behind a stub (touches_stub).
     {"generateMonster", 0x200, false},
-
+    // The story-route level commands (level_commands.hpp): killMonster tests
+    // flags 0x28 (docs/level-commands.md:235), autoPropSetState the AutoProp
+    // bit 0x10000000 (:121-124), on every object the name finds. A stub's
+    // flags are not the constructed object's, so a stub target refuses.
+    {"killMonster", 0x200, false}, {"autoPropSetState", 100, false},
 };
 // The select* forms act on g_scriptSelectedObj and test the same flag.
 bool selected_form(const char *name) {
@@ -177,6 +182,13 @@ bool dialog_command(const char *name) {
     if (std::strcmp(name, each) == 0)
       return true;
   return false;
+}
+// The four built-ins the level_commands port runs in a story-route level
+// (research t3/research-level-commands 8efa13d docs/level-commands.md 2-5).
+// activateStore keeps the dialog route it already had (docs/DIALOG.md).
+bool level_command(const char *name) {
+  return std::strcmp(name, "autoPropSetState") == 0 || std::strcmp(name, "killMonster") == 0 ||
+         std::strcmp(name, "soundSequence") == 0 || std::strcmp(name, "preloadResource") == 0;
 }
 bool text_command(const std::string &name) {
   return name == "setInfo" || name == "addHelpMessage" || name == "addHelpMessageF" ||
@@ -513,7 +525,9 @@ amx::NativeMap Host::command_map() {
         refuse(i, machine);
         return 0;
       }
-      if (!documented && !dialog_route && !quests::route_undocumented(kRows[i].name, *campaign_) &&
+      // Story-route levels only: elsewhere these stay refused as before.
+      const bool level_route = entry_gate_.has_value() && level_command(kRows[i].name);
+      if (!documented && !dialog_route && !level_route && !quests::route_undocumented(kRows[i].name, *campaign_) &&
           !script_items::routes(kRows[i].name)) {
         refuse(i, machine);
         return 0;
@@ -531,8 +545,16 @@ amx::NativeMap Host::command_map() {
         refuse(i, machine);
         return 0;
       }
+      callee_reason_.clear();
       if (callee_unknown(i, machine)) {
         counts_.callee_refusals += 1;
+        if (!callee_reason_.empty()) {
+          const auto reason = std::move(callee_reason_);
+          callee_reason_.clear();
+          counts_.level_command_refusals[reason] += 1;
+          refuse(i, machine, reason.c_str());
+          return 0;
+        }
         // Attached trigger preflight refuses the command itself, even when
         // the script discards its result. No later entry effects may run.
         if (dialog_attached_ && std::strcmp(kRows[i].name, "trigger") == 0) {
@@ -588,6 +610,42 @@ amx::NativeMap Host::command_map() {
         counts_.stopped[i]+=1;
         throw RefusedResult("refused hub availability write outside documented offer");
       }
+      // The level_commands port answers this call's virtual slots and
+      // call-outs (Host::scene) only while it runs.
+      struct LevelScope {
+        Host &host;
+        LevelCommand was;
+        std::function<std::uint32_t(const std::string &, const std::string &)> resource;
+        bool sequence;
+        LevelScope(Host &h, LevelCommand now)
+            : host(h), was(h.level_command_), sequence(now == LevelCommand::Sequence) {
+          host.level_command_ = now;
+          if (sequence) {
+            // res_find was a stub in the research (:331, :354-357): the host
+            // answers no resource, so sound_playOnObject returns -1 at once
+            // (:331-332) and nothing is stored (audit LC-3).
+            resource = std::move(host.variables_->find_resource);
+            host.variables_->find_resource = [](const std::string &, const std::string &) { return 0u; };
+          }
+        }
+        ~LevelScope() {
+          host.level_command_ = was;
+          if (sequence)
+            host.variables_->find_resource = std::move(resource);
+        }
+      };
+      const auto now = !level_route ? LevelCommand::None
+                       : std::strcmp(kRows[i].name, "autoPropSetState") == 0 ? LevelCommand::AutoProp
+                       : std::strcmp(kRows[i].name, "killMonster") == 0     ? LevelCommand::Kill
+                       : std::strcmp(kRows[i].name, "soundSequence") == 0   ? LevelCommand::Sequence
+                                                                            : LevelCommand::Preload;
+      std::optional<LevelScope> level_scope;
+      if (now != LevelCommand::None)
+        level_scope.emplace(*this, now);
+      if (now == LevelCommand::Sequence || now == LevelCommand::Preload)
+        counts_.recorded_noops[i] += 1;
+      if (now == LevelCommand::Sequence)
+        sound_players_diverged_ = true;
       std::optional<amx::Address> result;
       try {
         result = function(machine, params);
@@ -658,6 +716,58 @@ std::string Host::boss_name(const objects::GameObject &obj) const {
       .value_or(std::string());
 }
 
+// Checked before the binder runs, so a refused level command stores nothing.
+// Research t3/research-level-commands 8efa13d docs/level-commands.md.
+std::optional<std::string> Host::level_command_refusal(const std::string &name, amx::Machine &machine) {
+  auto &memory = variables_->memory;
+  if (name == "soundSequence")
+    return std::nullopt; // a recorded no-op (Host::scene, :326-364)
+  if (name == "preloadResource") {
+    // lump_load(name) (:366-396). A present lump: its result is ignored and
+    // nothing the game reads changes (Inferred, :392-396); recorded as a no-op.
+    const auto address = machine.cell(machine.params + 4);
+    if (machine.get_addr(address) != amx::ERR_NONE)
+      return std::string("the lump argument is not a resolvable address");
+    if (!lump_exists_)
+      return std::string("no game-folder listing: a missing lump stops the emulated run, on hardware Unknown "
+                         "(docs/level-commands.md:384-386, audit LC-4)");
+    if (!lump_exists_(machine.get_string(address)))
+      return std::string("the lump is not in the game folder: the original stops the emulated run, on hardware "
+                         "Unknown (docs/level-commands.md:384-386, audit LC-4)");
+    return std::nullopt;
+  }
+  const bool kill = name == "killMonster";
+  const auto found = named(machine, kill ? 0x200 : 100);
+  if (!found)
+    return std::string("the name argument is not a resolvable address");
+  for (const auto *obj : *found) {
+    const auto flags = memory.u32(obj->addr + level_commands::O_FLAGS);
+    if (!kill) {
+      // Objects without the AutoProp bit are skipped (:121-124).
+      if (!(flags & level_commands::OF_AUTOPROP))
+        continue;
+      if (auto reason = level_commands::autoprop_refusal(memory, obj->addr, std::uint32_t(machine.cell(machine.params + 8))))
+        return reason;
+      continue;
+    }
+    // Dead creatures and non-creatures are skipped (:235-238).
+    if ((flags & (level_commands::OF_DEAD | level_commands::OF_CREATURE)) != level_commands::OF_CREATURE)
+      continue;
+    level_commands::Death death;
+    death.script = objects::props_find(obj->props, "deathscript");
+    death.drop_item = objects::props_find(obj->props, "dropitem").has_value();
+    death.boss_music = !boss_name(*obj).empty();
+    if (auto reason = level_commands::gnome_kill_refusal(memory, obj->addr, death))
+      return reason;
+    // The deathscript is a nested entry start: in a story-route level the gate
+    // must admit it before any kill is stored.
+    if (death.script && !level_commands::arena_gate_refuses(memory) && entry_gate_ && entry_gate_->entry &&
+        entry_gate_->entry(*death.script, false))
+      return std::string("the deathscript entry is outside the story-route gate");
+  }
+  return std::nullopt;
+}
+
 // A routed command whose callee research did not execute for this state, or
 // a text command the port refuses. Checked before the binder runs, so a
 // refused command stores nothing.
@@ -667,6 +777,13 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
   const auto creature = [&](const objects::GameObject *obj) {
     return obj && (memory.u32(obj->addr + 0xc) & 0x20u) != 0;
   };
+  if (entry_gate_ && level_command(name.c_str())) {
+    if (auto reason = level_command_refusal(name, machine)) {
+      callee_reason_ = std::move(*reason);
+      return true;
+    }
+    return false;
+  }
   if (text_command(name)) {
     const auto reason = text_refusal(name, machine);
     if (reason)
@@ -1017,6 +1134,41 @@ std::uint32_t Host::scene(const std::string &name,
     refresh_hud_inputs();
     hud_->set_compass(vec_of(args[0]), text_commands_->resolve(word_of(args[1])));
     mirror_hud();
+    return 0;
+  }
+  if (level_command_ == LevelCommand::Preload && name == "lump_load")
+    return 0; // the result is ignored (docs/level-commands.md:371); a present lump, checked before the call
+  if (level_command_ == LevelCommand::Sequence && name == "sound_playOnObject") {
+    if (args.empty() || word_of(args[0]) != 0u)
+      throw amx::HostFault("recorded soundSequence reached sound_playOnObject with a resource");
+    return UINT32_MAX; // resource 0 returns -1 at once (:331-332)
+  }
+  if (level_command_ == LevelCommand::Sequence && name == "sound_setPlaysWhileFrozen") {
+    if (args.empty() || word_of(args[0]) != UINT32_MAX)
+      throw amx::HostFault("recorded soundSequence reached sound_setPlaysWhileFrozen with a handle");
+    return 0; // handle -1 stores nothing (ref_level_commands.py:530-535)
+  }
+  if (name == "virtual" && args.size() >= 3 && level_command_ == LevelCommand::AutoProp && word_of(args[0]) == 18u) {
+    // AutoProp_setState 0x23d680 (docs/level-commands.md:127-147).
+    level_commands::autoprop_set_state(memory, word_of(args[1]), word_of(args[2]));
+    return 0;
+  }
+  if (name == "virtual" && args.size() >= 3 && level_command_ == LevelCommand::Kill && word_of(args[0]) == 27u) {
+    // Gnome_setState 0x269bb4 with 0x14 (docs/level-commands.md:242-276).
+    const auto address = word_of(args[1]);
+    if (word_of(args[2]) != level_commands::STATE_DEAD)
+      throw amx::HostFault("killMonster virtual call with a state other than 0x14");
+    const auto *obj = variables_->obj_at(address);
+    if (!obj)
+      throw amx::HostFault("killMonster virtual call on an unknown object");
+    level_commands::Death death;
+    death.script = objects::props_find(obj->props, "deathscript");
+    const auto refused = level_commands::gnome_set_state(memory, address, death, [this](const std::string &entry) {
+      variables_->run_script(entry);
+      counts_.death_scripts_run += 1;
+    });
+    if (refused)
+      counts_.arena_gate_refusals += 1;
     return 0;
   }
   if (name == "virtual") {

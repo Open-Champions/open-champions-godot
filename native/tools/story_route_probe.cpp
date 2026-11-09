@@ -75,6 +75,7 @@ const champions::Entry *find_entry(const std::vector<champions::Entry> &entries,
 struct Level {
   std::vector<std::uint8_t> script;
   std::vector<std::vector<std::uint8_t>> text;
+  std::vector<std::uint8_t> objects; // objects.ob, adopted only by the stub-refusal groups
 };
 struct Disc {
   std::map<std::string, fs::path> files;
@@ -116,6 +117,10 @@ struct Disc {
             const auto p = champions::payload(lump_bytes, *script);
             out.script.assign(p.data, p.data + p.size);
           }
+          if (const auto *objects = find_entry(inner, "objects.ob")) {
+            const auto p = champions::payload(lump_bytes, *objects);
+            out.objects.assign(p.data, p.data + p.size);
+          }
           for (const auto &entry : inner)
             if (champions::simulation::rta::strings::is_uni_name(entry.name)) {
               const auto p = champions::payload(lump_bytes, entry);
@@ -139,6 +144,9 @@ struct Plant {
   std::map<std::string, int> vars;
   bool evil = false;
   int offered = 0; // a mission whose record-0 byte is planted available (0xA1)
+  // Adopt the level's objects.ob as the play session does without a ported
+  // constructor for its classes: every record an unconstructed stub.
+  bool adopt = false;
 };
 
 Prepared prepare(Disc &disc, const std::string &level, const Plant &plant = {}) {
@@ -160,6 +168,17 @@ Prepared prepare(Disc &disc, const std::string &level, const Plant &plant = {}) 
     return out;
   host.require_complete_commands();
   host.set_entry_gate(route::gate_for(level));
+  // preloadResource: a lump the owner's game folder has is a recorded no-op
+  // (research t3/research-level-commands 8efa13d docs/level-commands.md:384-396).
+  host.set_lump_exists([&disc](const std::string &name) {
+    auto base = lower(name);
+    const auto slash = base.find_last_of("/\\");
+    if (slash != std::string::npos)
+      base = base.substr(slash + 1);
+    return disc.files.count(base) != 0;
+  });
+  if (plant.adopt && (data->objects.empty() || !host.adopt_objects(data->objects.data(), data->objects.size())))
+    return out;
   auto campaign = q::Campaign::load(host.save_campaign());
   for (int slot = 0; slot < q::PLAYERS; ++slot)
     for (int mission = 3; mission <= 6; ++mission)
@@ -398,21 +417,31 @@ int main(int argc, char **argv) {
                   }));
         continue;
       }
-      // Research outcome (docs/story-route.md:454-463): eight killMonster
-      // calls, then the entrance still requests islc2 with its door.
+      // Research outcome (docs/story-route.md:454-463; level-commands
+      // t3/research-level-commands 8efa13d docs/level-commands.md:288-308):
+      // eight killMonster calls, all executed, then the entrance still
+      // requests islc2 with its door. No object is adopted here, so no gnome
+      // dies and no selected object is set: orientation 0xff (:302-306). The
+      // research ran three of the four (started, finished) pairs; the fourth,
+      // (0, 1), is Observed static only (the branch to 0x1ce4) and is not a
+      // case here (audit LC-8).
       tally.add("m3-gnome-kill", with("islgnome", plant, [&](sc::Host &h) {
                   const auto stop = h.run(entry);
-                  const auto calls = h.counts().executed[k] + h.counts().refused[k];
-                  return ran(stop) && calls == 8 && pending(h) == "islc2" && entrance(h) == doors[std::size_t(i)] &&
+                  return ran(stop) && h.counts().executed[k] == 8 && h.counts().refused[k] == 0 &&
+                         pending(h) == "islc2" && orient(h) == 0xFF && entrance(h) == doors[std::size_t(i)] &&
                          untouched(h);
                 }));
-      // Client: killMonster is a Partial row the host does not route, so the
-      // entrance stops at the first call, before islc2 is requested. Counted
-      // as its own group so the mission 3 gap stays visible (not a match).
-      tally.add("m3-gnome-kill-client-stop", with("islgnome", plant, [&](sc::Host &h) {
+      // Play: with the level's records adopted as unconstructed stubs (no
+      // Gnome constructor is ported), the first killMonster finds stub
+      // targets and refuses before any store, so the entrance stops before
+      // islc2. Counted as its own group so the play gap stays visible.
+      Plant adopted = plant;
+      adopted.adopt = true;
+      tally.add("m3-gnome-kill-stub-refusal", with("islgnome", adopted, [&](sc::Host &h) {
                   const auto stop = h.run(entry);
-                  return stops_at(h, stop, "killMonster") && h.counts().refused[k] == 1 &&
-                         h.counts().executed[k] == 0 && pending(h) == PENDING_SENTINEL && untouched(h);
+                  return stops_at(h, stop, "killMonster") && h.counts().stub_refusals == 1 &&
+                         h.counts().refused[k] == 1 && h.counts().executed[k] == 0 &&
+                         pending(h) == PENDING_SENTINEL && untouched(h);
                 }));
     }
   }
@@ -510,24 +539,34 @@ int main(int argc, char **argv) {
 
   // ---- Mission 5 (section 8) ----
   for (const bool evil : {false, true})
-    // The entrance is written; the client then stops at the refused
-    // preloadResource (lump_load of bust.lmp returned 0 in the research).
+    // The entrance is written; preloadResource, its last built-in, is a
+    // recorded no-op for a lump the game folder has (docs/level-commands.md:366-396).
     tally.add("m5-prestart", with("tormenta", {{}, evil, 0}, [&](sc::Host &h) {
                 const auto stop = h.run_prestart();
-                return (ran(stop) || stops_at(h, stop, "preloadResource")) &&
+                return ran(stop) && h.counts().recorded_noops[command("preloadResource")] == 1 &&
                        entrance(h) == (evil ? "evilstart" : "goodstart") && pending(h) == PENDING_SENTINEL &&
                        untouched(h);
               }));
-  // Research: start sets mission 5 available and posts absorb. The client
-  // stops earlier, at its refused autoPropSetState, before the availability
-  // store. Counted as its own group so the gap stays visible.
-  tally.add("m5-start", with("tormenta", {}, [](sc::Host &h) {
-              return ran(h.run_start()) && missions(h, 5, 0xA1, 0xA0) && quests(h) == 0 &&
-                     var(h, "startedMission5") == 1 && var(h, "currentMission") == 5 && var(h, "tor_beenHere") == 1;
+  // Research: start sets mission 5 available and posts absorb; its five
+  // autoPropSetState calls run first (docs/level-commands.md:172-198). No
+  // object is adopted here, so they find no target and store nothing.
+  const auto props = command("autoPropSetState");
+  tally.add("m5-start", with("tormenta", {}, [props](sc::Host &h) {
+              return ran(h.run_start()) && h.counts().executed[props] == 5 && h.counts().refused[props] == 0 &&
+                     missions(h, 5, 0xA1, 0xA0) && quests(h) == 0 && var(h, "startedMission5") == 1 &&
+                     var(h, "currentMission") == 5 && var(h, "tor_beenHere") == 1;
             }));
-  tally.add("m5-start-client-stop", with("tormenta", {}, [](sc::Host &h) {
-              return stops_at(h, h.run_start(), "autoPropSetState") && untouched(h);
-            }));
+  // Play: with the records adopted as stubs (no AutoProp constructor is
+  // ported; the research set those fields by hand, :57-63, audit LC-5), the
+  // first call finds a stub target and refuses before the availability store.
+  {
+    Plant adopted;
+    adopted.adopt = true;
+    tally.add("m5-start-stub-refusal", with("tormenta", adopted, [props](sc::Host &h) {
+                return stops_at(h, h.run_start(), "autoPropSetState") && h.counts().stub_refusals == 1 &&
+                       h.counts().executed[props] == 0 && untouched(h);
+              }));
+  }
   tally.add("m5-cuts", with("tormenta", {}, [](sc::Host &h) {
               return h.run("if87a0") == sc::Stop::Refused && h.last_refusal().rfind("refused cutScene", 0) == 0;
             }));

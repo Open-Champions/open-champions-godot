@@ -4,11 +4,17 @@
 // table payload, level text, quest or help key.
 // Research: t3/research-story-route-r3 3c7987c docs/story-route.md sections 6-8.
 #include "champions/amx.hpp"
+#include "champions/core_arithmetic.hpp"
+#include "champions/level_commands.hpp"
+#include "champions/script_builtins.hpp"
 #include "champions/quests.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/story_route.hpp"
 
 #include <algorithm>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <iostream>
 #include <iterator>
 #include <set>
@@ -763,6 +769,435 @@ void test_kept_refusals() {
             refuses(route::refuse_loader_body) && refuses(route::refuse_arrival),
         "menu draw, input restorer, loader body and arrival stay refused");
 }
+
+// ---- Level commands (research t3/research-level-commands 8efa13d
+// docs/level-commands.md, cited :line; audit research-level-commands.md
+// LC-1..LC-11). Synthetic objects, model, clip and class blocks in the binder
+// memory; authored names and strings only.
+namespace lc = champions::simulation::rta::level_commands;
+namespace rta = champions::simulation::rta;
+// A gate that admits every entry except the listed ones (the story-route
+// lists are tested above; these tests need the level route on).
+sc::EntryGate open_gate(std::set<std::string> refused = {}) {
+  sc::EntryGate gate;
+  gate.entry = [refused](const std::string &entry, bool) -> std::optional<std::string> {
+    if (refused.count(entry))
+      return std::string("authored refusal");
+    return std::nullopt;
+  };
+  return gate;
+}
+void level_host(sc::Host &host, const Built &built, std::optional<sc::EntryGate> gate) {
+  plant(host, built);
+  host.start_single_player();
+  host.require_complete_commands();
+  host.set_entry_gate(std::move(gate));
+}
+std::uint32_t object(sc::Host &host, const std::vector<std::string> &props, std::uint32_t flags,
+                     std::uint32_t table) {
+  auto list = std::make_shared<std::vector<std::string>>(props);
+  const auto obj = host.variables().new_object({}, flags, {0, 0, 0}, 0, "10GameObject", list);
+  host.variables().memory.w32(obj->addr + lc::O_VTABLE, table);
+  return obj->addr;
+}
+constexpr std::uint32_t MODEL = 0x0a000000, CLIP1 = 0x0a000100, CACHE = 0x0a000200, CLASS = 0x0a001000,
+                        DEATH_CLIPS = 0x0a002000, OLD_SLOT = 0x0a003000;
+
+// An AutoPropLP with three states: state 0 no clip, not passable; state 1 a
+// looping passable clip of length 29; state 2 ActionAtEnd.
+std::uint32_t autoprop(sc::Host &host, const std::string &name, std::uint32_t table = lc::VT_AUTOPROP_LP) {
+  auto &m = host.variables().memory;
+  const auto o = object(host, {"name=" + name}, lc::OF_AUTOPROP | 0x40u, table);
+  m.w32(o + lc::AP_MODEL, MODEL);
+  m.w64(MODEL + 8, 0xf0);
+  m.w16(MODEL + 0x10, 2);
+  m.w8(MODEL + 0x21, 2);
+  m.w64(MODEL + 32, 0x100);  // record 0: OR 0x100, clear 0x10
+  m.w64(MODEL + 40, 0x10);
+  m.w64(MODEL + 48, 0x200);  // record 1: OR 0x200, clear 0
+  m.w64(MODEL + 56, 0);
+  m.w32(CLIP1 + 4, 29);
+  m.w32(o + lc::AP_STATES, 3);
+  m.w32(o + lc::AP_ANIMS + 8, CLIP1);
+  m.w32(o + lc::AP_STATE_FLAGS + 8, lc::SF_PASSABLE | lc::SF_LOOPING);
+  m.w32(o + lc::AP_STATE_FLAGS + 16, lc::SF_ACTION_AT_END);
+  m.w8(o + lc::AP_TRACK_COUNT + 1, 2); // track capacity +0x9d, never written (:150-151)
+  m.w32(o + lc::AP_ANIM, CACHE);
+  m.w32(CACHE + 0x610, 0x5a5a5a5a);
+  m.w32(o + 0xa0 + 4, OLD_SLOT);       // the first track still holds a decoder slot
+  m.w32(OLD_SLOT + 0x14, 0x5a5a5a5a);
+  m.w32(o + lc::AP_STATE, 0x5a5a);
+  return o;
+}
+
+void test_autoprop_set_state() {
+  // Entries: set(name, state) then a later store that shows the entry ran on.
+  auto image = build_calls({{"set1", {{"autoPropSetState", {2000, 1}}, {"setv", {2100, 1}}}},
+                            {"set0", {{"autoPropSetState", {2000, 0}}, {"setv", {2100, 1}}}},
+                            {"set3", {{"autoPropSetState", {2000, 3}}, {"setv", {2100, 1}}}},
+                            {"set2", {{"autoPropSetState", {2000, 2}}, {"setv", {2100, 1}}}},
+                            {"setneg", {{"autoPropSetState", {2000, -1}}, {"setv", {2100, 1}}}},
+                            {"set10", {{"autoPropSetState", {2000, 10}}, {"setv", {2100, 1}}}}},
+                           {{2000, "auth-prop"}, {2100, "auth-ran"}});
+  const auto ran = [](sc::Host &host) {
+    for (const auto &[key, value] : host.variables().quest_vars())
+      if (key == "auth-ran")
+        return value == 1;
+    return false;
+  };
+  {
+    // State 1 (:138-147): every store in order, the clip at its end, passable.
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto o = autoprop(host, "auth-prop");
+    const auto other = object(host, {"name=auth-prop"}, 0x40u, lc::VT_AUTOPROP); // no AutoProp bit
+    auto &m = host.variables().memory;
+    check(host.run("set1") == sc::Stop::Complete && ran(host), "autoPropSetState runs on in a story-route level");
+    check(host.counts().executed[at("autoPropSetState")] == 1 && host.counts().refused[at("autoPropSetState")] == 0,
+          "autoPropSetState executes");
+    check(m.u32(o + lc::AP_STATE) == 1, "state +0x178 = n");
+    check(m.u64(o + lc::AP_REACHED) == 0x3, "states reached = bits 0..n");
+    std::uint64_t mask = ~UINT64_C(0xf0);
+    mask = (mask | 0x100) & ~UINT64_C(0x10);
+    mask = (mask | 0x200);
+    check(m.u64(o + lc::AP_MASK) == mask, "mesh mask = model_buildHideMask(model, bits)");
+    check(m.s8(o + lc::AP_TRACK_COUNT) == 1 && m.u32(o + 0xa0) == CLIP1, "one track holds the state's clip");
+    check(m.u16(o + 0xa0 + 0x1c) == 3 && (m.u16(o + lc::AP_ANIM + 6) & 3) == 3, "looping state pushed with mode 3");
+    check(m.u32(o + 0xa0 + 0x18) == rta::Fpu().from_int(29), "the clip jumped to its end");
+    check(m.u32(o + 0xa0 + 8) == rta::ONE && m.u32(o + 0xa0 + 0xc) == 0 && m.u32(o + 0xa0 + 0x10) == rta::ONE &&
+              m.u32(o + 0xa0 + 0x14) == 0,
+          "weight 1.0, rate 0, target 1.0, life 0");
+    check(m.u32(OLD_SLOT + 0x14) == 0 && m.u32(o + 0xa0 + 4) == 0, "the track's old decoder slot is released");
+    check(m.u32(o + lc::AP_ANIM) == 0 && m.u32(CACHE + 0x610) == 0, "the cache pointer and its +0x610 are zeroed");
+    check(m.u32(o + lc::AP_COUNTER) == 30, "frames in state = clip length + 1");
+    check((m.u32(o + lc::O_FLAGS) & lc::OF_NOCOLLIDE) != 0, "a passable state sets object flag 0x1");
+    check(m.s8(o + lc::AP_TRACK_COUNT + 1) == 2, "track capacity untouched (:150-151)");
+    check(m.u32(other + lc::O_FLAGS) == 0x40u && m.u32(other + lc::AP_STATE) == 0,
+          "an object without the AutoProp bit is skipped");
+    check(host.run("set0") == sc::Stop::Complete, "state 0 runs");
+    check(m.u32(o + lc::AP_STATE) == 0 && m.u64(o + lc::AP_REACHED) == 0, "state 0 reaches no bits (:142)");
+    check(m.u64(o + lc::AP_MASK) == ~UINT64_C(0xf0), "no bits: mask ~(model + 8)");
+    check(m.s8(o + lc::AP_TRACK_COUNT) == 0 && m.u32(o + lc::AP_COUNTER) == 0,
+          "no clip for state 0: track count 0 and frames 0");
+    check((m.u32(o + lc::O_FLAGS) & lc::OF_NOCOLLIDE) == 0, "a solid state clears object flag 0x1");
+    const auto before = m.nonzero_bytes();
+    check(host.run("set3") == sc::Stop::Complete && ran(host), "a state at States runs on");
+    check(m.nonzero_bytes() == before, "state >= States stores nothing (:135-136)");
+  }
+  struct Refusal {
+    const char *entry, *label, *reason;
+    std::function<void(rta::builtins::Memory &, std::uint32_t)> prepare;
+  };
+  const std::vector<Refusal> refusals = {
+      {"set1", "an AutoDoor", "AutoDoor",
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::AP_KIND, lc::AK_DOOR); }},
+      {"set2", "ActionAtEnd with the done bit clear", "ActionAtEnd", {}},
+      {"setneg", "a negative state", "negative", {}},
+      {"set10", "a state past the clip table", "hazard",
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::AP_STATES, 12); }},
+      {"set1", "another class's slot 18", "class table",
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::O_VTABLE, 0x0a00f000); }},
+      {"set1", "no model block", "model",
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::AP_MODEL, 0); }},
+      {"set1", "an unaligned clip", "unaligned",
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::AP_ANIMS + 8, CLIP1 + 2); }},
+  };
+  for (const auto &refusal : refusals) {
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto o = autoprop(host, "auth-prop");
+    auto &m = host.variables().memory;
+    if (refusal.prepare)
+      refusal.prepare(m, o);
+    const auto before = m.nonzero_bytes();
+    check(host.run(refusal.entry) == sc::Stop::Refused && !ran(host) &&
+              host.last_refusal().find(refusal.reason) != std::string::npos,
+          std::string("autoPropSetState refuses ") + refusal.label + " (" + host.last_refusal() + ")");
+    check(m.nonzero_bytes() == before && host.counts().level_command_refusals.size() == 1,
+          std::string("the refusal of ") + refusal.label + " stores nothing");
+  }
+  {
+    // ActionAtEnd with the done bit set: no pending action, so it runs.
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto o = autoprop(host, "auth-prop");
+    host.variables().memory.w32(o + lc::AP_STATE_FLAGS + 16, lc::SF_ACTION_AT_END | lc::SF_DONE);
+    check(host.run("set2") == sc::Stop::Complete && host.variables().memory.u32(o + lc::AP_STATE) == 2 &&
+              host.variables().memory.u64(o + lc::AP_REACHED) == 0x7,
+          "ActionAtEnd with the done bit set runs");
+  }
+  {
+    // Outside a story-route level the existing policy refuses it.
+    sc::Host host;
+    level_host(host, image, std::nullopt);
+    autoprop(host, "auth-prop");
+    check(host.run("set1") == sc::Stop::Refused && host.last_refusal() == "refused autoPropSetState",
+          "autoPropSetState stays refused outside a story-route level");
+  }
+}
+
+// A Gnome with a class definition whose four death clips are distinct.
+std::uint32_t gnome(sc::Host &host, const std::string &name, std::vector<std::string> extra = {}) {
+  auto &m = host.variables().memory;
+  std::vector<std::string> props = {"name=" + name};
+  props.insert(props.end(), extra.begin(), extra.end());
+  const auto o = object(host, props, lc::OF_CREATURE | 0x40u, lc::VT_GNOME);
+  m.w32(o + lc::C_CLASS, CLASS);
+  for (std::uint32_t k = 0; k < 4; ++k)
+    m.w32(CLASS + lc::CLASS_DEATH_ANIMS + 8 * k, DEATH_CLIPS + 0x100 * k);
+  m.w32(o + lc::C_RAND, 12345);
+  m.w8(o + lc::C_ANIM + 5, 2); // animation capacity
+  m.w64(o + lc::C_FLAGS64, UINT64_MAX);
+  m.w32(o + lc::C_HP, 0x41200000);
+  for (const auto field : {lc::C_ROOT, lc::C_ATTACK, lc::C_T31A, lc::C_STUN})
+    m.w16(o + field, 7);
+  m.w16(o + lc::C_AI_STATE, 3);
+  return o;
+}
+std::optional<int> quest_var(sc::Host &host, const std::string &name) {
+  for (const auto &[key, value] : host.variables().quest_vars())
+    if (key == name)
+      return int(value);
+  return std::nullopt;
+}
+
+void test_kill_monster() {
+  // kill: the selected object is a trigger fixture (orientation 3), then
+  // killMonster, then a travel whose orientation shows the selected object.
+  // auth-death: the deathscript, which travels too (so its orientation shows
+  // the selected object during the run) and stores a variable.
+  auto image = build_calls({{"kill", {{"killMonster", {2000}}, {"newWorld", {2100}}}},
+                            {"auth-death", {{"newWorld", {2200}}, {"addv", {2300, 1}}}}},
+                           {{2000, "auth-gnome"}, {2100, "auth-next"}, {2200, "auth-death-level"},
+                            {2300, "auth-died"}});
+  const auto trigger = [](sc::Host &host) {
+    const auto t = object(host, {"name=auth-trigger", "orientation=3"}, 0x40u, 0);
+    host.variables().memory.w32(lc::G_SELECTED_OBJ, t);
+  };
+  {
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto g = gnome(host, "auth-gnome", {"deathscript=auth-death", "orientation=7"});
+    const auto dead = gnome(host, "auth-gnome");
+    auto &m = host.variables().memory;
+    m.w32(dead + lc::O_FLAGS, lc::OF_CREATURE | lc::OF_DEAD);
+    const auto other = object(host, {"name=auth-gnome"}, 0x40u, 0); // not a creature
+    trigger(host);
+    std::uint32_t draw = 12345u * 0x19660du + 0x3c6ef35fu;
+    const auto pick = (draw >> 16) & 3u;
+    check(host.run("kill") == sc::Stop::Complete, "killMonster runs on in a story-route level");
+    check(host.counts().executed[at("killMonster")] == 1 && host.counts().death_scripts_run == 1,
+          "one kill, one deathscript run");
+    check(m.u32(g + lc::O_FLAGS) == (lc::OF_CREATURE | 0x40u | lc::KILL_FLAGS) && m.u32(g + lc::C_HP) == 0,
+          "flags 0x2009 (dead, killed, not solid) and hit points 0 (:235-237)");
+    check(m.u16(g + lc::C_ROOT) == 0 && m.u16(g + lc::C_ATTACK) == 0 && m.u16(g + lc::C_T31A) == 0 &&
+              m.u16(g + lc::C_STUN) == 0,
+          "the gate clears the four timers (:257)");
+    check(m.u32(g + lc::C_RAND) == draw, "one draw of the creature's own generator (:259-260)");
+    check(m.u32(g + lc::C_ANIM + 8) == DEATH_CLIPS + 0x100 * pick && m.u16(g + lc::C_ANIM + 8 + 0x1c) == 6 &&
+              m.s8(g + lc::C_ANIM + 4) == 1,
+          "death animation (draw & 3) of the class definition, flags 6 (:261-262)");
+    check(m.u32(g + lc::C_ANIM + 8 + 0xc) == rta::ONE && m.u32(g + lc::C_ANIM + 8 + 8) == 0,
+          "the first track has no blend: rate 1.0");
+    check(m.u64(g + lc::C_FLAGS64) == lc::DEATH_CFLAGS_KEEP, "creature flags 0x8c00000 cleared (:264)");
+    check(m.u16(g + lc::C_AI_STATE) == lc::STATE_DEAD, "AI state 0x14 (:276)");
+    check(quest_var(host, "auth-died") == 1, "the deathscript ran as the level's code");
+    check(m.u32(lc::G_SELECTED_OBJ) == 0, "the selected object is 0 afterwards, not the trigger (:267-268)");
+    check(m.cstr(PENDING) == "auth-next" && m.read(ORIENT) == 0xff,
+          "the later travel sees no selected object: orientation 0xff (:302-306)");
+    check(m.u32(dead + lc::O_FLAGS) == (lc::OF_CREATURE | lc::OF_DEAD) && m.u32(dead + lc::C_HP) == 0x41200000 &&
+              m.u32(dead + lc::C_RAND) == 12345,
+          "a dead creature is skipped");
+    check(m.u32(other + lc::O_FLAGS) == 0x40u, "a non-creature is skipped");
+  }
+  {
+    // The deathscript runs with the selected object = the gnome: its own
+    // travel takes the gnome's orientation.
+    auto inner = build_calls({{"kill", {{"killMonster", {2000}}}},
+                              {"auth-death", {{"newWorld", {2200}}}}},
+                             {{2000, "auth-gnome"}, {2200, "auth-death-level"}});
+    sc::Host host;
+    level_host(host, inner, open_gate());
+    gnome(host, "auth-gnome", {"deathscript=auth-death", "orientation=7"});
+    trigger(host);
+    check(host.run("kill") == sc::Stop::Complete && host.variables().memory.read(ORIENT) == 7 &&
+              host.variables().memory.cstr(PENDING) == "auth-death-level",
+          "during the deathscript the selected object is the creature");
+  }
+  {
+    // A second death animation on a creature already animating blends in at
+    // 1 / (0.1 x 60) (:261-262).
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto g = gnome(host, "auth-gnome");
+    auto &m = host.variables().memory;
+    m.w8(g + lc::C_ANIM + 4, 1);
+    trigger(host);
+    const rta::Fpu fpu;
+    check(host.run("kill") == sc::Stop::Complete && m.s8(g + lc::C_ANIM + 4) == 2 &&
+              m.u32(g + lc::C_ANIM + 8 + 32 + 0xc) == fpu.div(rta::ONE, fpu.mul(lc::F_0_1, lc::F_60)),
+          "a second track fades in at 1 / (0.1 x 60)");
+    check(host.counts().death_scripts_run == 0 && m.read(ORIENT) == 3,
+          "no deathscript: the selected trigger is kept and its orientation used (:305-306)");
+  }
+  {
+    // The arena-only refusal (:254-257): only the handler's stores remain.
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto g = gnome(host, "auth-gnome", {"deathscript=auth-death"});
+    auto &m = host.variables().memory;
+    m.w32(lc::G_ARENA, 1);
+    m.w32(lc::G_GATE_C, 1);
+    trigger(host);
+    check(host.run("kill") == sc::Stop::Complete && host.counts().arena_gate_refusals == 1,
+          "the arena state gate refuses the death");
+    check(m.u32(g + lc::O_FLAGS) == (lc::OF_CREATURE | 0x40u | lc::KILL_FLAGS) && m.u32(g + lc::C_HP) == 0 &&
+              m.u16(g + lc::C_ROOT) == 7 && m.u32(g + lc::C_RAND) == 12345 && m.u16(g + lc::C_AI_STATE) == 3 &&
+              m.s8(g + lc::C_ANIM + 4) == 0 && host.counts().death_scripts_run == 0,
+          "after the gate refuses only flags and hit points are stored");
+  }
+  struct Refusal {
+    const char *label, *reason;
+    std::vector<std::string> props;
+    std::function<void(rta::builtins::Memory &, std::uint32_t)> prepare;
+    std::set<std::string> gate_refuses;
+  };
+  const std::vector<Refusal> refusals = {
+      {"a dropitem", "dropitem", {"dropitem=auth-item"}, {}, {}},
+      {"object flag 0x2", "obj_delete", {},
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::O_FLAGS, lc::OF_CREATURE | lc::OF_DELETE_ON_DEATH); },
+       {}},
+      {"the arena flag past the gate", "arena_addKill", {},
+       [](rta::builtins::Memory &m, std::uint32_t) {
+         m.w32(lc::G_ARENA, 1);
+         m.w32(lc::G_ARENA_B, 1);
+       },
+       {}},
+      {"another class's slot 27", "class table", {},
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::O_VTABLE, 0x0a00f000); }, {}},
+      {"no class definition", "class definition", {},
+       [](rta::builtins::Memory &m, std::uint32_t o) { m.w32(o + lc::C_CLASS, 0); }, {}},
+      {"a deathscript outside the gate", "deathscript", {"deathscript=auth-death"}, {}, {"auth-death"}},
+  };
+  for (const auto &refusal : refusals) {
+    sc::Host host;
+    level_host(host, image, open_gate(refusal.gate_refuses));
+    const auto g = gnome(host, "auth-gnome", refusal.props);
+    auto &m = host.variables().memory;
+    if (refusal.prepare)
+      refusal.prepare(m, g);
+    const auto before = m.nonzero_bytes();
+    check(host.run("kill") == sc::Stop::Refused && host.last_refusal().find(refusal.reason) != std::string::npos,
+          std::string("killMonster refuses ") + refusal.label + " (" + host.last_refusal() + ")");
+    check(m.nonzero_bytes() == before && host.counts().executed[at("killMonster")] == 0,
+          std::string("the refusal of ") + refusal.label + " stores nothing");
+  }
+  {
+    // Outside a story-route level the existing policy refuses it.
+    sc::Host host;
+    level_host(host, image, std::nullopt);
+    gnome(host, "auth-gnome");
+    check(host.run("kill") == sc::Stop::Refused && host.last_refusal() == "refused killMonster",
+          "killMonster stays refused outside a story-route level");
+  }
+}
+
+void test_recorded_no_ops() {
+  auto image = build_calls({{"seq", {{"soundSequence", {2000, 2100}}, {"setv", {2200, 1}}}},
+                            {"pre", {{"preloadResource", {2000}}, {"setv", {2200, 1}}}}},
+                           {{2000, "auth-lump"}, {2100, "auth-seq"}, {2200, "auth-ran"}});
+  {
+    sc::Host host;
+    level_host(host, image, open_gate());
+    const auto before = host.variables().memory.nonzero_bytes();
+    check(!host.sound_players_diverged(), "no sequence recorded yet");
+    check(host.run("seq") == sc::Stop::Complete && quest_var(host, "auth-ran") == 1,
+          "soundSequence is a recorded no-op in a story-route level (:363-364)");
+    check(host.counts().executed[at("soundSequence")] == 1 && host.counts().recorded_noops[at("soundSequence")] == 1,
+          "the sequence is counted as recorded");
+    check(host.sound_players_diverged(), "the skipped player take is disclosed (audit LC-3)");
+    auto after = host.variables().memory.nonzero_bytes();
+    bool sound_table_untouched = true;
+    for (const auto &[address, value] : after)
+      if ((address >= 0x871a68 && address < 0x871a68 + 32 * 0x4c) || (address >= 0x4f8950 && address < 0x4f8952))
+        sound_table_untouched = sound_table_untouched && before.count(address) && before.at(address) == value;
+    check(sound_table_untouched, "no sound player or serial is written");
+  }
+  {
+    sc::Host host;
+    level_host(host, image, open_gate());
+    check(host.run("pre") == sc::Stop::Refused && host.last_refusal().find("LC-4") != std::string::npos,
+          "preloadResource without a game-folder listing is refused");
+  }
+  {
+    sc::Host host;
+    level_host(host, image, open_gate());
+    host.set_lump_exists([](const std::string &name) { return name == "auth-lump"; });
+    check(host.run("pre") == sc::Stop::Complete && quest_var(host, "auth-ran") == 1 &&
+              host.counts().recorded_noops[at("preloadResource")] == 1,
+          "a present lump is a recorded no-op (:392-396)");
+  }
+  {
+    sc::Host host;
+    level_host(host, image, open_gate());
+    host.set_lump_exists([](const std::string &) { return false; });
+    check(host.run("pre") == sc::Stop::Refused && host.last_refusal().find("not in the game folder") != std::string::npos,
+          "a missing lump is refused: the original stops (:384-386)");
+  }
+  for (const char *entry : {"seq", "pre"}) {
+    sc::Host host;
+    level_host(host, image, std::nullopt);
+    host.set_lump_exists([](const std::string &) { return true; });
+    check(host.run(entry) == sc::Stop::Refused, std::string(entry) + " stays refused outside a story-route level");
+  }
+}
+
+void test_activate_store_binder() {
+  // activateStore 0x144010 as the binder runs it (:398-453): index when the
+  // argument is below 0x15; dialog open: the pending flag only (the deferred
+  // open at the dialog's end is Observed static, not run, :426-432); closed,
+  // offline: shop_openOrStock(active player, 0, 1), mode 0, which keeps the
+  // stock (vendor-stock.md via :437-446). The index is 0 at the shipped
+  // top-level runs (:412-417, audit LC-9a); net delivery goes to the first
+  // local slot under g_numPlayers (:429, LC-9b) and is not modelled here.
+  namespace b = rta::builtins;
+  for (const std::int32_t argument : {0, 20, 21, 500, -1}) {
+    for (const bool open : {false, true}) {
+      b::Variables v;
+      a::ImageOptions options;
+      options.data.resize(4096);
+      options.stack_cells = 128;
+      a::Machine m(a::build_image({0}, options), v.natives());
+      check(m.load() == 0, "store fixture loads");
+      m.params = 3000;
+      m.set_cell(3004, argument);
+      v.memory.w16(0x4f7150, 0x5a5a);
+      v.memory.w32(0x4d8ae4, 2);
+      std::vector<std::string> calls;
+      std::vector<std::uint32_t> shop;
+      v.scene_service = [&](const std::string &name, const std::vector<b::Variables::ServiceValue> &args) {
+        calls.push_back(name);
+        if (name == "dialog_isOpen")
+          return open ? 1u : 0u;
+        if (name == "shop_openOrStock")
+          for (const auto &arg : args)
+            shop.push_back(std::get<std::uint32_t>(arg));
+        return 0u;
+      };
+      v.dispatch("activateStore", m);
+      const auto label = " (argument " + std::to_string(argument) + (open ? ", dialog open)" : ", closed)");
+      const bool below = static_cast<std::uint32_t>(argument) < 0x15;
+      check(v.memory.u16(0x4f7150) == (below ? std::uint32_t(argument) & 0xffffu : 0x5a5au),
+            "the store index is written only below 0x15" + label);
+      if (open)
+        check(v.memory.read(0x4fdd30) == 1 && calls == std::vector<std::string>{"dialog_isOpen"},
+              "an open dialog sets the pending flag and opens nothing" + label);
+      else
+        check(v.memory.read(0x4fdd30) == 0 && shop == std::vector<std::uint32_t>{2, 0, 1},
+              "a closed dialog opens the vendor-stock shop, mode 0, for the active player" + label);
+    }
+  }
+}
 } // namespace
 
 int main() {
@@ -783,6 +1218,10 @@ int main() {
   test_hub_research_table();
   test_medal_bonus_refused();
   test_kept_refusals();
+  test_autoprop_set_state();
+  test_kill_monster();
+  test_recorded_no_ops();
+  test_activate_store_binder();
   if (failed) {
     std::cerr << failed << " of " << checks << " checks failed\n";
     return 1;

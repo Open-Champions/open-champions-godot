@@ -20,7 +20,8 @@ add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/scr
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/loading_equipment.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp"
-    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/story_route.cpp")
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/story_route.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/level_commands.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
     champions-script-builtins champions-level-flow champions-fx-sim champions-quests

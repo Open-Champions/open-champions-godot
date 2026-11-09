@@ -585,6 +585,10 @@ void Dialog::on_end(Host &host) {
   log.push_back(ev("post_action"));
   if (on_post_action)
     on_post_action();
+  // The deferred open of a pending store (0x22f7fc): Observed static, not run
+  // (docs/level-commands.md:426-432). Offline: the active player; net: the
+  // first local slot under g_numPlayers (:429, audit LC-9b). The flag is
+  // cleared only where a dialog opens (0x22f2b0), not here.
   if (store_pending) {
     if (!host.network) {
       log.push_back(ev("shop", {I(active_player), I(0), I(1)}));
@@ -935,6 +939,12 @@ void Dialog::free() {
 }
 
 // ---- script built-ins ---------------------------------------------------------------
+// activateStore 0x144010 (research t3/research-level-commands 8efa13d
+// docs/level-commands.md:398-453): the index below 0x15 (unsigned) is stored;
+// at the 42 shipped hub/hub2 sites it is 0 in top-level runs (:412-417, audit
+// LC-9a). An open dialog only sets the pending flag (executed, :422). A closed
+// one opens the vendor-stock shop in mode 0, which keeps the stock (:437-446);
+// nothing here regenerates stock.
 void Dialog::activate_store(Host &host, std::int64_t index) {
   if (static_cast<std::uint64_t>(index & 0xFFFFFFFF) < 21)
     store_index = s16(static_cast<std::uint32_t>(index));
