@@ -1,0 +1,83 @@
+# Save/load screen play flow — confirm, write, and load handoff
+
+`native/include/champions/memcard_screen.hpp` (`champions::frontend::memcard`)
+is a word-level contract for the Return to Arms US v2.00 save and load
+screens. It is authored only from `t3/research-save-screen` `c8895e2`
+`docs/save-screen.md`, "Play flow" (lines 181–325), and its probe
+`tools/difftest_save_screen_flow.py`, audited PASS by
+`research-save-screen-r2.md` and `research-save-screen-r2-fix.md`. Every field
+names the address it stands for. A branch the research did not execute throws
+`memcard::Unknown` (a `frontend::Refusal`) instead of guessing. Card I/O is
+returned to the host as queued `CardOp`s. No card bytes, localized text,
+pixels or retail card behaviour are held.
+
+This module is a contract, not a host card. The existing front-end `Flow`
+save/load actions (native session files and PS2 slot import,
+`docs/FRONTEND.md`) are unchanged, and no host directory source binds it
+yet.
+
+## What is implemented
+
+Research citations are `docs/save-screen.md` line numbers at `c8895e2`.
+
+| Behaviour | Native | Research |
+|---|---|---|
+| Settle | State 4 copies a mismatched 0x879e30 over 0x879e2c. Float bits 0x3f800000 at 0x879e34 snap: the float is cleared and 0x879e28 takes 0x879e24. Confirm is read only when the float compares equal to 0 and the two row words match; 0x3f000000, or unequal words, leave slot state, 0x4f8ef4 and the fade step alone. | 100–101, 193–200, 206–207 |
+| Free row vs overwrite | Save screen (card state 3): scroll + row == cache count stores 7 at 0x4f8ef4 and fade step −16; at fade 0 it queues operation 8 and enters 7. A populated row enters 5; 5 takes 0x20 back to 4 or 0x80 to 11 and 0x88d400. 11 queues 0x0a on `/BASLUS-20973` and enters 12. 12, pump idle, 0x4f9540 ≥ 0 and fade 0, returns 1 and clears the slot state. | 167–172, 202–221 |
+| Scroll/cache count | Visible row index is 0x879e2c + 0x879e28 against 0x4f9238. | 91–104, 202–207 |
+| Free space | State 7 waits for 0x88d3c4, then with a positive fade step compares 0x88d3ac with 0x88d3ec + (count & 1): short looks up `MemcardNeedFreeSpaceBrowser` and leaves the fade, enough sets −16. With the fade at 0, 7 becomes 12. | 208–216 |
+| Slot names | Fresh (0x8e1ad8 set, or index == count): count 0 gives `BASLUS-20973_slot0`; an empty directory, clear byte and count 1–3 give `BASLUS-20973_slot1`. Otherwise the name is copied from 0x88d060 + index×64. | 228 |
+| Write | Offline step 1 calls `save_build(slot byte 0x4f923c, 0)`; the recorded pair is (3, 0) with `g_numPlayers` 5. Step 2 queues open 0x202, one 0x4bc78-byte write, close and file info. | 229–230 |
+| Net-byte path | 0x402791 set calls `save_packLocalPlayer` instead of `save_build`, then step 2. | 229 |
+| Saved box | Step 3 sets 0x4f8f29 and −16, then step 4 at fade 0. Step 4 looks up `MemcardContinue`, `MemcardSaveComplete`, and `MemcardSaveGood2` (new row) or `OverwriteGood` (occupied). Confirm sets −16; at fade 0 the latch is cleared and the card state stored −1. Keys are identifiers, never displayed text. | 231–232 |
+| Latch lifecycle | `request_load` with 0x88d3c8 set returns before any store (0xa5 survives). The opening call clears the latch (0x217760). Load acceptance with the pump returning 0 stores 1 (0x2195a8). | 31, 251–263 |
+| Error path | A nonzero 0x88d3bc moves to step 9 and closes the file. The latch and card state 3 are kept. | 234–236 |
+| Cancel | The error box cancel stores −1 (0x21f254). It calls `memcard_requestSave` unless the network byte and a pending level name are both set; while 0x88d3d8 is 1 that request does not open. | 237–251 |
+| Directory copy | Load acceptance copies all 0x40 bytes from 0x88d040 + index×64 to 0x88d2c0. Step 0, stage 1, fade step 16. | 258–263 |
+| Load | Step 2 queues open mode 1 of the record's name, a 0x4bc78-byte read and close. Step 4 stores the bytes; with 0x8e1ab9 0 it clears the latch, stores −1 and step 0. With 1, `save_load` requests the header's level: `strife`, or `hub` + `west` as `hub_west`, in 0x41b6d0 and 0x8e1a98; marker 0xfd; 0x8e1ad6 1; live name untouched; image directory bytes untouched; step 5. Step 5 waits until the live qualified name matches, then stores −1 and clears the latch. | 263–286 |
+
+Object records stay with the existing save-world loader
+(`t3/research-save-world` `e7d8972` `docs/save-world.md` 81–91). The optional
+`Services::restore` hook receives the read image for the existing loaders; the
+module never calls `world_loadRecords`, `level_loadScriptAndObjects` or
+`save_reload`. Death reload keeps `blocked_death_reload`
+(`docs/PLAYER_DEATH_FLOW.md`).
+
+## Native sequencing, disclosed
+
+These link executed outcomes where the research shows both ends but not the
+word between them:
+
+- The fade is the host's: `fade_level` is read after the host applies the frame's
+  fade. How 0x8e11fc is integrated into 0x8e11f8 is not in the research.
+- On a committed save slot the native sets 0x88d3b0 to the row it compared
+  (scroll + row), sets the latch (Observed at 0x218ba4, `docs/save-screen.md:31`)
+  and enters stage 1, step 0. The probes planted 0x88d3b0.
+- Offline step 1 advances to step 2 like the executed net path; the offline
+  probe planted step 2.
+- The saved box's confirm and close are linked by a native flag.
+- Load steps 0, 1 and 3 were not executed; the host calls `queue_load_read()`
+  after acceptance and `load_read_complete()` with the card's bytes.
+- The load list's own confirm path was not executed (its acceptance ran with
+  the list stubbed); `accept_load()` stands for that return of 1.
+
+## Refused, with reasons
+
+| Refused | Reason |
+|---|---|
+| Free-space units | What 0x88d3ac and 0x88d3ec count is Unknown (`docs/save-screen.md:216`); only their compare is ported. |
+| Why slot 1 | Why a nonempty cache count with an empty directory names `_slot1` is Unknown (line 228; audit RSS-3). Counts above 3, a nonempty directory, or a set 0x8e1ad8 with a nonzero count throw. |
+| 0x8e1ad8 writer | Who sets the fresh-name byte is Unknown (line 228); the host must supply it. The product prefix at 0x88d061 was supplied by the probe. |
+| Pixels | Text widths, fades and GPU output are stubbed in every fixture (lines 56–58, 321). |
+| Localized strings | Only lookup keys are used; their text is Unknown (lines 162–163, 321). |
+| Retail card I/O | `memcard_browser` 0x219b90, the card queue and pump, real directory timestamps and a retail capture are not run (lines 27–29, 321–323). A busy pump throws. |
+
+Also unexecuted and refused: slot state 12 with the network byte, a negative
+0x4f9540, slot stages other than 0/1, save steps other than 0–4 and 9, a
+confirm past the free row, 0x8e1ab9 other than 0/1, and an empty header level.
+
+## Tests
+
+`ctest -R '^memcard-screen$'` runs `native/tests/memcard_screen_tests.cpp`.
+Each case plants the words of one probe in the flow difftest and asserts the
+recorded outcome. All inputs are synthetic.

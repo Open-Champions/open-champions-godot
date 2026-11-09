@@ -71,6 +71,13 @@ are not established. Real directory timestamps, card capacity, level/class
 text, locale and retail pixel parity remain unverified. The saved confirmation is
 also a labelled host layout because its frame art is not established.
 
+The screens' confirm, write and load handoff from `t3/research-save-screen`
+`c8895e2` (settle snap, free row and overwrite, free-space compare, slot
+names, the 0x4bc78-byte write, latch lifecycle and the header-level load) is a
+separate word-level contract, `memcard_screen.hpp`, documented in
+`docs/SAVE_SCREEN.md`. `Flow` does not drive it yet: no host card directory
+source exists and retail card I/O is refused.
+
 Still a labelled host layout (the research lists them Unknown): class art, the 3D
 model pose and the per-race animations, appearance art, the refused options value bars and
 knobs, card rows with real file data, the intro film picture, the credits data

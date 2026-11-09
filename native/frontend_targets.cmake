@@ -2,7 +2,8 @@
 # (docs/FRONTEND.md). Navigation and state only; no Godot dependency.
 include_guard(GLOBAL)
 set(CHAMPIONS_FRONTEND_ROOT "${CMAKE_CURRENT_LIST_DIR}")
-add_library(champions-frontend "${CHAMPIONS_FRONTEND_ROOT}/src/frontend.cpp" "${CHAMPIONS_FRONTEND_ROOT}/src/frontend_layout.cpp")
+add_library(champions-frontend "${CHAMPIONS_FRONTEND_ROOT}/src/frontend.cpp" "${CHAMPIONS_FRONTEND_ROOT}/src/frontend_layout.cpp"
+    "${CHAMPIONS_FRONTEND_ROOT}/src/memcard_screen.cpp")
 target_include_directories(champions-frontend PUBLIC "${CHAMPIONS_FRONTEND_ROOT}/include")
 # The native build names the audio library champions-native-audio; the Godot
 # extension build compiles the same sources as champions-native-audio-binding-core.
@@ -22,4 +23,8 @@ if(BUILD_TESTING AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CHAMPIONS_FRONTEND_ROOT)
     add_executable(champions-frontend-tests "${CHAMPIONS_FRONTEND_ROOT}/tests/frontend_tests.cpp")
     target_link_libraries(champions-frontend-tests PRIVATE champions-frontend champions-menus)
     add_test(NAME frontend-exact COMMAND champions-frontend-tests)
+    # Save/load screen play flow (docs/SAVE_SCREEN.md), synthetic fixtures only.
+    add_executable(champions-memcard-screen-tests "${CHAMPIONS_FRONTEND_ROOT}/tests/memcard_screen_tests.cpp")
+    target_link_libraries(champions-memcard-screen-tests PRIVATE champions-frontend)
+    add_test(NAME memcard-screen COMMAND champions-memcard-screen-tests)
 endif()
