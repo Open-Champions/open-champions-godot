@@ -30,7 +30,7 @@ using Bytes = std::vector<std::uint8_t>;
 // g_memcardState 0x88d3a0 (save-screen.md:26): 3 saves, 4 loads, -1 idle.
 inline constexpr std::int32_t CARD_IDLE = -1, CARD_SAVE = 3, CARD_LOAD = 4;
 // Slot state 0x88d3dc (save-screen.md:30, 167-172, 193-221).
-inline constexpr std::int32_t SLOT_LIST = 4, SLOT_OVERWRITE = 5, SLOT_SPACE = 7,
+inline constexpr std::int32_t SLOT_LIST = 4, SLOT_OVERWRITE = 5, SLOT_SPACE = 7, SLOT_DELETE = 9,
                               SLOT_DIRECTORY = 11, SLOT_COMMIT = 12;
 // Bit pattern of 1.0f: the cursor snap at 0x21ca2c/0x21ca3c (save-screen.md:197-199).
 inline constexpr std::uint32_t CURSOR_SNAP = 0x3f800000u;
@@ -42,6 +42,10 @@ inline constexpr std::int32_t FADE_OUT = -16;
 inline constexpr std::int32_t LOAD_ACCEPT_FADE = 16;
 // Button masks (save-screen.md:169-170, 174-179); scheme-dependent, not face names.
 inline constexpr std::uint32_t MASK_CONFIRM = 0x40, MASK_CANCEL = 0x20, MASK_COMMIT = 0x80;
+// State 4's repeat mask (save-screen.md:169; ref_save_screen.py:116). The probe
+// planted the same mask on the edge and repeat words (difftest_save_screen.py:33-34),
+// so the host passes one mask for both.
+inline constexpr std::uint32_t MASK_REPEAT = 0x204000;
 // Card queue operations (ref_save_screen.py:139-153; flow difftest :568-574, 657-659, 678-681).
 inline constexpr int OP_OPEN = 0, OP_CLOSE = 1, OP_READ = 3, OP_WRITE = 5, OP_FILE_INFO = 6,
                      OP_SPACE = 8, OP_DIRECTORY = 0x0a;
@@ -92,7 +96,7 @@ struct Words {
   std::uint32_t cursor_float = 0;       // 0x879e34, float bits
   std::int32_t cache_count = 0;         // 0x4f9238
   std::uint32_t list_action = 0;        // 0x4f8ef4
-  std::int32_t countdown = 0;           // 0x88d3c4
+  std::int32_t countdown = 0;           // 0x88d3c4; the host runs it down (not in the research)
   std::int32_t space_have = 0;          // 0x88d3ac; units Unknown
   std::int32_t space_need = 0;          // 0x88d3ec; units Unknown
   std::int32_t list_result = 0;         // 0x4f9540
@@ -111,6 +115,10 @@ struct Words {
   std::uint8_t from_frontend = 0;       // 0x8e1ab8, copied from 0x41b510
   std::uint8_t restore_flag = 0;        // 0x8e1ab9
   std::int32_t num_players = 0;         // g_numPlayers 0x4d8ae0; save_build does not take it
+  // The living-player count memcard_requestSave 0x2175b4 would make
+  // (save-screen.md:246-251). The host supplies it; the error-box cancel
+  // passes it on, so slot stage 1 is what keeps that request closed.
+  std::int32_t counted_living = 0;
   std::string pending_level;            // 0x41b6d0
   std::string side_name;                // 0x8e1a98
   std::uint8_t pending_marker = 0;      // 0x41b720
@@ -123,6 +131,10 @@ struct Words {
   // Native: the saved box's confirm was taken and its fade is running. The
   // research shows the confirm and the close, not the word that links them.
   bool saved_box_dismissing = false;
+  // Native: step 3 has set 0x4f8f29 and -16 and is waiting for the fade. The
+  // byte is cleared by Savepoint_run, not by the screen, and can stay up
+  // across saves (native-soak.md:547, 572), so it cannot be this link.
+  bool saved_step_armed = false;
 };
 
 struct Services {
@@ -150,8 +162,8 @@ struct Call {
 };
 
 // memcard_makeSlotName 0x21effc outcomes the research executed
-// (save-screen.md:228): count 0 gives slot0; an empty directory with a clear
-// fresh byte and count 1, 2 or 3 gives slot1. Anything else is Unknown.
+// (save-screen.md:228), all with an empty directory: count 0 gives slot0; a
+// clear fresh byte and count 1, 2 or 3 gives slot1. Anything else is Unknown.
 std::string make_slot_name(const Words &w);
 // 0x1ec0f0: `name` or `name_sub` (save-screen.md:269-271, 281-285).
 std::string qualified_level(const std::string &name, const std::string &sub);
@@ -183,6 +195,9 @@ public:
 
 private:
   bool read_queued_ = false;
+  // Offline step 2 was executed only right after step 1's save_build filled
+  // 0x895580 (difftest_save_screen_flow.py:561-574).
+  bool image_built_ = false;
   Call slot_list(std::uint32_t edge);
   Call save_step(std::uint32_t edge);
   Call load_step();

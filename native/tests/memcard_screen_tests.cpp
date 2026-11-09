@@ -279,17 +279,22 @@ void save_write() {
   s.w.slot_name = SLOT1_NAME;
   s.w.live_level = "innovat1";
   std::vector<std::array<std::uint8_t, 2>> calls;
+  // A byte pattern the module cannot make itself: the screen must keep the
+  // service's return. The level name in the image is save_build's own result
+  // (doc:229) and belongs to the save_build port, not this module.
+  Bytes pattern(IMAGE_BYTES);
+  for (std::size_t i = 0; i < pattern.size(); ++i)
+    pattern[i] = static_cast<std::uint8_t>((i * 131u + 17u) ^ (i >> 9));
   s.services.save_build = [&](std::uint8_t a, std::uint8_t b) {
     calls.push_back({{a, b}});
-    return synthetic_image(s.w.live_level, {});
+    return pattern;
   };
   s.services.pack_local_player = [] { throw std::runtime_error("offline save packed"); };
   auto c = s.call(0);
   expect(c.save_built && !c.packed && c.build_args == std::array<std::uint8_t, 2>{{3, 0}},
          "offline step 1 calls save_build(slot byte, 0)");
   expect(calls.size() == 1 && calls[0] == std::array<std::uint8_t, 2>{{3, 0}}, "save_build recorded (3, 0)");
-  expect(s.w.image.size() == IMAGE_BYTES && std::string(reinterpret_cast<const char *>(s.w.image.data())) == "innovat1",
-         "the image begins with the live level name");
+  expect(s.w.image == pattern, "step 1 stores save_build's return in 0x895580");
   expect(s.w.step == 2, "step 1 moves to step 2");
   c = s.call(0);
   const std::vector<CardOp> want{{OP_OPEN, SLOT1_NAME, SAVE_OPEN_MODE},
@@ -342,8 +347,10 @@ void saved_box() {
   (void)s.call(0);
   expect(s.w.latch == 0 && s.w.card_state == CARD_IDLE, "dismiss clears the latch and stores -1");
 
-  // flow:589-599: a new row (index 0, count 0).
+  // flow:589-599: a new row (index 0, count 0) after save_filename(fresh=True),
+  // which set 0x8e1ad8 (flow:181, 591).
   Screen n = save_screen(4);
+  n.w.fresh_name = 1;
   n.w.fade_step = 8;
   c = n.call(0);
   expect(c.keys == std::vector<std::string>{KEY_CONTINUE, KEY_SAVE_COMPLETE, KEY_SAVE_GOOD_NEW},
@@ -486,6 +493,216 @@ void load_flow() {
   unknown([&] { (void)step0.call(0); }, "load step 0 through the dispatcher was not executed");
 }
 
+// difftest_save_screen.py:21-46 fixture(): settled save list, count 2, row 0.
+Screen list_fixture() {
+  Screen s;
+  s.w.browser_stage = 1;
+  s.w.card_state = CARD_SAVE;
+  s.w.slot_state = SLOT_LIST;
+  s.w.cache_count = 2;
+  s.w.countdown = 10;
+  s.w.fade_level = 0x7f;
+  s.w.fade_step = 8;
+  s.w.list_action = 0xa5;
+  return s;
+}
+
+void state4_inputs() {
+  // PSS-1. doc:169; ref:115-122; difftest_save_screen.py:334-337.
+  auto d = list_fixture();
+  (void)d.call(MASK_COMMIT);
+  expect(d.w.slot_state == SLOT_DELETE && d.w.settled_row == 0 && d.w.write_intent == 0,
+         "(4, 0x80): state 9, 0x879e24 0, 0x88d400 0");
+  expect(d.w.list_action == 0xa5 && d.w.fade_step == 8, "(4, 0x80) leaves 0x4f8ef4 and the fade step");
+  (void)d.call(0);
+  expect(d.w.slot_state == SLOT_DELETE, "(9, 0) stays in 9");
+  (void)d.call(MASK_CANCEL);
+  expect(d.w.slot_state == SLOT_LIST, "(9, 0x20) returns to 4");
+  auto dc = list_fixture();
+  (void)dc.call(MASK_COMMIT);
+  unknown([&] { (void)dc.call(MASK_CONFIRM); }, "the delete confirm fade 0x21d360 was not executed");
+  dc.w.slot_state = SLOT_DELETE;
+  unknown([&] { (void)dc.call(MASK_COMMIT); }, "state 9 bit 0x80 was not executed");
+
+  auto r = list_fixture();
+  r.w.selected_index = 7;
+  (void)r.call(MASK_REPEAT);
+  expect(r.w.slot_state == SLOT_LIST && r.w.settled_row == 1 && r.w.write_intent == 0,
+         "(4, 0x204000): state 4, 0x879e24 = 1, 0x88d400 0");
+  expect(r.w.selected_row == 0 && r.w.list_action == 0xa5 && r.w.fade_step == 8 && r.w.selected_index == 7,
+         "the repeat writes 0x879e24 only");
+  expect(r.call(MASK_CONFIRM).ops.empty() && r.w.slot_state == SLOT_LIST,
+         "after the repeat the rows differ, so a confirm waits for the settle");
+  for (std::uint32_t bit : {0x4000u, 0x200000u}) {
+    auto one = list_fixture();
+    (void)one.call(bit);
+    expect(one.w.settled_row == 1, "either bit of the repeat mask 0x204000 advances");
+  }
+  auto last = list_fixture();
+  last.w.settled_row = last.w.selected_row = 1;
+  unknown([&] { (void)last.call(MASK_REPEAT); }, "the repeat on the last cached row was not executed");
+  auto scrolled = list_fixture();
+  scrolled.w.cache_count = 4;
+  scrolled.w.scroll_base = scrolled.w.scroll_target = 1;
+  unknown([&] { (void)scrolled.call(MASK_REPEAT); }, "the repeat with a scroll was not executed");
+
+  auto cancel = list_fixture();
+  unknown([&] { (void)cancel.call(MASK_CANCEL); }, "the state-4 cancel back fade was not executed");
+  expect(cancel.w.slot_state == SLOT_LIST && cancel.w.fade_step == 8 && cancel.w.list_action == 0xa5,
+         "the refused cancel writes nothing");
+  auto both = list_fixture();
+  unknown([&] { (void)both.call(MASK_CONFIRM | 0x4000u); }, "0x40 | 0x4000 is not acted on as a confirm");
+  expect(both.w.slot_state == SLOT_LIST && both.w.list_action == 0xa5 && both.w.fade_step == 8 &&
+             both.w.settled_row == 0,
+         "the combined press arms nothing and moves nothing");
+  auto both_free = list_fixture();
+  both_free.w.cache_count = 0;
+  unknown([&] { (void)both_free.call(MASK_CONFIRM | 0x200000u); }, "0x40 | 0x200000 on the free row");
+  expect(both_free.w.list_action == 0xa5, "the combined press does not arm the free row");
+  auto mixed = list_fixture();
+  unknown([&] { (void)mixed.call(MASK_CONFIRM | MASK_COMMIT); }, "0x40 | 0x80 was not executed");
+
+  auto unsettled = list_fixture();
+  unsettled.w.cursor_float = 0x3f000000;
+  unknown([&] { (void)unsettled.call(MASK_COMMIT); }, "0x80 with an unsettled cursor was not executed");
+  unknown([&] { (void)unsettled.call(MASK_REPEAT); }, "0x204000 with an unsettled cursor was not executed");
+  auto free_delete = list_fixture();
+  free_delete.w.cache_count = 0;
+  unknown([&] { (void)free_delete.call(MASK_COMMIT); }, "0x80 on the free row was not executed");
+  auto load_list = list_fixture();
+  load_list.w.card_state = CARD_LOAD;
+  unknown([&] { (void)load_list.call(MASK_COMMIT); }, "0x80 on the load list was not executed");
+  unknown([&] { (void)load_list.call(MASK_REPEAT); }, "0x204000 on the load list was not executed");
+}
+
+void saved_key_discriminator() {
+  // PSS-2. The byte and index == count agreed in both executed cases
+  // (flow:562, 581-586 and 591-599); a split throws.
+  Screen clear_new = save_screen(4);
+  clear_new.w.fade_step = 8;
+  unknown([&] { (void)clear_new.call(0); }, "step 4 with 0x8e1ad8 clear and index == count");
+  Screen set_old = save_screen(4);
+  set_old.w.fresh_name = 1;
+  set_old.w.selected_index = 1;
+  set_old.w.cache_count = 2;
+  unknown([&] { (void)set_old.call(0); }, "step 4 with 0x8e1ad8 set and index != count");
+  Screen old_row = save_screen(4);
+  old_row.w.selected_index = 1;
+  old_row.w.cache_count = 2;
+  expect(old_row.call(0).keys.back() == KEY_OVERWRITE_GOOD, "byte clear, index != count: OverwriteGood");
+}
+
+void saved_flag_stale() {
+  // PSS-3. flow:220-229 ran step 3 with 0x4f8f29 at 0; Savepoint_run clears it
+  // and it can stay up across saves (native-soak.md:547, 572).
+  Screen stale = save_screen(3);
+  stale.w.saved_flag = 1;
+  stale.w.fade_level = 0;
+  stale.w.fade_step = 4;
+  unknown([&] { (void)stale.call(0); }, "step 3 with 0x4f8f29 already set was not executed");
+  expect(stale.w.step == 3 && stale.w.fade_step == 4, "the stale flag does not skip to step 4");
+
+  Screen s = save_screen(3);
+  s.w.selected_index = 1;
+  s.w.cache_count = 2;
+  s.w.fade_level = 0;
+  (void)s.call(0);
+  expect(s.w.saved_flag == 1 && s.w.saved_step_armed && s.w.step == 3, "the arm is the native flag");
+  (void)s.call(0);
+  expect(s.w.step == 4 && !s.w.saved_step_armed && s.w.saved_flag == 1,
+         "fade 0 enters step 4; the screen does not clear 0x4f8f29");
+  // A second save in the same Screen with the flag still up.
+  s.w.step = 3;
+  unknown([&] { (void)s.call(0); }, "a second save with 0x4f8f29 still up was not executed");
+  s.w.saved_flag = 0; // what Savepoint_run does (native-soak.md:547)
+  (void)s.call(0);
+  expect(s.w.saved_flag == 1 && s.w.fade_step == FADE_OUT, "after the host clears it, step 3 arms again");
+}
+
+void net_step2() {
+  // PSS-4. The net path was executed only to step 2's entry (flow:602-608).
+  Screen net = save_screen(1);
+  net.w.network = 1;
+  net.w.image = Bytes(IMAGE_BYTES, 0x3c); // a buffer left by an earlier load
+  net.services.pack_local_player = [] {};
+  (void)net.call(0);
+  expect(net.w.step == 2, "the net byte reaches step 2");
+  Call c;
+  unknown([&] { c = net.call(0); }, "net-path step 2 was not executed");
+  expect(c.ops.empty() && net.w.step == 2, "no write of the old buffer is queued");
+
+  Screen planted = save_screen(2);
+  planted.w.image = Bytes(IMAGE_BYTES, 0x3c);
+  unknown([&] { (void)planted.call(0); }, "offline step 2 without this save's save_build");
+}
+
+void overwrite_row_one() {
+  // PSS-6. Row 1 of 2 with 0x88d3b0 planted to 7: the commit must write it.
+  auto s = confirm_case(0, 1, 1, 0, 2);
+  expect(s.w.slot_state == SLOT_OVERWRITE, "row 1 of 2 enters 5");
+  s.w.selected_index = 7;
+  (void)s.call(MASK_COMMIT);
+  (void)s.call(0);
+  s.w.fade_level = 0;
+  s.w.fade_step = 0;
+  auto c = s.call(0);
+  expect(c.committed && s.w.selected_index == 1, "the commit writes row 1 over the planted 7");
+}
+
+void load_latch_flag1() {
+  // PSS-7. doc:267-268; flow:473, 687: flag 1 leaves the latch 1 over 0xa5.
+  Screen s = accepted(1);
+  (void)s.accept_load();
+  (void)s.queue_load_read();
+  s.w.latch = 0xa5;
+  (void)s.load_read_complete(synthetic_image("strife", ""));
+  expect(s.w.latch == 1 && s.w.step == 5, "flag 1 stores the latch 1 over 0xa5");
+}
+
+void card_error_living() {
+  // PSS-8. flow:248 plants a living player in every corner; slot stage 1 is
+  // what keeps the reopened request closed (doc:238-240; flow:624).
+  for (bool network : {false, true}) {
+    Screen s = save_screen(2);
+    s.w.latch = 1;
+    s.w.card_result = 1;
+    s.w.counted_living = 1;
+    (void)s.call(0);
+    s.w.card_result = 0;
+    s.w.network = network ? 1 : 0;
+    auto c = s.call(MASK_CANCEL);
+    expect(c.reopen_called && s.w.card_state == CARD_IDLE && s.w.slot_stage == 1,
+           "a living player and stage 1: the request is called and stays closed");
+  }
+  Screen bad = save_screen(9);
+  bad.w.counted_living = -1;
+  refused([&] { (void)bad.call(MASK_CANCEL); }, "a negative counted total is refused");
+}
+
+void slot_name_named_count0() {
+  // PSS-9. Every count-0 case had an empty directory (flow:181-185, 549-551).
+  for (std::uint8_t fresh : {std::uint8_t{0}, std::uint8_t{1}}) {
+    Words w;
+    w.fresh_name = fresh;
+    w.directory = {record("BASLUS-20973_slot0")};
+    unknown([&] { (void)make_slot_name(w); }, "count 0 with a named record was not executed");
+  }
+  Words prefix;
+  prefix.fresh_name = 1;
+  prefix.directory.resize(1);
+  std::memcpy(prefix.directory[0].data() + DIRECTORY_NAME_AT + 1, "BASLUS-20973", 12); // 0x88d061 (flow:185)
+  expect(make_slot_name(prefix) == SLOT0_NAME, "the probe's 0x88d061 prefix leaves record 0's name byte clear");
+}
+
+void countdown_negative() {
+  // PSS-10. Only 0 and 10 were planted (flow:350, 374, 395).
+  Screen t = free_row_list();
+  t.w.slot_state = SLOT_SPACE;
+  t.w.countdown = -1;
+  t.w.fade_step = 8;
+  unknown([&] { (void)t.call(0); }, "a negative 0x88d3c4 was not executed");
+}
+
 void refusals() {
   Screen s = confirm_case(0, 0, 0, 0, 2);
   s.w.card_state = CARD_LOAD;
@@ -517,6 +734,15 @@ int main() {
     requests();
     load_flow();
     refusals();
+    state4_inputs();
+    saved_key_discriminator();
+    saved_flag_stale();
+    net_step2();
+    overwrite_row_one();
+    load_latch_flag1();
+    card_error_living();
+    slot_name_named_count0();
+    countdown_negative();
   } catch (const std::exception &e) {
     std::cerr << "FAIL after " << checks << " checks: " << e.what() << "\n";
     return 1;

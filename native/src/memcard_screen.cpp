@@ -41,9 +41,14 @@ bool cursor_settled(std::uint32_t bits) {
 
 std::string make_slot_name(const Words &w) {
   // doc:228; flow:176-193, 534-559. A set 0x8e1ad8 was executed only with count 0.
+  // Every executed case had an empty directory (record 0's name byte 0x88d060
+  // clear; flow:181-185, 549-551), so a named record throws for every count.
+  if (!directory_empty(w))
+    throw Unknown("memcard_makeSlotName 0x21effc with a named directory record was not executed "
+                  "(save-screen.md:228; difftest_save_screen_flow.py:534-559)");
   if (w.cache_count == 0)
     return SLOT0_NAME;
-  if (w.fresh_name == 0 && w.cache_count >= 1 && w.cache_count <= 3 && directory_empty(w))
+  if (w.fresh_name == 0 && w.cache_count >= 1 && w.cache_count <= 3)
     return SLOT1_NAME; // why a nonempty count selects slot 1 is Unknown (doc:228)
   throw Unknown("memcard_makeSlotName 0x21effc: only count 0, or counts 1-3 with an empty "
                 "directory and a clear 0x8e1ad8, were executed (save-screen.md:228)");
@@ -139,12 +144,51 @@ Call Screen::slot_list(std::uint32_t edge) {
       }
       return out;
     }
-    if (!(edge & MASK_CONFIRM))
+    // The list's four inputs (doc:169; ref:115-122). difftest_save_screen.py:334-335
+    // executed each of 0x204000, 0x40 and 0x80 alone, and no state-4 0x20.
+    const bool repeat = (edge & MASK_REPEAT) != 0, confirm = (edge & MASK_CONFIRM) != 0,
+               remove = (edge & MASK_COMMIT) != 0, cancel = (edge & MASK_CANCEL) != 0;
+    const int pressed = int(repeat) + int(confirm) + int(remove) + int(cancel);
+    if (pressed == 0)
+      return out; // (4, 0) leaves the list (difftest_save_screen.py:334; ref:122)
+    if (pressed > 1)
+      throw Unknown("slot state 4 was executed with one of 0x204000, 0x40, 0x80 and 0x20 at a time; "
+                    "a combined press was not (difftest_save_screen.py:334-335)");
+    if (cancel)
+      throw Unknown("the state-4 cancel 0x20 back fade 0x21ccc0 is named (save-screen.md:169) but "
+                    "was not executed; no probe ran (4, 0x20) (difftest_save_screen.py:334-335)");
+    const bool settled = cursor_settled(w.cursor_float) && w.settled_row == w.selected_row;
+    if (repeat || remove) {
+      // Executed only in the settled save-mode fixture: card state 3, the float
+      // and both row words 0, scroll 0, count 2 (difftest_save_screen.py:21-46, 71-74).
+      if (!settled)
+        throw Unknown("state 4 0x204000 / 0x80 with an unsettled cursor was not executed "
+                      "(difftest_save_screen.py:21-46)");
+      if (w.card_state != CARD_SAVE)
+        throw Unknown("state 4 0x204000 / 0x80 on the load list was not executed (the fixture "
+                      "ran card state 3, difftest_save_screen.py:27)");
+      const std::int32_t at = w.scroll_base + w.selected_row;
+      if (repeat) {
+        // ref:116-117: 0x879e24 becomes the selection + 1 when another cached
+        // slot exists; executed from row 0 of 2 with no scroll.
+        if (w.scroll_base != 0)
+          throw Unknown("the state-4 repeat with a nonzero scroll 0x879e2c was not executed");
+        if (at + 1 >= w.cache_count)
+          throw Unknown("the state-4 repeat on the last cached row was not executed "
+                        "(save-screen.md:169; difftest_save_screen.py:334)");
+        w.settled_row = w.selected_row + 1; // 0x879e24; 0x879e28 follows by the settle
+        return out;
+      }
+      // Bit 0x80 on a populated row enters 9 (doc:169; ref:120-121; executed on row 0).
+      if (at < 0 || at >= w.cache_count)
+        throw Unknown("state 4 bit 0x80 off a populated row was not executed (difftest_save_screen.py:334)");
+      w.slot_state = SLOT_DELETE;
       return out;
+    }
     // 0x21caa4: confirm is read only with the float at 0 and the two row words
     // equal. 0x3f000000, or unequal words, leave slot state, 0x4f8ef4 and the
     // fade step alone (doc:193-200; flow:335-359, 637-645).
-    if (!cursor_settled(w.cursor_float) || w.settled_row != w.selected_row)
+    if (!settled)
       return out;
     if (w.card_state != CARD_SAVE)
       throw Unknown("the load list's own confirm path was not executed; the load acceptance "
@@ -169,10 +213,23 @@ Call Screen::slot_list(std::uint32_t edge) {
       w.write_intent = 1; // 0x88d400
     }
     return out;
+  case SLOT_DELETE:
+    // doc:171; ref:129-132. difftest_save_screen.py:335 executed (9, 0) and (9, 0x20) only.
+    if (edge == 0)
+      return out;
+    if (edge == MASK_CANCEL) {
+      w.slot_state = SLOT_LIST;
+      return out;
+    }
+    throw Unknown("slot state 9 was executed with no press and with 0x20 only; the delete confirm "
+                  "fade and queue path 0x21d360-0x21d3c0 was not (difftest_save_screen.py:335)");
   case SLOT_SPACE:
     // doc:208-216; flow:385-439, 652-656.
+    if (w.countdown < 0)
+      throw Unknown("a negative countdown 0x88d3c4 was not executed; only 0 and 10 were planted "
+                    "(difftest_save_screen_flow.py:350, 374, 395)");
     if (w.countdown != 0)
-      return out; // waits until 0x88d3c4 has run down
+      return out; // waits until 0x88d3c4 has run down; the host runs it down
     if (w.fade_step > 0) {
       // andi 0x21cd60, add 0x21cd68, slt 0x21cd74. Units Unknown.
       if (w.space_have < w.space_need + (w.cache_count & 1)) {
@@ -203,7 +260,7 @@ Call Screen::slot_list(std::uint32_t edge) {
     return out;
   default:
     throw Unknown("slot state " + std::to_string(w.slot_state) +
-                  " is outside the executed play-flow states 4, 5, 7, 11 and 12");
+                  " is outside the executed play-flow states 4, 5, 7, 9, 11 and 12");
   }
 }
 
@@ -246,6 +303,7 @@ Call Screen::save_step(std::uint32_t edge) {
       out.save_built = true;
       if (w.image.size() != IMAGE_BYTES)
         throw Refusal("save_build returned " + std::to_string(w.image.size()) + " bytes, not 0x4bc78");
+      image_built_ = true;
     }
     // Step 2 next: executed on the net path (flow:601-608); the offline probe
     // planted step 2 before its step-2 call (flow:214).
@@ -254,6 +312,15 @@ Call Screen::save_step(std::uint32_t edge) {
   case 2:
     if (w.image.size() != IMAGE_BYTES)
       throw Refusal("the save buffer 0x895580 does not hold a 0x4bc78-byte image");
+    // The net path was executed only to step 2's entry (flow:602-608); what
+    // 0x895580 holds after save_packLocalPlayer was not read.
+    if (w.network != 0)
+      throw Unknown("save step 2 on the network-byte path was not executed (save-screen.md:229; "
+                    "difftest_save_screen_flow.py:602-608)");
+    if (!image_built_)
+      throw Unknown("offline save step 2 was executed only after step 1's save_build filled 0x895580 "
+                    "(difftest_save_screen_flow.py:561-574)");
+    image_built_ = false;
     // doc:230; flow:568-574.
     out.ops = {{OP_OPEN, w.slot_name, SAVE_OPEN_MODE},
                {OP_WRITE, {}, static_cast<std::uint32_t>(IMAGE_BYTES)},
@@ -262,17 +329,33 @@ Call Screen::save_step(std::uint32_t edge) {
     w.step = 3;
     return out;
   case 3:
-    // doc:231; flow:220-231, 583-584. Who clears 0x4f8f29 again is not in the research.
-    if (w.saved_flag == 0) {
+    // doc:231; flow:220-231, 583-584, executed with 0x4f8f29 at 0 on entry.
+    // The byte is the screen's "done" flag that Savepoint_run clears
+    // (native-soak.md:547; monsters.md:1064-1066), and it can stay up across
+    // saves (native-soak.md:572). A native flag links the arm to the wait.
+    if (!w.saved_step_armed) {
+      if (w.saved_flag != 0)
+        throw Unknown("save step 3 entered with 0x4f8f29 already set was not executed "
+                      "(difftest_save_screen_flow.py:220-229, 583); Savepoint_run clears it "
+                      "(native-soak.md:547)");
       w.saved_flag = 1;
       w.fade_step = FADE_OUT;
+      w.saved_step_armed = true;
     } else if (w.fade_level == 0) {
+      w.saved_step_armed = false;
       w.step = 4;
     }
     return out;
   case 4: {
-    // doc:232; flow:232-243, 585-599.
+    // doc:232; flow:232-243, 585-599. The new-row keys ran with 0x8e1ad8 set
+    // and index == count (flow:591-599), the overwrite keys with the byte clear
+    // and index != count (flow:562, 581-586). Which of the two picks the key
+    // was not separated, so a disagreement throws.
     const bool new_row = w.selected_index == w.cache_count;
+    if ((w.fresh_name != 0) != new_row)
+      throw Unknown("save step 4 with 0x8e1ad8 " + std::string(w.fresh_name ? "set" : "clear") +
+                    " and index " + (new_row ? "==" : "!=") +
+                    " count was not executed (difftest_save_screen_flow.py:562, 581-599)");
     out.keys = {KEY_CONTINUE, KEY_SAVE_COMPLETE, new_row ? KEY_SAVE_GOOD_NEW : KEY_OVERWRITE_GOOD};
     if (w.saved_box_dismissing) {
       if (w.fade_level == 0) {
@@ -294,7 +377,9 @@ Call Screen::save_step(std::uint32_t edge) {
       w.card_state = CARD_IDLE;
       if (!(w.network != 0 && !w.pending_level.empty())) {
         out.reopen_called = true;
-        (void)request_save(0); // stage 1 keeps it closed whatever the player count
+        // flow:248 plants a living player; 0x88d3d8 still 1 is what keeps the
+        // request closed (doc:238-240; flow:624).
+        (void)request_save(w.counted_living);
       }
     }
     return out;
@@ -362,6 +447,7 @@ Call Screen::load_read_complete(Bytes image) {
   // world_loadRecords, level_loadScriptAndObjects or save_reload.
   if (services.restore)
     services.restore(w.image);
+  w.latch = 1; // "the latch is 1 afterward, over that same sentinel" (doc:267-268; flow:473, 687)
   w.pending_level = level;
   w.side_name = level;
   w.pending_marker = PENDING_MARKER;
