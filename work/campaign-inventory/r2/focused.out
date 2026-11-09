@@ -1,0 +1,22 @@
+1/7 Test #248: mission2-actors ..................   Passed    0.05 sec
+2/7 Test #210: level-flow-exact .................   Passed    0.06 sec
+3/7 Test #256: campaign-inventory ...............   Passed    0.22 sec
+4/7 Test #242: quests ...........................   Passed    0.52 sec
+5/7 Test #255: frontend-exact ...................   Passed    0.60 sec
+6/7 Test #253: ps2-save .........................   Passed    0.54 sec
+7/7 Test #235: script-commands ..................   Passed    1.41 sec
+100% tests passed, 0 tests failed out of 7
+
+PASS campaign inventory
+459 PS2 save checks passed; 29 image and 51 checksum reference vectors
+Mutations (each applied alone, test rebuilt, then restored):
+  bit8-refusal: ps2-save: inventory_shareQuestItems flag bit 8 on a copied cell is Unknown
+  clear: FAIL the entry reports six carried cells, one removed, and 1 at 0x4f7118
+  death: FAIL a running death task stores the act and skips the clear
+  empty-name: FAIL an empty flag-39 name refuses instead of being removed: flag-39 cell name is unreadable; keep or drop is refused
+  guard: FAIL character creation: the act transfer refuses as wave 37 did
+  index0: ps2-save: a saved bag-2 flag-39 cell has a negative definition row, so it has no definition to copy
+  latch-mirror: FAIL the front end's latch left at 1 stores the act and skips the clear
+  name-check: FAIL without definitions in the destination the act transfer refuses: Act transfer with inventory is refused: a flag-39 cell's definition name cannot 
+  share-call: ps2-save: line 1070: m.word(inv.cell(1, 2, 0)) == definition_pointer(10)
+  chain (rerun with a forced object rebuild): FAIL an act transfer that carried cells starts the act-transfer chain
