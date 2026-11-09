@@ -50,7 +50,8 @@ func run() -> void:
 	service.set_page(3)
 	check(service.press(2, 0x40).action == "none" and int(service.state().stat_points) == 3, "stats page does not spend")
 	var skill: Dictionary = service.spend_skill(0, 1)
-	check(not skill.get("ok", false) and str(skill.get("error", "")).contains("Unknown") and int(service.state().skill_points) == 4, "unknown skill sender refuses without spending")
+	check(not skill.get("ok", false) and str(skill.get("error", "")).contains("not the skills_screen sender") and int(service.state().skill_points) == 4, "bare spend is not the skill screen")
+	check(not service.skill_screen({"kind": 0, "need": 1, "ident": 1, "pre_kind": -1, "cursor": "inside", "edge": 0x40, "page": 5}).get("ok", false) and int(service.state().skill_points) == 4, "skill screen recalc refuses without the executable rules")
 	service.reset()
 	var thresholds := PackedInt32Array()
 	for index in range(81):
@@ -73,6 +74,7 @@ func run() -> void:
 	check(xp.get("ok", false) and int(xp.levels_gained) == 1 and int(xp.level) == 6 and int(xp.experience) == 500, "exact XP threshold")
 	check(int(xp.skill_points) == 5 and int(xp.stat_points) == 6 and int(xp.max_hp) == 0x424c0000 and int(xp.max_mana) == 0x41880000, "level resource and point awards")
 	check(int(xp.acknowledged) == 4 and int(xp.hud_xp_base) == 300 and int(xp.hud_next_xp) == 400, "pending level HUD interval follows acknowledged level")
+	check(int(xp.level_message_calls) == 1 and xp.level_message_stored and int(xp.level_message_frames) == 360 and int(xp.level_message_force) == 0, "level step asks for the 360-frame force-0 message")
 	var opened: Dictionary = service.open_level_up()
 	check(int(opened.acknowledged) == 6 and int(opened.page) == 5, "opening inventory for level-up acknowledges")
 	check(int(opened.hud_xp_base) == 500 and int(opened.hud_next_xp) == 600, "acknowledged level advances HUD interval")
@@ -80,9 +82,15 @@ func run() -> void:
 	check(not service.press_stat(2, 3, 0x40, 0, 2999).sent, "stat timer gate")
 	var stat: Dictionary = service.press_stat(2, 3, 0x40, 0, 3000)
 	check(stat.get("ok", false) and stat.get("sent", false) and int(stat.base_stats[3]) == 14 and int(stat.stat_points) == 5, "stat row sends and spends")
+	var sent: Dictionary = service.skill_screen({"kind": 0, "need": 1, "ident": 1, "pre_kind": -1, "cursor": "inside", "edge": 0x40, "page": 5, "resource": true})
+	check(sent.get("ok", false) and sent.get("sent", false) and int(sent.send_kind) == 0 and int(sent.send_value) == 1 and int(sent.skill_points) == 4, "passive row sends the mask and spends one point")
+	var outside: Dictionary = service.skill_screen({"kind": 0, "need": 1, "ident": 1, "pre_kind": -1, "cursor": "outside", "edge": 0x40, "page": 5})
+	check(outside.get("ok", false) and not outside.get("sent", false) and int(service.state().skill_points) == 4, "a cursor outside the tree does not send")
+	var edge: Dictionary = service.skill_screen({"kind": 1, "ident": 95, "cursor": "edge", "virtual_float": 0})
+	check(not edge.get("ok", false) and str(edge.get("error", "")).contains("cursor-box"), "cursor-box edges stay refused")
 	var kill: Dictionary = service.give_kill_xp(0x42000000, 0x41f00000)
 	check(kill.get("ok", false) and int(kill.award) > 0 and int(kill.experience) == 500 + int(kill.award), "authored solo kill award reaches record")
-	check(not service.spend_skill(0, 1).get("ok", false), "skill sender stays refused")
+	check(not service.spend_skill(0, 1).get("ok", false), "bare skill spend stays refused")
 	var stats_snapshot: PackedByteArray = service.save_bytes().bytes
 	var missing_half := stats_snapshot.slice(0, stats_snapshot.size() - 4)
 	var oversized_half := stats_snapshot.duplicate()
@@ -130,7 +138,8 @@ func run() -> void:
 	var ids := {}
 	for gap in service.gaps().gaps:
 		ids[str(gap.id)] = true
-	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "skill-confirm-input", "skill-spend-sender", "pause-frames", "memory-card-frames"]:
+	check(not ids.has("skill-spend-sender"), "executed skill sender is no longer a refusal")
+	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "skill-confirm-input", "skill-virtual-bodies", "skill-cursor-edges", "pause-frames", "memory-card-frames"]:
 		check(ids.has(id), "refusal " + id)
 	service.press(2, 0x40)
 	var dir := "user://menu-smoke-%d" % OS.get_process_id()

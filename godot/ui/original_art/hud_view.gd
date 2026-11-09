@@ -63,7 +63,7 @@ func observe(value: Dictionary) -> void:
 		return
 	var health_ok := valid_bar(value, "hp", "max_hp")
 	var mana_ok := valid_bar(value, "mana", "max_mana")
-	var experience_ok := typeof(value.get("acknowledged_level")) == TYPE_INT and int(value.acknowledged_level) > 0 and typeof(value.get("experience")) == TYPE_INT and typeof(value.get("experience_base")) == TYPE_INT and typeof(value.get("experience_next")) == TYPE_INT and int(value.experience_next) > int(value.experience_base)
+	var experience_ok := typeof(value.get("acknowledged_level")) == TYPE_INT and int(value.acknowledged_level) > 0 and typeof(value.get("experience")) == TYPE_INT and typeof(value.get("experience_base")) == TYPE_INT and typeof(value.get("experience_next")) == TYPE_INT and int(value.experience_next) >= int(value.experience_base)
 	var origins: Dictionary = layout_service.hud_origins(false, PackedInt32Array([0]), 1)
 	# Slot zero is this authored offline singleton view. Unknown cooldown and
 	# flash gates are not submitted. Neutral inputs only obtain
@@ -173,10 +173,12 @@ func advance_glow() -> void:
 func bar_inputs_known(value: Dictionary, current: String, maximum: String) -> bool:
 	for key in [current, maximum]:
 		if typeof(value.get(key)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value[key])): return false
-	return float(value[maximum]) > 0.0
+	# A zero maximum saturates and current is not clamped
+	# (hud-live-producers.md:51-55). A negative maximum was not executed.
+	return float(value[maximum]) >= 0.0
 
 func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
-	return bar_inputs_known(value, current, maximum) and float(value[current]) >= 0.0
+	return bar_inputs_known(value, current, maximum)
 
 # 640x448 logical canvas to this control; a 4:3 square-pixel picture is 640x480.
 func _canvas_transform() -> void:

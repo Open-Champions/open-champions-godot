@@ -442,7 +442,7 @@ void ledger_vectors() {
     reject([&] { book.spend_stat(0); }, "stat handler needs complete level-up rules");
     expect(book.base_stat(0) == 10 && book.stat_points() == 3, "refused stat handler preserves record");
     expect(book.passive_level_at(1) == 2, "passive");
-    reject([&] { book.spend_skill(0, 1); }, "unknown skill sender refused");
+    reject([&] { book.spend_skill(0, 1); }, "bare spend is not the skills_screen sender");
     expect(book.skill_points() == 4 && book.passive_level_at(1) == 2, "skill points preserved");
     expect(book.frame("skills").texts.at(0).text == "4 cost 8", "displayed cost");
   }
@@ -847,6 +847,142 @@ void levelup_vectors() {
            "supported imported menu operation works after tail refusal");
   }
 }
+void observed_level_vectors() {
+  XpTable table{};
+  for (int i = 0; i < 81; ++i)
+    table[static_cast<std::size_t>(i)] = i * 100;
+  std::array<ClassFormula, 8> formulas{};
+  for (auto &row : formulas)
+    row = {0u, 0x3f800000u, 0x3f800000u, 0x40000000u, 0x40400000u, 0u};
+  const std::pair<int, int> bands[] = {{5, 1}, {6, 2}, {15, 2}, {16, 3}, {25, 3},
+                                        {26, 4}, {35, 4}, {36, 5}, {79, 5}};
+  for (const auto [old_level, grant] : bands) {
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = old_level;
+    hero.acknowledged = 2;
+    hero.experience = table[static_cast<std::size_t>(old_level)] - 1;
+    hero.skill_points = 41;
+    hero.stat_points = 70;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    expect(book.give_xp(0) == 0 && book.level() == old_level && book.skill_points() == 41 &&
+               book.stat_points() == 70 && book.acknowledged() == 2,
+           "one below the exact word does not level");
+    expect(book.give_xp(1) == 1 && book.level() == old_level + 1 &&
+               book.skill_points() == 41 + grant && book.stat_points() == 73 &&
+               book.acknowledged() == 2 && book.level_notice().stored &&
+               book.level_notice().calls == 1 && book.level_notice().frames == 0x168 &&
+               book.level_notice().force == 0,
+           "exact table word grants the old-level skill word and the stat byte");
+  }
+  {
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = 5;
+    hero.acknowledged = 4;
+    hero.experience = 499;
+    hero.stat_points = 254;
+    hero.skill_points = 0;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    expect(book.give_xp(1) == 1 && book.stat_points() == 1 && book.skill_points() == 1 &&
+               book.acknowledged() == 4,
+           "stat byte 254 becomes 1 and acknowledged level stays");
+  }
+  {
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = 5;
+    hero.acknowledged = 4;
+    hero.experience = 499;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    LedgerProbe::record_word(book, 0xac, 0);
+    LedgerProbe::record_word(book, 0xc0, 0x40400000u);
+    expect(book.give_xp(1) == 1 && book.hit_points() == 0 && book.mana() == 0x40400000u,
+           "a zero hit-point value leaves mana");
+  }
+  {
+    // A zero force with the local menu open keeps the previous message.
+    // hud-live-producers.md:120-122, 174-176.
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = 5;
+    hero.acknowledged = 4;
+    hero.experience = 499;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    book.set_local_menu_open(true);
+    expect(book.give_xp(1) == 1 && book.level() == 6 && !book.level_notice().stored &&
+               book.level_notice().calls == 1,
+           "force 0 does not store while the local menu is open");
+    book.set_local_menu_open(false);
+    expect(book.give_xp(100) == 1 && book.level_notice().stored &&
+               book.level_notice().frames == 0x168 && book.level_notice().calls == 2,
+           "the next level step stores once the menu is closed");
+  }
+  {
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = 6;
+    hero.acknowledged = 4;
+    hero.experience = 123456;
+    hero.skill_points = 7;
+    hero.stat_points = 9;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    const auto image = book.save();
+    Ledger::Adopted cleared = hero;
+    cleared.level = 1;
+    cleared.acknowledged = 1;
+    cleared.experience = 0;
+    cleared.skill_points = 0;
+    cleared.stat_points = 0;
+    book.adopt(cleared);
+    book.load(image);
+    expect(book.level() == 6 && book.acknowledged() == 4 && book.experience() == 123456 &&
+               book.skill_points() == 7 && book.stat_points() == 9,
+           "a pending level survives restore and is not applied");
+  }
+  {
+    Ledger book;
+    book.set_page(5);
+    champions::levelup_hud::SkillAsk ask;
+    ask.kind = 0;
+    ask.need = 1;
+    ask.ident = 1;
+    ask.pre_kind = -1;
+    ask.cursor = champions::levelup_hud::Cursor::Inside;
+    ask.edge = 0x40;
+    ask.confirm_mask = 0x40;
+    ask.page = 5;
+    ask.resource = true;
+    reject([&] { book.skill_screen(ask); }, "the screen's recalc needs the executable rules");
+    expect(book.skill_points() == 4, "refused screen leaves the skill word");
+    book.set_xp_rules(table, formulas);
+    const auto sent = book.skill_screen(ask);
+    expect(sent.sent && sent.kind == 0 && sent.value == 1 && book.skill_points() == 3 &&
+               book.passive_level_at(1) == 3,
+           "passive row sends slot, kind 0, mask");
+    ask.cursor = champions::levelup_hud::Cursor::Outside;
+    const auto missed = book.skill_screen(ask);
+    expect(!missed.sent && !missed.recalc && book.skill_points() == 3, "outside cursor does not send");
+    ask.cursor = champions::levelup_hud::Cursor::Edge;
+    reject([&] { book.skill_screen(ask); }, "cursor-box edge stays refused");
+  }
+}
+
 } // namespace
 
 int main() {
@@ -857,6 +993,7 @@ int main() {
   layout_vectors();
   ledger_vectors();
   levelup_vectors();
+  observed_level_vectors();
   std::cout << "PASS menus " << checks << " checks\n";
   return 0;
 }

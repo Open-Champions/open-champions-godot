@@ -59,6 +59,12 @@ class ChampionsMenuService : public RefCounted {
     out["hud_next_xp"] = hud_interval ? ledger_->hud_next_threshold() : 0;
     out["hud_xp_base"] = hud_interval ? ledger_->hud_base_threshold() : 0;
     out["xp_ready"] = ledger_->has_xp_rules();
+    // player_giveExp's hud_showMessage(text, 360, slot, 0); the text is not known.
+    const auto &notice = ledger_->level_notice();
+    out["level_message_calls"] = notice.calls;
+    out["level_message_stored"] = notice.stored;
+    out["level_message_frames"] = int(notice.frames);
+    out["level_message_force"] = int(notice.force);
     out["hp"] = int64_t(ledger_->hit_points());
     out["max_hp"] = int64_t(ledger_->max_hit_points());
     out["mana"] = int64_t(ledger_->mana());
@@ -95,6 +101,8 @@ protected:
     ClassDB::bind_method(D_METHOD("set_page", "page"), &ChampionsMenuService::set_page);
     ClassDB::bind_method(D_METHOD("set_scheme", "name"), &ChampionsMenuService::set_scheme);
     ClassDB::bind_method(D_METHOD("spend_skill", "is_skill", "value"), &ChampionsMenuService::spend_skill);
+    ClassDB::bind_method(D_METHOD("skill_screen", "row"), &ChampionsMenuService::skill_screen);
+    ClassDB::bind_method(D_METHOD("set_local_menu_open", "open"), &ChampionsMenuService::set_local_menu_open);
     ClassDB::bind_method(D_METHOD("press_stat", "screen_arg", "row", "edge", "panel_gate", "elapsed"), &ChampionsMenuService::press_stat);
     ClassDB::bind_method(D_METHOD("give_xp", "amount"), &ChampionsMenuService::give_xp);
     ClassDB::bind_method(D_METHOD("give_kill_xp", "creature_experience", "creature_max_hp"), &ChampionsMenuService::give_kill_xp);
@@ -457,6 +465,46 @@ public:
     try {
       ledger_->spend_skill(is_skill, static_cast<std::uint32_t>(value));
       return fill_state(success());
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
+  void set_local_menu_open(bool open) { ledger_->set_local_menu_open(open); }
+  Dictionary skill_screen(const Dictionary &row) {
+    try {
+      champions::levelup_hud::SkillAsk ask;
+      ask.kind = int(row.get("kind", 0));
+      ask.need = int(row.get("need", 1));
+      ask.ident = static_cast<std::uint64_t>(int64_t(row.get("ident", 0)));
+      ask.pre_kind = int(row.get("pre_kind", -1));
+      ask.pre = static_cast<std::uint64_t>(int64_t(row.get("pre", 0)));
+      const String cursor = row.get("cursor", "inside");
+      if (cursor == "edge")
+        ask.cursor = champions::levelup_hud::Cursor::Edge;
+      else if (cursor == "outside")
+        ask.cursor = champions::levelup_hud::Cursor::Outside;
+      else
+        ask.cursor = champions::levelup_hud::Cursor::Inside;
+      ask.edge = static_cast<std::uint32_t>(int(row.get("edge", 0x40)));
+      ask.confirm_mask = 0x40;
+      ask.held = static_cast<std::uint32_t>(int(row.get("held", 0)));
+      ask.page = int(row.get("page", 5));
+      ask.gate = static_cast<std::uint32_t>(int(row.get("gate", 0)));
+      ask.panel30 = int(row.get("panel30", 0));
+      ask.resource = bool(row.get("resource", true));
+      ask.in_table = bool(row.get("in_table", true));
+      // Raw float word the skill's vtable+0x28 entry returned (levelup.md:150-158).
+      if (row.has("virtual_float")) {
+        ask.virtual_float = static_cast<std::uint32_t>(int64_t(row.get("virtual_float", 0)));
+        ask.virtual_float_planted = true;
+      }
+      const auto decision = ledger_->skill_screen(ask);
+      auto out = success();
+      out["sent"] = decision.sent;
+      out["recalc"] = decision.recalc;
+      out["send_kind"] = decision.kind;
+      out["send_value"] = int64_t(decision.value);
+      return fill_state(out);
     } catch (const std::exception &error) {
       return failure(error);
     }

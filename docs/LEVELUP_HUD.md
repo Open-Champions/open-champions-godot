@@ -1,0 +1,112 @@
+# Level-up and live HUD producers
+
+Research pins: `t3/research-levelup` `98a8a47` (`docs/spec/levelup.md`, audits
+`research-levelup-r2.md` and `research-levelup-r2-fix.md` PASS) and
+`t3/research-hud-inputs` `fb24f5e` (`docs/spec/hud-live-producers.md`, audits
+`research-hud-inputs-r2.md` and `research-hud-inputs-r2-fix.md` PASS). Only
+rules those notes mark Observed or Executed are ported. The experience table
+and the skill trees are supplied by the caller; no retail word is embedded.
+Tests use authored tables (`i * 100`) and planted values only.
+
+## Experience and level steps
+
+`levelup_hud::give_experience` (`native/src/levelup_hud.cpp`) is
+`player_giveExp` `0x1d3150`, driven by `Ledger::give_xp`.
+
+- The award is added with 32-bit wrap. `table[80] - 1` is stored when that
+  ceiling is below the sum (hud-live-producers.md:86-92, levelup.md:28-31).
+- The loop runs while experience is not below `table[level]`; one below the
+  word does not level and the exact word does (levelup.md:47-50).
+- The skill word `+0xe8` gains 1, 2, 3, 4 or 5 by the level being left; old
+  levels 5, 6, 15, 16, 25, 26, 35, 36 and 79 give 1, 2, 2, 3, 3, 4, 4, 5 and 5
+  (levelup.md:33-34, 49-53).
+- The stat byte `+0xec` gains 3 as a byte; 254 becomes 1 (levelup.md:50-51).
+- `player_recalcStats` runs after the level increment. Current health and
+  mana become the new maxima only when health is above 0 (levelup.md:40-41,
+  60-61; hud-live-producers.md:108-111).
+- Acknowledged level `+0x58` is not written (levelup.md:42, 61-62).
+- Each step asks `hud_showMessage` for 360 frames (`0x168`) and force 0. The
+  ledger is the owning machine; with `g_localMenuOpen` set the zero force keeps
+  the previous message (hud-live-producers.md:120-122, 174-176). The ledger
+  records the calls, frames and force (`level_message_*` in the menu service).
+  The message text is not known, so nothing draws it yet.
+
+A pending level survives `Ledger::save` / `Ledger::load` unapplied: both level
+bytes, experience and both point balances come back unchanged
+(levelup.md:182-197; `observed_level_vectors` in `native/tests/menus_tests.cpp`).
+
+## Skill screen sender
+
+`levelup_hud::skill_screen` is the `skills_screen` `0x1d4660` sender.
+`Ledger::skill_screen` fills the record side (class `+0x50`, points `+0xe8`,
+acknowledged `+0x58`, maximum mana `+0xc4`, ranks); the caller supplies the
+tree row, cursor and pad.
+
+- A missing picture resource, a point outside the tree, an edge without the
+  confirm mask `0x40`, or the page-5 held-bit-2 latch leave without sending
+  (levelup.md:94-112).
+- Prerequisite `-1` passes; prerequisite 0 passes on skill 60 or 61; otherwise
+  the passive mask or skill id needs rank 1 (levelup.md:114-119).
+- The nine executed alternatives are embedded by class, row kind and ident,
+  including class 4 ident 95 from skill 18 and class 6 ident 90 from skill 86
+  (levelup.md:121-138). Class 1 ident 55 is not unlocked by passive `0x40`.
+- Rank 20 does not send; acknowledged `< need + rank` does not send
+  (levelup.md:140-143).
+- From there `player_recalcStats` runs even when the point word (`<= 0`) or the
+  float compare refuses (levelup.md:145-147, 160-164).
+- A passive row sends `(slot, 0, low 32 bits of the mask)`. A skill row sends
+  `(slot, 1, id)` only when the planted vtable+0x28 float is `<=` maximum mana
+  (`c.ole.s`; levelup.md:150-158).
+
+The ledger runs the screen's recalc, then applies the existing message-7
+handler `inventory_onSkillPoint`, which does not recalculate
+(levelup.md:166-178). Without the executable class formulas the recalc
+refuses. `Ledger::spend_skill` stays refused: the handler is not the sender.
+
+## HUD
+
+These producers already existed and now follow the notes:
+
+- Bars: `ui_layout::barClipRight` is `trunc(S + current / maximum * 99)`,
+  `S = origin + 15`, offline slot 0 `x = 27`. No clamp. A zero maximum
+  saturates (40/0 gives `0x7fffffff`, -5/0 gives `0x80000000`)
+  (hud-live-producers.md:40-55). The HUD view no longer drops zero-max or
+  negative-current bars.
+- Green bar: `hudBaseLayers` draws it from acknowledged level only, from
+  `T[ack-1]..T[ack]`, with both differences wrapped as 32-bit integers
+  (hud-live-producers.md:114-118).
+- Regen: `Tick::regen_health` / `Tick::regen_mana` (`native/src/player.cpp`)
+  are `0x1b3b90` / `0x1b3900`: `maximum * 0.0001`, the passive, the object
+  byte, the 17 equipment modifiers, the cap, class 0 without natural mana, and
+  the pending drain (hud-live-producers.md:60-82). Unchanged; cites added.
+- Message: `strings::Hud::show_message` / `tick_message` and
+  `hud_dynamic::messageFrame`. The alpha step now reads the timer as a signed
+  halfword like the tick does (hud-live-producers.md:181-193).
+
+`levelup_hud::reveal_world` is the automap reveal `0x16a4b0` for any world
+position: `cell = origin + world * 0.25 * 0x3d088888`, radius-8 disk, round
+half away from zero of `(1 - r/8) * 254`, high nibble only, greater nibble wins,
+bits 0..11 kept, loop bounded by the loaded size (hud-live-producers.md:146-165,
+`tools/ref_hud_inputs.py:77-132`). It is a native producer; the play view does
+not draw an automap yet.
+
+## Still refused
+
+- Per-skill virtual bodies: the vtable+0x28 bodies were not run, so a skill
+  row needs a planted float (levelup.md:155-158).
+- Inclusive cursor-box edges: only interior and outside points were executed
+  (levelup.md:101-103).
+- `save_load` header, camera, quest and memory-card steps: not run
+  (levelup.md:195-196).
+- VU1 tiles `0x403e20` and the `world+0x6c` atlas: Unknown
+  (hud-live-producers.md:163-164, 237).
+- Scripted map icons: `vars_get` / `script_runByName` gates Unknown
+  (hud-live-producers.md:164-165, 238).
+- Ammunition and thrown notices: starters only Observed
+  (hud-live-producers.md:141-144, 239).
+- Every other `hud_showMessage` caller: branch conditions Unknown
+  (hud-live-producers.md:196-212, 240).
+- The writer of acknowledged level `+0x58` inside `player_giveExp`'s callers:
+  Unknown here (hud-live-producers.md:111-112, 241). The client keeps the
+  existing inventory message 9 path (levelup.md:42-44).
+- Level bytes outside 0..80 and a negative bar maximum: not executed.

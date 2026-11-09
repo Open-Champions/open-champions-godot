@@ -2,6 +2,7 @@
 
 #include "champions/messages.hpp"
 #include "champions/inventory_icon_assoc.hpp"
+#include "champions/levelup_hud.hpp"
 
 #include <array>
 #include <cstdint>
@@ -255,6 +256,21 @@ public:
   // Message handlers remain separately callable for synthetic verification.
   void spend_stat(int stat);
   void spend_skill(int is_skill, std::uint32_t value);
+  // skills_screen sender for the owner's record. The record supplies class,
+  // points, acknowledged level, maximum mana and ranks; the caller supplies the
+  // tree row, cursor and pad. levelup.md:92-164. Cursor edges and virtual
+  // bodies stay refused.
+  levelup_hud::SkillDecision skill_screen(levelup_hud::SkillAsk ask);
+  // g_localMenuOpen 0x41b69d as the level-up message store sees it.
+  void set_local_menu_open(bool open);
+  // What player_giveExp's hud_showMessage calls left on this machine.
+  struct LevelNotice {
+    int calls = 0;
+    bool stored = false;
+    std::uint16_t frames = 0;
+    std::uint8_t force = 0;
+  };
+  const LevelNotice &level_notice() const { return level_notice_; }
   void grant_level();
   void set_xp_rules(XpTable table, std::array<ClassFormula, 8> formulas);
   int give_xp(std::int32_t amount);
@@ -329,6 +345,8 @@ private:
   int drag_column_ = 0, drag_row_ = 0;
   bool live_record_ = false;
   bool xp_ready_ = false;
+  bool local_menu_open_ = false;
+  LevelNotice level_notice_{};
   XpTable xp_table_{};
   std::array<ClassFormula, 8> formulas_{};
   std::array<std::int32_t, 4> effective_delta_{};

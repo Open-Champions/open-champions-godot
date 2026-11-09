@@ -146,7 +146,9 @@ std::array<int,4> hudOrigins(bool network,const std::array<bool,4>&local_slots,i
     return values;
 }
 int barClipRight(int origin,float current,float maximum) {
-    if (origin<0 || !std::isfinite(current) || !std::isfinite(maximum) || current<0 || maximum<=0)
+    // Zero maximum saturates; current above the maximum is not clamped.
+    // hud-live-producers.md:48-54. Non-finite values stay refused.
+    if (origin<0 || !std::isfinite(current) || !std::isfinite(maximum) || maximum<0)
         throw FormatError("outside supported bar domain");
     const auto fraction=ps2Divide(raw(current),raw(maximum));
     const auto scaled=ps2Multiply(fraction,raw(99.f));
@@ -164,8 +166,12 @@ std::vector<HudLayer> hudBaseLayers(int x,std::uint32_t tick,float health,float 
     };
     bar("red",46,health,health_max,health_flash?0x80ffffff:0x80808080);
     if (local) {
-        if (acknowledged_level>0) bar("green",56,float(checked(static_cast<long long>(experience)-experience_base)),
-                                       float(checked(static_cast<long long>(experience_next)-experience_base)),0x80808080);
+        if (acknowledged_level>0) {
+            // 32-bit wrap, then the same unclamped fill. hud-live-producers.md:113-118.
+            const auto base=static_cast<int>(static_cast<std::uint32_t>(experience)-static_cast<std::uint32_t>(experience_base));
+            const auto span=static_cast<int>(static_cast<std::uint32_t>(experience_next)-static_cast<std::uint32_t>(experience_base));
+            bar("green",56,float(base),float(span),0x80808080);
+        }
         bar("blue",63,mana,mana_max,cooldown>0?0x2aacacac:0x80acacac);
     }
     out.push_back({{local?"hud_statusbar00.tex":"hud_multi.tex",checked(static_cast<long long>(x)-4),36,true,clip(0,0,1000,1000)},0x80808080,6});
