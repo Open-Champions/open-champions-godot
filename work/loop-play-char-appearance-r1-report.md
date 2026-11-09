@@ -70,3 +70,12 @@ creature-animation `template_debug` configured fresh and linked, exit 0;
 `lipo -archs` reports `x86_64 arm64` for all five. Overall 655 s. Evidence
 `work/ca-r1/build-status.txt`, `configure.log`, `build.log`, `*-build.log`.
 `champions-char-appearance-tests`: 8,510 checks passed.
+
+### Gate 2: focused tests — PASS
+
+`ctest -R '^(char-appearance|campaign-fight.*|player-death-flow|ps2-class-restore|script-commands|real-data.*|animation-clock.*)$' -j 3`:
+**11/11 PASS**, 54 s, exit 0. `char-appearance` is new; `campaign-fight-adopt`,
+`campaign-fight-boundaries`, `player-death-flow`, `ps2-class-restore` and
+`script-commands` link the changed `reset_idle_anim`; the three animation-clock
+tests cover the `anim_start`/`anim_advance` the pose helpers call. Evidence
+`work/ca-r1/ctest-focused.out`.
