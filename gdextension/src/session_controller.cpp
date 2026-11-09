@@ -1187,6 +1187,9 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       level.box_available = bool(dialog.get("box_available", true));
       level.pvp_mode_b = bool(dialog.get("pvp_mode_b", false));
       level.previous_box = dialog_box_loaded_;
+      // research-hub-npcs@fbbfe65 docs/hub-services.md:196-245: hub2's dialog
+      // runs only through the researched table (hub_dialog.hpp).
+      level.require_hub_services = std::string(level_name.utf8().get_data()) == "hub2";
       const Dictionary files = dialog.get("dbin", Dictionary());
       const Array keys = files.keys();
       for (int64_t i = 0; i < keys.size(); ++i)
@@ -1594,10 +1597,7 @@ Dictionary ChampionsSessionController::dialog_use() {
     out["error"] = "Player_interact refused: a controlled player object with positive record health is required.";
   else if (scripts_ && scripts_->hud().help_open)
     out["error"] = "Player_interact refused: the help box owns use input.";
-  else if (scripts_ && fight_level_ == "hub2") {
-    dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
-    out["error"] = dialog_last_use_;
-  } else
+  else
     out["error"] = "Player_interact refused: ridden-vehicle state and the ordered live object-grid query are unavailable.";
   exit_use_refusal_ = String(out["error"]).utf8().get_data();
   return out;
@@ -1696,11 +1696,6 @@ Dictionary ChampionsSessionController::dialog_talk_to(int64_t index) {
   Dictionary out;
   out["ok"] = bool(scripts_ && scripts_->dialog_attached() && !scripts_->hud().help_open) && index >= 0 &&
               std::size_t(index) < scripts_->talkers().size();
-  if (scripts_ && fight_level_ == "hub2") {
-    out["ok"] = false;
-    dialog_last_use_ = "Refused: alternate-hub object-to-dialog choice effects are not audited.";
-    out["error"] = dialog_last_use_;
-  }
   if (out["ok"])
     dialog_talk_pending_ = index;
   return out;
@@ -2322,8 +2317,6 @@ Dictionary ChampionsSessionController::script_run_exit(int64_t index) {
   try {
     if (!scripts_ || index < 0 || std::size_t(index) >= script_level_objects_.size())
       throw std::runtime_error("No level exit at that index.");
-    if (fight_level_ == "hub2")
-      throw std::runtime_error("Alternate-hub trigger entry effects are not audited; no action was run.");
     if (scripts_->requires_complete_commands() && scripts_->faulted())
       throw std::runtime_error("Mission script stopped: " + scripts_->last_fault());
     if (scripts_->requires_complete_commands())

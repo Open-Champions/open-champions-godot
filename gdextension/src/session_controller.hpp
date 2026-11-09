@@ -285,6 +285,7 @@ public:
   godot::Dictionary dialog_use();
   godot::Array hub_service_targets() const;
   godot::Dictionary hub_service_use(int64_t index, bool card_busy);
+  godot::Dictionary hub_service_research() const;
   // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,
   // 0x40 confirm), taken at the next ready tick.
   godot::Dictionary dialog_press(int64_t pad_bits);

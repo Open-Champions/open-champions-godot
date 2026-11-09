@@ -6,28 +6,40 @@ using namespace godot;
 namespace rta = champions::simulation::rta;
 
 namespace {
-const char *service_refusal(const std::string &kind, bool alternate) {
+// research-hub-npcs@fbbfe65 docs/hub-services.md (HS). Both hubs follow the
+// same researched rules; only the Unknowns below stay refused.
+const char *service_refusal(const std::string &kind, bool) {
   if (kind == "Savepoint") return "";
   if (kind == "NPC")
-    return alternate ? "Alternate-hub dialog choice effects are not audited; no conversation was queued."
-                     : "Use E near the NPC for the existing Player conversation and quest route.";
+    return "Use E near the NPC: its conversation runs the researched hub/hub2 table (HS:160-245); this selector does not open dialogs.";
   if (kind == "PushTrigger")
-    return alternate ? "Alternate-hub trigger entry effects are not audited; no action was run."
-                     : "The level-action control opens native mission state; mission-map presentation and completion are not integrated.";
+    return "Use the level-action control: key and action run the original entries (HS:361-391). Physical use at radius 79/78 is refused: this research asserts the radius values only, not the use query that applies them.";
   if (kind == "Trigger")
-    return alternate ? "Alternate-hub walk-in effects are not audited; no action was run."
-                     : "The portal visual signal requires the separate walk-in path; this is not a use-button service.";
+    return "The walk-in rectangle runs from the 15-list walk path and dispatches trigger(ring, 0) once (HS:393-401); it is not a use-button service.";
   if (kind == "Portal" || kind == "JumpGate")
     return "Gate discovery, party-distance checks, travel and arrival are not integrated in this host.";
   if (kind == "apprings" || kind == "fpprings")
-    return "Effect-ring actions are not audited; no action was run.";
+    return "The ring is visual only (HS:403-409); its state requests are counted, and the rendered effect is Inferred.";
   return "This object has no audited hub use service.";
 }
+// Unknowns this research leaves open, refused with the evidence gap (HS:467-472,
+// HSF-3). None is assigned a value.
+const char *const UNKNOWNS[][2] = {
+    {"inn_gold", "L-INN imports checkPlayerGold, givePlayerGold and takePlayerGold; their use is Unknown (not traced, HS:351-353, HSF-3). Whether L-INN charges for the stay is Unknown; no fee or refund is applied."},
+    {"inn_route", "How a player reaches L-INN is Unknown: no hub object or hub script requests it (HS:354)."},
+    {"hub_restore_charge", "The hub-side mana restore charges nothing (Executed, HS:325). That is not a claim about L-INN."},
+    {"cutscene_caller", "The caller of hub public 0x34a4 is Unknown and the line list's link to that cutscene is Inferred (HS:66-69); the line list is never offered as a dialog."},
+    {"help_box_pause", "Whether the warning help box pauses the game is Inferred, not executed (HS:381-382); K.poll counts only what gamePaused reads."},
+    {"poll_copies", "What several queued K.poll copies do together is Unknown (HS:382-383)."},
+    {"store_stack_index", "The stack-read activateStore index is fixture-dependent (HS:152-153); only backup-dialog writers use it and they are not wired."},
+    {"dedupe_bag_cell", "Which bag cell removePlayerItem deletes is Unknown (HS:470)."},
+};
 }
 
 void ChampionsSessionController::bind_hub_methods() {
   ClassDB::bind_method(D_METHOD("hub_service_targets"), &ChampionsSessionController::hub_service_targets);
   ClassDB::bind_method(D_METHOD("hub_service_use", "index", "card_busy"), &ChampionsSessionController::hub_service_use);
+  ClassDB::bind_method(D_METHOD("hub_service_research"), &ChampionsSessionController::hub_service_research);
 }
 
 Array ChampionsSessionController::hub_service_targets() const {
@@ -46,6 +58,15 @@ Array ChampionsSessionController::hub_service_targets() const {
     item["direct_use"] = record.cls == "Savepoint";
     item["engagement"] = "Host direct-use adapter; original proximity dispatch is not implemented.";
     item["refusal"] = service_refusal(record.cls, fight_level_ == "hub2");
+    if (record.cls == "PushTrigger") {
+      // HS:363-366, Observed and asserted: nethostonly=1, radius 79 / 78.
+      const auto hub = fight_level_ == "hub" ? rta::hub_dialog::Hub::Hub : rta::hub_dialog::Hub::Hub2;
+      const auto radius = record.prop("radius"), host = record.prop("nethostonly");
+      item["radius"] = String::utf8(radius.value_or("").c_str());
+      item["nethostonly"] = String::utf8(host.value_or("").c_str());
+      item["record_matches_research"] = radius == std::to_string(rta::hub_dialog::push_radius(hub)) &&
+          host == std::to_string(rta::hub_dialog::NET_HOST_ONLY);
+    }
     targets.push_back(item);
   }
   return targets;
@@ -86,4 +107,44 @@ Dictionary ChampionsSessionController::hub_service_use(int64_t index, bool card_
     result["error"] = String::utf8(error.what());
   }
   return result;
+}
+
+Dictionary ChampionsSessionController::hub_service_research() const {
+  Dictionary out;
+  out["ok"] = false;
+  if (!scripts_ || (fight_level_ != "hub" && fight_level_ != "hub2")) {
+    out["error"] = "Hub research facts need an attached hub or hub2 script.";
+    return out;
+  }
+  const auto facts = scripts_->hub_research();
+  out["ok"] = true;
+  out["hub"] = String::utf8(fight_level_.c_str());
+  // HS:329-341: tables of 10 and 13 cells; the loops visit 9 and 12.
+  out["dedupe_tables_match"] = facts.dedupe.has_value();
+  out["shard_table_cells"] = int64_t(facts.dedupe ? facts.dedupe->shard_cells : 0);
+  out["blood_table_cells"] = int64_t(facts.dedupe ? facts.dedupe->blood_cells : 0);
+  out["shard_cells_visited"] = int64_t(rta::hub_dialog::SHARD_LIST);
+  out["blood_cells_visited"] = int64_t(rta::hub_dialog::BLOOD_LIST);
+  out["dialog_files"] = int64_t(facts.dialog_files);
+  out["backup_dialogs"] = int64_t(facts.backups);
+  out["cutscene_line_lists"] = int64_t(facts.cutscene_line_lists);
+  out["cutscene_stem_requested"] = facts.cutscene_stem_requested;
+  out["cutscene_playable"] = false;
+  const auto *bound = scripts_->hub_services();
+  out["dialog_table_bound"] = bound != nullptr;
+  out["dialog_table"] = bound ? String(bound->hub == rta::hub_dialog::Hub::Hub ? "hub" : "hub2") : String();
+  out["dialog_table_mismatch"] = String::utf8(scripts_->hub_services_mismatch().c_str());
+  out["dialog_table_start"] = int64_t(scripts_->hub_services_start());
+  const auto &counts = scripts_->dialog_counts();
+  out["dialog_table_opens"] = int64_t(counts.hub_service_opens);
+  out["dialog_table_actions"] = int64_t(counts.hub_service_actions);
+  Dictionary fenced;
+  for (const auto &[why, n] : counts.hub_service_refused) fenced[String::utf8(why.c_str())] = int64_t(n);
+  out["dialog_action_refusals"] = fenced;
+  out["warn_poll_runs"] = int64_t(rta::hub_dialog::WARN_POLL_RUNS);
+  out["warn_poll_counts"] = "Script-task runs (on_ready_tick), not frames (HSF-2).";
+  Dictionary unknowns;
+  for (const auto &row : UNKNOWNS) unknowns[row[0]] = row[1];
+  out["unknowns"] = unknowns;
+  return out;
 }

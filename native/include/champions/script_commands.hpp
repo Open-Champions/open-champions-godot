@@ -7,6 +7,7 @@
 #include "champions/arena_executable.hpp"
 #include "champions/dialog.hpp"
 #include "champions/hub_offers.hpp"
+#include "champions/hub_dialog.hpp"
 #include "champions/ui_text_gaps.hpp"
 #include "champions/dialog_gaps.hpp"
 #include "champions/fx_simulation.hpp"
@@ -181,6 +182,10 @@ struct DialogLevel {
   bool box_available = true;
   bool pvp_mode_b = false;
   bool previous_box = false;
+  // research-hub-npcs@fbbfe65 docs/hub-services.md: hub2's live dialog is
+  // admitted only through the researched table (hub_dialog.hpp). Set for hub2;
+  // a dialog that does not match it there refuses instead of running unbounded.
+  bool require_hub_services = false;
 };
 struct DialogServices {
   // text_lookup. Required: a conversation is refused without it.
@@ -242,6 +247,10 @@ struct DialogCounts {
   // talker records (dialogScript) the object factory makes no object for.
   std::uint64_t camera_steps = 0, camera_views = 0, no_object_talker_records = 0;
   std::map<std::string, std::uint64_t> mouth; // dialog_startTalkAnim paths
+  // Researched hub/hub2 table admission (hub_dialog.hpp): opens bound to it,
+  // actions run under its five-native fence, and fence refusals by reason.
+  std::uint64_t hub_service_opens = 0, hub_service_actions = 0;
+  std::map<std::string, std::uint64_t> hub_service_refused;
 };
 
 // One level script. Not copied: its command closures capture this.
@@ -517,6 +526,20 @@ public:
   bool dialog_attached() const { return dialog_attached_; }
   bool bounded_hub_dialog() const { return bool(hub_offers_); }
   int bounded_hub_start() const { return hub_offer_start_; }
+  // The researched hub/hub2 table bound at the last open (nullptr if none),
+  // its start node, and why the last open did not bind (empty when it did).
+  const hub_dialog::Binding *hub_services() const { return hub_services_ ? &*hub_services_ : nullptr; }
+  int hub_services_start() const { return hub_services_start_; }
+  const std::string &hub_services_mismatch() const { return hub_services_mismatch_; }
+  // Static facts research-hub-npcs@fbbfe65 Observed in a hub script and lump,
+  // read from this level (docs/hub-services.md:64-72, 329-341). Nothing here
+  // runs a cutscene or a duplicate check; it reports what the script holds.
+  struct HubResearch {
+    std::optional<hub_dialog::DedupeTables> dedupe;
+    int dialog_files = 0, cutscene_line_lists = 0, backups = 0;
+    bool cutscene_stem_requested = false;
+  };
+  HubResearch hub_research() const;
   const dialog::Dialog &dialog() const { return dialog_; }
   const DialogCounts &dialog_counts() const { return dialog_counts_; }
   // Objects this level lets the player talk to: a documented creature class
@@ -718,6 +741,13 @@ private:
   int hub_offer_start_ = -1;
   int hub_action_mission_ = 0;
   bool hub_action_running_ = false;
+  std::optional<hub_dialog::Binding> hub_services_;
+  int hub_services_start_ = -1;
+  std::string hub_services_mismatch_;
+  // The researched effect of the dialog action now running, and what it has
+  // used so far (each native at most once, HS:120-125).
+  std::optional<hub_dialog::Effect> hub_effect_;
+  struct EffectUse { int avail = 0, quest = 0, swoop = 0, store = 0, var = 0; } hub_effect_used_;
   std::optional<dialog_gaps::View> camera_view_;
   std::optional<DialogCameraPose> camera_pose_;
   std::uint32_t box_word_ = 0;

@@ -105,6 +105,7 @@ inline void confirm(sc::Host &host,int choice=0) {
   host.dialog_tick(in);
 }
 inline void open(sc::Host &host) { host.use(0,{0x41f00000u,0,0}); }
+namespace table { inline void run(Check check,std::string &where); }
 inline void run(Check check,std::string &where) {
   where="bounded hub offers";
   Fixture fixture;
@@ -473,5 +474,295 @@ inline void run(Check check,std::string &where) {
     check(host.dialog().node==3 && host.variables().quest_vars().size()==1 &&
           host.variables().quest_vars()[0].second==0,"hub: an absent variable read creates zero");
   }
+  table::run(check,where);
 }
+
+// ---- Researched hub / hub2 table (research-hub-npcs@fbbfe65 docs/hub-services.md) ----
+// Authored AMX with the researched public offsets and native call shapes only.
+// Conditions return 0: the production binding must answer from live state. No
+// shipped bytes, names, text keys or dialogue.
+namespace hd = champions::simulation::rta::hub_dialog;
+namespace table {
+enum N { START_DIALOG, AVAIL, STORE, SWOOP, QUEST, SETV, GETV, CALL_SCRIPT, GOLD, DEFER, PAUSED, MENU, ENTRANCE };
+inline const std::vector<std::string> natives{"startDialog","setMissionAvailable","activateStore","changeSwoop",
+  "addQuest","setv","getv","callScript","givePlayerGold","addDeferedCall","gamePaused","activateMissionMenu","setEntrance"};
+// Unpacked strings: four bytes per character, so slots are 0x40 apart.
+constexpr a::Cell S_STARTED=0x800, S_INTRO=0x500, S_DEMO=0x540, S_QUEST=0x580, S_SCAN=0x5C0, S_POLL=0x600,
+                  S_ENT=0x640, S_SHARD=0x680, S_BLOOD=0x6C0, RUNS=0x400, UNPAUSED=0x404;
+using L=std::vector<a::AsmLine>;
+inline a::AsmInstruction I(const std::string &m,std::vector<a::AsmValue> o={}) { return {m,std::move(o),{},{}}; }
+inline void call(L &l,int native,const std::vector<a::Cell> &args) {
+  for(auto it=args.rbegin();it!=args.rend();++it) l.push_back(I("PUSH.C",{*it}));
+  l.push_back(I("PUSH.C",{a::Cell(4*args.size())}));
+  l.push_back(I("SYSREQ.C",{a::Cell(native)}));
+  l.push_back(I("STACK",{a::Cell(4*(args.size()+1))}));
+}
+struct Options { bool gold_first=false; int wrong_avail=0; };
+struct Fixture {
+  Script script; sc::DialogLevel level; World world; std::vector<std::uint8_t> objects;
+  hd::Hub hub;
+  Fixture(hd::Hub h,Options o={}):hub(h) {
+    std::vector<a::Cell> code(0x5800/4,a::Cell(a::opcode_number("ZERO.pri")));
+    a::ImageOptions options; options.data.resize(0x2000); options.natives=natives;
+    std::set<int> used;
+    // Assembled at offset 0, then placed: code-operand jumps are moved by `at`.
+    auto put=[&](int at,const std::string &name,L lines) {
+      check_free(used,at);
+      L body{I("PROC")}; body.insert(body.end(),lines.begin(),lines.end()); body.push_back(I("RETN"));
+      auto assembly=a::assemble(body);
+      std::size_t cell=0;
+      for(const auto &line:body) {
+        const auto *ins=std::get_if<a::AsmInstruction>(&line);
+        if(!ins) continue;
+        if(ins->mnemonic=="JNZ"||ins->mnemonic=="JZER"||ins->mnemonic=="JUMP") assembly.cells[cell+1]+=at;
+        cell+=1+ins->operands.size();
+      }
+      std::copy(assembly.cells.begin(),assembly.cells.end(),code.begin()+at/4);
+      options.publics.emplace_back(name,at);
+    };
+    const auto &rows=h==hd::Hub::Hub ? std::vector<hd::NodeRow>(hd::HUB_NODES.begin(),hd::HUB_NODES.end())
+                                     : std::vector<hd::NodeRow>(hd::HUB2_NODES.begin(),hd::HUB2_NODES.end());
+    const auto &acts=h==hd::Hub::Hub ? std::vector<hd::ActionRow>(hd::HUB_ACTIONS.begin(),hd::HUB_ACTIONS.end())
+                                     : std::vector<hd::ActionRow>(hd::HUB2_ACTIONS.begin(),hd::HUB2_ACTIONS.end());
+    const int var_cond=h==hd::Hub::Hub ? 0x498 : 0x28B4;
+    std::set<int> conds;
+    for(const auto &r:rows) { conds.insert(r.cond); for(int j=0;j<r.count;++j) if(r.choices[j].cond!=hd::NONE) conds.insert(r.choices[j].cond); }
+    for(int at:conds) {
+      L l;
+      if(at==rows[0].cond) call(l,CALL_SCRIPT,{S_SCAN});
+      if(at==var_cond) call(l,GETV,{h==hd::Hub::Hub ? S_DEMO : S_INTRO});
+      l.push_back(I("CONST.pri",{0}));
+      put(at,"c"+std::to_string(at),l);
+    }
+    for(const auto &act:acts) {
+      L l; const auto &e=act.effect;
+      if(o.gold_first && e.avail==2) call(l,GOLD,{0,5});
+      if(e.avail) call(l,AVAIL,{o.wrong_avail && e.avail==2 ? o.wrong_avail : e.avail,1});
+      if(e.quest) call(l,QUEST,{S_QUEST,S_QUEST});
+      if(e.store) { call(l,SWOOP,{0}); call(l,STORE,{0}); }
+      if(e.var!=hd::Var::None) call(l,SETV,{e.var==hd::Var::Demo ? S_DEMO : S_INTRO,1});
+      put(act.offset,"x"+std::to_string(act.offset),l);
+    }
+    L scan; for(int m=0;m<12;++m) call(scan,GETV,{S_STARTED+0x40*m});
+    put(0x4A00,"scan",scan);
+    put(0x4C00,"talk",{I("PUSH.C",{0}),I("PUSH.C",{0}),I("PUSH.C",{400}),I("PUSH.C",{12}),
+                       I("SYSREQ.C",{START_DIALOG}),I("STACK",{16})});
+    // start queues two checks with bounds 9 and 12 (HS:329-337 shape).
+    L start; call(start,DEFER,{S_SHARD}); call(start,DEFER,{S_BLOOD}); put(0x4D00,"start",start);
+    put(0x4E00,"shard",{I("CONST.pri",{0}),I("BOUNDS",{9}),I("BOUNDS",{9})});
+    put(0x4F00,"blood",{I("CONST.pri",{0}),I("BOUNDS",{12}),I("BOUNDS",{12})});
+    // K.help / K.poll shape (HS:373-383): help queues poll; poll counts its runs,
+    // counts unpaused ones, calls activateMissionMenu on the 6th and re-queues.
+    L help; call(help,DEFER,{S_POLL}); put(0x5000,"help",help);
+    L poll{I("LOAD.pri",{RUNS}),I("ADD.C",{1}),I("STOR.pri",{RUNS})};
+    call(poll,PAUSED,{});
+    poll.push_back(I("JNZ",{std::string("requeue")}));
+    poll.push_back(I("LOAD.pri",{UNPAUSED})); poll.push_back(I("ADD.C",{1})); poll.push_back(I("STOR.pri",{UNPAUSED}));
+    poll.push_back(I("EQ.C.pri",{hd::WARN_POLL_RUNS}));
+    poll.push_back(I("JZER",{std::string("requeue")}));
+    call(poll,MENU,{});
+    poll.push_back(a::Label{"requeue:"});
+    call(poll,DEFER,{S_POLL});
+    put(0x5080,"poll",poll);
+    // The no-warning use: entrance, then the menu (HS:373).
+    L use; call(use,ENTRANCE,{S_ENT}); call(use,MENU,{}); put(0x5200,"use",use);
+    script.image=a::build_image(code,options);
+    script.strings={{400,"npc"},{S_QUEST,"q"},{S_SCAN,"scan"},{S_POLL,"poll"},{S_ENT,"ent"},
+                    {S_SHARD,"shard"},{S_BLOOD,"blood"},{S_INTRO,"vi"},{S_DEMO,"vd"}};
+    for(int m=0;m<12;++m) script.strings.emplace_back(S_STARTED+0x40*m,"s"+std::to_string(m+1));
+    std::vector<dl::Node> nodes(rows.size());
+    for(std::size_t i=0;i<rows.size();++i) {
+      const auto &r=rows[i];
+      nodes[i].condition="c"+std::to_string(r.cond); nodes[i].text="body";
+      for(int j=0;j<r.count;++j) {
+        const auto &c=r.choices[std::size_t(j)];
+        const auto role=c.next!=-1 ? "m" : (c.action!=hd::NONE &&
+            std::any_of(acts.begin(),acts.end(),[&](const auto &x){return x.offset==c.action && x.effect.store;})) ? "s" : "e";
+        nodes[i].choices.push_back({role,c.cond==hd::NONE ? "" : "c"+std::to_string(c.cond),
+                                    c.action==hd::NONE ? "" : "x"+std::to_string(c.action),c.next});
+      }
+      nodes[i].raw_choices=r.count;
+    }
+    level.level="synthetic";
+    level.require_hub_services=h==hd::Hub::Hub2;
+    level.files["npc.dbin"]=dl::build_dbin(nodes);
+    dl::Node line; line.text="body";
+    level.files["cut.dbin"]=dl::build_dbin({line});
+    for(const char *key:{"nm","body","m","e","s","Affirmation","dialogMore"}) world.texts[key]=wide("authored");
+    objects=objects_ob({{"NPC",0,{}, {"name=npc","showName=nm","dialogScript=talk","dialogOffset=0,0,0,0"}}});
+  }
+  static void check_free(std::set<int> &used,int at) {
+    if(!used.insert(at).second) throw std::logic_error("fixture public offset reused");
+  }
+  void load_into(sc::Host &host,Check check) const {
+    check(load(host,script,objects),"hub table: authored host loads");
+    host.attach_dialog(level,world.services());
+    std::vector<q::MissionRow> rows(13);
+    for(int i=0;i<13;++i) rows[std::size_t(i)].story="authored-"+std::to_string(i);
+    host.campaign().set_rows(rows);
+    host.campaign().set_num_players(1);
+  }
+};
+inline void set_mission(sc::Host &host,int n,int raw) {
+  host.variables().memory.byte(host.variables().mission_byte(0,1,n),std::uint8_t(raw));
+}
+inline int mission(sc::Host &host,int n) { return host.variables().memory.read(host.variables().mission_byte(0,1,n)); }
+
+inline void run(Check check,std::string &where) {
+  where="researched hub tables";
+  const Fixture h2(hd::Hub::Hub2), h1(hd::Hub::Hub);
+  // Field-by-field binding; the narrower legacy table does not bind.
+  {
+    sc::Host host; h2.load_into(host,check);
+    const auto &bytes=h2.level.files.at("npc.dbin");
+    const auto nodes=dl::parse_dbin(bytes.data(),bytes.size());
+    std::string why;
+    const auto b=hd::Binding::match(*host.machine(),nodes,&why);
+    check(b && b->hub==hd::Hub::Hub2 && why.empty(),"hub table: hub2 26-node table binds");
+    check(b && b->started[0]=="s1" && b->started[11]=="s12" && b->intro=="vi",
+          "hub table: started and intro variables resolve from literal getv sites");
+    check(b && b->actions.size()==19,"hub table: hub2 binds its 19 actions");
+    hub_offer_host_tests::Fixture old;
+    const auto &ob=old.level.files.at("npc.dbin");
+    sc::Host oh; old.load_into(oh,check);
+    check(!hd::Binding::match(*oh.machine(),dl::parse_dbin(ob.data(),ob.size())),
+          "hub table: the legacy partial fixture does not bind the researched table");
+    sc::Host hh; h1.load_into(hh,check);
+    const auto &hb=h1.level.files.at("npc.dbin");
+    const auto b1=hd::Binding::match(*hh.machine(),dl::parse_dbin(hb.data(),hb.size()));
+    check(b1 && b1->hub==hd::Hub::Hub && b1->actions.size()==22 && b1->demo=="vd",
+          "hub table: hub 31-node table binds its 22 actions");
+  }
+  // HS:298, hub2 intro: C(1) shows only the second MORE; it sets the intro
+  // variable and continues to the mission-2 offer, whose END sets A(2).
+  {
+    sc::Host host; h2.load_into(host,check);
+    set_mission(host,1,3);
+    const auto gold=host.variables().memory.word(host.variables().player_record(0)+0xe4);
+    open(host);
+    check(host.dialog().node==1 && host.hub_services() && host.hub_services_start()==1,
+          "hub table: hub2 intro opens H2.N01");
+    check(host.dialog().visible.size()==1 && host.dialog().visible[0]==1,"hub table: only the C(1) choice is visible");
+    confirm(host);
+    check(host.dialog().node==3 && host.variables().quest_get("vi")==1,"hub table: intro set, mission-2 offer shown");
+    confirm(host,0);
+    check((mission(host,2)&1)==1 && !host.dialog_stalled(),"hub table: END on the offer sets A(2)");
+    check(host.variables().memory.word(host.variables().player_record(0)+0xe4)==gold,"hub table: no gold write");
+    check(host.dialog_counts().hub_service_actions==2 && host.dialog_counts().hub_service_refused.empty(),
+          "hub table: two researched actions, no fence refusal");
+  }
+  // !C(1): the first MORE leads to H2.N02 (store/close).
+  {
+    sc::Host host; h2.load_into(host,check);
+    open(host);
+    check(host.dialog().node==1 && host.dialog().visible.size()==1 && host.dialog().visible[0]==0,
+          "hub table: without C(1) only the first MORE is visible");
+    confirm(host);
+    check(host.dialog().node==2 && (mission(host,2)&1)==0,"hub table: N02 reached with no mission write");
+  }
+  // SHOP on an offer: A(3), quest none, swoop 0, store deferred until close (HS:247-268).
+  {
+    sc::Host host; h2.load_into(host,check);
+    set_mission(host,1,3); set_mission(host,2,3); host.variables().quest_set("vi",1);
+    host.variables().memory.word(0x4fdce4,7);
+    open(host);
+    check(host.dialog().node==5,"hub table: mission-3 offer opens H2.N05");
+    confirm(host,1);
+    check((mission(host,3)&1)==1,"hub table: SHOP sets A(3)");
+    check(host.dialog_counts().shop_requests==0 && host.dialog_counts().deferred_shops==0 &&
+          host.dialog().store_pending==1 && host.variables().memory.word(0x4fdce4)==0,
+          "hub table: inside the dialog the store is only marked pending and the swoop is 0");
+    ready(host); run_to_close(host);
+    check(!host.dialog().is_open() && host.dialog_counts().deferred_shops==1 &&
+          host.dialog_counts().shop_requests==0,"hub table: the store opens at dialog end");
+  }
+  // Every reminder: A(k), not started -> PENDING(k) node, close only.
+  for(int k:{2,3,4,5,6,7,10,11,12}) {
+    sc::Host host; h2.load_into(host,check);
+    host.variables().quest_set("vi",1);
+    for(int m=1;m<k;++m) set_mission(host,m,3);
+    set_mission(host,k,1);
+    open(host);
+    int pending=-1;
+    for(std::size_t i=0;i<hd::HUB2_NODES.size();++i)
+      if(hd::HUB2_NODES[i].kind==hd::Kind::Pending && hd::HUB2_NODES[i].mission==k) { pending=int(i); break; }
+    check(host.dialog().node==pending,"hub table: hub2 pending mission opens its reminder");
+    host.variables().quest_set("s"+std::to_string(k),1);
+    run_to_close(host);
+    open(host);
+    check(host.dialog().node==0,"hub table: a started incomplete mission opens node 0");
+  }
+  // Hub: mission 10 offer is the two-node MORE chain then END/SHOP with a quest.
+  {
+    sc::Host host; h1.load_into(host,check);
+    for(int m=1;m<=9;++m) set_mission(host,m,3);
+    const auto quests=host.campaign().record(0).quest_count;
+    open(host);
+    check(host.dialog().node==23,"hub table: hub mission-10 offer opens H1.N23");
+    confirm(host);
+    check(host.dialog().node==24 && (mission(host,10)&1)==0,"hub table: MORE writes nothing");
+    confirm(host,0);
+    check((mission(host,10)&1)==1 && host.campaign().record(0).quest_count==quests+1,"hub table: END sets A(10) and adds a quest");
+  }
+  // The five-native fence (HS:112-142): a gold native, or a different mission,
+  // stops the action before it writes.
+  for(int variant=0;variant<2;++variant) {
+    Options o; if(variant==0) o.gold_first=true; else o.wrong_avail=5;
+    Fixture f(hd::Hub::Hub2,o);
+    sc::Host host; f.load_into(host,check);
+    set_mission(host,1,3); host.variables().quest_set("vi",1);
+    open(host);
+    check(host.dialog().node==3,"hub table: fence fixture opens the mission-2 offer");
+    confirm(host,0);
+    check(host.dialog_stalled() && (mission(host,2)&1)==0 && (mission(host,5)&1)==0,
+          "hub table: the fence refuses before any write");
+    check(host.dialog_counts().hub_service_refused.size()==1,"hub table: the fence records one reason");
+  }
+  // hub2 must bind the table; a dialog that differs refuses (no VM fallback).
+  {
+    auto f=h2;
+    const auto &bytes=f.level.files.at("npc.dbin");
+    auto nodes=dl::parse_dbin(bytes.data(),bytes.size());
+    std::swap(nodes[3].choices[0].action,nodes[3].choices[1].action);
+    f.level.files["npc.dbin"]=dl::build_dbin(nodes);
+    sc::Host host; f.load_into(host,check);
+    set_mission(host,1,3); host.variables().quest_set("vi",1);
+    open(host);
+    check(!host.dialog().is_open() && !host.hub_services() && !host.hub_services_mismatch().empty(),
+          "hub table: a hub2 dialog that differs from the table refuses");
+  }
+  // Static facts: tables of 10 and 13; one cutscene line list (HS:64-69, 329-337).
+  {
+    sc::Host host; h1.load_into(host,check);
+    const auto facts=host.hub_research();
+    check(facts.dedupe && facts.dedupe->shard_cells==hd::SHARD_TABLE && facts.dedupe->blood_cells==hd::BLOOD_TABLE,
+          "hub table: deferred checks have 10- and 13-cell bounds");
+    check(facts.cutscene_line_lists==1 && facts.dialog_files==2,"hub table: the one-node line list is classified");
+    dl::Node with; with.text="body"; with.choices={{"e","","",-1}}; with.raw_choices=1;
+    check(!hd::cutscene_line_list({with}) && hd::cutscene_line_list({dl::Node{}}),"hub table: line-list shape rule");
+  }
+  // K.poll (HS:374-383, HSF-2): count Script-task runs. The 6th unpaused run
+  // calls the menu; paused runs are not counted; no entrance write; a dialog
+  // or recall blocks the menu but not the count.
+  for(int pattern=0;pattern<3;++pattern) {
+    sc::Host host; h2.load_into(host,check);
+    host.variables().memory.string(0x4f8468,"prior");
+    if(pattern==2) host.variables().memory.byte(0x41b51d,1);
+    host.run("help");
+    int opened_at=-1;
+    for(int tick=0;tick<40 && opened_at<0;++tick) {
+      const auto runs=a::s32(host.machine()->cell(RUNS));
+      host.variables().memory.word(0x41b4f4,pattern==1 && runs+1>=2 && runs+1<=4 ? 1u : 0u);
+      host.on_ready_tick();
+      if(host.campaign().menu_open()) opened_at=a::s32(host.machine()->cell(RUNS));
+      if(pattern==2 && a::s32(host.machine()->cell(UNPAUSED))>=hd::WARN_POLL_RUNS) break;
+    }
+    if(pattern==0) check(opened_at==6,"hub table: menu on the 6th K.poll run");
+    if(pattern==1) check(opened_at==9,"hub table: runs 2-4 paused move the menu to run 9");
+    if(pattern==2) check(opened_at<0 && a::s32(host.machine()->cell(UNPAUSED))==hd::WARN_POLL_RUNS,
+                         "hub table: recall blocks the 6th-run menu");
+    check(host.variables().memory.cstr(0x4f8468)=="prior","hub table: K.poll writes no entrance");
+  }
+}
+} // namespace table
 } // namespace hub_offer_host_tests

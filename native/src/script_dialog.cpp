@@ -70,6 +70,10 @@ std::string head(const std::exception &e) {
 
 void Host::attach_dialog(DialogLevel level, DialogServices services) {
   hub_offers_.reset();
+  hub_services_.reset();
+  hub_services_start_ = -1;
+  hub_services_mismatch_.clear();
+  hub_effect_.reset();
   hub_opening_ = false;
   hub_offer_start_ = -1;
   dialog_level_ = std::move(level);
@@ -291,9 +295,32 @@ std::int32_t Host::dialog_run_script(const std::string &name, bool) {
   dialog_counts_.scripts_run += 1;
   if (!machine_)
     return dialog::MISSING_ENTRY;
+  // research-hub-npcs@fbbfe65 docs/hub-services.md:85-97,160-245: the whole
+  // hub / hub2 table. Node and choice conditions answer from the researched
+  // predicates (Executed equal to the original, HS:85-88); an action runs its
+  // original entry only as the current visible choice, under the five-native
+  // fence in command_map (HS:112-142). Suppressors as the narrower binding.
+  std::optional<hub_dialog::Effect> service_effect;
+  if (hub_services_ && (hub_opening_ || dialog_.is_open())) {
+    if (dialog_host_.mission_menu)
+      throw dialog::Refused("hub offer admission suppressed");
+    if (const auto answer = hub_services_->condition(name, *variables_))
+      return *answer ? 1 : 0;
+    if (!dialog_.node || dialog_.cursor<0 || std::size_t(dialog_.cursor)>=dialog_.visible.size())
+      throw dialog::Refused("hub action outside an admitted choice");
+    const auto &choice=dialog_.nodes.at(std::size_t(*dialog_.node)).choices.at(
+        std::size_t(dialog_.visible.at(std::size_t(dialog_.cursor))));
+    if (choice.action!=name || dialog_host_.recall || dialog_host_.mission_menu)
+      throw dialog::Refused("hub offer admission suppressed");
+    const auto effect=hub_services_->actions.find(name);
+    if (effect==hub_services_->actions.end())
+      throw dialog::Refused("hub action has no researched effect");
+    service_effect=effect->second;
+    dialog_counts_.hub_service_actions += 1;
+  }
   // Only the structurally bound hub dialog uses this bounded implementation.
   // Generic dialogs keep their script VM; no identity is inferred from a name.
-  if (hub_offers_ && (hub_opening_ || dialog_.is_open())) {
+  if (!service_effect && hub_offers_ && (hub_opening_ || dialog_.is_open())) {
     // A registered run task blocks predicate dispatch and the availability
     // writer (mission-unlocks.md:120-125, 226-231). Opening returns before
     // pick_start; a choice already on screen is suppressed here.
@@ -321,16 +348,22 @@ std::int32_t Host::dialog_run_script(const std::string &name, bool) {
   }
   struct ActionScope {
     Host &host; bool previous, complete;
-    explicit ActionScope(Host &h):host(h),previous(h.hub_action_running_),complete(h.complete_commands_) {
-      host.hub_action_running_=bool(h.hub_offers_ && h.dialog_.is_open());
+    std::optional<hub_dialog::Effect> effect;
+    EffectUse used;
+    ActionScope(Host &h, const std::optional<hub_dialog::Effect> &e)
+        :host(h),previous(h.hub_action_running_),complete(h.complete_commands_),
+         effect(h.hub_effect_),used(h.hub_effect_used_) {
+      host.hub_action_running_=bool(!e && h.hub_offers_ && h.dialog_.is_open());
+      if (e) { host.hub_effect_=e; host.hub_effect_used_=EffectUse{}; }
       // An ignored unknown service must not become a successful offer fallback.
-      if (host.hub_action_running_) host.complete_commands_=true;
+      if (host.hub_action_running_ || e) host.complete_commands_=true;
     }
     ~ActionScope(){
       host.hub_action_running_=previous; host.hub_action_mission_=0;
       host.complete_commands_=complete;
+      host.hub_effect_=effect; host.hub_effect_used_=used;
     }
-  } scope(*this);
+  } scope(*this, service_effect);
   dialog_push();
   machine_->budget = session::SCRIPT_BUDGET;
   amx::Address result = -1;
@@ -439,7 +472,21 @@ void Host::dialog_message(const dialog::Bytes &msg) {
       // The draw hands word 0x4fe538 straight to ui_drawSprite, which reads the
       // texture's size first: with the word 0 that is address 0 (section 4).
       dialog_gaps::box_sprite_reads(box_word_);
-      hub_offers_ = machine_ ? hub_offers::Binding::match(*machine_, file->second) : std::nullopt;
+      hub_services_mismatch_.clear();
+      hub_services_ = machine_ ? hub_dialog::Binding::match(*machine_, file->second, &hub_services_mismatch_)
+                               : std::nullopt;
+      hub_services_start_ = -1;
+      if (hub_services_) {
+        hub_offers_.reset();
+        dialog_counts_.hub_service_opens += 1;
+      } else {
+        if (dialog_level_.require_hub_services)
+          throw dialog::Refused("hub2 live dialog differs from research-hub-npcs fbbfe65 tables: " +
+                                hub_services_mismatch_);
+        hub_offers_ = machine_ ? hub_offers::Binding::match(*machine_, file->second) : std::nullopt;
+      }
+      if (hub_services_ && !dialog_host_.recall && !dialog_host_.mission_menu)
+        hub_services_start_ = hub_services_->start(*variables_);
       hub_offer_start_ = -1;
       // Admission must precede predicate dispatch, including its create-zero reads.
       // on_open returns before pick_start while the run task is registered
@@ -532,6 +579,41 @@ std::vector<std::uint32_t> Host::talkers() const {
   for (const auto address : interactables())
     if (prop(variables_->obj_at(address)->props, "dialogScript"))
       out.push_back(address);
+  return out;
+}
+
+Host::HubResearch Host::hub_research() const {
+  HubResearch out;
+  if (!machine_)
+    return out;
+  out.dedupe = hub_dialog::dedupe_tables(*machine_);
+  std::vector<std::string> requested;
+  try {
+    const hub_dialog::Static code(*machine_);
+    if (code.by_offset.count(hub_dialog::CUTSCENE_ENTRY))
+      requested = code.literals(*machine_, hub_dialog::CUTSCENE_ENTRY, "cutScene");
+  } catch (const std::exception &) {
+    requested.clear();
+  }
+  for (const auto &[name, bytes] : dialog_level_.files) {
+    std::vector<dialog::Node> nodes;
+    try {
+      nodes = dialog::parse_dbin(bytes.data(), bytes.size());
+    } catch (const std::exception &) {
+      continue;
+    }
+    out.dialog_files += 1;
+    if (hub_dialog::cutscene_line_list(nodes)) {
+      out.cutscene_line_lists += 1;
+      const auto stem = lower(name.size() > 5 ? name.substr(0, name.size() - 5) : name);
+      out.cutscene_stem_requested =
+          out.cutscene_stem_requested || (requested.size() == 1 && lower(requested[0]) == stem);
+    } else if (nodes.size() > 1 &&
+               std::all_of(nodes.begin(), nodes.end(), [](const auto &n) { return !n.condition.empty(); }) &&
+               !hub_dialog::Binding::match(*machine_, nodes)) {
+      out.backups += 1;
+    }
+  }
   return out;
 }
 

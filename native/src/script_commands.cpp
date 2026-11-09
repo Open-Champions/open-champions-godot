@@ -3,6 +3,7 @@
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -577,6 +578,49 @@ amx::NativeMap Host::command_map() {
         counts_.stopped[i]+=1;
         throw RefusedResult("refused hub availability write outside documented offer");
       }
+      // research-hub-npcs@fbbfe65 docs/hub-services.md:112-142: a live hub /
+      // hub2 dialog action executes only setMissionAvailable, addQuest, setv,
+      // changeSwoop and activateStore, each as its researched effect (no item,
+      // gold or other write). Anything else stops the action before it runs.
+      if (hub_effect_) {
+        const std::string native = kRows[i].name;
+        const auto arg = [&](int k) { return machine.cell(machine.params + 4 + 4 * k); };
+        const auto &effect = *hub_effect_;
+        auto &used = hub_effect_used_;
+        std::string why;
+        if (!hub_dialog::action_native(native))
+          why = native + " is outside the five researched dialog-action natives";
+        else if (native == "setMissionAvailable") {
+          if (!effect.avail || arg(0) != effect.avail || arg(1) != 1 || used.avail++)
+            why = "availability write differs from the researched effect";
+        } else if (native == "addQuest") {
+          if (!effect.quest || used.quest++)
+            why = "quest add differs from the researched effect";
+        } else if (native == "changeSwoop") {
+          if (!effect.store || arg(0) != 0 || used.swoop++)
+            why = "swoop write differs from the researched effect";
+        } else if (native == "activateStore") {
+          if (!effect.store || arg(0) != 0 || used.store++)
+            why = "store request differs from the researched effect";
+        } else if (native == "setv") {
+          const auto address = arg(0);
+          const bool named = machine.get_addr(address) == amx::ERR_NONE;
+          const auto lower = [](std::string t) {
+            for (auto &c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return t;
+          };
+          if (effect.var == hub_dialog::Var::None || !hub_services_ || !named || arg(1) != 1 ||
+              lower(machine.get_string(address)) != lower(hub_services_->variable(effect.var)) || used.var++)
+            why = "variable write differs from the researched effect";
+        }
+        if (!why.empty()) {
+          counts_.executed[i] -= 1;
+          counts_.refused[i] += 1;
+          counts_.stopped[i] += 1;
+          dialog_counts_.hub_service_refused[why] += 1;
+          throw RefusedResult("refused hub dialog action: " + why);
+        }
+      }
       std::optional<amx::Address> result;
       try {
         result = function(machine, params);
@@ -1136,6 +1180,10 @@ bool Host::load(const amx::ByteVector &image) {
   hub_opening_=false;
   hub_action_running_=false;
   hub_action_mission_=0;
+  hub_services_.reset();
+  hub_services_start_=-1;
+  hub_services_mismatch_.clear();
+  hub_effect_.reset();
   machine_.reset();
   variables_->script_machine.reset();
   level_started_ = false;
