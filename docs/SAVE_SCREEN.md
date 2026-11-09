@@ -24,7 +24,7 @@ Research citations are `docs/save-screen.md` line numbers at `c8895e2`.
 |---|---|---|
 | Settle | State 4 copies a mismatched 0x879e30 over 0x879e2c. Float bits 0x3f800000 at 0x879e34 snap: the float is cleared and 0x879e28 takes 0x879e24. Confirm is read only when the float compares equal to 0 and the two row words match; 0x3f000000, or unequal words, leave slot state, 0x4f8ef4 and the fade step alone. | 100–101, 193–200, 206–207 |
 | Free row vs overwrite | Save screen (card state 3): scroll + row == cache count stores 7 at 0x4f8ef4 and fade step −16; at fade 0 it queues operation 8 and enters 7. A populated row enters 5; 5 takes 0x20 back to 4 or 0x80 to 11 and 0x88d400. 11 queues 0x0a on `/BASLUS-20973` and enters 12. 12, pump idle, 0x4f9540 ≥ 0 and fade 0, returns 1 and clears the slot state. | 167–172, 202–221 |
-| List inputs | State 4 reads one press at a time. 0x40 is the confirm above. Bit 0x80 on a populated row enters 9 and leaves 0x879e24 and 0x88d400 at 0. The repeat mask 0x204000 (either bit) moves 0x879e24 to the selection + 1 when another cached slot exists. Both run only with the cursor settled, scroll 0 and card state 3. State 9 stays on no press and returns to 4 on 0x20. | 169, 171; `ref_save_screen.py:115-132`; `difftest_save_screen.py:21-46, 334-337` |
+| List inputs | State 4 reads one press at a time. 0x40 is the confirm above. Bit 0x80 on a populated row enters 9 and leaves 0x879e24 and 0x88d400 at 0. The repeat mask 0x204000 (either bit) moves 0x879e24 to the selection + 1 when another cached slot exists. Both run only with the cursor settled, scroll 0 and card state 3; either with a nonzero 0x879e2c throws. State 9 stays on no press and returns to 4 on 0x20. `Screen::call(edge, repeat)` takes the owner's edge (+0x0c) and repeat (+0x10) words (lines 177–179); states 4, 5 and 9 throw when they differ, except state 4 with the free row armed, which reads no mask. | 169, 171, 177–179; `ref_save_screen.py:115-132`; `difftest_save_screen.py:21-46, 334-337`; flow 377–391 |
 | Scroll/cache count | Visible row index is 0x879e2c + 0x879e28 against 0x4f9238. | 91–104, 202–207 |
 | Free space | State 7 waits for 0x88d3c4, then with a positive fade step compares 0x88d3ac with 0x88d3ec + (count & 1): short looks up `MemcardNeedFreeSpaceBrowser` and leaves the fade, enough sets −16. With the fade at 0, 7 becomes 12. | 208–216 |
 | Slot names | Fresh (0x8e1ad8 set, or index == count), with an empty directory (every record's name byte clear): count 0 gives `BASLUS-20973_slot0`; a clear byte and count 1–3 give `BASLUS-20973_slot1`. Otherwise the name is copied from 0x88d060 + index×64. | 228 |
@@ -33,7 +33,7 @@ Research citations are `docs/save-screen.md` line numbers at `c8895e2`.
 | Saved box | Step 3, entered with 0x4f8f29 clear, sets it and −16, then step 4 at fade 0. Step 4 looks up `MemcardContinue`, `MemcardSaveComplete`, and `MemcardSaveGood2` (new row: 0x8e1ad8 set and index == count) or `OverwriteGood` (occupied: byte clear and index ≠ count). Confirm sets −16; at fade 0 the latch is cleared and the card state stored −1. Keys are identifiers, never displayed text. | 231–232; flow 562, 581–599 |
 | Latch lifecycle | `request_load` with 0x88d3c8 set returns before any store (0xa5 survives). The opening call clears the latch (0x217760). Load acceptance with the pump returning 0 stores 1 (0x2195a8). | 31, 251–263 |
 | Error path | A nonzero 0x88d3bc moves to step 9 and closes the file. The latch and card state 3 are kept. | 234–236 |
-| Cancel | The error box cancel stores −1 (0x21f254). It calls `memcard_requestSave` with the host's counted-living total (`Words::counted_living`; the probe planted a living player, flow 248) unless the network byte and a pending level name are both set; while 0x88d3d8 is 1 that request does not open. | 237–251 |
+| Cancel | The error box cancel stores −1 (0x21f254). It calls `memcard_requestSave` with the host's counted-living total (`Words::counted_living`; the probe planted a living player, flow 248) unless the network byte and a pending level name are both set; while 0x88d3d8 is 1 that request does not open. A negative total is refused before the −1 store, so the refusal writes nothing. | 237–251 |
 | Directory copy | Load acceptance copies all 0x40 bytes from 0x88d040 + index×64 to 0x88d2c0. Step 0, stage 1, fade step 16. | 258–263 |
 | Load | Step 2 queues open mode 1 of the record's name, a 0x4bc78-byte read and close. Step 4 stores the bytes; with 0x8e1ab9 0 it clears the latch, stores −1 and step 0. With 1, the latch is stored 1 (267–268) and `save_load` requests the header's level: `strife`, or `hub` + `west` as `hub_west`, in 0x41b6d0 and 0x8e1a98; marker 0xfd; 0x8e1ad6 1; live name untouched; image directory bytes untouched; step 5. Step 5 waits until the live qualified name matches, then stores −1 and clears the latch. | 263–286 |
 
@@ -62,6 +62,22 @@ word between them:
   and can stay up across saves (`docs/issues/native-soak.md:547, 572`;
   `docs/monsters.md:1064-1066` on the same research pin). Step 3 entered with
   the byte already set throws; the host clears it the way `Savepoint_run` does.
+- Every path that starts, restarts or leaves a save clears the three native
+  save links (`saved_step_armed`, `saved_box_dismissing` and the private
+  "step 1 built this image" flag): `request_save` opening card state 3, the
+  committed slot, step 0, the card-error move to step 9, the error-box cancel,
+  the saved box's close, and the load path (`request_load`, `accept_load`,
+  `load_read_complete`). An aborted step cannot carry its arm, its dismiss or
+  its build into a later save (audit `play-save-screen-r2` PSS2-1).
+- One input word for both. The slot list reads two owner words, edge +0x0c
+  and repeat +0x10 (`docs/save-screen.md:177-179`, 0x21c478–0x21c4ac). The
+  probe planted the same value in both (`difftest_save_screen.py:33-34`), so
+  which word each mask is tested against was not separated.
+  `Screen::call(edge, repeat)` takes both and throws in states 4, 5 and 9 when
+  they differ. The one-word `Screen::call(edge)` is a native convenience that
+  passes the same word as both, the way the probe planted them. The screen
+  steps read the edge word only; the flow probe planted only that word for
+  steps 4 and 9 (flow 234, 258).
 - The host runs the countdown 0x88d3c4 down. The research shows state 7
   waiting for it (`docs/save-screen.md:208-209`), not who decrements it; a
   negative value throws.
@@ -99,6 +115,13 @@ did not execute it:
 | Net-path step 2 | What 0x895580 holds after `save_packLocalPlayer`, and step 2 on that path, were not run (line 229; flow 602–608). Offline step 2 without this save's `save_build` also throws (flow 561–574). |
 | Named directory with count 0 | Every count-0 case had record 0's name byte clear (flow 181–185, 549–551). |
 | Negative 0x88d3c4 | Only 0 and 10 were planted (flow 350, 374, 395). |
+
+Refused in round 3 (audit `play-save-screen-r2`):
+
+| Refused | Reason |
+|---|---|
+| Split edge and repeat words | States 4, 5 and 9 were executed with the two owner words equal (`difftest_save_screen.py:33-34`); which word each mask is tested against is Unknown. |
+| Bit 0x80 with a scroll | Round 2 listed it, but the code checked the scroll only for the repeat. Bit 0x80 with a nonzero 0x879e2c now throws too (`difftest_save_screen.py:21-46, 334` ran scroll 0 only). |
 
 ## Tests
 

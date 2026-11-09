@@ -67,6 +67,12 @@ std::string header_level(const Bytes &image) {
   return qualified_level(name, cstr(image.data() + 0x14, 0x50));
 }
 
+void Screen::reset_save_links() {
+  w.saved_step_armed = false;
+  w.saved_box_dismissing = false;
+  image_built_ = false;
+}
+
 void Screen::require_pump_idle(const char *where) const {
   if (w.pump_busy)
     throw Unknown(std::string(where) + ": every executed fixture had mc_pump 0x2233e4 return 0 "
@@ -81,6 +87,7 @@ bool Screen::request_save(int counted_living) {
   if (w.card_state != CARD_IDLE || w.open_block != 0 || w.slot_stage != 0 || counted_living == 0)
     return false;
   w.card_state = CARD_SAVE;
+  reset_save_links(); // a new save starts
   return true;
 }
 
@@ -95,17 +102,18 @@ bool Screen::request_load(std::uint8_t slot, std::uint8_t flag, std::uint8_t in_
   w.latch = 0; // sb $zero at 0x217760
   w.card_state = CARD_LOAD;
   read_queued_ = false;
+  reset_save_links(); // a load leaves any save; its bytes must never be written as one
   return true;
 }
 
-Call Screen::call(std::uint32_t edge) {
+Call Screen::call(std::uint32_t edge, std::uint32_t repeat) {
   if (w.card_state != CARD_SAVE && w.card_state != CARD_LOAD)
     throw Refusal("the save/load dispatcher 0x2189e0 runs for card state 3 or 4 only");
   if (w.browser_stage == 0)
     throw Unknown("memcard_browser 0x219b90 (card check, format, errors) is not ported: "
                   "retail card I/O is refused (save-screen.md:27-29)");
   if (w.slot_stage == 0) {
-    Call out = slot_list(edge);
+    Call out = slot_list(edge, repeat);
     if (out.committed && w.card_state == CARD_SAVE) {
       // The committed slot (doc:220-221) sets the latch (doc:31, 0x218ba4) and
       // moves to the screen step. Native handoff: the index the list chose is
@@ -115,6 +123,7 @@ Call Screen::call(std::uint32_t edge) {
       w.latch = 1;
       w.slot_stage = 1;
       w.step = 0;
+      reset_save_links(); // a new save starts at step 0
     }
     return out;
   }
@@ -123,8 +132,20 @@ Call Screen::call(std::uint32_t edge) {
   return w.card_state == CARD_SAVE ? save_step(edge) : load_step();
 }
 
-Call Screen::slot_list(std::uint32_t edge) {
+Call Screen::slot_list(std::uint32_t edge, std::uint32_t repeat_word) {
   require_pump_idle("memcard_slotList 0x21c3a4");
+  // The list reads edge +0x0c and repeat +0x10 (doc:177-179, 0x21c478-0x21c4ac).
+  // States 4, 5 and 9 read the masks and were executed with both words equal
+  // (difftest_save_screen.py:33-34), so which word each mask is tested
+  // against is Unknown; a difference throws before any store. State 4 with
+  // the free row armed reads no mask and was executed with edge 0 and repeat
+  // 0x40 (difftest_save_screen_flow.py:377-391), so it is not refused.
+  const bool reads_masks = (w.slot_state == SLOT_LIST && w.list_action != FREE_ROW_ACTION) ||
+                           w.slot_state == SLOT_OVERWRITE || w.slot_state == SLOT_DELETE;
+  if (reads_masks && edge != repeat_word)
+    throw Unknown("slot state " + std::to_string(w.slot_state) +
+                  " was executed with the edge and repeat words equal; which word each mask is "
+                  "tested against was not separated (difftest_save_screen.py:33-34)");
   Call out;
   switch (w.slot_state) {
   case SLOT_LIST: {
@@ -167,12 +188,14 @@ Call Screen::slot_list(std::uint32_t edge) {
       if (w.card_state != CARD_SAVE)
         throw Unknown("state 4 0x204000 / 0x80 on the load list was not executed (the fixture "
                       "ran card state 3, difftest_save_screen.py:27)");
+      // Both were executed with scroll 0 only (difftest_save_screen.py:21-46, 334).
+      if (w.scroll_base != 0)
+        throw Unknown(std::string("the state-4 ") + (repeat ? "repeat" : "bit 0x80") +
+                      " with a nonzero scroll 0x879e2c was not executed (difftest_save_screen.py:21-46)");
       const std::int32_t at = w.scroll_base + w.selected_row;
       if (repeat) {
         // ref:116-117: 0x879e24 becomes the selection + 1 when another cached
         // slot exists; executed from row 0 of 2 with no scroll.
-        if (w.scroll_base != 0)
-          throw Unknown("the state-4 repeat with a nonzero scroll 0x879e2c was not executed");
         if (at + 1 >= w.cache_count)
           throw Unknown("the state-4 repeat on the last cached row was not executed "
                         "(save-screen.md:169; difftest_save_screen.py:334)");
@@ -268,14 +291,18 @@ Call Screen::save_step(std::uint32_t edge) {
   Call out;
   // A nonzero card result moves to step 9 and closes the file. The latch and
   // the card state are not written (doc:234-236; flow:245-252, 615-621).
+  // The save is abandoned from whichever step it was in, so its native links
+  // are cleared: an arm, a dismiss or a build must not survive into a later save.
   if (w.card_result != 0 && w.step != 9) {
     w.step = 9;
+    reset_save_links();
     out.closed_file = true;
     return out;
   }
   switch (w.step) {
   case 0: {
-    // doc:228; flow:176-193, 534-559.
+    // doc:228; flow:176-193, 534-559. Step 0 starts a save; no link carries in.
+    reset_save_links();
     const bool fresh = w.fresh_name != 0 || w.selected_index == w.cache_count;
     if (fresh) {
       w.slot_name = make_slot_name(w);
@@ -361,7 +388,7 @@ Call Screen::save_step(std::uint32_t edge) {
       if (w.fade_level == 0) {
         w.latch = 0;               // 0x2190d0
         w.card_state = CARD_IDLE;  // memcard_setState(-1)
-        w.saved_box_dismissing = false;
+        reset_save_links();
       }
     } else if (edge & MASK_CONFIRM) {
       w.fade_step = FADE_OUT;
@@ -374,8 +401,13 @@ Call Screen::save_step(std::uint32_t edge) {
     // 611-625). A pending level suppresses the save request only with the net
     // byte (0x2192cc-0x2192f4). While 0x88d3d8 is 1 that request does not open.
     if (edge & MASK_CANCEL) {
+      const bool reopen = !(w.network != 0 && !w.pending_level.empty());
+      // Refuse a bad count before the -1 store, so a refusal writes nothing.
+      if (reopen && w.counted_living < 0)
+        throw Refusal("a counted living player total cannot be negative");
       w.card_state = CARD_IDLE;
-      if (!(w.network != 0 && !w.pending_level.empty())) {
+      reset_save_links();
+      if (reopen) {
         out.reopen_called = true;
         // flow:248 plants a living player; 0x88d3d8 still 1 is what keeps the
         // request closed (doc:238-240; flow:624).
@@ -402,6 +434,7 @@ Call Screen::accept_load() {
   w.latch = 1;              // 0x2195a8 over the 0xa5 sentinel
   w.fade_step = LOAD_ACCEPT_FADE;
   read_queued_ = false;
+  reset_save_links();
   Call out;
   out.committed = true;
   return out;
@@ -436,6 +469,7 @@ Call Screen::load_read_complete(Bytes image) {
   // the level loader.
   w.image = std::move(image);
   read_queued_ = false;
+  reset_save_links(); // 0x895580 now holds loaded bytes, not this save's build
   if (w.restore_flag == 0) {
     // doc:265-267: save_load is not called.
     w.latch = 0;

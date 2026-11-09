@@ -42,9 +42,11 @@ inline constexpr std::int32_t FADE_OUT = -16;
 inline constexpr std::int32_t LOAD_ACCEPT_FADE = 16;
 // Button masks (save-screen.md:169-170, 174-179); scheme-dependent, not face names.
 inline constexpr std::uint32_t MASK_CONFIRM = 0x40, MASK_CANCEL = 0x20, MASK_COMMIT = 0x80;
-// State 4's repeat mask (save-screen.md:169; ref_save_screen.py:116). The probe
-// planted the same mask on the edge and repeat words (difftest_save_screen.py:33-34),
-// so the host passes one mask for both.
+// State 4's repeat mask (save-screen.md:169; ref_save_screen.py:116). The slot
+// list reads two owner words, edge +0x0c and repeat +0x10 (save-screen.md:177-179);
+// the probe planted the same value in both (difftest_save_screen.py:33-34), so
+// which word each mask is tested against was not separated. Screen::call takes
+// both and refuses a difference in slot states 4, 5 and 9.
 inline constexpr std::uint32_t MASK_REPEAT = 0x204000;
 // Card queue operations (ref_save_screen.py:139-153; flow difftest :568-574, 657-659, 678-681).
 inline constexpr int OP_OPEN = 0, OP_CLOSE = 1, OP_READ = 3, OP_WRITE = 5, OP_FILE_INFO = 6,
@@ -181,8 +183,14 @@ public:
   // memcard_requestLoad 0x2176e0 (save-screen.md:251-256).
   bool request_load(std::uint8_t slot, std::uint8_t flag, std::uint8_t in_frontend);
   // One call of the dispatcher 0x2189e0 for card state 3 or 4, with the
-  // owner's edge mask. Stage 0 runs the slot list, stage 1 the screen step.
-  Call call(std::uint32_t edge);
+  // owner's edge word (+0x0c) and repeat word (+0x10). Stage 0 runs the slot
+  // list, stage 1 the screen step. In slot states 4, 5 and 9 the two words were
+  // executed equal only, so a difference throws Unknown before any store. The
+  // screen steps were executed with the edge word only (flow:234, 258).
+  Call call(std::uint32_t edge, std::uint32_t repeat);
+  // Native, disclosed: one word passed as both edge and repeat, as the probe
+  // planted them (difftest_save_screen.py:33-34).
+  Call call(std::uint32_t edge) { return call(edge, edge); }
   // Load: the slot list returned 1 for w.selected_index. The research ran the
   // load acceptance with the list stubbed to that return (save-screen.md:258-263);
   // the list's own load confirm path was not executed, so call() refuses it.
@@ -198,7 +206,11 @@ private:
   // Offline step 2 was executed only right after step 1's save_build filled
   // 0x895580 (difftest_save_screen_flow.py:561-574).
   bool image_built_ = false;
-  Call slot_list(std::uint32_t edge);
+  // Clears the three native save links (saved_step_armed, saved_box_dismissing,
+  // image_built_) on every path that starts, restarts or leaves a save, so no
+  // aborted step can carry its arm into a later one (audit play-save-screen-r2 PSS2-1).
+  void reset_save_links();
+  Call slot_list(std::uint32_t edge, std::uint32_t repeat);
   Call save_step(std::uint32_t edge);
   Call load_step();
   void require_pump_idle(const char *where) const;

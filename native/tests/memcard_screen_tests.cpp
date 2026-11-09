@@ -677,6 +677,9 @@ void card_error_living() {
   Screen bad = save_screen(9);
   bad.w.counted_living = -1;
   refused([&] { (void)bad.call(MASK_CANCEL); }, "a negative counted total is refused");
+  // PSS2-3: the count is checked before the -1 store, so the refusal writes nothing.
+  expect(bad.w.card_state == CARD_SAVE && bad.w.step == 9 && bad.w.slot_stage == 1,
+         "the refused cancel leaves card state 3, step 9 and stage 1");
 }
 
 void slot_name_named_count0() {
@@ -701,6 +704,190 @@ void countdown_negative() {
   t.w.countdown = -1;
   t.w.fade_step = 8;
   unknown([&] { (void)t.call(0); }, "a negative 0x88d3c4 was not executed");
+}
+
+// Load `image` into an existing Screen through the executed load path
+// (flag 0: no save_load), as a host would after leaving a save.
+void load_into(Screen &s, const Bytes &image) {
+  s.w.card_state = CARD_IDLE;
+  s.w.slot_stage = 0;
+  s.w.open_block = 0;
+  expect(s.request_load(1, 0, 0), "the load opens");
+  s.w.selected_index = 1;
+  s.w.directory = accepted(0).w.directory;
+  (void)s.accept_load();
+  (void)s.queue_load_read();
+  (void)s.load_read_complete(image);
+  expect(s.w.image == image && s.w.card_state == CARD_IDLE, "0x895580 holds the loaded bytes");
+}
+
+void aborted_arm_resave() {
+  // PSS2-1. A write fails during step 3's fade wait (flow:245-252 corner,
+  // reached from an armed step 3), then the same Screen saves again.
+  Screen s = save_screen(3);
+  s.w.selected_index = 1;
+  s.w.cache_count = 2;
+  s.w.latch = 1;
+  s.w.fade_level = 0x10;
+  (void)s.call(0);
+  expect(s.w.saved_step_armed && s.w.saved_flag == 1 && s.w.fade_step == FADE_OUT, "step 3 arms");
+  (void)s.call(0);
+  expect(s.w.step == 3, "step 3 waits for the fade");
+  s.w.card_result = 1;
+  auto c = s.call(0);
+  expect(s.w.step == 9 && c.closed_file && !s.w.saved_step_armed && !s.w.saved_box_dismissing,
+         "the card-error divert clears the step-3 arm");
+  s.w.card_result = 0;
+  s.w.counted_living = 1;
+  (void)s.call(MASK_CANCEL);
+  expect(s.w.card_state == CARD_IDLE, "cancel stores -1");
+
+  // The same Screen saves again with 0x4f8f29 still up: step 3 must not skip
+  // the stale-byte check and the arm.
+  s.w.card_state = CARD_SAVE;
+  s.w.step = 3;
+  s.w.fade_level = 0;
+  s.w.fade_step = 4;
+  unknown([&] { (void)s.call(0); }, "after an aborted arm, step 3 with 0x4f8f29 still up throws");
+  expect(s.w.step == 3 && s.w.fade_step == 4, "the aborted arm does not let step 3 enter step 4");
+  s.w.saved_flag = 0; // Savepoint_run (native-soak.md:547)
+  (void)s.call(0);
+  expect(s.w.step == 3 && s.w.saved_flag == 1 && s.w.fade_step == FADE_OUT && s.w.saved_step_armed,
+         "after the host clears 0x4f8f29, step 3 arms again with -16");
+  (void)s.call(0);
+  expect(s.w.step == 4 && !s.w.saved_step_armed, "then fade 0 enters step 4");
+
+  // A confirmed saved box aborted by a card error must not close a later box
+  // without its confirm.
+  Screen d = save_screen(4);
+  d.w.selected_index = 1;
+  d.w.cache_count = 2;
+  d.w.latch = 1;
+  d.w.fade_level = 0x10;
+  (void)d.call(MASK_CONFIRM);
+  expect(d.w.saved_box_dismissing, "the saved box's confirm starts the dismiss");
+  d.w.card_result = 1;
+  (void)d.call(0);
+  expect(d.w.step == 9 && !d.w.saved_box_dismissing, "the divert clears the dismiss");
+  d.w.card_result = 0;
+  (void)d.call(MASK_CANCEL);
+  d.w.card_state = CARD_SAVE;
+  d.w.step = 4;
+  d.w.latch = 1;
+  d.w.fade_level = 0;
+  (void)d.call(0);
+  expect(d.w.card_state == CARD_SAVE && d.w.latch == 1, "a later box at fade 0 stays until its confirm");
+
+  // Every save start clears links a host left planted.
+  Screen n;
+  n.w.saved_step_armed = n.w.saved_box_dismissing = true;
+  expect(n.request_save(1) && !n.w.saved_step_armed && !n.w.saved_box_dismissing,
+         "memcard_requestSave opening a save clears the links");
+  auto k = confirm_case(0, 0, 0, 0, 2);
+  (void)k.call(MASK_COMMIT);
+  (void)k.call(0);
+  k.w.fade_level = 0;
+  k.w.fade_step = 0;
+  k.w.saved_step_armed = k.w.saved_box_dismissing = true;
+  expect(k.call(0).committed && k.w.step == 0 && !k.w.saved_step_armed && !k.w.saved_box_dismissing,
+         "the committed slot starts a save with no link set");
+  Screen z = save_screen(0);
+  z.w.fresh_name = 1;
+  z.w.saved_step_armed = z.w.saved_box_dismissing = true;
+  (void)z.call(0);
+  expect(z.w.step == 1 && !z.w.saved_step_armed && !z.w.saved_box_dismissing, "step 0 clears the links");
+}
+
+void stale_build_then_load() {
+  // PSS2-1. Step 1 builds, the step-2 call hits a card error, a load then
+  // replaces 0x895580, and a host-planted step 2 must not write those bytes.
+  const Bytes loaded = synthetic_image("strife", "");
+  auto built = [] {
+    Screen s = save_screen(1);
+    s.services.save_build = [](std::uint8_t, std::uint8_t) { return Bytes(IMAGE_BYTES, 0x11); };
+    (void)s.call(0);
+    expect(s.w.step == 2, "step 1 builds and moves to step 2");
+    return s;
+  };
+  auto planted_step2 = [&](Screen &s, const char *name) {
+    s.w.card_state = CARD_SAVE;
+    s.w.slot_stage = 1;
+    s.w.step = 2;
+    s.w.network = 0;
+    Call c;
+    unknown([&] { c = s.call(0); }, name);
+    expect(c.ops.empty() && s.w.step == 2 && s.w.image == loaded, "no write of the loaded buffer is queued");
+  };
+
+  Screen a = built();
+  a.w.card_result = 1;
+  (void)a.call(0);
+  expect(a.w.step == 9, "the step-2 call diverts to step 9");
+  a.w.card_result = 0;
+  (void)a.call(MASK_CANCEL);
+  load_into(a, loaded);
+  planted_step2(a, "after a card error and a load, a planted step 2 throws");
+
+  Screen b = built(); // the host leaves the save at step 2 and loads
+  load_into(b, loaded);
+  planted_step2(b, "after a load over an unwritten build, a planted step 2 throws");
+
+  Screen c = built();
+  c.w.card_result = 1;
+  (void)c.call(0);
+  c.w.card_result = 0;
+  c.w.image = loaded; // the buffer replaced by anything but this save's step 1
+  planted_step2(c, "after a card error, a planted step 2 over another buffer throws");
+}
+
+void delete_with_scroll() {
+  // PSS2-2. Bit 0x80 was executed with scroll 0 only (difftest_save_screen.py:21-46, 334).
+  auto s = list_fixture();
+  s.w.scroll_base = s.w.scroll_target = 1; // scroll 1, row 0, count 2: index 1 is populated
+  unknown([&] { (void)s.call(MASK_COMMIT); }, "state 4 bit 0x80 with a nonzero scroll was not executed");
+  expect(s.w.slot_state == SLOT_LIST && s.w.settled_row == 0 && s.w.write_intent == 0 &&
+             s.w.list_action == 0xa5 && s.w.fade_step == 8,
+         "the refused 0x80 writes nothing");
+}
+
+void two_words() {
+  // PSS2-4. The slot list reads edge +0x0c and repeat +0x10 (doc:177-179);
+  // states 4, 5 and 9 ran with both equal (difftest_save_screen.py:33-34).
+  auto eq = list_fixture();
+  (void)eq.call(MASK_COMMIT, MASK_COMMIT);
+  expect(eq.w.slot_state == SLOT_DELETE, "equal words: (4, 0x80) enters 9");
+  auto split = list_fixture();
+  unknown([&] { (void)split.call(MASK_COMMIT, 0); }, "state 4 with edge 0x80 and repeat 0");
+  expect(split.w.slot_state == SLOT_LIST && split.w.settled_row == 0, "the split press writes nothing");
+  auto rep = list_fixture();
+  unknown([&] { (void)rep.call(0, MASK_REPEAT); }, "state 4 with edge 0 and repeat 0x204000");
+  expect(rep.w.settled_row == 0 && rep.w.slot_state == SLOT_LIST, "the split repeat moves nothing");
+  auto conf = list_fixture();
+  unknown([&] { (void)conf.call(MASK_CONFIRM, 0); }, "state 4 with edge 0x40 and repeat 0");
+  expect(conf.w.slot_state == SLOT_LIST && conf.w.list_action == 0xa5, "the split confirm arms nothing");
+  auto ov = confirm_case(0, 0, 0, 0, 2);
+  unknown([&] { (void)ov.call(MASK_COMMIT, 0); }, "state 5 with split words");
+  expect(ov.w.slot_state == SLOT_OVERWRITE && ov.w.write_intent == 0, "state 5 split writes nothing");
+  auto del = list_fixture();
+  (void)del.call(MASK_COMMIT);
+  unknown([&] { (void)del.call(MASK_CANCEL, 0); }, "state 9 with split words");
+  expect(del.w.slot_state == SLOT_DELETE, "state 9 split stays in 9");
+  // State 4 with the free row armed reads no mask; flow:377-391 ran it with
+  // edge 0 and repeat 0x40.
+  auto fr = free_row_list();
+  (void)fr.call(MASK_CONFIRM, MASK_CONFIRM);
+  expect(fr.w.list_action == FREE_ROW_ACTION, "equal words arm the free row");
+  fr.w.fade_level = 0;
+  fr.w.fade_step = 0;
+  auto c = fr.call(0, MASK_CONFIRM);
+  expect(fr.w.slot_state == SLOT_SPACE && c.ops.size() == 1 && c.ops[0].op == OP_SPACE,
+         "armed free row with edge 0, repeat 0x40: operation 8 and state 7");
+  // The save steps were run with the edge word only (flow:234, 258).
+  Screen box = save_screen(4);
+  box.w.fresh_name = 1;
+  box.w.fade_level = 0x10;
+  (void)box.call(MASK_CONFIRM, 0);
+  expect(box.w.saved_box_dismissing && box.w.fade_step == FADE_OUT, "step 4 reads the edge word");
 }
 
 void refusals() {
@@ -743,6 +930,10 @@ int main() {
     card_error_living();
     slot_name_named_count0();
     countdown_negative();
+    aborted_arm_resave();
+    stale_build_then_load();
+    delete_with_scroll();
+    two_words();
   } catch (const std::exception &e) {
     std::cerr << "FAIL after " << checks << " checks: " << e.what() << "\n";
     return 1;
