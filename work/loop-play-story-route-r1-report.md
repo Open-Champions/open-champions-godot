@@ -37,7 +37,7 @@ Mission menu (section 6):
   evil level when `game_getEvil` is set and the row has one; orientation
   `0xff`; at difficulty 1 bit 0 keeps the story level (`:257-262`). Row 0
   confirms with mission 1's bit clear and is marked "not an offer"
-  (`:260-262`, `:338-340`, `tools/ref_story_route.py:112-117`). Later locked
+  (`:260-262`, `:336-338`, `tools/ref_story_route.py:112-117`). Later locked
   rows refuse.
 - `Campaign::tick_menu` now applies that row-0 rule (`MenuWorld::row0_open`,
   set only by the campaign wrapper, so the older field-machine vectors are
@@ -47,7 +47,7 @@ Mission menu (section 6):
   highest available row on open, completion does not move it, a new bit does
   not move it until down or the reopen tick, down will not step onto a
   locked row, up sits on one, reopen keeps row and request until the state-0
-  tick (`:228-236`, `:303-311`).
+  tick (`:228-236`, `:303-309`).
 - Scene: `mission_menu_select_story` accepts missions 3-12 from their table
   row. Missions 3-5 preflight the act transfer like mission 2
   (`story_refusal` per row, and the cross on rows 2-4). Missions 6-12 are
@@ -64,10 +64,10 @@ Missions 3-5 (sections 7-8):
   (`Variables::before_entry`). 75 entries may start; any other entry is
   refused before it runs and stops the script (`Counts::entry_refusals`).
   Thirteen named entries keep their own reason: `brokeFinalWall` x3
-  (`:728-737`), `holeCheck` x3 (`:738-743`), side-level `start` x6
+  (`:728-736`), `holeCheck` x3 (`:738-743`), side-level `start` x6
   (`:676-681`, `:723-725`, `:945-948`), `startDia7a53` (`:769-771`). Entries
   started from an object record are refused (`:549-552`, `:945-947`).
-  Dialog opening is refused (`:412-421`, `:442-450`, `:465-475`, `:782-802`).
+  Dialog opening is refused (`:412-421`, `:442-450`, `:465-474`, `:782-802`).
 - The listed entries run through the existing commands. In these levels
   `newWorld(0)` reads the data-segment string, because the research executed
   those travel entries and recorded their level (`:638-670`, `:832-848`);
@@ -78,7 +78,7 @@ Missions 3-5 (sections 7-8):
   `cutScene`, `activateStore`, `preloadResource`, `autoPropSetState` and,
   without a bound sound resource, `soundSequence` stay refused as before.
 - `story_route::availability_entries` lists the 17 hub/hub2 entries for
-  missions 4-6 (`:504-510`, `:861-880`). The hubs keep their existing policy.
+  missions 4-6 (`:504-510`, `:861-878`). The hubs keep their existing policy.
 
 ## Tests and private acceptance
 
