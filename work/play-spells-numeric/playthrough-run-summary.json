@@ -1,0 +1,56 @@
+{
+  "disc_files_before": 994,
+  "disc_files_after": 994,
+  "variants": {
+    "headless": {
+      "exit_code": 1,
+      "log_errors": 0,
+      "result_written": true,
+      "pickup_verified": true,
+      "screenshots": 0,
+      "steps": 80,
+      "refusal_kinds": 6,
+      "loot_pickup": {
+        "diagnostic_retry_placements": 0,
+        "drop_produced": true,
+        "fps": 82.0,
+        "inventory_units_after": 11,
+        "inventory_units_before": 10,
+        "memory_bytes": 179279090,
+        "picked_up": true,
+        "rendered": false,
+        "rendered_pickup_verified": false,
+        "result": "passed",
+        "retry_kills": 0,
+        "step": "loot_pickup",
+        "walk_ticks": 52,
+        "walked": true
+      }
+    },
+    "rendered": {
+      "exit_code": 1,
+      "log_errors": 0,
+      "result_written": true,
+      "pickup_verified": true,
+      "screenshots": 38,
+      "steps": 81,
+      "refusal_kinds": 6,
+      "loot_pickup": {
+        "diagnostic_retry_placements": 0,
+        "drop_produced": true,
+        "fps": 2.0,
+        "inventory_units_after": 11,
+        "inventory_units_before": 10,
+        "memory_bytes": 104725625,
+        "picked_up": true,
+        "rendered": true,
+        "rendered_pickup_verified": false,
+        "result": "passed",
+        "retry_kills": 0,
+        "step": "loot_pickup",
+        "walk_ticks": 52,
+        "walked": true
+      }
+    }
+  }
+}

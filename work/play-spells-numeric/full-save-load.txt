@@ -1,0 +1,1 @@
+FULL_SAVE_LOAD {"presentation_continued":"cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573","presentation_uninterrupted":"cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573","presents":[300,300],"trace_sha256":"9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659"}

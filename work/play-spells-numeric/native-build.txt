@@ -1,0 +1,2 @@
+Release native build: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release; cmake --build build/native -j 4: exit 0.
+spell-numerics after build: 62 checks PASS.

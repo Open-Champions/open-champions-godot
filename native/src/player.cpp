@@ -4,6 +4,7 @@
 // Champions contributors. Documented entry/scripted and independently callable helpers.
 // Reference copyright (c) 2026 TrustlessMike and contributors, MIT license.
 #include "champions/player.hpp"
+#include "champions/spell_numerics.hpp"
 #include <utility>
 namespace champions::simulation::rta::player {
 namespace {
@@ -1044,11 +1045,15 @@ std::uint32_t Tick::weapon_swap_input(std::uint32_t player, Address pad,
 }
 void Tick::cast_skill(std::uint32_t player, std::uint32_t ability) {
   const Address p = player;
-  if (signed16(p + 0x4ae) > 0 || !ability) return;
+  // Payment gates and debit: spell_numeric (spell_numerics.hpp), research-spells-r3
+  // docs/spec/player-spells-numeric-r3.md:94-112. Read order is unchanged.
+  const auto recast_before = u16(p + 0x4ae);
+  if (spell_numeric::recast_blocks(recast_before) || !ability) return;
   if (cstr(ability) != cstr(0x535e30)) return;
   auto skill = skill_of(ability);
   bool copy = u32(p + 0xc) & 0x20000;
-  if (!(u32(Address(skill) + 4) & 1) && copy) return;
+  const auto skill_flags = u32(Address(skill) + 4);
+  if (spell_numeric::copy_blocks(copy, skill_flags)) return;
   if (!vcall(Service::SkillCanUse, skill, 0x60, 1, {player})) return;
   auto [a, b] = hands_midpoint(player, true);
   auto point = aim_point(a, b, u32(p + 0x18));
@@ -1081,10 +1086,17 @@ void Tick::cast_skill(std::uint32_t player, std::uint32_t ability) {
   write(p + 0x4ae, 2, mem.load(Address(skill) + 0xc, 2));
   rank = vcall(Service::PlayerRank, player, 0x48, 39,
                {std::uint32_t(signed16(Address(ability) + 0x20))});
-  auto cost = vcall(Service::SkillCost, skill, 0x60, 5, {rank});
-  if (signed32(Address(skill) + 8) == 1) cost = mul(cost, 0x3c888888);
+  auto slot5 = vcall(Service::SkillCost, skill, 0x60, 5, {rank});
+  const auto kind = signed32(Address(skill) + 8);
   auto r = rec(signed32(p + 0x3c8));
-  write(r + 0xc0, 4, sub(u32(r + 0xc0), cost));
+  // The note observed only a zero cast return, kind 0, recast 0 and a copy with
+  // bit 0 clear. For recast below zero, a copy with bit 0 set, a returned spell
+  // or another kind, this still pays: payment.unprobed names the case. That is
+  // the player-tick contract (pinned player vectors), not research-spells-r3
+  // (player-spells-numeric-r3.md:95-97 and :110-112).
+  const auto payment = spell_numeric::cast_payment(u32(r + 0xc0), slot5, kind, recast_before, copy,
+                                                   skill_flags, spell);
+  write(r + 0xc0, 4, payment.mana);
   call(Service::HandleClear, {StackHandle{}});
 }
 // Bounded action-state family. Services remain supplied synchronous callbacks.
