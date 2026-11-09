@@ -41,4 +41,9 @@ Evidence under ignored `work/playable-wave38/`. Native configure/build and the e
 
 - Full CTest `-j 3`: **PASS, 260/260, 810.97 s**, exit 0. Evidence `ctest.out`. Wave 37 was 259/259 in 694.03 s. The added test is `mission2-route` (Passed, 0.14 s). Progression's run-task coverage and loading round 4's selection controls extended `quests`, `dialog`, and `script-commands` in place. Standard input was closed. No test, fixture, or source was changed. The longer wall time is the shared mini: `netplay` alone took 183.68 s inside this run.
 
-Strict matrix, combat, save/load, trace, and journeys are not started. Another CTest and a rendered journey were already using the mini's two heavy-job slots when this CTest finished, so the matrix waits for a free slot.
+- Strict Godot dev matrix: **54/54 PASS**, exit 0, 131 s wall, `tools/godot_matrix.py matrix --captures --timeout 1200`, standard input closed, isolated projects and user directories. Evidence `matrix.out`, `matrix/results.json`. The case list is identical to wave 37's 54 cases in the same order, so there is no size difference. The unchanged `check-log` found 0 diagnostic errors across all 105 matrix logs. Nothing was filtered or allowlisted. `ui_layout_smoke` PASS. The previous agent had run one matrix (19:34, also 54/54) but recorded no command or exit code before the provider cut-off. That run is kept as `matrix-unrecorded-1934/` and is not this gate.
+- Full synthetic combat **2,645 checks, 0 failures** (`matrix/playable_wave_smoke_full_combat.log`), same as wave 37.
+- FULL_SAVE_LOAD **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical, the same as wave 37.
+- FULL_TRACE **PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, headless renderer. No baseline was edited.
+
+Journeys are pending.
