@@ -19,3 +19,6 @@ Evidence in ignored `work/vendors-r2/`.
 2. Focused CTest (`vendor-stock-exact`, `items-exact`, `messages-exact`,
    `messages-api`, `menus-exact`, `level-flow-exact`, `script-commands`,
    `script-items`), `-j 3`: **PASS 8/8**. Evidence `ctest-focused.out`.
+3. Full CTest `-j 3`, standard input closed: **PASS 260/260**, 845.38 s,
+   exit 0. Wave 37 was 259; the added test is `vendor-stock-exact`.
+   Evidence `ctest.out`.
