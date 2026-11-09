@@ -204,6 +204,13 @@ public:
   void seed_new_character(int slot);
   void quest_add(const std::string &title, const std::string &text);
   void quest_remove(const std::string &title);
+  // quest_clearAll 0x1d3adc: overlays each used entry of the first
+  // num_players() records and stores count 0. A later record keeps its
+  // entries and count (research t3/research-quest-log 965ec52
+  // docs/spec/quest-log.md 217, ref_quest_log.py 110-118). The list only.
+  void quest_clear_all();
+  // The act-change clear: quest_clear_all, flag-39 items, then quest-variable
+  // values.
   void clear_for_act_change();
 
   int mission_available(int mission) const;
