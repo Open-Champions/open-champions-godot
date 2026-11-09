@@ -345,22 +345,38 @@ public:
   void advance_first_level_items(const std::string &level_name,
                                  std::optional<bool> hud_lmp_resident = std::nullopt);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
-  // Only the five currently constructed Creature subclasses participate.
+  // Every live built record participates, whatever its class, so both calls
+  // first require each record to be a Creature this host constructed (the
+  // ported classes, the creature-family builder and the Horsemen rows) whose
+  // object is at least CREATURE_SAVE_LAYOUT_END bytes. Any other built class
+  // (ScriptGenerator 0x4c bytes, Chest, Player1) is refused by name before
+  // any field is read or written: its save state is unresearched
+  // (research-save-world@31a0ca6 docs/spec/object-system.md:805-806).
   // Independently specified native raw-field companion: the in-memory HP
   // words are distinct from the original writer's serialized HP fraction.
   // Layout: research-save-world e7d8972 docs/creatures.md:131. Load services such as
   // corpse animation and motion are deliberately outside this API.
   std::vector<level_object_state::Record> save_built_object_fields() const;
   std::size_t restore_built_object_fields(const std::vector<level_object_state::Record> &);
-  // Read-only census for the save refusal above: every live built record
-  // whose HP word +0x228 is not a float above 0, with its file ordinal,
-  // class and raw +0x228/+0x22c words, plus whether Creature_setStats had
-  // level data when the level was built (stats_ready).
+  // One past the last Creature byte the layout above touches (s16 +0x312).
+  static constexpr std::uint32_t CREATURE_SAVE_LAYOUT_END = 0x314;
+  // The fixed start of the class refusal above; the full message adds the
+  // class, object size and ordinal.
+  static constexpr const char *NON_CREATURE_SAVE_REFUSAL =
+      "built non-Creature object save state is unresearched";
+  // Read-only census for the save refusals above, over every live built
+  // record: its file ordinal, record class, constructed class (type name
+  // without the length prefix) and object size. A record that is not a
+  // constructed Creature of the layout's size is listed with creature false
+  // and no words read. A Creature is listed when its HP word +0x228 is not a
+  // float above 0, with its raw +0x228/+0x22c words. stats_ready says whether
+  // Creature_setStats had level data when the level was built.
   struct BuiltHpEntry {
-    std::uint32_t ordinal = 0, hp_word = 0, max_hp_word = 0;
-    std::string cls;
+    std::uint32_t ordinal = 0, hp_word = 0, max_hp_word = 0, size = 0;
+    std::string cls, type_name;
+    bool creature = false;
   };
-  std::vector<BuiltHpEntry> built_hp_not_above_zero() const;
+  std::vector<BuiltHpEntry> built_save_refusal_census() const;
   std::size_t built_record_count() const { return built_records_.size(); }
   bool creature_stats_ready() const { return stats_ready_; }
   // Override the audio model's documented 0.5 default with session options.
@@ -702,7 +718,16 @@ private:
     std::string cls;
     std::array<std::uint32_t, 3> position;
     std::uint16_t angle;
+    // The factory row's object size, and whether one of the Creature
+    // constructor paths built it (set from last_built_creature_).
+    std::uint32_t size = 0;
+    bool creature = false;
   };
+  // Throws the class refusal unless the record is a constructed Creature
+  // at least CREATURE_SAVE_LAYOUT_END bytes long.
+  void require_creature_layout(const BuiltRecord &) const;
+  // Set by build() when the record went through a Creature constructor path.
+  bool last_built_creature_ = false;
   std::vector<BuiltRecord> built_records_;
   Counts counts_;
   bool player_currents_known_ = true;

@@ -674,11 +674,14 @@ void test_generate_monster() {
   namespace LF = champions::simulation::rta::level_factory;
   const auto gen = static_cast<std::size_t>(index_of("generateMonster"));
   std::string generator, plain;
+  std::uint32_t generator_size = 0;
   int k = 0;
   for (const auto &row : LF::tests()) {
     const auto name = "Cls" + std::to_string(k++);
-    if (row.call_count == 1 && row.calls[0] == sc::SCRIPT_GENERATOR_CTOR)
+    if (row.call_count == 1 && row.calls[0] == sc::SCRIPT_GENERATOR_CTOR) {
       generator = name;
+      generator_size = row.size;
+    }
     if (row.name == 0x5323f0)
       plain = name;
   }
@@ -703,6 +706,52 @@ void test_generate_monster() {
   const auto &memory = host.variables().memory;
   check((memory.word(maker->addr + 0xc) & 9u) == 9u && memory.word(maker->addr + 0x48) == 0x514e60,
         "ScriptGenerator_ctor's flags and table");
+  {
+    // A ScriptGenerator (0x4c bytes, monsters-2.md:7660) has no Creature
+    // layout. Even with a positive float where a Creature's +0x228 would be
+    // (another object's memory), the save and the restore refuse it by class
+    // before reading or writing a Creature offset, and the census reads none
+    // (audit PDR3-2).
+    auto &raw = host.variables().memory;
+    check(generator_size == 0x4c && generator_size < sc::Host::CREATURE_SAVE_LAYOUT_END,
+          "the generator row's object is 0x4c bytes");
+    const auto kept_228 = raw.word(maker->addr + 0x228), kept_e8 = raw.word(maker->addr + 0xe8);
+    raw.word(maker->addr + 0x228, 0x3f800000);
+    raw.word(maker->addr + 0xe8, 0x11223344);
+    auto class_refused = [](auto &&call) {
+      try {
+        call();
+      } catch (const std::runtime_error &e) {
+        const std::string what = e.what();
+        return what.rfind(sc::Host::NON_CREATURE_SAVE_REFUSAL, 0) == 0 &&
+               what.find("0x4c-byte ScriptGenerator") != std::string::npos;
+      }
+      return false;
+    };
+    check(class_refused([&] { (void)host.save_built_object_fields(); }),
+          "a built ScriptGenerator save is refused by class");
+    // A record that matches the generator's identity (ordinal, class,
+    // position, angle) and carries a well-formed live Creature field set.
+    champions::simulation::rta::level_object_state::Record forged;
+    forged.ordinal = 0;
+    forged.cls = generator;
+    forged.position = {raw.word(maker->addr + 0x10), raw.word(maker->addr + 0x14),
+                       raw.word(maker->addr + 0x18)};
+    forged.angle = std::uint16_t(raw.u8(maker->addr + 0x38) | (raw.u8(maker->addr + 0x39) << 8));
+    forged.fields = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f,
+                     0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x00};
+    check(class_refused([&] { (void)host.restore_built_object_fields({forged}); }) &&
+              raw.word(maker->addr + 0xe8) == 0x11223344 &&
+              raw.word(maker->addr + 0x228) == 0x3f800000,
+          "a built ScriptGenerator restore is refused before any write");
+    const auto census = host.built_save_refusal_census();
+    check(census.size() == 1 && !census[0].creature && census[0].size == 0x4c &&
+              census[0].type_name == "ScriptGenerator" && census[0].hp_word == 0 &&
+              census[0].max_hp_word == 0,
+          "the census lists the generator by class and size and reads no Creature word");
+    raw.word(maker->addr + 0x228, kept_228);
+    raw.word(maker->addr + 0xe8, kept_e8);
+  }
   host.run_start();
   const auto &counts = host.counts();
   if (counts.executed[gen] != 1 || counts.refused[gen] != 1)

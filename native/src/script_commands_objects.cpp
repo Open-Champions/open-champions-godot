@@ -8,6 +8,7 @@
 #include "champions/combat_stats.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/terrain_file.hpp"
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <limits>
@@ -114,7 +115,31 @@ bool live_creature_hp(std::uint32_t raw) {
   return hp > 0.0f;
 }
 
+// A type-info name without its length prefix ("15ScriptGenerator" ->
+// "ScriptGenerator"); builder-set names without a prefix stay as they are.
+std::string constructed_class(const std::string &type_name) {
+  std::size_t i = 0;
+  while (i < type_name.size() && type_name[i] >= '0' && type_name[i] <= '9') ++i;
+  return type_name.substr(i);
+}
+
 } // namespace
+
+void Host::require_creature_layout(const BuiltRecord &built) const {
+  if (built.creature && built.size >= CREATURE_SAVE_LAYOUT_END) return;
+  const auto live = variables_->world->objects.find(built.address);
+  const auto type = live == variables_->world->objects.end() || !live->second
+                        ? std::string("?")
+                        : constructed_class(live->second->type_name);
+  char size[16];
+  std::snprintf(size, sizeof size, "0x%x", built.size);
+  throw std::runtime_error(
+      std::string(NON_CREATURE_SAVE_REFUSAL) + ": ordinal " + std::to_string(built.ordinal) +
+      " is a " + size + "-byte " + type +
+      (built.creature ? ", smaller than the Creature save layout (0x314)"
+                      : ", not a constructed Creature") +
+      " (research-save-world@31a0ca6 docs/spec/object-system.md:805-806)");
+}
 
 std::vector<level_object_state::Record> Host::save_built_object_fields() const {
   std::vector<level_object_state::Record> result;
@@ -125,10 +150,16 @@ std::vector<level_object_state::Record> Host::save_built_object_fields() const {
   constexpr std::uint64_t masks[5] = {0x1000000ull, 0x100000000ull,
                                       0x400000ull, 0x800000ull,
                                       0x2000000000000ull};
+  // Refuse before any field read: every record must be live and a constructed
+  // Creature whose object holds the whole layout.
   for (const auto &built : built_records_) {
     const auto live = variables_->world->objects.find(built.address);
     if (live == variables_->world->objects.end() || !live->second || !live->second->alive)
       throw std::runtime_error("deleted built-object save policy is unverified");
+  }
+  for (const auto &built : built_records_)
+    require_creature_layout(built);
+  for (const auto &built : built_records_) {
     level_object_state::Record record;
     record.ordinal = built.ordinal;
     record.cls = built.cls;
@@ -154,16 +185,26 @@ std::vector<level_object_state::Record> Host::save_built_object_fields() const {
   return result;
 }
 
-std::vector<Host::BuiltHpEntry> Host::built_hp_not_above_zero() const {
+std::vector<Host::BuiltHpEntry> Host::built_save_refusal_census() const {
   std::vector<BuiltHpEntry> out;
   auto &m = variables_->memory;
   for (const auto &built : built_records_) {
     const auto live = variables_->world->objects.find(built.address);
     if (live == variables_->world->objects.end() || !live->second || !live->second->alive)
       continue;
-    const auto hp = m.word(built.address + 0x228);
-    if (live_creature_hp(hp)) continue;
-    out.push_back({built.ordinal, hp, m.word(built.address + 0x22c), built.cls});
+    BuiltHpEntry e;
+    e.ordinal = built.ordinal;
+    e.cls = built.cls;
+    e.type_name = constructed_class(live->second->type_name);
+    e.size = built.size;
+    e.creature = built.creature && built.size >= CREATURE_SAVE_LAYOUT_END;
+    // No Creature word is read from an object that does not hold the layout.
+    if (e.creature) {
+      e.hp_word = m.word(built.address + 0x228);
+      if (live_creature_hp(e.hp_word)) continue;
+      e.max_hp_word = m.word(built.address + 0x22c);
+    }
+    out.push_back(std::move(e));
   }
   return out;
 }
@@ -199,6 +240,11 @@ std::size_t Host::restore_built_object_fields(
         throw std::runtime_error("invalid saved Creature charm timer");
     }
   }
+  // The checks above read only the saved records. Before the first write, no
+  // Creature offset may land in an object that does not hold the layout:
+  // refuse the whole set.
+  for (const auto &built : built_records_)
+    require_creature_layout(built);
   auto &m = variables_->memory;
   auto word = [](const level_object_state::Bytes &v, std::size_t at) {
     return std::uint32_t(v[at]) | (std::uint32_t(v[at + 1]) << 8) |
@@ -515,7 +561,8 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
     if (result == Build::Built) {
       counts_.objects_built += 1;
       built_records_.push_back({std::uint32_t(index), address, record.cls,
-                                record.position, record.angle});
+                                record.position, record.angle, outcome.size,
+                                last_built_creature_});
       continue;
     }
     if (result == Build::NotBuilt) {
@@ -550,6 +597,7 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
   last_draws_complete_ = false;
+  last_built_creature_ = false;
   if (outcome.constructor() == 0x292030 && chest_builder_) {
     if (!external_seed_) {
       counts_.build_refusals["Chest needs the shared session seed"] += 1;
@@ -1024,6 +1072,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   if (stats_ready_ && seed_gate_observed_ && !counts_.item_load_gate_refusals &&
       !counts_.load_draws_unmodelled) stats_built_.insert(c);
   counts_.objects_registered += 1;
+  last_built_creature_ = true;
   return Build::Built;
 }
 
@@ -1230,6 +1279,7 @@ Host::Build Host::build_creature_family(const level_flow::Record &record,
   if (seed_gate_observed_ && !counts_.item_load_gate_refusals && !counts_.load_draws_unmodelled)
     stats_built_.insert(c);
   counts_.objects_registered += 1;
+  last_built_creature_ = true;
   return Build::Built;
 }
 
@@ -1472,6 +1522,7 @@ Host::Build Host::build_mounted(const level_flow::Record &record, const level_fa
   }
   variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
   counts_.objects_registered += objects.size();
+  last_built_creature_ = true;
   return Build::Built;
 }
 

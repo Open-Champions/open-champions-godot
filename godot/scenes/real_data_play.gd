@@ -286,9 +286,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	if record_departing_state and not restoring_real_level and real.current >= 0 and controller.get_play_capabilities().get("level_script_enabled", false):
 		var departing: Dictionary = controller.save_level_object_directory(str(real.levels[real.current].stem))
 		if not departing.get("ok", false) or not departing.get("readable", false):
-			status_label.text = "Level change refused: a built object's Creature HP word (+0x228) is not above 0; its save state is unverified." if \
-				str(departing.get("error", "")) == "dead built-Creature save state is unverified" else \
-				"Level change refused: per-level object directory is full or unreadable."
+			status_label.text = "Level change refused: %s" % _object_save_refusal(str(departing.get("error", "")))
 			return false
 	var result: Dictionary = real.load_level(index, previous, entrance, qualified)
 	if not result.ok:
@@ -426,9 +424,7 @@ func _save_real_session_file(path: String) -> bool:
 		campaign = state.bytes
 		var objects_saved: Dictionary = controller.save_level_object_directory(str(level.stem))
 		if not objects_saved.get("ok", false) or not objects_saved.get("readable", false):
-			status_label.text = "Save refused: a built object's Creature HP word (+0x228) is not above 0; its save state is unverified." if \
-				str(objects_saved.get("error", "")) == "dead built-Creature save state is unverified" else \
-				"Save refused: per-level object directory is full or unreadable."
+			status_label.text = "Save refused: %s" % _object_save_refusal(str(objects_saved.get("error", "")))
 			return false
 		object_state = objects_saved.bytes
 	if not super.save_session_file(path): return false
@@ -478,6 +474,14 @@ func _save_real_session_file(path: String) -> bool:
 	_live_checkpoint_path = path if marked.get("ok", false) else ""
 	status_label.text = "Saved level, player, quests, position and confirmed Creature fields. Other object and in-flight script effects refused."
 	return true
+
+# The native object-directory refusal, worded for the status line.
+func _object_save_refusal(error: String) -> String:
+	if error == "dead built-Creature save state is unverified":
+		return "a built Creature's HP word (+0x228) is not above 0; its save state is unverified."
+	if error.begins_with("built non-Creature object save state is unresearched"):
+		return "a built object is not a constructed Creature (no Creature HP field); its save state is unresearched."
+	return "per-level object directory is full or unreadable."
 
 func _write_companion(path: String, bytes: PackedByteArray) -> bool:
 	var temporary := path + ".tmp"

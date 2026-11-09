@@ -1846,11 +1846,15 @@ func run() -> void:
 	var saved := FileAccess.file_exists(save_path) and FileAccess.file_exists(save_path + ".level") and FileAccess.file_exists(save_path + ".campaign") and FileAccess.file_exists(save_path + ".worldstate")
 	var save_probe: Dictionary = scene.controller.save_level_object_directory(str(scene.real.levels[scene.real.current].stem)) if not saved else {}
 	var dead_state_refused: bool = not saved and str(save_probe.get("error", "")) == "dead built-Creature save state is unverified"
+	# A built object that is not a constructed Creature of the save layout's
+	# size is refused by class before any field is read.
+	var class_refused: bool = not saved and str(save_probe.get("error", "")).begins_with("built non-Creature object save state is unresearched")
 	var refused_without_output: bool = pickup_refusal_verified and not saved and not FileAccess.file_exists(save_path) and not FileAccess.file_exists(save_path + ".level") and not FileAccess.file_exists(save_path + ".campaign") and not FileAccess.file_exists(save_path + ".player")
-	# Which built Creature holds an HP word not above 0 (the refusal's test).
-	var save_census: Dictionary = scene.controller.built_creature_hp_census() if dead_state_refused else {}
-	mark("in_game_save", "saved" if saved else ("refused_as_expected" if dead_state_refused or refused_without_output else "refused"),
-		{"screen": fe.screen(), "dead_state_refused": dead_state_refused, "creature_hp_census": save_census})
+	# Which built records the save refuses: non-Creature classes, and
+	# Creatures whose HP word is not above 0.
+	var save_census: Dictionary = scene.controller.built_save_refusal_census() if dead_state_refused or class_refused else {}
+	mark("in_game_save", "saved" if saved else ("refused_as_expected" if dead_state_refused or class_refused or refused_without_output else "refused"),
+		{"screen": fe.screen(), "dead_state_refused": dead_state_refused, "class_refused": class_refused, "save_refusal_census": save_census})
 	var saved_state := FileAccess.get_file_as_bytes(save_path + ".worldstate") if saved else PackedByteArray()
 	await capture("07-save")
 	if fe.screen() == "saved": tap(CROSS)
@@ -1961,9 +1965,10 @@ func run() -> void:
 	var death_loaded: bool = cold.load_session_file(save_path)
 	# Death reload (client round 2): a card load fills the live save buffer
 	# (research-save-screen@c8895e2 docs/save-screen.md:258-279). When the
-	# journey's own save was refused (a built Creature HP word not above 0), the
-	# revisited level was loaded fresh, so a card save there is not that
-	# refusal; its card load becomes the checkpoint the death reload reads.
+	# journey's own save was refused (a built non-Creature object, or a built
+	# Creature HP word not above 0), the revisited level was loaded fresh, so
+	# a card save there is not that refusal; its card load becomes the
+	# checkpoint the death reload reads.
 	var checkpoint_path := save_path
 	var checkpoint_saved := false
 	var checkpoint_scripted := false
@@ -1989,7 +1994,7 @@ func run() -> void:
 		checkpoint_path = out_dir.path_join("death-checkpoint.ocplay")
 		for suffix in ["", ".level", ".campaign", ".worldstate", ".player", ".fight"]:
 			if FileAccess.file_exists(checkpoint_path + suffix): DirAccess.remove_absolute(checkpoint_path + suffix)
-		if checkpoint_scripted: checkpoint_census = cold.controller.built_creature_hp_census()
+		if checkpoint_scripted: checkpoint_census = cold.controller.built_save_refusal_census()
 		checkpoint_saved = checkpoint_scripted and cold.save_session_file(checkpoint_path)
 		death_loaded = checkpoint_saved and cold.load_session_file(checkpoint_path)
 		checkpoint_status = str(cold.status_label.text)
@@ -2069,7 +2074,7 @@ func run() -> void:
 			"respawn_completed": reloaded, "checkpoint_loaded": death_loaded,
 			"checkpoint_attempted": checkpoint_attempted, "checkpoint_saved": checkpoint_saved,
 			"checkpoint_status": checkpoint_status, "checkpoint_character": checkpoint_character,
-			"checkpoint_creature_hp_census": checkpoint_census,
+			"checkpoint_save_refusal_census": checkpoint_census,
 			"hit_queued": queued.get("ok", false), "hit_error": str(queued.get("error", "")),
 			"fight_ready_before": death_before.get("fight_player_ready", false),
 			"fight_failed": dead.get("fight_failed", false), "campaign_fight": dead.get("campaign_fight", false),

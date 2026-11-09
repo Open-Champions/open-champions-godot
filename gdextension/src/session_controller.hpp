@@ -295,9 +295,12 @@ public:
   godot::Dictionary load_level_object_directory(const godot::PackedByteArray &bytes,
                                                 const godot::String &required_key = godot::String());
   godot::Dictionary level_object_state_status() const;
-  // Read-only: built records whose Creature HP word is not above 0 (the
-  // card-save refusal's condition), by ordinal, class and raw words.
-  godot::Dictionary built_creature_hp_census() const;
+  // Read-only: the built records the card save refuses, by ordinal, record
+  // class, constructed class and size. not_creature: not a constructed
+  // Creature of the save layout's size (no Creature word read).
+  // hp_not_above_zero: Creatures whose HP word +0x228 is not above 0, with
+  // the raw +0x228/+0x22c words.
+  godot::Dictionary built_save_refusal_census() const;
   // Death reload: a card load marks the live save buffer; the death task's
   // reload request is reported here and the owner reports the loaded key.
   godot::Dictionary set_live_checkpoint(const godot::String &qualified_key);

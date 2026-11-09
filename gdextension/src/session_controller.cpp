@@ -145,8 +145,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_level_object_directory, DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("level_object_state_status"),
                        &ChampionsSessionController::level_object_state_status);
-  ClassDB::bind_method(D_METHOD("built_creature_hp_census"),
-                       &ChampionsSessionController::built_creature_hp_census);
+  ClassDB::bind_method(D_METHOD("built_save_refusal_census"),
+                       &ChampionsSessionController::built_save_refusal_census);
   ClassDB::bind_method(D_METHOD("set_live_checkpoint", "qualified_key"),
                        &ChampionsSessionController::set_live_checkpoint);
   ClassDB::bind_method(D_METHOD("invalidate_live_checkpoint", "reason"),
@@ -1452,23 +1452,30 @@ Dictionary ChampionsSessionController::fight_place_player(const Vector3 &positio
   if (!error.empty()) out["error"] = String::utf8(error.c_str());
   return out;
 }
-Dictionary ChampionsSessionController::built_creature_hp_census() const {
+Dictionary ChampionsSessionController::built_save_refusal_census() const {
   try {
     if (!scripts_) throw std::runtime_error("No built level-script objects.");
-    Array rows;
-    for (const auto &e : scripts_->built_hp_not_above_zero()) {
+    Array not_creature, hp_rows;
+    for (const auto &e : scripts_->built_save_refusal_census()) {
       Dictionary row;
       row["ordinal"] = int64_t(e.ordinal);
       row["class"] = String::utf8(e.cls.c_str());
+      row["constructed_class"] = String::utf8(e.type_name.c_str());
+      row["size"] = int64_t(e.size);
+      if (!e.creature) {
+        not_creature.push_back(row);
+        continue;
+      }
       row["hp_word"] = int64_t(e.hp_word);
       row["max_hp_word"] = int64_t(e.max_hp_word);
-      rows.push_back(row);
+      hp_rows.push_back(row);
     }
     Dictionary out;
     out["ok"] = true;
     out["built"] = int64_t(scripts_->built_record_count());
     out["stats_ready"] = scripts_->creature_stats_ready();
-    out["hp_not_above_zero"] = rows;
+    out["not_creature"] = not_creature;
+    out["hp_not_above_zero"] = hp_rows;
     return out;
   } catch (const std::exception &e) { return failure(e); }
 }
