@@ -1,0 +1,68 @@
+STATUS: PENDING — gates running.
+
+# Play save screen round 3 — 2026-11-09
+
+Branch `codex/play-save-screen`, round 2 tip `69931140`, audit
+`cursor-runs/audits/play-save-screen-r2.md` (VERDICT FIX: 0 HIGH, 1 MEDIUM,
+3 LOW). Research is the same PASS pin as rounds 1 and 2:
+`t3/research-save-screen` `c8895e2` (`docs/save-screen.md` = doc,
+`tools/difftest_save_screen_flow.py` = flow, `tools/ref_save_screen.py` = ref,
+`tools/difftest_save_screen.py` = dt). No push or PR.
+
+## Method
+
+Same setup as round 2. All builds, tests, Godot runs and journeys ran on the
+Mac mini in `~/malik-champions/open-champions/worktrees/play-save-screen`,
+which is its own small shallow repository (round 2's report, "Method"). The
+four source files were edited on the MacBook, then copied with
+`rsync -R -rlp --checksum` (no `-t`) and `touch`ed on the mini. SHA-256 of all
+four matched on both machines before the build. Every commit was made on the
+mini and brought to the MacBook with `git fetch` plus `git merge --ff-only`.
+One build root `build/` (`build/native`, plus `build/gdx` reused one extension
+at a time by the round-2 script), `-j 4`, `ctest -j 3`. Logs stay in the
+ignored `work/pss3/` on the mini. Mini home paths are written as `~/` here.
+
+Test-edit rule: no test or baseline that existed before this branch changed.
+`native/tests/memcard_screen_tests.cpp` is the branch's own test. Round 3
+only adds to it: four new cases, one helper, and one added assertion after
+the existing `card_error_living` `bad` refusal. No existing line was changed
+or removed (`git diff 69931140 -- native/tests` has 0 deletions).
+
+## Findings → fixes → evidence
+
+| ID | Sev | Fix (native/src/memcard_screen.cpp unless noted) | Research line it implements or refuses | Test evidence (`memcard_screen_tests.cpp`) |
+|---|---|---|---|---|
+| PSS2-1 | MED | New private `Screen::reset_save_links()` clears `saved_step_armed`, `saved_box_dismissing` and `image_built_`. It is called on every path that starts, restarts or leaves a save: `request_save` opening card state 3, the committed slot (`call`, beside `w.step = 0`), step 0, the card-error divert to step 9, the error-box cancel, the saved box's close, and the load path (`request_load`, `accept_load`, `load_read_complete`). Disclosed in `docs/SAVE_SCREEN.md` "Native sequencing". | doc:231, 234-236; flow:220-252, 561-574, 583, 615-621; `docs/issues/native-soak.md:547` | `aborted_arm_resave`: arm step 3, wait, card error → step 9 (arm cleared), cancel; the same `Screen` re-enters step 3 at fade 0 with 0x4f8f29 still up → Unknown, step and fade unchanged; after the host clears it, step 3 arms again with −16 and only then enters 4. A confirmed saved box aborted by a card error does not close a later box at fade 0. `request_save`, the commit and step 0 each clear links the host left planted. `stale_build_then_load`: step 1 builds; (a) step-2 card error, cancel, load, planted step 2; (b) no divert, load, planted step 2; (c) step-2 card error, another buffer, planted step 2 — all Unknown with no op queued and the loaded bytes untouched |
+| PSS2-2 | LOW | Code fixed to match the doc: the nonzero-scroll refusal now covers bit 0x80 as well as the repeat (it sits before the branch split). | dt:21-46, 334 (0x80 executed with scroll 0, row 0 only) | `delete_with_scroll`: scroll 1, row 0, count 2, 0x80 → Unknown, slot state, 0x879e24, 0x88d400, 0x4f8ef4 and the fade step unchanged |
+| PSS2-3 | LOW | The step-9 cancel checks `counted_living >= 0` (when it will call `memcard_requestSave`) before storing −1. | doc:237-251 | `card_error_living` `bad` case gains one assertion: card state still 3, step 9, stage 1 after the refusal |
+| PSS2-4 | LOW | Took the two words, as the original reads them. `Screen::call(edge, repeat)` passes both to the slot list; states 4, 5 and 9 throw Unknown before any store when they differ. State 4 with the free row armed (0x4f8ef4 = 7) reads no mask and was executed with edge 0 and repeat 0x40, so it is not refused. The screen steps read the edge word only, as flow:234 and :258 planted only that word. The one-word `call(edge)` remains as a native convenience that passes the same word as both, and is listed under "Native sequencing, disclosed". | doc:177-179 (edge +0x0c, repeat +0x10, 0x21c478-0x21c4ac); dt:33-34 (both planted equal); flow:377-391 (armed free row, edge 0, repeat 0x40); flow:234, 258 | `two_words`: equal words act as before; split words in state 4 (0x80/0, 0/0x204000, 0x40/0), state 5 and state 9 → Unknown with nothing written; armed free row with edge 0 and repeat 0x40 queues operation 8 and enters 7; step 4's confirm with repeat 0 starts the dismiss |
+
+Mutation check (`work/pss3/mutate.py`, `mutations.log`): each fix was
+removed in turn on the mini, the test target rebuilt, and the test run.
+All six mutants fail: reset made a no-op (fails at check 170), the divert's
+reset removed (170), the three load-path resets removed (191, case b), the
+0x80 scroll check removed (196), the cancel order reverted (163), and the
+two-word check removed (199). The source was restored and rebuilt afterwards
+(211 checks, clean tree). The first run printed stale results for two mutants
+because `make` missed a same-second mtime change; the logged rerun spaces
+the writes 1.2 s apart.
+
+`memcard-screen` grew from 166 to 211 checks. Docs: `docs/SAVE_SCREEN.md`
+updates the list-input row (both words, the 0x80 scroll refusal) and the
+cancel row (no partial write), adds the link-reset and two-word items to
+"Native sequencing, disclosed", and adds a round-3 "Refused" table. No disc
+text: no new lookup key, string or identifier. The module still has no
+caller outside itself, its test and its CMake line.
+
+## Gates (Mac mini)
+
+1. **Release build -j 4: PASS.** `cmake -S native -B build/native
+   -DCMAKE_BUILD_TYPE=Release` (exit 0) on a fresh `build/`, then
+   `cmake --build build/native -j 4`, exit 0 in 440 s
+   (`work/pss3/configure.log`, `build.log`). 10 warnings, the same count as
+   round 2's full build, none in `memcard_screen*`. `df -h ~/malik-champions`
+   showed 49–51 GB free before each build.
+2. **Focused tests: PASS, 6/6**, 49.07 s: `ctest -R
+   '^(memcard-screen|frontend-exact|ps2-save|ps2-class-restore|menus-exact|native-save)$'
+   -j 3`, standard input closed (`work/pss3/focused.log`). `memcard-screen` 211
+   checks (round 2: 166). 260 tests registered (unchanged).
