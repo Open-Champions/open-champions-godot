@@ -476,6 +476,24 @@ std::uint64_t Service::machine_service(View &v, const std::string &name, const s
     return 0;
   }
   if (name == "script_runByName") {
+    if (command == "givePlayerItem") {
+      // research-items 5a683b4 docs/give-player-item.md:131-136: on the
+      // equip of the class-0 weapon row, script_runByName 0x1ed694 was called
+      // once with g_scriptMachine 0x86b270 equal to 0 and returned without a
+      // level script. The weapon and bow hooks with a loaded level script are
+      // Unknown there (:135-136, :186), so this command refuses them before
+      // any script runs, whatever another caller's delegate would do.
+      // inventory_equipItem does not read the call's value.
+      calls.push_back({name, args});
+      if (!level_script_loaded)
+        throw Refused("givePlayerItem: equipping a weapon calls script_runByName, and whether "
+                      "g_scriptMachine 0x86b270 holds a level script is not bound");
+      if (level_script_loaded())
+        throw Refused("givePlayerItem: equipping a weapon runs its notify hook through script_runByName "
+                      "with a level script loaded; the weapon and bow hooks are Unknown "
+                      "(research-items 5a683b4 docs/give-player-item.md:135-136,186)");
+      return 0;
+    }
     if (delegates.count(name)) return delegate(name, args);
     throw Refused("equipping a weapon runs a notify script inside inventory_equipItem; not composed here");
   }
@@ -606,9 +624,12 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
           (entry - bag_entry(slot, bag, 0)) % ITEM_SIZE == 0)
         inside = true;
     // inventory_giveItem returned -1 and the handler equips the address 0x48
-    // bytes before the bag. Not copied.
+    // bytes before the bag. research-items 5a683b4 docs/give-player-item.md:79-81
+    // executed that call only on a word planted 0; what a real record holds
+    // there (+0xe8 for bag 0) is not in the research. Not copied.
     if (!inside)
-      throw Refused("inventory_equipItem: the entry is outside the bag (the give returned -1)");
+      throw Refused("inventory_equipItem: the entry is outside the bag (the give returned -1); only a "
+                    "planted zero word there was executed (research-items 5a683b4 docs/give-player-item.md:79-81)");
     counts.equipped += 1;
     if (delegates.count(name)) {
       delegate(name, {std::uint32_t(slot), entry, quiet});
@@ -631,8 +652,13 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
     // Every native item caller requests 0x190 for a ground ItemProp. Its
     // resource and bounds services are unbound, so refuse before consuming a
     // pool block. The pool model itself is tested independently.
+    // givePlayerItem's overweight drop is this call (research-items 5a683b4
+    // docs/give-player-item.md:85-88): the probe's pool_new returned 0, so
+    // ItemProp_ctor2 0x1590ec was never entered and its body is Unknown (:183).
     if (size == 0x190)
-      throw Refused("ground item: resource and model-bounds services are unbound");
+      throw Refused("ground item: pool_new(0x190) feeds ItemProp_ctor2 0x1590ec, whose body is Unknown "
+                    "(research-items 5a683b4 docs/give-player-item.md:86-88,183) and whose resource and "
+                    "model-bounds services are unbound");
     if (!variables_.world)
       throw Refused("pool_new: no object world");
     return variables_.world->pool.allocate(size); // full pool returns 0; corruption still throws

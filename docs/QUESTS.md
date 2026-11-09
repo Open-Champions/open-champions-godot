@@ -318,8 +318,8 @@ supersedes the "stay refused" table above for the item commands:
   substring rule: the entry whose definition name occurs inside the text,
   and the last match wins.
 - `givePlayerItem` and `giveOnePlayerItem` run only with the item tables and
-  the bound session seed. The host binds neither yet, so both still refuse
-  there.
+  the bound session seed. The campaign binds both (2026-11-08); the
+  `givePlayerItem` rules are in [SCRIPT_ITEMS.md](SCRIPT_ITEMS.md) section 4.
 - `givePlayerRandom` stays refused.
 - The host starts `g_difficultyIdx` (`0x4f719c`) and the campaign at 1, the
   executable image's value. `clearAllSkills` still writes 0xff into

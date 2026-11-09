@@ -1726,10 +1726,14 @@ amx::Cell Variables::inventory_dispatch(const std::string &name,amx::Machine &m)
     for(unsigned bag=0;bag<(name=="removeAllItems" ? 3u : 1u);++bag) empty_bag(slot,bag);
     if(name=="removeAllWeapons") for(unsigned k=0;k<3;++k) memory.word(player_record(slot)+0x4434+4*k,0);
   } else if(name=="givePlayerItem") {
-    const auto item=text(0);const auto variant=arg(2);
+    // research-items 5a683b4 docs/give-player-item.md:21-38: the cells are
+    // descriptor, equip and usePresets; the parser gets variant -1 and that
+    // usePresets. Slots re-read g_numPlayers; medal mode visits only 0x4f7148
+    // (:45-52). The result is 0 whether or not a cell was written (:96-100).
+    const auto item=text(0);const auto use_presets=arg(2);
     for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) {
       if(memory.word(0x4f713c)==0 || slot==memory.read(0x4f7148)) {
-        if(!give(slot,item,variant,arg(1),false,true)) {
+        if(!give(slot,item,use_presets,arg(1),false,true)) {
           if(memory.word(player_record(slot)+0x43d8)==0)
             drop_at([&] {return need(player_object(alive(0)),"givePlayerItem");});
           else drop_at([&,slot] {return player_object(slot);});

@@ -117,6 +117,19 @@ if(BUILD_TESTING AND NOT TARGET champions-script-items-tests)
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/give_random.txt")
 endif()
 
+# givePlayerItem's observed rules on authored rows (research-items 5a683b4,
+# docs/give-player-item.md); no game file.
+if(BUILD_TESTING AND NOT TARGET champions-give-player-item-tests)
+    add_executable(champions-give-player-item-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/give_player_item_tests.cpp")
+    target_link_libraries(champions-give-player-item-tests PRIVATE champions-script-commands champions-script-items)
+    if(MSVC)
+        target_compile_options(champions-give-player-item-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-give-player-item-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME give-player-item COMMAND champions-give-player-item-tests)
+endif()
+
 if(BUILD_TESTING AND NOT TARGET champions-item-drops-tests)
     add_executable(champions-item-drops-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/item_drops_tests.cpp")
     target_link_libraries(champions-item-drops-tests PRIVATE champions-script-commands champions-script-items)

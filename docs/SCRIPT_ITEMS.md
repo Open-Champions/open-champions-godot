@@ -49,6 +49,29 @@ In the research's order of priority:
    - **Does not fit:** the ground-item path refuses before `pool_new` takes a
      block. `ItemProp_ctor2` needs unbound resource names, pointers and model
      bounds ([ITEMS_GAPS.md](ITEMS_GAPS.md) section 3).
+   - **`givePlayerItem` in detail** (research `t3/research-items` `5a683b4`,
+     `docs/give-player-item.md`; audits `research-give-item` and
+     `research-give-item-fix` PASS). Cells: descriptor, equip, usePresets;
+     the parser gets variant −1 and usePresets (lines 21–38). Recipients:
+     every slot below the re-read `g_numPlayers`, or only the medal player
+     `0x4f7148` while `0x4f713c` is set (45–52). Bag: the definition's
+     category `+0x1d` (54–56); a flag-39 row keeps its bit and the keep list
+     is not applied at give time (104–111). Bit 8 stacks on definition,
+     flags, prefix and suffix (60–65). Count 63 appends; count 64 loses the
+     item without a drop, and `player_recalcLoad` still runs (69–77). Weight 0
+     is given at limit 0; a positive weight at limit 0 is the drop (85–94).
+     The result is 0 on a give, a full bag and a drop (96–100). Equip with a
+     check of 0 stores the cell and the weapon class; flag bit 41 is given and
+     not left equipped (123–139). `player_giveStartingItems` is a different
+     caller and does not enter this handler (141–151).
+   - **Weapon notify inside the equip.** For `givePlayerItem` only, the
+     `script_runByName` call returns without running anything when the host
+     says no level script is loaded (`g_scriptMachine` `0x86b270` is 0, lines
+     131–134). With a level script loaded it **refuses** before any script
+     runs: the weapon and bow hooks are Unknown there (135–136, 186). The
+     script host's level script is always loaded while one of its commands
+     runs, so in play a `givePlayerItem` weapon equip refuses. Other callers
+     (pickups) keep the host's notify delegate.
 5. **`game_scanCm1Vars`.** `scan_cm1_vars(0, …, word)` returns the word at
    `0x4f7110`, which the host starts at the image's −1. With any other
    argument it scans this machine's profile names, and
@@ -98,10 +121,12 @@ The bounded item-round paths are in [ITEMS_GAPS.md](ITEMS_GAPS.md) (research
 | `generateMonster` for a class whose constructor chain is not ported | The factory row is decided, but only five creature constructors are ported. Any other row refuses before it takes a pool block. |
 | `hideMonster` / `showMonster` on a stub whose factory row the research probe did not decide | 4 rows are undecided; no shipped hide or show target is one. |
 | `givePlayerRandom` | The record after ten failed generations is unknown in pinned research, so the host refuses before its first draw even if other inputs are bound. 0 shipped calls. |
-| Ground `ItemProp_ctor2` | Resource names, lookup pointers and model bounds are unbound; the host refuses before allocating a pool block. |
+| Ground `ItemProp_ctor2` | Resource names, lookup pointers and model bounds are unbound; the host refuses before allocating a pool block. For `givePlayerItem`'s overweight drop, the research probe's `pool_new` returned 0, so the constructor body was not entered (`docs/give-player-item.md` lines 86–88, 183). |
+| Equip after a lost give (`inventory_giveItem` −1) | The handler equips the address 0x48 bytes before the bag. The research executed that call only on a word planted 0 (lines 79–81); a real record's word there (`+0xe8` for bag 0) is not established. |
 | `hideMonster` / `showMonster` on a creature stub with `hide=` or `wait=` | Its constructor's load-time effects have not run. |
 | The Skeleton rise; the AntQueen and Skeleton states in the arena builder | combat-ctors keeps them refused. |
-| Weapon equips that run `*weaponEquipNotify` / `*bowEquipNotify` | They run a script inside `inventory_equipItem`, which is not composed here. `script_runByName` refuses. |
+| Weapon equips that run `*weaponEquipNotify` / `*bowEquipNotify` | They run a script inside `inventory_equipItem`, which is not composed here. `script_runByName` refuses. Under `givePlayerItem`, a loaded level script refuses (hooks Unknown, `docs/give-player-item.md` lines 135–136, 186); no level script returns, as executed (131–134). |
+| Keep-list names not in the research | `givePlayerItem` does not call `player_removeFlag39Items`. Only `pickaxe` and one `bloodstone` name were re-run on that remover in this round; the other names and `shardof` stay as `t3/research-quests` `7efd3ce` `docs/quests.md` lines 163–169 specify, and no name is added. |
 | `dropItem`, `selectDropItem` | Not in this contract. |
 
 A call-out outside the contract refuses. It is never answered with an
@@ -124,7 +149,11 @@ The combat world's `combat_stats::recalc_stats` is the session's.
 (`script_items::routes`). The audit rules still hold:
 
 - **Gives need the item tables and the bound session seed.** The parse may
-  draw. The play session binds neither yet, so both gives refuse there.
+  draw. The campaign binds the tables when it builds the player
+  (`campaign_fight.cpp`, `prepare_items`) and the session binds the seed
+  (`session_controller.cpp`, `bind_seed`).
+- **The command scope.** The host names the running command in
+  `Service::command` and states `level_script_loaded` (its machine is loaded).
 - **`generateMonster` reads its generators' type names.** It stays on the stub-read
   list, but every `ScriptGenerator` record is now built ([ITEMS_GAPS.md](ITEMS_GAPS.md)
   section 5), so only a generator whose build refused is a stub that blocks it.
