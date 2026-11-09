@@ -1,6 +1,7 @@
 #include "vendor_stock_fixture.hpp"
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <string>
 
 namespace it = champions::simulation::rta::items;
@@ -229,23 +230,100 @@ int main() {
   check(residue_result.generated && residue_result.counts[1] == 18 && found_residue,
         "a failed special keeps a nonzero destination pointer and does not invent residue");
 
+  // ref_vendor_stock.py:107-134: weapon and armour failures and outer
+  // rejections retry the same progress with no overall bound. The port
+  // refuses only when its watchdog is reached, and publishes nothing.
+  // docs/spec/vendor-stock.md:117-123,217-219,341.
   fx::Options no_ordinary;
   no_ordinary.ordinary = false;
   auto blocked = fx::ready(99, 99, no_ordinary);
   blocked.plant_store_level(0);
+  blocked.set_retry_watchdog(64);
   auto blocked_result = blocked.open_or_stock(1);
   check(blocked_result.refused &&
             blocked_result.reason.find("unbounded generation failure") != std::string::npos &&
+            blocked_result.failed[0] == 64 &&
             blocked.generations() == 0 && blocked.shared_seed() == 99 && blocked.count(0) == 0,
-        "weapon generation failure refuses instead of inventing a bound");
+        "weapon generation failure retries and refuses only at the port watchdog");
+  check(threw_reason([&] { blocked.set_retry_watchdog(0); }, "retry watchdog"),
+        "a zero watchdog is rejected");
   fx::Options bit40;
   bit40.bit40 = true;
   auto flagged = fx::ready(7, 7, bit40);
+  flagged.set_retry_watchdog(64);
   auto flagged_result = flagged.open_or_stock(1);
   check(flagged_result.refused &&
             flagged_result.reason.find("unbounded generation failure") != std::string::npos &&
-            flagged.generations() == 0,
-        "a bit-40 reject with no overall bound is refused");
+            flagged_result.bit40_rejected[0] > 0 && flagged.generations() == 0,
+        "bit 40 on every weapon rejects without bound and is refused at the watchdog");
+  fx::Options some_bit40;
+  some_bit40.bit40_names = {"w0", "w1"};
+  auto partial = fx::ready(7, 7, some_bit40);
+  auto partial_result = partial.open_or_stock(1);
+  int fixed_flagged = 0;
+  for (std::uint32_t i = 0; i < partial.count(0); ++i)
+    if (partial.item(0, i).flags & (1ull << 40))
+      ++fixed_flagged;
+  check(partial_result.generated && partial_result.counts[0] == 26 &&
+            partial_result.bit40_rejected[0] > 0 && fixed_flagged == 3 &&
+            partial.shared_seed() != first.shared_seed,
+        "a bit-40 weapon is rejected and retried; only the fixed records keep it");
+
+  // A rejected category-2 candidate stays in its slot; a failed special then
+  // adopts that nonzero pointer. ref_vendor_stock.py:110-113,135-145.
+  // Cosmetic seed 12 rolls only the third special.
+  auto plain = fx::ready(7, 12, no_presets);
+  auto plain_result = plain.open_or_stock(1);
+  check(plain_result.generated &&
+            plain_result.special_roll == std::array<bool, 3>{false, false, true} &&
+            plain_result.rejected[2] == 0 && plain.candidates(2).size() == 6,
+        "cosmetic seed 12 rolls only the category-2 special");
+  auto shadow = fx::ready(7, 12, no_presets);
+  for (std::size_t i = 0; i < plain.candidates(2).size(); ++i)
+    shadow.plant_name_record(i, plain.candidates(2)[i].pack());
+  auto shadow_result = shadow.open_or_stock(1);
+  const auto last = shadow.candidates(2).back().pack();
+  bool adopted = false;
+  for (std::uint32_t i = 0; i < shadow.count(2); ++i)
+    adopted = adopted || shadow.record_bytes(2, i) == last;
+  check(shadow_result.generated && shadow_result.rejected[2] > 0 &&
+            shadow_result.counts[2] ==
+                3u + std::uint32_t(6 - shadow_result.rejected[2]) + 1u &&
+            adopted,
+        "a duplicate in the name region is rejected, kept in its slot, and adopted by a failed special");
+
+  // storeLevel bound to the session quest variables.
+  // docs/spec/vendor-stock.md:305-322.
+  std::map<std::string, std::int32_t> quest;
+  auto bound = fx::ready(7, 7);
+  bound.bind_quest_values(&quest);
+  check(!bound.store_level_present(), "bound storeLevel starts absent");
+  check(bound.open_or_stock(1).generated && quest.at("storeLevel") == 0 &&
+            packs(bound) == generated,
+        "the creating read stores storeLevel 0 in the quest variables");
+  bound.apply_literal_setv("hub", 1);
+  check(quest.at("storeLevel") == 8, "a literal setv writes the quest variable");
+  for (auto &value : quest)
+    value.second = 0;
+  check(bound.read_store_level() == 0, "the level-flow act clear zeroes the bound variable");
+  check(threw_reason([&] { bound.apply_non_literal_setv("hub2"); }, "non-literal"),
+        "a non-literal hub2 store stays refused");
+  auto tainted = bound.open_or_stock(1);
+  check(tainted.refused && tainted.reason.find("non-literal setv") != std::string::npos &&
+            bound.generations() == 1 && packs(bound) == generated,
+        "stock after a non-literal store refuses and keeps the lists");
+  bound.on_act_change(true, true, false);
+  check(bound.store_level_unestablished(), "a card latch does not clear the unknown store");
+  bound.on_act_change(true, false, false);
+  check(!bound.store_level_unestablished() && quest.at("storeLevel") == 0 &&
+            bound.open_or_stock(1).generated,
+        "an act clear replaces the unknown store with 0");
+  check(threw_reason([&] { bound.apply_non_literal_setv("hub"); }, "non-literal") &&
+            bound.store_level_unestablished(),
+        "the hub store also marks storeLevel unknown");
+  bound.apply_literal_setv("stobonus", 0);
+  check(!bound.store_level_unestablished() && quest.at("storeLevel") == 7,
+        "a later literal store replaces the unknown value");
 
   const std::array<std::string, 4> names{"shop-a", "shop-b", "shop-c", "shop-d"};
   auto loaded = fx::ready(7, 7);

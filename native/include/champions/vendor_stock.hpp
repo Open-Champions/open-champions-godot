@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,6 +67,10 @@ struct VendorLoad {
   int mode = -1;
   std::array<std::uint32_t, 3> counts{};
   int armour_scan_rejections = 0;
+  // Diagnostics only: outer rejections and generator failures per list.
+  std::array<int, 3> rejected{};
+  std::array<int, 3> failed{};
+  std::array<int, 3> bit40_rejected{};
   std::array<bool, 3> special_roll{};
   std::array<std::int32_t, 3> special_budget{};
   std::uint32_t shared_seed = 0;
@@ -88,13 +93,24 @@ public:
   void set_party(std::int32_t num_players, std::vector<std::int32_t> classes);
   void set_fixed(VendorFixedText fixed);
   void set_destinations(std::array<std::string, 4> identifiers);
+  // Optional session quest variables (the getv/setv table). When bound,
+  // storeLevel lives in that map, so script setv and the level-flow act
+  // clear reach it directly. Unbound, a private variable is used.
+  void bind_quest_values(std::map<std::string, std::int32_t> *values);
   // Creating read of storeLevel. A missing variable is stored at 0.
-  // docs/spec/vendor-stock.md:309-311.
+  // docs/spec/vendor-stock.md:305-311.
   std::int32_t read_store_level();
-  bool store_level_present() const { return store_present_; }
+  bool store_level_present() const;
   // Authored literal setv values only. docs/spec/vendor-stock.md:313-317.
   void apply_literal_setv(const std::string &level, std::size_t index);
+  // Throws. Also marks storeLevel unestablished so that the next stock
+  // pass refuses until a literal setv or an act clear replaces the value.
   void apply_non_literal_setv(const std::string &level);
+  bool store_level_unestablished() const { return non_literal_; }
+  // Consecutive non-accepting attempts at one weapon/armour progress step
+  // before the pass is refused. Port watchdog only; the original has no
+  // bound (docs/spec/vendor-stock.md:121-122,217-219).
+  void set_retry_watchdog(std::uint64_t attempts);
   void literal_current_on_visit(const std::string &level) const;
   // Probe plant, not a script store. Act clear reads the planted value back as 0.
   void plant_store_level(std::int32_t value);
@@ -118,7 +134,9 @@ public:
   std::uint64_t generations() const { return generations_; }
   std::uint32_t shared_seed() const { return shared_seed_; }
   std::uint32_t cosmetic_seed() const { return cosmetic_seed_; }
-  const std::vector<Item> &armour_candidates() const { return armour_seen_; }
+  const std::vector<Item> &armour_candidates() const { return seen_[1]; }
+  // Every successful ordinary generator result of the last pass, in order.
+  const std::vector<Item> &candidates(int category) const;
 
   static std::vector<std::int32_t> literals(const std::string &level);
 
@@ -132,7 +150,7 @@ private:
     std::array<std::vector<Slot>, 3> slots;
     std::array<std::uint32_t, 3> counts{};
     std::uint32_t shared = 0, cosmetic = 0;
-    std::vector<Item> armour_seen;
+    std::array<std::vector<Item>, 3> seen;
   };
 
   VendorLoad regenerate(int mode);
@@ -153,10 +171,14 @@ private:
   std::uint32_t shared_seed_ = 0, cosmetic_seed_ = 0;
   bool store_present_ = false;
   std::int32_t store_level_ = 0;
+  std::map<std::string, std::int32_t> *quest_values_ = nullptr;
+  bool non_literal_ = false;
+  std::uint64_t retry_watchdog_ = std::uint64_t(1) << 20;
+  void store(std::int32_t value);
   std::array<std::vector<Slot>, 3> slots_{};
   std::array<std::uint32_t, 3> counts_{};
   std::vector<std::array<std::uint8_t, kRecord>> names_;
-  std::vector<Item> armour_seen_;
+  std::array<std::vector<Item>, 3> seen_;
   std::uint64_t generations_ = 0;
 };
 

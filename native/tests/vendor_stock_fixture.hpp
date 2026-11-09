@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/vendor_stock.hpp"
+#include <algorithm>
 
 // Synthetic item tables for the vendor-stock contract. No retail names or bytes.
 namespace champions::simulation::rta::items::vendor_fixture {
@@ -7,6 +8,8 @@ struct Options {
   bool presets = true;
   bool ordinary = true;
   bool bit40 = false;
+  // Flags bit 40 on the ordinary weapon definitions named here only.
+  std::vector<std::string> bit40_names;
 };
 inline Tables tables(const Options &options = {}) {
   Tables t;
@@ -30,6 +33,10 @@ inline Tables tables(const Options &options = {}) {
     if (!options.ordinary && !preset)
       d->flags |= 0x10000u;
     if (options.bit40 && category == 0 && !preset)
+      d->flags |= 1ull << 40;
+    if (category == 0 && !preset &&
+        std::find(options.bit40_names.begin(), options.bit40_names.end(),
+                  d->name) != options.bit40_names.end())
       d->flags |= 1ull << 40;
     rows.push_back(d);
   };

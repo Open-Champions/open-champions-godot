@@ -156,13 +156,35 @@ void VendorStock::set_destinations(std::array<std::string, 4> identifiers) {
   destinations_ = std::move(identifiers);
   destinations_set_ = true;
 }
+constexpr const char *kStoreLevel = "storeLevel";
+void VendorStock::bind_quest_values(std::map<std::string, std::int32_t> *values) {
+  quest_values_ = values;
+}
+bool VendorStock::store_level_present() const {
+  return quest_values_ ? quest_values_->count(kStoreLevel) != 0 : store_present_;
+}
+void VendorStock::store(std::int32_t value) {
+  if (quest_values_)
+    (*quest_values_)[kStoreLevel] = value;
+  else {
+    store_present_ = true;
+    store_level_ = value;
+  }
+}
 std::int32_t VendorStock::read_store_level() {
   // docs/spec/vendor-stock.md:309-311. The creating read stores 0.
+  if (quest_values_)
+    return quest_values_->try_emplace(kStoreLevel, 0).first->second;
   if (!store_present_) {
     store_present_ = true;
     store_level_ = 0;
   }
   return store_level_;
+}
+void VendorStock::set_retry_watchdog(std::uint64_t attempts) {
+  if (attempts == 0)
+    throw Error("retry watchdog must allow one attempt");
+  retry_watchdog_ = attempts;
 }
 std::vector<std::int32_t> VendorStock::literals(const std::string &level) {
   return literal_row(level);
@@ -171,13 +193,14 @@ void VendorStock::apply_literal_setv(const std::string &level, std::size_t index
   const auto &row = literal_row(level);
   if (index >= row.size())
     throw VendorRefused("storeLevel literal index is outside the authored list");
-  store_present_ = true;
-  store_level_ = row[index];
+  store(row[index]);
+  non_literal_ = false;
 }
 void VendorStock::apply_non_literal_setv(const std::string &level) {
   // docs/spec/vendor-stock.md:315-319,341. The expressions are unknown.
   if (level != "hub" && level != "hub2")
     throw VendorRefused("non-literal storeLevel setv is evidenced only in hub and hub2");
+  non_literal_ = true;
   throw VendorRefused("non-literal storeLevel setv in hub/hub2 is unknown");
 }
 void VendorStock::literal_current_on_visit(const std::string &) const {
@@ -185,13 +208,18 @@ void VendorStock::literal_current_on_visit(const std::string &) const {
   throw VendorRefused("which storeLevel literal is current on a visit is unknown");
 }
 void VendorStock::plant_store_level(std::int32_t value) {
-  store_present_ = true;
-  store_level_ = value;
+  store(value);
+  non_literal_ = false;
 }
 void VendorStock::on_act_change(bool act_changed, bool card_latch, bool death_task) {
   // docs/spec/vendor-stock.md:45-47,320. A latch or a death task skips the clear.
-  if (act_changed && !card_latch && !death_task && store_present_)
-    store_level_ = 0;
+  // With bound quest values the level-flow clear zeroes every variable;
+  // repeating it here is idempotent. An absent variable stays absent.
+  if (!act_changed || card_latch || death_task)
+    return;
+  if (store_level_present())
+    store(0);
+  non_literal_ = false;
 }
 void VendorStock::render_shop() const {
   // docs/spec/vendor-stock.md:223-224,341.
@@ -227,6 +255,11 @@ void VendorStock::plant_name_record(
     names_.resize(index + 1);
   names_[index] = raw;
 }
+const std::vector<Item> &VendorStock::candidates(int category) const {
+  if (category < 0 || category > 2)
+    throw Error("stock list is outside 0..2");
+  return seen_[static_cast<std::size_t>(category)];
+}
 std::uint32_t VendorStock::count(int category) const {
   if (category < 0 || category > 2)
     throw Error("stock list is outside 0..2");
@@ -244,14 +277,14 @@ VendorStock::record_bytes(int category, std::size_t index) const {
   return slots_[static_cast<std::size_t>(category)][index].raw;
 }
 VendorStock::Snapshot VendorStock::capture() const {
-  return {slots_, counts_, shared_seed_, cosmetic_seed_, armour_seen_};
+  return {slots_, counts_, shared_seed_, cosmetic_seed_, seen_};
 }
 void VendorStock::restore(const Snapshot &saved) {
   slots_ = saved.slots;
   counts_ = saved.counts;
   shared_seed_ = saved.shared;
   cosmetic_seed_ = saved.cosmetic;
-  armour_seen_ = saved.armour_seen;
+  seen_ = saved.seen;
 }
 std::array<std::uint8_t, ITEM_SIZE>
 VendorStock::scan_record(int category, std::size_t index) const {
@@ -305,8 +338,12 @@ VendorLoad VendorStock::regenerate(int mode) {
   out.resource_reason =
       "resource completion unavailable: shop resource 0x538678 is requested and not completed";
   const Snapshot saved = capture();
-  armour_seen_.clear();
+  for (auto &seen : seen_)
+    seen.clear();
   try {
+    if (non_literal_)
+      throw VendorRefused("storeLevel was last stored by the non-literal setv in "
+                          "hub/hub2; that expression is unknown");
     const std::int32_t first = read_store_level();
     const std::int32_t second = read_store_level();
     game_.difficulty = difficulty_;
@@ -343,8 +380,13 @@ VendorLoad VendorStock::regenerate(int mode) {
         auto item = parse_descriptor(tables_, text, -1, false, &rng);
         write_record(category, index, item);
       }
+      // 0x1c7d90-0x1c7e94, 0x1c7fd8-0x1c80b4, 0x1c8398-0x1c8488, as
+      // ref_vendor_stock.py:107-134. The generator writes slot `count`
+      // before the outer tests, so a rejected candidate stays there until
+      // the next write. A failed call preserves the destination.
       int retries = 0;
       int progress = 0;
+      std::uint64_t idle = 0;
       while (progress < attempts[category]) {
         const std::int32_t attempt_budget = wrap(
             std::int64_t(budget.low) +
@@ -352,46 +394,50 @@ VendorLoad VendorStock::regenerate(int mode) {
         auto made = generate_with_affixes(
             tables_, game_, rng, attempt_budget, category, category == 2 ? 1 : -1,
             budget.caps[static_cast<std::size_t>(category)]);
-        if (!made) {
-          // Weapons and armour retry the same budget with no overall bound.
-          // docs/spec/vendor-stock.md:117-123,217-219.
-          if (category != 2) {
-            restore(saved);
-            out.refused = true;
-            out.reason = "unbounded generation failure";
-            out.generated = false;
-            out.counts = counts_;
-            return out;
-          }
-          ++progress;
-          continue;
-        }
-        if (category == 1)
-          armour_seen_.push_back(*made);
-        const auto raw = made->pack();
-        bool accept = true;
-        const bool dup = duplicate(category, count, raw, out.armour_scan_rejections);
-        bool bounded_dup = false;
-        if (accept && dup && retries < 6) {
-          ++retries;
-          accept = false;
-          bounded_dup = true;
-        }
-        if (accept && category == 0 && (made->flags & kBit40))
-          accept = false;
-        if (accept && category == 2 && raw[0x21] == 0xff)
-          accept = false;
-        if (accept) {
+        bool accept = false;
+        if (made) {
           write_record(category, count, *made);
+          seen_[static_cast<std::size_t>(category)].push_back(*made);
+          const auto &raw = slots_[static_cast<std::size_t>(category)][count].raw;
+          accept = true;
+          // Six duplicate rejections; the seventh duplicate can pass.
+          if (duplicate(category, count, raw, out.armour_scan_rejections) &&
+              retries < 6) {
+            ++retries;
+            accept = false;
+          }
+          // Bit 40 rejects even after the duplicate allowance is spent.
+          if (category == 0 && (made->flags & kBit40)) {
+            accept = false;
+            ++out.bit40_rejected[0];
+          }
+          if (category == 2 && raw[0x21] == 0xff)
+            accept = false;
+          if (!accept)
+            ++out.rejected[static_cast<std::size_t>(category)];
+        } else {
+          ++out.failed[static_cast<std::size_t>(category)];
+        }
+        if (accept) {
           ++count;
           retries = 0;
         }
-        if (accept || category == 2)
+        // Weapons and armour retry the same progress and budget; the third
+        // list advances even on failure. docs/spec/vendor-stock.md:117-131.
+        if (accept || category == 2) {
           ++progress;
-        else if (!bounded_dup) {
+          idle = 0;
+          continue;
+        }
+        // The original has no overall bound (docs/spec/vendor-stock.md:
+        // 121-122,217-219). This is a port watchdog, not an observed value:
+        // reaching it refuses the whole pass and never publishes stock.
+        if (++idle >= retry_watchdog_) {
           restore(saved);
           out.refused = true;
-          out.reason = "unbounded generation failure";
+          out.reason = "unbounded generation failure: no record accepted at one "
+                       "progress step within the port watchdog";
+          out.generated = false;
           out.counts = counts_;
           return out;
         }
@@ -421,21 +467,25 @@ VendorLoad VendorStock::regenerate(int mode) {
               list[count].raw[3])
         ++count;
     }
+    // 0x1c8588-0x1c8724: ascending signed value, equal values keep their
+    // order, and a swap copies all 0x48 bytes. docs/spec/vendor-stock.md:148-152.
     for (int category = 0; category < 3; ++category) {
       auto &list = slots_[static_cast<std::size_t>(category)];
       const auto n = counts_[static_cast<std::size_t>(category)];
       if (list.size() < n)
         throw Error("stock count exceeds stored records");
-      std::vector<Item> prefix;
-      prefix.reserve(n);
-      for (std::uint32_t i = 0; i < n; ++i)
-        prefix.push_back(list[i].item);
-      sort_stock_by_value(tables_, prefix);
+      std::vector<std::pair<std::int32_t, Slot>> rows;
+      rows.reserve(n);
       for (std::uint32_t i = 0; i < n; ++i) {
-        list[i].item = prefix[i];
-        list[i].raw = prefix[i].pack();
-        list[i].occupied = true;
+        if (!list[i].item.definition)
+          throw VendorRefused("a counted stock record is residue without a "
+                              "definition; its value is unknown");
+        rows.emplace_back(item_value(tables_, list[i].item), list[i]);
       }
+      std::stable_sort(rows.begin(), rows.end(),
+                       [](const auto &a, const auto &b) { return a.first < b.first; });
+      for (std::uint32_t i = 0; i < n; ++i)
+        list[i] = std::move(rows[i].second);
     }
     shared_seed_ = rng.seed;
     out.counts = counts_;
