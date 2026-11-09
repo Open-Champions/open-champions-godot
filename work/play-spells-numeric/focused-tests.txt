@@ -1,0 +1,5 @@
+Focused CTest -j 3 on the mini, Release, stdin closed:
+spell-numerics (62 checks), simulation-boundary, core-trace-integrity (includes the 82-file boundary census),
+player-host, player-vector-harness, skills-b-host, skills-b-exact, monsters-1-unit, monsters-1-exact:
+100% tests passed, 0 tests failed out of 9, 52.25 s.
+player-exact (pinned player vectors through Tick::cast_skill): 1/1 passed, 56.73 s.
