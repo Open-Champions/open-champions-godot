@@ -108,10 +108,23 @@ render-frame elapsed time, or Godot physics as substitutes.
   (`arena_modes::read_names`, [ARENA_MODES.md](ARENA_MODES.md)); it publishes
   `start.arena_mode` "A". Without that table, or for an unlisted level, it
   still refuses.
-- `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
-  state directory and byte budget, card/flag suppression, hub allocation rule,
+- `begin_change`, `LevelStates`: ordered save/act/reset/name handling, state
+  directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared
   level transients. The typed native state is not a PS2 save-format serializer.
+  Round four of the exit research (`research-exits-r3@e86f3de`,
+  `docs/exits-r4-travel.md`, audit `research-exits-r4` PASS) corrects two
+  earlier readings. A non-hub departure takes the first current-act row its
+  name **starts with** (`save_levelIndexInAct`, :30-34), so `storm1a` takes
+  `storm1`'s size. A new key after ten is appended as an 11th entry (:37-38).
+  `LevelStates::store` returns `StoreResult`: `ret` is the original register,
+  0 on every path (:27); `entry` is set even when the writer is not called
+  (:40-41); `writer_offset` is the data offset of `0x218600` or none.
+  `LevelStates::stored` is `save_levelStateStored` (:110-111): a directory
+  key, written or not. It drives the idle-voice countdown (miss: 300).
+  `ChangeResult` is not a status (:122-123). The adapter refuses a directory
+  hit with no writer bytes: what the original restores from that area is
+  Unknown.
 - `Trigger`, `PushTrigger`: inclusive XY rectangle edges, first slot, recall
   suppression; ordered key/action predicates, host/shop gates, once deletion.
   Schedule rectangle polling using the owner's documented 15-frame lists.
@@ -272,7 +285,9 @@ These are explicit limits, not inferred approvals:
   explicit callbacks. They must not be mistaken for verified implementations
   of those services.
 - Bounds checks replace original buffer overwrite/crash behavior. Names that
-  exceed fixed buffers, 11th state entry, 16th gate, malformed object/archive
+  exceed fixed buffers, a 12th state entry (the 11th is observed; a 12th would
+  overlap the data area and was not run), `save_levelStateStored` past ten
+  keys, 16th gate, malformed object/archive
   bounds and payloads larger than state allocations refuse explicitly.
 
 ## Validation

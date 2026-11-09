@@ -735,40 +735,58 @@ int find_act(const Acts &acts, const std::string &name, int current) {
       return int(a);
   return -1;
 }
-bool LevelStates::store(const std::string &name, const Act &rows, int card,
-                        std::uint32_t flags, bool fixed, const Blob &blob) {
-  if (card == 4 || (flags & 0x800))
-    return false;
+StoreResult LevelStates::store(const std::string &name, const Act &rows,
+                               int card, std::uint32_t flags, bool fixed,
+                               const Blob &blob) {
+  StoreResult out;
+  if (card == 4 || (flags & 0x800)) {
+    out.skipped = true;
+    return out;
+  }
   name_limit(name, 0x14);
   std::uint32_t size = 35000;
   if (!fixed) {
+    // hub* uses row 0; otherwise save_levelIndexInAct: the first current-act
+    // row the name starts with (docs/exits-r4-travel.md:30-34).
     auto i = starts(name, "hub")
                  ? rows.begin()
-                 : std::find_if(rows.begin(), rows.end(),
-                                [&](auto &r) { return r.first == name; });
+                 : std::find_if(rows.begin(), rows.end(), [&](auto &r) {
+                     return starts(name, r.first);
+                   });
     if (i == rows.end())
-      return false;
+      return out;
     size = i->second;
   }
-  std::size_t offset = 0;
-  auto it = entries.begin();
-  for (; it != entries.end(); ++it) {
-    if (it->first == name)
+  std::size_t offset = 0, index = 0;
+  for (; index < entries.size() && index < SEARCHED; ++index) {
+    if (entries[index].first == name)
       break;
-    offset += it->second;
+    offset += entries[index].second;
   }
-  if (it == entries.end()) {
-    if (entries.size() >= 10)
-      throw Error("11th level state would overflow original directory");
+  if (index == entries.size() || index == SEARCHED) {
+    if (entries.size() >= ENTRIES)
+      throw Unsupported("a 12th level-state directory entry overlaps the "
+                        "data area; that path was not executed");
     entries.push_back({name, size});
-    it = entries.end() - 1;
+    index = entries.size() - 1;
   }
-  if (offset <= LIMIT && it->second <= LIMIT - offset) {
-    if (blob.size() > it->second)
+  out.entry = true;
+  const auto kept = entries[index].second;
+  if (offset <= LIMIT && kept <= LIMIT - offset) {
+    if (blob.size() > kept)
       throw Error("serialized state exceeds act allocation");
     blobs[name] = blob;
-    return true;
+    out.writer_offset = offset;
   }
+  return out;
+}
+bool LevelStates::stored(const std::string &name) const {
+  for (std::size_t i = 0; i < entries.size() && i < SEARCHED; ++i)
+    if (entries[i].first == name)
+      return true;
+  if (entries.size() > SEARCHED)
+    throw Unsupported("save_levelStateStored past ten directory entries was "
+                      "not executed");
   return false;
 }
 std::pair<bool, std::size_t>
@@ -997,9 +1015,11 @@ begin_change(State &s, const ChangeOptions &o,
   if (!s.arrived_by_recall && !s.restore_xy)
     s.ambient_countdown = 60;
   if (!s.level.empty() && !o.death_task)
-    r.stored = s.states.store(qualified_name(s.level, s.sub), act_rows(s),
-                              o.card_state, s.level_flags, o.fixed_state_size,
-                              o.old_blob);
+    r.stored = s.states
+                   .store(qualified_name(s.level, s.sub), act_rows(s),
+                          o.card_state, s.level_flags, o.fixed_state_size,
+                          o.old_blob)
+                   .written();
   if (event && !o.death_task)
     event("restore_medal_player_if_saved");
   if (!s.frontend) {
@@ -1036,7 +1056,9 @@ begin_change(State &s, const ChangeOptions &o,
     for (auto &p : s.players)
       p.recall_dest = "None";
   s.transient = {};
-  r.had_saved_state = s.states.lookup(qualified_name(s.level, s.sub)).first;
+  const auto arriving = qualified_name(s.level, s.sub);
+  r.had_saved_state = s.states.stored(arriving);
+  r.saved_bytes = s.states.lookup(arriving).first;
   if (!r.had_saved_state)
     s.idle_voice_countdown = 300;
   return r;

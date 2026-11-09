@@ -115,6 +115,11 @@ LoadedLevel SessionAdapter::change(const ChangeOptions &opts,
       }
       hooks_.event("flush_constructor_deletions");
     };
+    // A directory key can exist without writer bytes (docs/exits-r4-travel.md
+    // :40-41). What the original restores from that unwritten area is Unknown.
+    if (result.had_saved_state && !result.saved_bytes)
+      throw Unsupported("saved level-state entry has no writer bytes; "
+                        "restoring the unwritten area is Unknown");
     if (result.had_saved_state) {
       build_records(hooks_.restore_level_state(
           state_.states.blobs.at(qualified_name(state_.level, state_.sub))));

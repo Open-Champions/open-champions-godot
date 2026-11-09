@@ -340,11 +340,26 @@ void reference_cases() {
   CHECK(find_act(acts, "hub2", -1) == 0);
   CHECK(find_act(acts, "qq", 0) == -1);
   LevelStates states;
-  CHECK(states.store("aa", acts[0], 0, 0, false, {'1'}));
-  CHECK(states.store("hub2", acts[0]));
-  CHECK(!states.store("aa_x", acts[0]));
-  CHECK(!states.store("bb", acts[0]));
-  CHECK(!states.store("aa", acts[0], 4));
+  CHECK(states.store("aa", acts[0], 0, 0, false, {'1'}).written());
+  CHECK(states.store("hub2", acts[0]).written());
+  // save_levelIndexInAct is a prefix match on the current act, so aa_x
+  // takes the aa row (research-exits-r3@e86f3de docs/exits-r4-travel.md:30-34;
+  // it supersedes the exact-row wording of docs/level-flow.md 7.3).
+  {
+    auto prefixed = states.store("aa_x", acts[0]);
+    CHECK(prefixed.written() && prefixed.ret == 0 && prefixed.entry &&
+          *prefixed.writer_offset == 150 && states.entries.back() ==
+          std::make_pair(std::string("aa_x"), std::uint32_t(50)));
+  }
+  {
+    auto missing = states.store("bb", acts[0]);
+    CHECK(!missing.written() && !missing.entry && !missing.skipped &&
+          missing.ret == 0 && states.entries.size() == 3);
+  }
+  {
+    auto card = states.store("aa", acts[0], 4);
+    CHECK(!card.written() && card.skipped && card.ret == 0);
+  }
   CHECK(states.lookup("hub2") == std::make_pair(true, std::size_t(50)));
   State se;
   se.acts = acts;
@@ -495,14 +510,27 @@ void robustness_and_state() {
   refuses([&] { parse_objects({bad.data(), bad.size()}); });
   LevelStates states;
   Act rows{{"large", std::uint32_t(LevelStates::LIMIT + 1)}};
-  CHECK(!states.store("large", rows));
-  CHECK(states.entries.size() == 1 && !states.lookup("large").first);
+  {
+    auto large = states.store("large", rows);
+    CHECK(!large.written() && large.entry && large.ret == 0);
+  }
+  CHECK(states.entries.size() == 1 && !states.lookup("large").first &&
+        states.stored("large"));
   states = {};
   for (int i = 0; i < 10; ++i)
-    CHECK(
-        states.store("s" + std::to_string(i), {{"s" + std::to_string(i), 1}}));
-  refuses([&] { states.store("eleven", {}, 0, 0, true); });
-  CHECK(!states.store("s0", {}, 0, 0x800, true));
+    CHECK(states.store("s" + std::to_string(i), {{"s" + std::to_string(i), 1}})
+              .written());
+  // The 11th key is appended after ten (docs/exits-r4-travel.md:37-38);
+  // only a 12th, which would overlap the data area, refuses.
+  {
+    auto eleventh = states.store("eleven", {}, 0, 0, true);
+    CHECK(eleventh.written() && *eleventh.writer_offset == 10 &&
+          states.entries.size() == 11 &&
+          states.entries.back().second == 35000);
+  }
+  refuses([&] { states.store("twelve", {}, 0, 0, true); });
+  CHECK(states.entries.size() == 11);
+  CHECK(states.store("s0", {}, 0, 0x800, true).skipped);
   State s;
   s.acts = acts;
   s.act = 0;
@@ -981,6 +1009,277 @@ void integration() {
   refuses([&] { adapter.change({}, {}, placement); });
   CHECK(adapter.failed() && !adapter.ready());
   refuses([&] { adapter.advance_ready(); });
+  // A directory key without writer bytes (docs/exits-r4-travel.md:40-41) is
+  // a save_levelStateStored hit, but nothing was written to restore.
+  State unwritten;
+  unwritten.acts = acts;
+  unwritten.act = 0;
+  unwritten.level = "aa";
+  unwritten.players[0].active = true;
+  unwritten.players[0].hp = 10;
+  unwritten.states.entries = {{"aab", 50}};
+  unwritten.pending.request("aab");
+  SessionAdapter unwritten_adapter(unwritten, loader, hooks);
+  bool unsupported = false;
+  try {
+    unwritten_adapter.change({}, {}, placement);
+  } catch (const level_flow::Unsupported &) {
+    unsupported = true;
+  }
+  CHECK(unsupported && unwritten_adapter.failed() && !unwritten_adapter.ready());
+}
+// research-exits-r3@e86f3de docs/exits-r4-travel.md and
+// tools/difftest_exit_travel.py. Act tables are synthetic: thirteen acts
+// shaped like the probe's cases (hub in every act, storm1 before storm1a in
+// act 8, honor in act 6), with authored sizes. No retail size is used.
+Acts travel_acts() {
+  Acts out(13);
+  for (std::uint32_t a = 0; a < 13; ++a)
+    out[a].push_back({"hub", 1000 + a});
+  out[0].push_back({"strife", 2000});
+  out[6].push_back({"honor", 2600});
+  out[8].push_back({"storm1", 2800});
+  out[8].push_back({"storm1a", 2801});
+  return out;
+}
+void travel_r4_cases() {
+  const auto t = travel_acts();
+  // save_findAct / save_actChanged, the ten probe cases (:12-23; difftest
+  // :78-89). Current act first; prefix rows; unknown leaves the act.
+  struct ActCase {
+    int current;
+    const char *name;
+    int found, stored;
+    bool changed;
+  };
+  for (auto c : std::vector<ActCase>{{-1, "strife", 0, 0, true},
+                                     {0, "strife", 0, 0, false},
+                                     {6, "hub", 6, 6, false},
+                                     {-1, "hub2", 0, 0, true},
+                                     {-1, "storm1a", 8, 8, true},
+                                     {8, "storm1a", 8, 8, false},
+                                     {12, "strife", 0, 0, true},
+                                     {5, "honor", 6, 6, true},
+                                     {-1, "SYN_NO_LEVEL", -1, -1, false},
+                                     {4, "SYN_NO_LEVEL", -1, 4, false}}) {
+    CHECK(find_act(t, c.name, c.current) == c.found);
+    State s;
+    s.acts = t;
+    s.act = c.current;
+    s.pending.request(c.name);
+    auto r = begin_change(s, {});
+    CHECK(s.act == c.stored && r.act_changed == c.changed &&
+          r.reset_act == c.changed);
+  }
+  // save_storeLevelState, the fifteen probe departures (:27-43; difftest
+  // :142-164). ret is 0 on every path.
+  struct StoreCase {
+    const char *name;
+    int act, card;
+    std::uint32_t flag;
+    bool forced;
+    std::vector<std::pair<std::string, std::uint32_t>> prior, entries;
+    std::optional<std::size_t> offset;
+    bool skipped;
+  };
+  using E = std::vector<std::pair<std::string, std::uint32_t>>;
+  std::vector<std::pair<std::string, std::uint32_t>> full;
+  for (int i = 0; i < 10; ++i)
+    full.push_back({"SYN_K" + std::to_string(i), 1});
+  auto full_plus = full;
+  full_plus.push_back({"strife", 2000});
+  const std::size_t L = LevelStates::LIMIT;
+  for (auto &c : std::vector<StoreCase>{
+           {"strife", 0, 4, 0, false, {}, {}, {}, true},
+           {"strife", 0, 0, 0x800, false, {}, {}, {}, true},
+           {"hub", 0, 0, 0, false, {}, E{{"hub", 1000}}, 0, false},
+           {"hub2", 5, 0, 0, false, {}, E{{"hub2", 1005}}, 0, false},
+           {"strife", 0, 0, 0, false, {}, E{{"strife", 2000}}, 0, false},
+           {"storm1a", 8, 0, 0, false, {}, E{{"storm1a", 2800}}, 0, false},
+           {"strife", 5, 0, 0, false, {}, {}, {}, false},
+           {"SYN_NO_LEVEL", 0, 0, 0, false, {}, {}, {}, false},
+           {"strife", 0, 0, 0, true, {}, E{{"strife", 35000}}, 0, false},
+           {"SYN_NO_LEVEL", 0, 0, 0, true, {}, E{{"SYN_NO_LEVEL", 35000}}, 0,
+            false},
+           {"strife", 0, 0, 0, false, E{{"hub", 15000}},
+            E{{"hub", 15000}, {"strife", 2000}}, 15000, false},
+           {"hub", 0, 0, 0, false, E{{"hub", 100}}, E{{"hub", 100}}, 0, false},
+           {"hub", 0, 0, 0, false, E{{"hub", std::uint32_t(L)}},
+            E{{"hub", std::uint32_t(L)}}, 0, false},
+           {"hub", 0, 0, 0, false, E{{"hub", std::uint32_t(L + 1)}},
+            E{{"hub", std::uint32_t(L + 1)}}, {}, false},
+           {"strife", 0, 0, 0, false, full, full_plus, 10, false}}) {
+    LevelStates states;
+    states.entries = c.prior;
+    const Act &rows = c.act >= 0 ? t[std::size_t(c.act)] : Act{};
+    auto r = states.store(c.name, rows, c.card, c.flag, c.forced);
+    CHECK(r.ret == 0 && r.skipped == c.skipped && r.writer_offset == c.offset);
+    CHECK(states.entries == (c.entries.empty() ? c.prior : c.entries));
+    CHECK(r.entry == !c.entries.empty());
+    CHECK(states.blobs.count(c.name) == (c.offset ? 1u : 0u));
+  }
+  // Act -1 stores nothing unless the forced byte is set (ref :97-100).
+  {
+    LevelStates states;
+    CHECK(!states.store("hub", {}).entry && states.entries.empty());
+    CHECK(states.store("hub", {}, 0, 0, true).written());
+  }
+  // save_levelStateStored is a key lookup; an 11-entry directory whose
+  // 11th key is asked for was not run.
+  {
+    LevelStates states;
+    states.entries = full_plus;
+    CHECK(states.stored("SYN_K9"));
+    refuses([&] { (void)states.stored("strife"); });
+    refuses([&] { (void)states.stored("SYN_ABSENT"); });
+    refuses([&] { states.store("strife", t[0]); });
+    CHECK(states.entries.size() == 11);
+  }
+  // mainloop_loadRequestedWorld through the split (:51-85; difftest
+  // :295-466). Orientation byte is synthetic.
+  const std::uint8_t orient = 0x5a;
+  auto prepared = [&](const std::string &level, const std::string &sub,
+                      const std::string &pending, int act) {
+    State s;
+    s.acts = t;
+    s.act = act;
+    s.level = level;
+    s.sub = sub;
+    s.pending.request(pending, orient);
+    s.quest_values["SYN"] = 7;
+    s.idle_voice_countdown = 7;
+    return s;
+  };
+  {
+    auto s = prepared("", "", "SYN_A_SUB", -1);
+    auto r = begin_change(s, {});
+    CHECK(!r.stored && s.states.entries.empty());
+    CHECK(s.level == "SYN" && s.sub == "A_SUB" && s.pending.name.empty() &&
+          s.prev.empty());
+    CHECK(r.orientation == orient && s.orientation_copy == orient &&
+          s.pending.orientation == ORIENT_CONSUMED);
+  }
+  {
+    // A death task skips the departure store and the clear, not the act
+    // update or the split.
+    auto s = prepared("SYN_OLD", "PART", "strife_branch", 5);
+    ChangeOptions o;
+    o.death_task = true;
+    auto r = begin_change(s, o);
+    CHECK(!r.stored && s.states.entries.empty() && s.act == 0 &&
+          r.act_changed && !r.reset_act && s.quest_values["SYN"] == 7);
+    CHECK(s.level == "strife" && s.sub == "branch" && s.prev == "SYN_OLD_PART");
+  }
+  {
+    // The front end does not consult the act table.
+    auto s = prepared("SYN_OLD", "", "strife", -1);
+    s.frontend = true;
+    auto r = begin_change(s, {});
+    CHECK(!r.act_changed && s.act == -1 && s.level == "strife");
+  }
+  {
+    // The latch skips the clear after the act index has changed.
+    auto s = prepared("SYN_OLD", "", "honor", 0);
+    ChangeOptions o;
+    o.card_latch = true;
+    auto r = begin_change(s, o);
+    CHECK(s.act == 6 && r.act_changed && !r.reset_act &&
+          s.quest_values["SYN"] == 7);
+  }
+  {
+    // Same act keeps quest values; a different act zeroes them, keeping
+    // the name (vars_clearAll), and writes None for every record.
+    auto s = prepared("SYN_OLD", "", "strife", 0);
+    begin_change(s, {});
+    CHECK(s.act == 0 && s.quest_values["SYN"] == 7);
+    s = prepared("SYN_OLD", "", "strife", 5);
+    s.players[1].hp = 0;
+    for (auto &p : s.players)
+      p.recall_dest = "SYN_DEST";
+    auto r = begin_change(s, {});
+    CHECK(r.reset_act && s.act == 0 && s.quest_values.count("SYN") &&
+          s.quest_values["SYN"] == 0);
+    for (auto &p : s.players)
+      CHECK(p.recall_dest == "None");
+  }
+  {
+    // A directory hit, even with no writer bytes, keeps the idle-voice
+    // countdown; a miss stores 300.
+    auto s = prepared("SYN_OLD", "", "strife", 0);
+    s.states.entries = {{"strife", 2000}};
+    auto r = begin_change(s, {});
+    CHECK(r.had_saved_state && !r.saved_bytes && s.idle_voice_countdown == 7);
+    s = prepared("SYN_OLD", "", "SYN_FRESH", 0);
+    r = begin_change(s, {});
+    CHECK(!r.had_saved_state && s.idle_voice_countdown == 300);
+  }
+  {
+    // A leading underscore leaves the base empty.
+    auto s = prepared("SYN_OLD", "", "_SYN_ONLY", 0);
+    begin_change(s, {});
+    CHECK(s.level.empty() && s.sub == "SYN_ONLY");
+  }
+  // Recall None write: card state 4 or a death task skips it (:107-109).
+  for (int card : {0, 4})
+    for (bool death : {false, true}) {
+      std::array<PlayerRecord, 4> records;
+      records[1].hp = 0;
+      for (auto &p : records)
+        p.recall_dest = "SYN_DEST";
+      apply_act_entry(records, true, card, death);
+      for (auto &p : records)
+        CHECK(p.recall_dest ==
+              (card != 4 && !death ? std::string("None") : "SYN_DEST"));
+    }
+  // Placement gates (:87-106; difftest :369-438). Recall copies x and y;
+  // terrain z for every slot; slot 0 is not searched; the search takes
+  // 36 and 14; facing grows by 0x1f40 and wraps in 16 bits.
+  {
+    SpawnState s;
+    s.pos[0] = v(1, 1, 1);
+    s.pos[1] = v(2, 1, 1);
+    s.facing[0] = 0x1234;
+    s.facing[1] = 0xf000;
+    Placement p;
+    p.players = 2;
+    p.restore_xy = std::array<Vec3, 4>{v(3, 5, 77), v(4, 5, 77), {}, {}};
+    std::vector<std::pair<Raw, Raw>> searched;
+    auto height = [](Raw, const Vec3 &) { return f(4); };
+    auto spot = [&](const Vec3 &, Raw spread, Raw radius, bool any) {
+      CHECK(!any);
+      searched.push_back({spread, radius});
+      return v(9, 8, 7);
+    };
+    auto built = place_players(s, p, height, spot);
+    CHECK(built == std::vector<unsigned>({0, 1}));
+    CHECK(s.pos[0] == v(3, 5, 4) && s.pos[1] == v(9, 8, 4));
+    CHECK(searched.size() == 1 && searched[0].first == f(36) &&
+          searched[0].second == f(14));
+    CHECK(s.facing[0] == 0x1234 && s.facing[1] == 0x0f40);
+    for (int variant = 0; variant < 3; ++variant) {
+      SpawnState q;
+      q.rank = variant == 0 ? 3 : 0;
+      Placement g;
+      g.players = 2;
+      g.level_loaded = variant != 1;
+      g.pvp = variant == 2;
+      searched.clear();
+      auto b = place_players(q, g, height, spot);
+      CHECK(searched.empty() && b.size() == (variant == 0 ? 2u : 0u));
+    }
+    Placement gated;
+    gated.players = 2;
+    gated.alive = {{true, false, true, true}};
+    gated.active = {{true, true, true, true}};
+    gated.medal_slot = 0;
+    SpawnState q;
+    q.rank = 3;
+    CHECK(place_players(q, gated, height, spot) == std::vector<unsigned>({0}));
+    gated.alive = {{true, true, true, true}};
+    gated.active = {{false, true, true, true}};
+    gated.medal_slot.reset();
+    CHECK(place_players(q, gated, height, spot) == std::vector<unsigned>({1}));
+  }
 }
 // Grid origin (-2, -2) and an 8 by 8 cell table match the round-3 fixture, so a
 // point just below zero is still a cell. The rectangle is the sample box padded
@@ -1578,6 +1877,7 @@ int main() {
     round2_cases();
     round3_cases();
     round4_cases();
+    travel_r4_cases();
     loader_world_order();
     robustness_and_state();
     top_floor();
