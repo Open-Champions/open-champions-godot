@@ -131,3 +131,56 @@ These stay refused:
 
 List save/load and a nonzero act-change on this boundary stay unexecuted.
 The older destination-list walk in level flow is unchanged.
+
+## Jump-gate portal (round 6)
+
+Research pin: `research-mission2-route` `3c10c07`, `docs/mission2-round6.md`
+(audits `research-mission2-route-r6.md` and `-r6-fix.md`, PASS). Code:
+`native/include/champions/mission2_portal.hpp`, in the same
+`champions-mission2-route` library. The live session does not call it.
+Only Observed or Executed behaviour is carried. Line numbers below are in
+`docs/mission2-round6.md`.
+
+- **Menu** (`portal::open`, `portal::frame`, one call per frame, `:204-207`).
+  State 0 finds the current level in the list, clears the selection, sets
+  `0x41b4fc`/`0x41b500` and pauses offline (`:133-142`). State 1 fades in by
+  8 until `0x80`, then holds `0x7f`: 16 frames (`:144-145`, `:216`). State 2
+  cancels on pressed `& 0x120` or an inactive slot, confirms on pressed
+  `& 0x40` unless the selection is the current level (`0x27dfa0`), and
+  otherwise moves up on `+0x10 & 0x101000` above 0 and down on
+  `& 0x204000` below count − 1 (`:147-163`, executed `:218-228`). State 3
+  fades out by `0x10`: 8 frames, then `pauseMenu_close` and state 4 with
+  travel, or `net_lockLocalInput(chooser, 5)` and removal of both tasks
+  without it (`:165-172`, `:229-230`, `:245-254`). State 4 begins travel
+  (`:174-175`). State 5 counts travel to 181, then writes the selected name
+  to `g_pendingLevel` and `0xff` to the orientation byte, and nothing else
+  (`:177-184`, `:232-240`). The travel word is
+  `level_flow::State::travel.ticks`, which the client's loader path reads.
+- **Handoff** (`portal::handoff`). The request goes through
+  `SessionAdapter::change`, the client's `mainloop_loadRequestedWorld`
+  path: the level left is stored, the name splits with an empty subname,
+  `g_prevLevelName` is the level left, `0x41b7c1` keeps `0xff`, `0x41b720`
+  becomes `0xfe`, and the loader gets `hub` (`:302-318`). The handoff
+  refuses any request that is not the gate's (orientation `0xff`, travel
+  181).
+- **Arrival.** The existing adapter path builds the destination's own gate
+  with travel set: one free-spot search per player near it (the call passes
+  `0x24` and `0x18`), one `g_randSeed` step, facing from the seed's high
+  half, then rank 3 so the loader's own search is skipped, the terrain
+  height, and player 0 constructed there (`:334-363`). The free-spot
+  geometry stays the caller's hook.
+- **Destination block** (`portal::save_destinations`,
+  `portal::load_destinations`). The sign-extended count byte as a word, then
+  the 480 bytes; the load keeps the word's low byte. Both return `0x1e4`.
+  This is the `+0x134` save row that `ps2_save::pack_jump` packs
+  (`:258-285`).
+
+Refused: a net game and a fixed destination (read, not executed: `:141`,
+`:148-150`, `:180`), up and down in one frame, and menu state 6 and later.
+State 6 → 7 and state 7's clear were executed (`:186-189`, `:241-243`), but
+which main-loop pass takes the request against state 6 is Inferred
+(`:292-296`), so the client leaves the menu in state 6. Main-loop steps 2,
+4 and 5 were not run (`:465-471`). The loader internals round 6 runs (VU1,
+DMA, boot and `engine_init` fixtures) are research scaffolding and are not
+ported. The older `portal_row0` direct call and the refusal rows above are
+unchanged.
