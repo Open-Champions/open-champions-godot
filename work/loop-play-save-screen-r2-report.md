@@ -70,4 +70,11 @@ untouched.
    -j 3`, standard input closed (`work/pss2/focused.log`). `memcard-screen` 166 checks.
    Registered tests: 260 (unchanged; no test added to CTest this round).
 
+3. **Full CTest: PASS, 260/260**, `ctest --test-dir build/native --output-on-failure
+   -j 3`, standard input closed, 2,174.28 s, exit 0 (`work/pss2/ctest.out`). Baseline
+   260/260. No test timed out, so no rerun was needed. It ran next to the GDExtension
+   builds and then the Godot matrix (the second heavy-job slot) on a mini at load average
+   about 80–120 from other jobs. `netplay` alone took 278.95 s. `memcard-screen` passed
+   in 0.01 s.
+
 GATES_REST
