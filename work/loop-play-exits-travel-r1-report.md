@@ -1,4 +1,4 @@
-STATUS: PENDING GATES
+STATUS: PASS — 2026-11-09. Round-four observed level-travel contracts carried natively (prefix act rows, store returns 0, 11th entry, entry without writer, directory-key arrival lookup). Gates: Release + 5 universal extensions; focused 11/11; CTest 259/259; strict Godot 54/54; FULL_SAVE_LOAD 300/300; FULL_TRACE unchanged 36,402 / 9c7922b2…c659; journeys 80/81 with pickup 10→11, every difference explained. All named refusals kept.
 
 # Play exits travel, round 1 — 2026-11-09
 
@@ -189,7 +189,46 @@ about 30–38 throughout, from other agents.
    baseline was edited. The combat trace does not go through
    `LevelStates` / `begin_change`.
 
-GATES_PENDING
+7. **Journeys: match wave 37 at 80/81 steps, pickup 10→11.** Unchanged
+   `tools/run_loop_playthrough.py`, serial headless then rendered, stdin
+   closed, read-only disc, 282 s. Wrapper exit 1 is the retained full-journey
+   refusal (`player_death`). Disc 994 files before and 994 after. Evidence:
+   `playthrough.out`, `playthrough/`. Field-by-field comparison with wave 37's
+   `result.json` uses `compare.py`.
+
+   | Variant | Steps | Step/result pairs equal | Refused rows | Refusal map | Pickup | Walk ticks | Log errors | Captures |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | Headless | 80 | 80/80 | 27 (= w37) | equal | 10→11, picked up | 52 | 0 | 0 |
+   | Rendered | 81 | 81/81 | 28 (= w37) | equal | 10→11, picked up | 52 | 0 | 38 |
+
+   Every difference from wave 37:
+   - **Host only:** `fps` and `memory_bytes` on every step;
+     `enemy_fight.swing_wall_msec` 25,024→61,404 headless and 27,173→78,214
+     rendered (wall-clock `Time.get_ticks_msec()`, mini load about 30–38).
+   - **`dialog_choice_close.choices_taken`** 5→4 headless, 6→3 rendered, and
+     with it **`hub_trigger_mission_menu.script_executed_commands.addQuest`**
+     3→2 headless, 4→1 rendered. Both rows keep the same result (`closed`,
+     and the same step result). The journey presses ENTER every 8 process
+     frames while advancing (`godot/tests/loop_playthrough.gd:784-790`). The
+     scene also advances native ticks from monotonic wall time each frame
+     (`godot/scenes/session_sandbox.gd:91-97`). The number of choices that land
+     before the dialog closes therefore depends on frame time. Recorded waves
+     with no dialog change show the same variation. Rendered `choices_taken`
+     ran 5, 7, 5, 4, 4, 6, 6, 6, 3 over waves 30–38. Wave 38 recorded 3/3 with
+     `addQuest` 1/1. `addQuest` equals `choices_taken − 2` in every recorded
+     wave and here. This change does not reach that path: these are hub
+     dialog steps before any level change, and the live client never calls
+     `LevelStates` or `begin_change` outside `prepare_campaign_entry`'s act
+     transfer. No test, baseline or fixture was edited.
+
+## Final
+
+All seven gate groups passed on the mini. The native contract now carries the
+round-four observed travel behaviour. Disc load, free-spot geometry,
+object-writer bytes, scripts on entry and both arrival refusals stay refused,
+for the reasons above. No values were invented. No push, PR, private-disc
+write, `~/champions-re` or `playable-integration` edit, or process-name
+termination. The mini `build/` was deleted afterwards.
 
 ## Final
 
