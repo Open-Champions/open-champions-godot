@@ -1,4 +1,4 @@
-Test project ~/malik-champions/open-champions/worktrees/play-spells-numeric/build/native
+Test project <mini worktree>/build/native
         Start 147: create-fixtures
         Start 155: player-exact
         Start 157: monsters-1-exact
