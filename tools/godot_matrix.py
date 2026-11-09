@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Explicit public fixture matrix. Helper scripts are not executable tests.
 SMOKES = (
-    "archive_smoke", "control_anim_cache_smoke",
+    "archive_smoke", "char_appearance_smoke", "control_anim_cache_smoke",
     "frame_rate_smoke", "frontend_smoke", "fx_bridge_refusal_smoke",
     "fx_shade_batch_smoke", "inventory_icons_smoke", "level_library_smoke",
     "level_lights_smoke",

@@ -1,4 +1,5 @@
 #include "champions/campaign_fight.hpp"
+#include "champions/char_appearance.hpp"
 #include "champions/campaign_actors.hpp"
 #include "champions/minotaur.hpp"
 #include "champions/combat_ctors.hpp"
@@ -14,6 +15,7 @@
 #include "champions/session_combat_runtime_adapter.hpp"
 #include "champions/session_control.hpp"
 #include <algorithm>
+#include <tuple>
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
@@ -821,22 +823,47 @@ struct Fight::Impl {
     return {};
   }
   // player_resetIdleAnim 0x1b2470 (research-player-anim cda95dc,
-  // player-animation-selection.md section 2): idle, walk, run 1 and run 2 of
-  // the weapon-class row into cells 0..3.
+  // player-animation-selection.md:58-66): idle, walk, run 1 and run 2 of the
+  // weapon-class row into cells 0..3. research-char-appearance 153d1c3
+  // created-character-appearance.md:389-397 adds that the time and rate words
+  // are not written (a prior value survives) and that object byte +0x462
+  // replaces cell 0 with the class idled name.
   void reset_idle_anim() {
     if (!player || !lt(0, read(PLAYERS + 0xac))) return;
     const Address def = read(player + 0x24);
+    const auto cls = std::int8_t(read(PLAYERS + 0x4a86, 1));
+    creature_anim::ClipId display = 0;
+    if (read(player + 0x462, 1)) {
+      // :393-395. The name comes from the owner's executable; no other clip
+      // is substituted when the player lump lacks it.
+      display = clip_for(player_token(exe->string(char_appearance::display_idle_address(cls))));
+      if (!display) {
+        refuse("player_resetIdleAnim: display idle clip unavailable");
+        return;
+      }
+    }
+    std::array<std::pair<Raw, Raw>, 4> kept{};
+    const auto &cells = anim->state(player_state).tracks;
+    for (std::size_t i = 0; i < kept.size() && i < cells.size(); ++i) {
+      const auto &t = anim->track(cells[i]);
+      kept[i] = {t.time, t.rate};
+    }
     anim->anim_clear(player_state);
     for (unsigned i = 0; i < BASE_TRACK_OFFSETS.size(); ++i) {
-      const auto cls = std::int8_t(read(PLAYERS + 0x4a86, 1));
       const auto token = read(def + Address(cls) * ROW_SIZE + BASE_TRACK_OFFSETS[i]);
-      const auto clip = clip_for(token);
+      const auto clip = (i == 0 && display) ? display : clip_for(token);
       if (!clip) {
         refuse("player_resetIdleAnim: base clip resource unavailable");
         continue;
       }
-      anim->anim_push_with_weights(player_state, clip, BASE_TRACK_FLAGS, i == 0 ? ONE : 0, 0,
-                                   i == 0 ? ONE : 0, 0);
+      const auto id = anim->anim_push_with_weights(player_state, clip, BASE_TRACK_FLAGS, i == 0 ? ONE : 0, 0,
+                                                   i == 0 ? ONE : 0, 0);
+      // :395-396: restore the words the original leaves unwritten.
+      if (id) {
+        auto &t = anim->track(id);
+        const auto cell = std::size_t(anim->state(player_state).count - 1);
+        if (cell < kept.size()) std::tie(t.time, t.rate) = kept[cell];
+      }
     }
     anim->anim_release_caches(player_state);
     store_cells(player, player_state);

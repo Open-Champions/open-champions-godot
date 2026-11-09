@@ -72,7 +72,7 @@ add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/ses
 target_sources(champions-archive-extension PRIVATE ../native/src/real_world.cpp)
 target_sources(champions-archive-extension PRIVATE src/session_controller_mission1.cpp)
 target_sources(champions-archive-extension PRIVATE src/session_controller_hub.cpp)
-target_link_libraries(champions-archive-extension PRIVATE champions-player-state champions-menus champions-frontend champions-play-fixture-save champions-fx-world-save champions-level-play champions-combat-play champions-player-services champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-fx-sim champions-script-commands champions-campaign-fight champions-combat-play-effects champions-native-audio-binding-core champions-ps2-save godot::cpp)
+target_link_libraries(champions-archive-extension PRIVATE champions-player-state champions-menus champions-frontend champions-play-fixture-save champions-fx-world-save champions-level-play champions-combat-play champions-player-services champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-fx-sim champions-script-commands champions-campaign-fight champions-combat-play-effects champions-native-audio-binding-core champions-ps2-save champions-char-appearance godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)

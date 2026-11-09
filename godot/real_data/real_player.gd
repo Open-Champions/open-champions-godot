@@ -16,6 +16,9 @@ var clip_slots: Array = []
 var body_bytes := PackedByteArray()
 var archive_reader: RefCounted
 var rest_mesh: Mesh
+# Hair/beard rest-pose parts drawn under the body, and their decided plan.
+var layer_nodes: Array = []
+var layer_plan: Dictionary = {}
 
 func clear() -> void:
 	model_index = -1
@@ -27,6 +30,12 @@ func clear() -> void:
 	body_bytes = PackedByteArray()
 	archive_reader = null
 	rest_mesh = null
+	layer_plan = {}
+	for node in layer_nodes:
+		if is_instance_valid(node):
+			if node.get_parent() != null: node.get_parent().remove_child(node)
+			node.free()
+	layer_nodes.clear()
 	if actor != null and is_instance_valid(actor): actor.material_override = null
 
 static func _row_index(rows: Array, name: String) -> int:
@@ -107,8 +116,8 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 			if bound.get("ok", false) and binder.apply(visual):
 				textured = true
 				status = "Class body rest pose and record-selected skin drawn; original idle animation refused."
-				if int(appearance[0]) != -1 or int(appearance[2]) != -1:
-					status += " Hair/beard attachments refused: part draw path unported."
+				_install_optional_layers(real, reader, executable, selection, selection_rows,
+					str(listing.fingerprint), index, appearance)
 			else:
 				binder = null
 				status = "Class body rest pose drawn; record-selected skin refused: " + str(bound.get("error", "material binding failed"))
@@ -125,6 +134,104 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 	if player_count < 2:
 		status += " Selection flag 0x506040 is unknown; select.lmp is a host preview choice."
 	return true
+
+# Optional hair/beard layers, research-char-appearance 153d1c3
+# docs/spec/created-character-appearance.md. `requests` are the native
+# constructor requests (:158-164); `rows` maps lower-case names to archive
+# rows. A layer whose style is -1 has no requests and cleared handles; a
+# missing mesh or texture keeps a null pair, never another style (:162-170).
+# Each layer needs its gate and both handles (:193-198). The cover flag is
+# not established here: it is set by equipped parts that hold both handles
+# (:182-185), and this client does not resolve equipment resources. A gate is
+# therefore decided only when it passes for every cover/head input, i.e.
+# hair on model 11 or model 10 skin 4, beard on model 11.
+static func plan_optional_layers(requests: Array, rows: Dictionary, gates_for: Callable) -> Dictionary:
+	var plan := {}
+	for layer in ["hair", "beard"]:
+		var entry := {"requested": false, "mesh": "", "texture": "", "mesh_row": -1, "texture_row": -1}
+		for request in requests:
+			if not request is Dictionary or str(request.get("layer", "")) != layer: continue
+			entry["requested"] = true
+			var lower := str(request.get("name", "")).to_lower()
+			if str(request.get("kind", "")) == "mesh":
+				entry["mesh"] = lower
+				entry["mesh_row"] = int(rows.get(lower, -1))
+			else:
+				entry["texture"] = lower
+				entry["texture_row"] = int(rows.get(lower, -1))
+		entry["pair"] = entry.requested and entry.mesh_row >= 0 and entry.texture_row >= 0
+		var always := true
+		for covered in [false, true]:
+			for head in [false, true]:
+				for exception in [false, true]:
+					var gates: Array = gates_for.call(covered, head, exception)
+					always = always and bool(gates[0 if layer == "hair" else 1])
+		entry["gate"] = "pass" if always else "cover_unknown"
+		if not entry.requested: entry["draw"] = "absent"
+		elif not entry.pair: entry["draw"] = "null_pair"
+		elif always: entry["draw"] = "pending"
+		else: entry["draw"] = "refused_cover"
+		plan[layer] = entry
+	return plan
+
+func _install_optional_layers(real: Node, reader: RefCounted, executable: String, selection: String,
+		rows: Array, fingerprint: String, index: int, appearance: Array) -> void:
+	var requested: Dictionary = reader.player_appearance_requests(FileAccess.get_file_as_bytes(executable),
+		index, appearance)
+	if not requested.get("ok", false):
+		status += " Hair/beard requests refused: " + str(requested.get("error", "templates unavailable"))
+		return
+	var names := {}
+	for i in range(rows.size()):
+		if rows[i] is Dictionary:
+			var key := str(rows[i].get("name", "")).to_lower()
+			if not names.has(key): names[key] = i
+	var skin := int(appearance[3])
+	layer_plan = plan_optional_layers(requested.requests, names,
+		func(covered: bool, head: bool, exception: bool) -> Array:
+			return reader.player_appearance_gates(index, skin, covered, head, exception))
+	var words: Array[String] = []
+	for layer in ["hair", "beard"]:
+		var entry: Dictionary = layer_plan[layer]
+		if entry.draw == "pending": _draw_layer(real, reader, selection, rows, fingerprint, layer, entry)
+		words.append("%s %s" % [layer, str(entry.draw).replace("_", " ")])
+	status += " Appearance layers: " + ", ".join(words) + "."
+	# :201-208, 403-419: the body draw consumes object +0x220 from the previous
+	# equipment pass. Equipped parts are unresolved, so that mask is unknown and
+	# the body keeps its default-visible meshes.
+	status += " Body show mask +0x220 refused: equipment pass unresolved."
+
+# A part whose header +0x13 is -1 selects no attachment record (:210-215) and
+# is drawn in the same rest-pose space as the body. Any attachment index needs
+# animated joint matrices, which remain refused (:236-238).
+func _draw_layer(real: Node, reader: RefCounted, selection: String, rows: Array, fingerprint: String,
+		layer: String, entry: Dictionary) -> void:
+	var model: Dictionary = reader.inspect_model(selection, int(entry.mesh_row), "rta", fingerprint)
+	if not model.get("ok", false):
+		entry["draw"] = "refused_model"
+		return
+	if int(model.get("attachment_slot", -2)) != -1:
+		entry["draw"] = "refused_joint_matrix"
+		entry["attachment_slot"] = int(model.get("attachment_slot", -2))
+		return
+	var prepared: Dictionary = MeshBuilder.prepare_rest(model)
+	if not prepared.get("ok", false):
+		entry["draw"] = "refused_geometry"
+		return
+	var node := MeshInstance3D.new()
+	node.name = "Appearance" + layer.capitalize()
+	node.mesh = prepared.mesh
+	var bind := RealCreature.new()
+	bind.environment = real.environment
+	var bound: Dictionary = bind.bind_named(selection, rows, int(entry.mesh_row), str(entry.texture),
+		reader, fingerprint)
+	if not bound.get("ok", false) or not bind.apply(node):
+		node.free()
+		entry["draw"] = "refused_texture"
+		return
+	actor.add_child(node)
+	layer_nodes.append(node)
+	entry["draw"] = "drawn_rest_pose"
 
 # An explicit diagnostic sample. The real level session has no observed
 # weapon-animation class or Player_run state, so it must not call this as if
@@ -158,6 +265,9 @@ func draw_selected_pose(weapon_class: int, role: int, tick: float) -> Dictionary
 	actor.mesh = prepared.mesh
 	actor.position = Vector3(0, -prepared.bounds.position.y, 0)
 	if binder != null: binder.apply(actor)
+	# Posed parts need animated joint matrices (refused); hide rest-pose layers.
+	for node in layer_nodes:
+		if is_instance_valid(node): node.visible = false
 	return {"ok": true, "slot": slot, "duration_ticks": int(sample.duration_ticks),
 		"visible_corners": int(prepared.visible_corners)}
 
@@ -166,3 +276,5 @@ func restore_rest_pose() -> void:
 		actor.mesh = rest_mesh
 		actor.position = Vector3(0, -rest_mesh.get_aabb().position.y, 0)
 		if binder != null: binder.apply(actor)
+		for node in layer_nodes:
+			if is_instance_valid(node): node.visible = true

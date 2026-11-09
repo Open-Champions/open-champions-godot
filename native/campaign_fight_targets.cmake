@@ -2,6 +2,7 @@
 # mission-2 actors. Included by the native tree and by the GDExtension after
 # script_commands_targets.cmake.
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/char_appearance_targets.cmake")
 add_library(champions-mission2-actors "${CMAKE_CURRENT_LIST_DIR}/src/mission2_actors.cpp")
 target_include_directories(champions-mission2-actors PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
 target_link_libraries(champions-mission2-actors PUBLIC champions-campaign-actors champions-arena-modes)
@@ -31,6 +32,7 @@ if(TARGET champions-script-commands AND TARGET champions-campaign-actors AND
     target_link_libraries(champions-campaign-fight PUBLIC
         champions-script-commands champions-campaign-actors champions-mission2-actors champions-player-services
         champions-combat-runtime champions-creature-anim champions-player-state champions-items champions-ps2-save
+        champions-char-appearance
         ${CHAMPIONS_FIGHT_ARCHIVE})
     set_target_properties(champions-campaign-fight PROPERTIES POSITION_INDEPENDENT_CODE ON)
     if(MSVC)

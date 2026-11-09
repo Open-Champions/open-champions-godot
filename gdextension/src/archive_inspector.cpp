@@ -13,6 +13,7 @@
 #include "champions/animation.hpp"
 #include "champions/skinning.hpp"
 #include "champions/arena_executable.hpp"
+#include "champions/char_appearance.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -313,6 +314,10 @@ protected:
                             &ChampionsArchiveInspector::read_player_resource);
         ClassDB::bind_method(D_METHOD("player_model_resources", "executable_bytes", "model_index"),
                             &ChampionsArchiveInspector::player_model_resources);
+        ClassDB::bind_method(D_METHOD("player_appearance_requests", "executable_bytes", "model_index", "choices"),
+                            &ChampionsArchiveInspector::player_appearance_requests);
+        ClassDB::bind_method(D_METHOD("player_appearance_gates", "model_index", "skin", "covered", "head_present", "head_exception"),
+                            &ChampionsArchiveInspector::player_appearance_gates);
     }
 public:
     Dictionary player_model_resources(const PackedByteArray &executable_bytes,
@@ -366,6 +371,69 @@ public:
             failure["error"] = String::utf8(error.what());
         }
         return failure;
+    }
+
+    // Constructor handle requests 0x1a1ea0-0x1a21f4 (research-char-appearance
+    // 153d1c3 docs/spec/created-character-appearance.md:138-170). The six
+    // format templates and the model prefix are read from the owner's
+    // executable; the native module only orders and formats them.
+    Dictionary player_appearance_requests(const PackedByteArray &executable_bytes,
+            int64_t model_index, const Array &choices) const {
+        namespace ca = champions::simulation::rta::char_appearance;
+        Dictionary result;
+        result["ok"] = false;
+        result["error"] = String();
+        result["requests"] = Array();
+        try {
+            if (model_index < 0 || model_index >= 12)
+                throw champions::FormatError("Player model index is outside the traced 0..11 table.");
+            if (choices.size() != 4)
+                throw champions::FormatError("Appearance needs the four record bytes +0x20..+0x23.");
+            if (executable_bytes.is_empty() || executable_bytes.size() > 16 * 1024 * 1024)
+                throw champions::FormatError("Owner executable is missing or exceeds the 16 MiB limit.");
+            champions::simulation::rta::arena_modes::Executable exe;
+            if (!exe.load(std::vector<std::uint8_t>(executable_bytes.ptr(),
+                    executable_bytes.ptr() + executable_bytes.size())))
+                throw champions::FormatError("Owner executable could not be mapped as RTA ELF32.");
+            ca::Choices picked;
+            std::array<std::int8_t *, 4> fields{{&picked.hair, &picked.colour, &picked.beard, &picked.skin}};
+            for (int i = 0; i < 4; ++i) {
+                const int64_t value = choices[i];
+                if (value < -128 || value > 127)
+                    throw champions::FormatError("Appearance byte is outside the signed byte range.");
+                *fields[static_cast<std::size_t>(i)] = static_cast<std::int8_t>(value);
+            }
+            const ca::Templates templates{exe.string(ca::HAIR_MESH_FORMAT), exe.string(ca::HAIR_TEXTURE_FORMAT),
+                exe.string(ca::BEARD_MESH_FORMAT), exe.string(ca::BEARD_TEXTURE_FORMAT),
+                exe.string(ca::BODY_MESH_FORMAT), exe.string(ca::BODY_TEXTURE_FORMAT)};
+            const auto prefix = exe.string(exe.word(ca::MODEL_PREFIX_TABLE + 4 * static_cast<std::uint32_t>(model_index)));
+            Array requests;
+            for (const auto &request : ca::constructor_requests(prefix, templates, picked)) {
+                Dictionary row;
+                row["layer"] = request.layer == ca::Layer::Hair ? "hair" : request.layer == ca::Layer::Beard ? "beard" : "body";
+                row["kind"] = request.kind == ca::Kind::Mesh ? "mesh" : "texture";
+                row["object_offset"] = static_cast<int64_t>(request.object_offset);
+                row["name"] = String::utf8(request.name.c_str());
+                requests.push_back(row);
+            }
+            result["requests"] = requests;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        }
+        return result;
+    }
+
+    // Optional-layer gates (created-character-appearance.md:193-198).
+    Array player_appearance_gates(int64_t model_index, int64_t skin, bool covered,
+            bool head_present, bool head_exception) const {
+        const auto gates = champions::simulation::rta::char_appearance::appearance_gates(
+            static_cast<std::int32_t>(model_index), static_cast<std::int32_t>(skin), covered,
+            head_present, head_exception);
+        Array result;
+        result.push_back(gates.hair);
+        result.push_back(gates.beard);
+        return result;
     }
 
     // Copy a selected player resource from the same fingerprinted snapshot used
@@ -1030,6 +1098,8 @@ public:
             // Decimal strings retain every bit of unsigned 64-bit masks.
             result["hidden_mask"] = String::utf8(std::to_string(model.hidden_mask).c_str());
             result["part_mask"] = String::utf8(std::to_string(model.part_mask).c_str());
+            // Header +0x13: -1 means no attachment record is selected.
+            result["attachment_slot"] = static_cast<int64_t>(model.attachment_slot);
             result["name"] = String::utf8(champions::escapeTsv(selected.name).c_str());
             result["ok"] = true;
         } catch (const std::bad_alloc &) {
