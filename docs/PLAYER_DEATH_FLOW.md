@@ -164,29 +164,48 @@ gate list, level, act, difficulty) comes back together with each level's
 **Native model, `level_flow`.**
 
 - `save_game` (save-world:241-275, Executed). Nothing happens without a
-  counted living player: a slot below `g_numPlayers`, built, with HP above 0
-  (save-world:247-252). With no act row as a prefix of the qualified name, no
-  checkpoint is built and nothing is stored (save-world:255-260). Otherwise the
-  header goes into `State::saved` and the current level is stored into the live
-  directory `State::states`. A completed game skips the lookup and the store,
-  so that level keeps the body the directory already held (save-world:269-275;
-  client-path:69-71). `checkpoint` is the earlier entry point. It now returns
-  the same header without a copy of the directory.
+  counted living player: a slot below `g_numPlayers` whose object pointer
+  (+0x43d8) is set, whose object's flag 8 is clear, and whose HP is above 0
+  (save-world:247-252). These are `PlayerRecord::object_built` and
+  `object_flag8`, separate from the placement peer bit `active`
+  (exits-r4:107-117), which is a different original test (round 3).
+  - Act −1 or the `missionmenurun` task goes to `save_build` directly
+    (save-world:253-254).
+  - Otherwise, with no act row as a prefix of the qualified name, no checkpoint
+    is built and nothing is stored (save-world:255-260). This test does not
+    read the completed-game flag (round 3).
+  - `save_build`: when the game is not complete and its own `save_findAct`
+    misses, nothing is written (`t3/research-saves` `8d43286`
+    `docs/save-format.md:55-58`). Otherwise the header goes into
+    `State::saved` and the current level is stored into the live directory
+    `State::states`. A completed game skips `save_build`'s lookup and the
+    store, so that level keeps the body the directory already held
+    (save-world:269-275; save-format.md:58-60; client-path:69-71).
+  - At act −1 a non-hub name has no current-act row and is not stored
+    (save-format.md:236-242). A `hub*` name there would read row 0 of no act,
+    which was not executed, so it refuses.
+
+  `checkpoint` is the earlier entry point. It now returns the same header
+  without a copy of the directory.
 - `card_load` replaces the header and the directory together (save-screen
   `c8895e2` `docs/save-screen.md:258-279`; client-path:103-108).
 - `party_wipe(State&)` (client-path:88-91) runs the act lookup on the current
   level.
   - Found: the header from `State::saved`, the live directory left as it is,
     the loaded flag, and the saved level requested with `0xfd`.
-  - Not found: the current level requested with `0xfd`, HP refilled, nothing
+  - Not found: the current level requested with `0xfd`, HP refilled for slots
+    below `g_numPlayers` only (`deathTask` 0x1e76dc-0x1e7710; round 3), nothing
     else changed (step 5b).
   - Found but no header ever built or card-loaded: refuses, because the
     uninitialised-buffer behaviour is Unknown (client-path:183).
 
-  The research note says step 5 looks up "the checkpoint's level". This client
-  keeps the round-1 current-level lookup, which matches its 5b wording ("request
-  the current level") and the existing tests. That wording is noted for the
-  research owners.
+  The research note says step 5 looks up "the checkpoint's level"
+  (client-path:89). The disassembly contradicts that wording: `deathTask` phase
+  1 passes 0x44fe18, the current level base name, to `save_findAct`
+  (0x1e76a8-0x1e76b4), and phase 5b copies the same register into the pending
+  name (0x1e76c4-0x1e76d0); 0x44fe18 is the base name per `monsters.md:244`
+  (`t3/research-death-reload` `98ea7a6`) and exits-r4:87. So this client keeps
+  the current-level lookup. The wording is noted for the research owners.
 - A death load through `SessionAdapter::change` with `death_task` set:
   - It does not store the dying level (step 6). It skips the act-change clear
     but still updates the act index (step 6a, exits-r4:67-80). Both happen
@@ -204,21 +223,28 @@ gate list, level, act, difficulty) comes back together with each level's
   empty name, which loads fresh. After ten misses it reaches gap slot 10:
   empty, the level loads fresh; written, the original restores the gap body
   for every missing name.
-- Gap-slot policy: **refuse**. The port must choose a policy (save-world
-  :314-316) and none is chosen. `require_restorable` names the key and the gap
+- Gap slot. The port must choose a policy (save-world:314-316); the chosen
+  gap-slot policy is to refuse. `require_restorable` names the key and the gap
   name. This refuses exactly the misses that `stored()` already refused, now
-  with the precise reason. The eleventh key is still written to the gap. A
-  twelfth key stays refused (an existing test pins that), although save-world
-  :35-39 executes it as a rewrite of the gap body.
-- An act change after the checkpoint (save-world:194, 293-296).
-  `save_clearBuffer(0)` keeps directory slot 0, with its first 15000 bytes and
-  the act-0 row-0 size. This client clears the whole directory on an act change
-  (an existing test pins that) and records the slot-0 key it dropped
-  (`LevelStates::cleared_slot0`).
-  - A death reload into that key refuses.
+  with the precise reason. The eleventh key is written to the gap. Since round
+  3 a twelfth key (or any later miss) rewrites the gap body at its offset with
+  its kept size and keeps the ghost name, as save-world:35-39 and 196 execute;
+  the client no longer refuses that store.
+- An act change after the checkpoint (save-world:194-195, 293-296).
+  `save_clearBuffer(0)` keeps directory slot 0's name and first act-0 row-0
+  bytes (15000 in the retail table) and sets its size to that row's. Since
+  round 3 the client keeps slot 0 only in the case whose restore was executed:
+  the exact act-0 row-0 name (`hub`), already at that size, with a body that
+  fits; that slot restores after the clear. In every other case (a larger
+  body; a name such as `blood1` whose size the clear cuts; a hub sub-area such
+  as `hub_west`, for which only the lookup was checked) it drops the whole
+  directory and records the slot-0 key (`LevelStates::cleared_slot0`).
+  - A death reload into that recorded key refuses.
   - So does any death reload once the dropped slot would push the client's
     slot 9 onto the original's gap.
   - Other levels of the old act come back fresh, as in the original.
+  - With block byte 0x4f8f2a set (`ChangeOptions::clear_block`), the buffer is
+    left untouched (save-format.md:296-297). Nothing in this client sets it.
 
 **Client, campaign `Fight` and Godot scene.**
 
@@ -227,8 +253,12 @@ gate list, level, act, difficulty) comes back together with each level's
   (exits-r4:12-17).
 - When the death task asks for the reload, the controller refuses with a
   precise reason in each of these cases:
-  - No card load in this session has marked the live buffer (client-path:183).
-  - The campaign act changed, or an act reset ran, since the card load
+  - No card load or card save in this session has marked the live buffer
+    (client-path:183).
+  - The last card save was refused. The original's offline card save rebuilds
+    the buffer with `save_build` before writing (save-screen:229), so the live
+    header is unknown to this client (round 3).
+  - The campaign act changed, or an act reset ran, since the card load or save
     (save-world:194). The client's object directory is not cleared on an act
     change.
   - The checkpoint level meets a written gap slot (save-world:44-52, 314-316).
@@ -236,7 +266,11 @@ gate list, level, act, difficulty) comes back together with each level's
   loading fresh.
 - Step 5b (no act row) refuses in the scene. The scene has no current-level
   reload that keeps the dying record with only HP refilled (client-path:91).
-- `real_data_play.gd` marks the live buffer after each successful card load.
+- `real_data_play.gd` marks the live buffer after each successful card load
+  and, since round 3, after each successful card save: an offline card save
+  calls `save_build(slot byte, 0)`, after which the image at 0x895580 starts
+  with the live level name (save-screen:229, Executed). So "load A, save to B,
+  die" reloads B. A refused card save clears the mark with its reason.
   `run_death_reload` then reloads that image with `restoring_real_level`, so
   the dying level is not stored (client-path:92). It keeps the live object
   directory rather than the card's copy (client-path:120-124). It restores the
@@ -247,7 +281,56 @@ gate list, level, act, difficulty) comes back together with each level's
 - A death fee (client-path:76-78). The real retail GetReg values.
 - Item fixup with populated bags. Per-class load effects. Camera presentation.
 - The alternate-death script (phase 10).
-- The entry autosave's camera-mode gate. Without it, a checkpoint comes only
-  from a card load.
+- The autosave daemon is not ported. `save_daemonRun` calls `save_game(0, 1)`
+  only when the card state is idle, outside the front end, not PvP, with no
+  full-screen menu, camera mode 1 and the game not paused, after
+  `save_armAutosave` arms the countdown (`t3/research-death-reload`
+  `98ea7a6` `docs/audio-save.md:156-162, 341-343`). `level_flow::save_game`
+  has no production caller either: it is wired neither to the controller nor
+  to script `saveCheckPoint` (still `Effect::Partial`). So the controller's
+  live header comes only from a card load or a card save.
 - A continuous original death-to-playable run to compare against
   (client-path:170-185).
+
+## Death reload, client round 3 (2026-11-09)
+
+Audit `play-death-reload-r2` (FIX). The round 2 text above is corrected in
+place; this section lists what changed.
+
+- **save_game act test (PDR2-1).** With no act row as a prefix, `save_game`
+  builds nothing, even for a completed game. Only act −1 and the
+  `missionmenurun` task go straight to `save_build` (save-world:253-260; the
+  `save_game` body reads no completed-game flag on that path). The
+  completed-game skip is `save_build`'s, and covers its own `save_findAct`
+  and the level store (save-format.md:55-60).
+- **Live header after a card save (PDR2-2).** A successful card save marks
+  the live header with the saved file (save-screen:229). A refused card save
+  clears the mark, and a later death reload refuses with that reason.
+- **Two object tests (PDR2-3).** `save_game` uses `object_built` and
+  `object_flag8`; placement keeps the peer bit `active`.
+- **Step 5b (PDR2-4).** The HP refill covers slots below `g_numPlayers` only.
+- **Wording (PDR2-5, PDR2-7).** The autosave daemon and the in-session
+  `save_game` are not ported (see "Still Unknown" above). The chosen gap-slot
+  policy is to refuse.
+- **Research-backed pins.** An act change keeps the executed `hub` slot 0
+  (save-world:194-195); a twelfth key rewrites the gap body (save-world:35-39,
+  196). Both are described in the round 2 bullets above.
+- **The card-save refusal on a fresh level (PDR2-6).** The scene now says "a
+  built object's Creature HP word (+0x228) is not above 0", and
+  `built_creature_hp_census()` lists the refusing records (ordinal, class,
+  raw +0x228/+0x22c words). On the journey's freshly loaded checkpoint level
+  the census finds no dead Creature: the refusing records are 16
+  `ScriptGenerator` objects. `build_generator` reports them as built, and
+  `save_built_object_fields` reads every built record with the Creature layout,
+  so their never-written +0x228 word (0) fails the HP test. (The journey's own
+  earlier save also meets its killed enemy, a `WarBoarSmall` with a negative HP
+  word.)
+- **Not unblocked (Part 3).** What the original saves for a `ScriptGenerator`
+  is not established: whether `world_saveFilter` 0x15d9c8 rebuilds it from
+  `objects.ob` or a save routine writes it is open (`t3/research-save-world`
+  `31a0ca6` `docs/spec/object-system.md:805-806`; save-world:101-105 names
+  only lights, fire, `Line`, `Blocker`, `customVars` and route points). The
+  dead-Creature record is established (`Creature_saveState`, save-world:116),
+  but porting it would not unblock this level. So the refusal stays, and a
+  journey checkpoint, and with it a successful real-data death reload, remains
+  blocked.
