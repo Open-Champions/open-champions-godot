@@ -61,8 +61,10 @@ def simulation_paths(root):
     paths += [root / "native/src/play_animation.cpp", root / "native/include/champions/play_animation.hpp"]
     # Cast payment shared by player.cpp, plus the ID 55 product and the fixtures.
     paths += [root / "native/src/spell_numerics.cpp", root / "native/include/champions/spell_numerics.hpp"]
-    if len(paths) != 82 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 82 simulation sources and headers")
+    # Mission 1-3 creature decision kernel (research-campaign-combat fbb2e1d).
+    paths += [root / "native/src/creature_ai_m1_3.cpp", root / "native/include/champions/creature_ai_m1_3.hpp"]
+    if len(paths) != 84 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 84 simulation sources and headers")
     return paths
 
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/core_math.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -12,15 +13,17 @@
 // (RTA US v2.00). Authored port of research branch t3/research-campaign-combat
 // at fbb2e1d (audits research-creature-ai-m1-3, -fix, -fix2: PASS, 4 LOW).
 // Citations "C:<line>" are docs/creature-ai-m1-3.md, "M2:<line>" are
-// docs/monsters-2.md, "MOD:<line>" are tools/models_creature_ai_m1_3.py and
-// "REF:<line>" tools/ref_creature_ai_m1_3.py, all at fbb2e1d.
+// docs/monsters-2.md, "MOD:<line>" are tools/models_creature_ai_m1_3.py,
+// "REF:<line>" tools/ref_creature_ai_m1_3.py and "DT:<line>"
+// tools/difftest_creature_ai_m1_3.py, all at fbb2e1d.
 //
 // The module is a decision kernel: the caller answers every query (sight,
 // cone, see, counts, hitAtReach) and executes every action it emits. Only
 // claims labelled Executed or Observed are ported. Unknowns refuse:
 // Goblin 7/8, Froglock 7/8 and Kobold 9 bodies, Cazic/Critter/Catapult runs,
 // the IronGuardian Droid spawn, HP rules inside the stubbed base
-// Creature_run/processDamage (C:145-146, C:528-529, C:573-580).
+// Creature_run/processDamage (C:145-146, C:528-529, C:573-580), variant values
+// and setState landings the research never executed.
 namespace champions::simulation::rta::creature_ai_m1_3 {
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 
@@ -30,21 +33,27 @@ enum class Class : unsigned {
 };
 inline constexpr unsigned CLASS_COUNT = 12;
 
+// Event arguments are integers in units of 1/10000. The research compares its
+// float arguments rounded to four decimals (creature_ai_rig.py f(), DT:80-89),
+// so that is the precision the port can claim; integer arguments are exact.
+inline constexpr std::int64_t ARG_SCALE = 10000;
+
 struct ClassInfo {
   Class cls;
   const char *name;
-  // REF:30-47 (constructor from C:41-56), run/setState/vtable/pool size.
+  // REF:19-42 constructors and pool sizes (C:41-56); REF:57-71 run, setState,
+  // vtable and size.
   std::uint32_t constructor, run, set_state, vtable, size;
-  Raw knockback;                // C:77-80, Executed head() scale
+  std::int32_t knockback;       // C:77-80 head() scale, in 1/ARG_SCALE units
   std::optional<Raw> corpse;    // C:148-150 deadUpdate distance (none: own death body)
-  // Vtable words, Observed from the loaded image (C:86-95, REF via SLOTS).
+  // Vtable words, Observed from the loaded image (C:86-95, MOD:1200-1205).
   std::uint32_t slot2, slot20, slot21, slot23, slot24, slot25;
   std::uint32_t home_range;     // C:103-106 (base 1000, Observed)
 };
 const ClassInfo &info(Class);
 std::optional<Class> class_of_constructor(std::uint32_t constructor);
 
-// --- Level records (C:28-60, REF:16-56): per-level creature record counts
+// --- Level records (C:28-60, REF:19-54): per-level creature record counts
 // and the property-key counts; counts and key names only, no values.
 struct LevelCreature {
   const char *level, *type;
@@ -66,8 +75,19 @@ const LevelCreature &factory_pick(const std::string &level, const std::string &t
 // --- One tick ------------------------------------------------------------
 struct Event {
   std::string name;
-  std::vector<double> args;
+  std::vector<std::int64_t> args;  // value x ARG_SCALE
   bool operator==(const Event &o) const { return name == o.name && args == o.args; }
+};
+// Froglock water state (M2:4139-4145, Observed; the research walk held it dry,
+// MOD:1141-1142). The u8 fields are copies of booleans, so only 0 and 1 are
+// accepted. `ahead` is +0x461 as helper 0x265754 reads it, i.e. after this
+// tick's head water sample (M2:4140-4141, M2:4148). The end-of-run copies into
+// +0x460/+0x462 (M2:4148-4149) are the caller's writes, not events.
+struct FroglockWater {
+  bool standing = false;           // cflag 0x2000000000000000
+  std::uint32_t was_standing = 0;  // +0x460
+  std::uint32_t ahead = 0;         // +0x461
+  std::uint32_t ahead_before = 0;  // +0x462
 };
 struct Context {
   std::uint32_t state = 0;       // +0x232
@@ -79,27 +99,39 @@ struct Context {
   std::map<std::uint32_t, std::int64_t> fields;  // class fields as stored
   Raw hp = 0x42c80000u, max_hp = 0x42c80000u;    // +0x228 / +0x22c floats
   std::uint32_t alive_players = 0;               // 0x4f8420
-  bool ally = false;             // Kobold: an ally handle is held (MOD:101)
-  std::uint32_t holder_hand1 = 0;// Froglock holder word +0x7c (MOD:892)
+  bool ally = false;             // Kobold: an ally handle is held (MOD:103)
+  std::uint32_t holder_hand1 = 0;// Froglock holder word +0x7c (MOD:890): 0x12 or 0x10
   std::int32_t dmg_low = 0, dmg_high = 0, rating = 0;  // +0xd0/+0xd2/+0xd4
   bool base_run_ends = false;    // Creature_run 0x112948 returned nonzero
   bool active = true;            // Creature_updateActive 0x10c0f0 result
   std::uint32_t seed = 0;        // own generator +0x44 (GameObject_rand 0x1509d0)
+  // Required for Froglock: refused when absent (CAI13-1).
+  std::optional<FroglockWater> water;
+  // Object flags +0xc, required for Clockwork: flag 2 gates the dead-state
+  // burst and the hammer steam puffs (M2:3711, M2:3721-3723, MOD:738-742).
+  std::optional<std::uint32_t> object_flags;
   std::int64_t field(std::uint32_t off) const {
     const auto it = fields.find(off);
     return it == fields.end() ? 0 : it->second;
   }
 };
-// Answers queries in order; unanswered queries read 0 like the probe (REF:110-114).
+// Answers queries in order; unanswered queries read 0 like the probe (REF:88-92).
 using Answer = std::function<std::int64_t(const Event &)>;
 struct Tick {
   std::vector<Event> events;
   std::uint32_t seed = 0;
   unsigned draws = 0;
+  // Index of the first event after the class head (C:66-82): events from here
+  // on are the state body, including Droid's pre-switch fuse test.
+  std::size_t body = 0;
   std::vector<std::uint32_t> requests() const;  // slot-27 requests in order
   bool has(const std::string &name) const;
 };
 Tick tick(Class, const Context &, const Answer & = {});
+// C:416-417 / MOD:752-753: before its state switch a Droid requests 0x17 when
+// the self-destruct time +0x3cc is below the clock, outside states 0x14/0x17
+// (+0x3cc 99 goes at clock 100; 100 and 101 do not).
+bool droid_fuse_due(std::uint32_t state, std::int64_t self_destruct, std::int64_t clock);
 
 // --- setState (slot 27) ------------------------------------------------------
 struct SetContext {
@@ -109,6 +141,11 @@ struct SetContext {
   // Caller's global network/PvP words (monsters_1 filter 0x4f7120/0x4f711c/
   // 0x503890/0x503894): when they refuse, every request is refused.
   bool global_refuses = false;
+  // The class variant field (Kobold +0x3cc, Orc +0x478, Goblin +0x3d4,
+  // Clockwork +0x3c8). Every setState row ran on a rig that writes none of
+  // them (DT:384-391, DT:410, DT:455; creature_ai_rig.py Rig), so only 0 was
+  // executed and any other value refuses.
+  std::int64_t variant = 0;
 };
 // One entry write: Exact value, clock + base + draw % mod, or base + draw % mod.
 struct EntryWrite {
@@ -123,8 +160,10 @@ struct SetResult {
   std::uint32_t requested = 0, filtered = 0, landed = 0;
   std::vector<std::pair<std::uint32_t, std::int64_t>> cleared;  // filter writes
   bool target_cleared = false;
-  // False when the executed entry table (MOD:1164-1196) has no row for the
-  // filtered state: the state is stored, but other entry writes are unknown.
+  // True for a SET_ENTRY row (MOD:1163-1197). False for a state that only the
+  // filter test landed (DT:442-461: 0/3/5/6/0x10/0x13/0x14): the stored state
+  // was executed, the class's other entry writes were not. Any other filtered
+  // state throws Unsupported.
   bool entry_known = false;
   std::vector<EntryWrite> writes;
   std::vector<std::string> calls;   // loot / death calls by name

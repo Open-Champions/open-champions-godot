@@ -4,49 +4,55 @@
 #include "champions/core_state.hpp"
 #include <algorithm>
 #include <array>
-#include <cstring>
+#include <iterator>
 
 namespace champions::simulation::rta::creature_ai_m1_3 {
 namespace {
 constexpr std::uint32_t X = 0x7fff;        // MOD:6 any-angle arc
-Raw raw(float v) { Raw r; std::memcpy(&r, &v, 4); return r; }
+constexpr std::int64_t S = ARG_SCALE;
+// Exact IEEE-754 single bits of the corpse distances 20, 25 and 30 (C:148-150).
+constexpr Raw F20 = 0x41a00000u, F25 = 0x41c80000u, F30 = 0x41f00000u;
 
-// C:77-80 knock-back scales; C:148-150 corpse distances; C:89-93 slots;
-// C:103-106 HomeRange (Observed: M2:6202 WarWraith 600, M2:1355 IronGuardian 3000).
+// C:77-80 knock-back scales (four decimals, see ARG_SCALE); C:148-150 corpse
+// distances; C:89-93 slots; C:103-106 HomeRange (Observed: M2:6202 WarWraith
+// 600, M2:1355 IronGuardian 3000).
 constexpr std::uint32_t PICK = 0x10ded0, ALLY = 0x10e2c0, SIGHT = 0x10e658;
 constexpr std::uint32_t IS_ENEMY = 0x119328, IS_ALLY = 0x119400, TAKE = 0x116638;
 const std::array<ClassInfo, CLASS_COUNT> &table() {
   static const std::array<ClassInfo, CLASS_COUNT> t = {{
     {Class::Kobold, "Kobold", 0x27f0c0, 0x27f52c, 0x27ff6c, 0x515ef0, 0x3d0,
-     raw(1.0f), raw(20.0f), TAKE, IS_ENEMY, 0x280434, PICK, ALLY, SIGHT, 1000},
+     10000, F20, TAKE, IS_ENEMY, 0x280434, PICK, ALLY, SIGHT, 1000},
     {Class::WarWraith, "WarWraith", 0x2c07a8, 0x2c0c2c, 0x2c1648, 0x517f80, 0x468,
-     raw(0.0f), std::nullopt, TAKE, 0x2c1bc0, IS_ALLY, PICK, ALLY, SIGHT, 600},
+     0, std::nullopt, TAKE, 0x2c1bc0, IS_ALLY, PICK, ALLY, SIGHT, 600},
     {Class::Orc, "Orc", 0x2a0954, 0x2a1848, 0x2a323c, 0x50ffd0, 0x488,
-     raw(0.4f), raw(30.0f), 0x2a2eac, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     4000, F30, 0x2a2eac, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::Goblin, "Goblin", 0x26a624, 0x26b27c, 0x26ccfc, 0x510260, 0x498,
-     raw(0.5f), raw(20.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     5000, F20, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::Ogre, "Ogre", 0x29fad0, 0x29fe50, 0x2a060c, 0x517220, 0x468,
-     raw(0.1f), raw(30.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     1000, F30, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::Warrior, "Warrior", 0x2bafb4, 0x2bb640, 0x2bc320, 0x517e38, 0x480,
-     raw(0.4f), raw(20.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     4000, F20, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::Clockwork, "Clockwork", 0x24e124, 0x24e758, 0x24f90c, 0x514300, 0x500,
-     raw(0.4f), raw(20.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     4000, F20, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::Droid, "Droid", 0x27b840, 0x27ba78, 0x27c0a0, 0x515da8, 0x3d0,
-     raw(1.0f), std::nullopt, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     10000, std::nullopt, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::IronGuardian, "IronGuardian", 0x27a00c, 0x27a390, 0x27b550, 0x515c60, 0x3e8,
-     raw(0.0f), raw(30.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 3000},
+     0, F30, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 3000},
     {Class::Froglock, "Froglock", 0x263e1c, 0x264314, 0x265150, 0x510780, 0x468,
-     raw(0.5f), raw(25.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     5000, F25, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::Amphian, "Amphian", 0x234584, 0x23483c, 0x2350d0, 0x512da0, 0x3c8,
-     raw(0.5f), raw(20.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     5000, F20, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
     {Class::SeaMonster, "SeaMonster", 0x2a428c, 0x2a44a8, 0x2a4aa4, 0x517368, 0x3d0,
-     raw(0.2f), raw(30.0f), TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
+     2000, F30, TAKE, IS_ENEMY, IS_ALLY, PICK, ALLY, SIGHT, 1000},
   }};
   return t;
 }
 
 // The per-tick model context: the same answers as the probe's query stubs
-// (REF:94-157). Draws come from the class object's own generator.
+// (REF:77-157). Draws come from the class object's own generator. Arguments
+// are given in whole units and stored x ARG_SCALE.
+using Args = std::vector<std::int64_t>;
+Args scaled(Args a) { for (auto &v : a) v *= S; return a; }
 struct M {
   const Context &c;
   const Answer &answer;
@@ -58,30 +64,29 @@ struct M {
     out.events.push_back(std::move(e));
     return v;
   }
-  void act(const char *name, std::vector<double> args = {}) { out.events.push_back({name, std::move(args)}); }
-  void set(std::uint32_t s) { act("set", {double(s)}); }
-  std::int64_t see(double near, double far, std::uint32_t arc, int ray = 0, int facing = 0) {
-    return ask({"see", {near, far, double(facing), double(arc), double(ray)}});
+  void act(const char *name, Args args = {}) { out.events.push_back({name, scaled(std::move(args))}); }
+  void set(std::uint32_t s) { act("set", {std::int64_t(s)}); }
+  std::int64_t see(std::int64_t near, std::int64_t far, std::uint32_t arc, int ray = 0, int facing = 0) {
+    return ask({"see", scaled({near, far, facing, arc, ray})});
   }
-  std::int64_t cone(double near, double far, std::uint32_t arc, int facing = 0) {
-    return ask({"cone", {near, far, double(facing), double(arc)}});
+  std::int64_t cone(std::int64_t near, std::int64_t far, std::uint32_t arc, int facing = 0) {
+    return ask({"cone", scaled({near, far, facing, arc})});
   }
-  std::int64_t sight(int force = 0) { return ask({"sight", {double(force)}}); }
-  std::int64_t q(const char *name, std::vector<double> args = {}) { return ask({name, std::move(args)}); }
-  void hit(double near, double far, std::uint32_t arc, std::uint32_t flags,
+  std::int64_t sight(int force = 0) { return ask({"sight", scaled({force})}); }
+  std::int64_t q(const char *name, Args args = {}) { return ask({name, scaled(std::move(args))}); }
+  void hit(std::int64_t near, std::int64_t far, std::uint32_t arc, std::uint32_t flags,
            const char *name = "hitInArc", int facing = 0,
            std::optional<std::array<std::int32_t, 2>> dmg = std::nullopt) {
     const auto lo = dmg ? (*dmg)[0] : c.dmg_low, hi = dmg ? (*dmg)[1] : c.dmg_high;
-    act(name, {near, far, double(facing), double(arc), double(lo), double(hi),
-               double(c.rating), double(flags)});
+    act(name, {near, far, facing, arc, lo, hi, c.rating, flags});
   }
-  void hit_all(double near, double far, std::uint32_t arc, std::uint32_t flags, int facing = 0,
+  void hit_all(std::int64_t near, std::int64_t far, std::uint32_t arc, std::uint32_t flags, int facing = 0,
                std::optional<std::array<std::int32_t, 2>> dmg = std::nullopt) {
     hit(near, far, arc, flags, "hitAll", facing, dmg);
   }
-  // REF:129-131: the wraith tests hitAtReach's result, so it is a query.
-  std::int64_t hit_reach(double reach, std::uint32_t flags) {
-    return ask({"hitAtReach", {reach, double(c.dmg_low), double(c.dmg_high), double(c.rating), double(flags)}});
+  // REF:119-121: the wraith tests hitAtReach's result, so it is a query.
+  std::int64_t hit_reach(std::int64_t reach, std::uint32_t flags) {
+    return ask({"hitAtReach", scaled({reach, c.dmg_low, c.dmg_high, c.rating, flags})});
   }
   std::uint32_t rand() { ++out.draws; return rng.draw(); }
   void unit_ball() {
@@ -92,6 +97,7 @@ struct M {
       if (!lt(ONE, add(add(mul(x, x), mul(y, y)), mul(z, z)))) return;
     }
   }
+  void begin_body() { out.body = out.events.size(); }
   std::uint32_t s() const { return c.state; }
   bool target() const { return c.target; }
   std::uint32_t ev() const { return c.ev; }
@@ -104,21 +110,27 @@ struct M {
 bool entry(M &m) {
   m.act("processDamage");
   m.act("baseRun");
-  if (m.c.base_run_ends) return false;
+  if (m.c.base_run_ends) { m.begin_body(); return false; }
   m.act("updateActive");
+  if (!m.c.active) m.begin_body();
   return m.c.active;
 }
 // C:73-82 / MOD:25-31
-bool head(M &m, double knock, bool ally = false) {
+bool head(M &m, Class cls, bool ally = false) {
   if (!entry(m)) return false;
-  m.act("stepAnim", {1.0});
-  m.act("knockback", {knock});
+  m.act("stepAnim", {1});
+  m.out.events.push_back({"knockback", {table()[unsigned(cls)].knockback}});
   m.act("pickTarget", {0});
   if (ally) m.act("pickAlly");
+  m.begin_body();
   return true;
 }
 [[noreturn]] void unwalked(const char *what) {
   throw Unsupported(std::string("creature_ai_m1_3: ") + what + " was not walked by the research (Unknown)");
+}
+// CAI13-5: the variant values the research walked; any other value refuses.
+void variant(bool walked, const char *what) {
+  if (!walked) throw Unsupported(std::string("creature_ai_m1_3: ") + what + " outside the walked variants (Unknown)");
 }
 // Common flee/hit-reaction/stun shapes (C:131-134, C:147-148).
 void flee(M &m) { if (m.q("attackReady")) m.set(0); else m.act("flee"); }
@@ -126,8 +138,9 @@ void flee(M &m) { if (m.q("attackReady")) m.set(0); else m.act("flee"); }
 // ---- C:253-275 Kobold (MOD:35-150) --------------------------------------
 void kobold(M &m) {
   const auto v = m.field(0x3cc) & 0xff;
+  variant(v <= 2, "Kobold +0x3cc");  // MOD:152: 0, 1 and 2
   if (m.s() == 9 || m.s() >= 0x18) unwalked("Kobold state 9/0x18 body");  // C:271-272
-  if (!head(m, 1.0, true)) return;
+  if (!head(m, Class::Kobold, true)) return;
   switch (m.s()) {
   case 0:
     if (m.sight()) m.set(3);
@@ -141,7 +154,7 @@ void kobold(M &m) {
   case 3:
     if (!m.target()) m.set(0);
     else if (v == 1) {
-      if (m.q("alliesNearTarget", {24.0}) > 2) m.set(5);  // C:258: 2 stays, 3 goes
+      if (m.q("alliesNearTarget", {24}) > 2) m.set(5);  // C:258: 2 stays, 3 goes
       else if (m.q("targetCharging") && m.see(0, 24, 6000)) m.set(7);
       else if (m.see(0, 24, 6000)) m.set(5);
       else if (m.see(0, 24, X)) m.act("turn");
@@ -166,7 +179,7 @@ void kobold(M &m) {
     m.act("turn");
     if (m.see(0, 24, 6000)) m.set(6);
     else if (v == 1) {
-      if (m.q("notRooted") && !(m.q("alliesNearTarget", {24.0}) > 2)) m.set(3);
+      if (m.q("notRooted") && !(m.q("alliesNearTarget", {24}) > 2)) m.set(3);
     } else if (v == 2) {
       if (m.q("corpse")) m.set(8);
       else if (m.q("notRooted") && !m.see(0, 200, 5000)) m.set(3);
@@ -197,7 +210,7 @@ void kobold(M &m) {
   case 0x10: flee(m); break;
   case 0x12: if (!(m.anim() & 0x10)) m.set(3); break;
   case 0x13: if (m.q("notStunned")) m.set(3); break;
-  case 0x14: m.act("deadUpdate", {20.0}); break;
+  case 0x14: m.act("deadUpdate", {20}); break;
   case 0x17: if (!(m.anim() & 0x10)) m.set(3); break;
   default: m.set(0);
   }
@@ -211,10 +224,11 @@ void warwraith(M &m) {
   const auto s = m.s();
   if (s > 0x18) unwalked("WarWraith state above 0x18");
   if (!entry(m)) return;
-  m.act("stepAnim", {1.0});
+  m.act("stepAnim", {1});
   if (s != 0x14) m.act("pickTarget", {0});  // C:80-81: before knock-back, not when dead
-  m.act("knockback", {0.0});
+  m.act("knockback", {0});
   if (fade >= 99) m.act("turn");          // C:279: 98 does not
+  m.begin_body();
   switch (s) {
   case 0:
     if (m.sight()) m.set(3);
@@ -256,9 +270,10 @@ void warwraith(M &m) {
 void orc(M &m) {
   const auto v = m.field(0x478);
   const auto s = m.s();
+  variant(v >= 0 && v <= 5, "Orc +0x478");  // MOD:1111: 0-5
   const bool melee = v <= 3;
   if (s > 0x18) unwalked("Orc state above 0x18");
-  if (!head(m, 0.4)) return;
+  if (!head(m, Class::Orc)) return;
   switch (s) {
   case 0: case 1: case 2: {
     const bool forced = v == 4 && m.sight(1);
@@ -272,8 +287,8 @@ void orc(M &m) {
     else if (melee) {
       if (m.see(0, 30, 6000)) m.set(6);
       else if (m.see(0, 30, X)) m.act("turn");
-      else if ((v == 1 || v == 2 || v == 3) && m.q("alliesNearTarget", {30.0}) > 0) m.set(0x17);
-      else if (v == 0 && m.q("alliesNearTarget", {30.0}) > 1) m.set(0x17);  // C:310
+      else if ((v == 1 || v == 2 || v == 3) && m.q("alliesNearTarget", {30}) > 0) m.set(0x17);
+      else if (v == 0 && m.q("alliesNearTarget", {30}) > 1) m.set(0x17);  // C:310
       else if ((v == 0 || v == 1) && m.rand() % 30 == 0 && m.q("countInBox") < 3) m.set(4);  // C:311-312
       else m.act("moveToTarget");
     } else if (v == 4) {
@@ -337,7 +352,7 @@ void orc(M &m) {
   case 0x11: if (m.c.clock > m.c.deadline) m.set(3); break;
   case 0x12: if (!(m.anim() & 0x10)) m.set(3); break;
   case 0x13: if (m.q("notStunned")) m.set(0); break;
-  case 0x14: m.act("deadUpdate", {30.0}); break;
+  case 0x14: m.act("deadUpdate", {30}); break;
   case 0x17:
     if (!m.target()) m.set(0);
     else if (v == 5) {
@@ -346,9 +361,9 @@ void orc(M &m) {
       else if (m.see(0, 6000, X)) m.act("turn");  // C:331-332, M2:5492-5494
     } else if (v == 4) {
     } else if (v == 1 || v == 2 || v == 3) {
-      if (m.see(0, 30, X) || m.q("alliesNearTarget", {30.0}) == 0) m.set(3);
+      if (m.see(0, 30, X) || m.q("alliesNearTarget", {30}) == 0) m.set(3);
     } else if (m.see(0, 30, 6000) || m.c.clock > m.c.deadline ||
-               m.q("alliesNearTarget", {30.0}) < 2) m.set(3);  // C:333-334: 1 goes, 2 stays
+               m.q("alliesNearTarget", {30}) < 2) m.set(3);  // C:333-334: 1 goes, 2 stays
     if (m.target()) m.act("turn");
     break;
   default: break;
@@ -359,9 +374,10 @@ void orc(M &m) {
 void goblin(M &m) {
   const auto role = m.field(0x3d4);
   const auto s = m.s();
+  variant(role >= 0 && role <= 5, "Goblin +0x3d4");  // MOD:1115: 0-5
   if (s == 7 || s == 8) unwalked("Goblin state 7/8 body (bow shot, shaman cast)");  // C:341-342
   if (s > 0x18) unwalked("Goblin state above 0x18");
-  if (!head(m, 0.5, role == 5)) return;
+  if (!head(m, Class::Goblin, role == 5)) return;
   switch (s) {
   case 0: case 1: case 2: {
     const bool archer = role == 4 && m.sight(1);
@@ -417,7 +433,7 @@ void goblin(M &m) {
   case 0x11: if (m.c.clock > m.c.deadline) m.set(3); break;
   case 0x12: if (!(m.anim() & 0x30)) m.set(3); break;  // C:147: Goblin 0x30
   case 0x13: if (m.q("notStunned")) m.set(0); break;
-  case 0x14: m.act("deadUpdate", {20.0}); break;
+  case 0x14: m.act("deadUpdate", {20}); break;
   case 0x17:
     if (!m.target()) { m.set(0); return; }
     if (role == 5) {
@@ -435,7 +451,7 @@ void ogre(M &m) {
   const auto last = m.field(0x460);
   const auto s = m.s();
   if (s > 0x18) unwalked("Ogre state above 0x18");
-  if (!head(m, 0.1)) return;
+  if (!head(m, Class::Ogre)) return;
   switch (s) {
   case 0: if (m.sight() || m.q("away")) m.set(1); break;  // C:363: to 1, not 3
   case 1: if (m.sight()) m.set(3); else m.act("moveToDest"); break;
@@ -444,7 +460,7 @@ void ogre(M &m) {
     else if (m.see(0, 60, 2000)) m.set(5);
     else if (last != 8 && last != 9 && m.see(0, 60, X)) m.set(9);
     else if (!m.q("targetCharging") && m.see(0, 60, X)) m.act("turn");
-    else if (m.see(0, 120, 2000) && m.q("alliesNearTarget", {60.0}) > 0) m.set(5);
+    else if (m.see(0, 120, 2000) && m.q("alliesNearTarget", {60}) > 0) m.set(5);
     else m.act("moveToTarget");
     break;
   case 5:
@@ -454,7 +470,7 @@ void ogre(M &m) {
       else m.set(6);
     } else if (m.q("notRooted")) {  // C:367-368: the two 1-in-60 draws
       if (!m.see(0, 156, 2000) && m.rand() % 60 == 0) m.set(3);
-      else if (m.rand() % 60 == 0 && !m.q("alliesNearTarget", {60.0})) m.set(3);
+      else if (m.rand() % 60 == 0 && !m.q("alliesNearTarget", {60})) m.set(3);
     }
     break;
   case 6: case 7: case 8: case 9:  // C:369-371
@@ -470,7 +486,7 @@ void ogre(M &m) {
   case 0x10: flee(m); break;
   case 0x12: if (!(m.anim() & 0x10)) m.set(3); break;
   case 0x13: if (m.q("notStunned")) m.set(3); break;
-  case 0x14: m.act("deadUpdate", {30.0}); break;
+  case 0x14: m.act("deadUpdate", {30}); break;
   default: m.set(0);
   }
 }
@@ -479,20 +495,20 @@ void ogre(M &m) {
 void warrior(M &m) {
   const auto s = m.s();
   if (s > 0x18) unwalked("Warrior state above 0x18");
-  if (!head(m, 0.4)) return;
+  if (!head(m, Class::Warrior)) return;
   const auto count = m.field(0x474) & 0xff;
   switch (s) {
   case 0: if (m.sight() || m.q("away")) m.set(1); break;
   case 1:
     if (!m.sight()) m.act("moveToDest");
-    else { m.act("turn"); if (m.see(0, double(m.field(0x3ae) & 0xffff), 8000)) m.set(3); }
+    else { m.act("turn"); if (m.see(0, m.field(0x3ae) & 0xffff, 8000)) m.set(3); }
     break;
   case 3:
     if (!m.target()) m.set(0);
     else if (m.see(0, 12, 8000)) m.set(5);
     else if (!m.q("targetCharging") && m.see(0, 36, 8000)) m.set(5);
     else if (!m.q("targetCharging") && m.see(0, 36, X)) m.act("turn");
-    else if (m.see(0, 120, 8000) && m.q("alliesNearTarget", {36.0}) >= 1) {  // C:379: 0 stays, 1 goes
+    else if (m.see(0, 120, 8000) && m.q("alliesNearTarget", {36}) >= 1) {  // C:379: 0 stays, 1 goes
       m.act("pickTarget", {1});
       m.set(5);
     } else m.act("moveToTarget");
@@ -504,7 +520,7 @@ void warrior(M &m) {
     } else if (m.see(0, 36, X)) m.act("turn");
     else if (m.q("notRooted")) {  // C:383-385: near asked every tick, allies only on the 1-in-60
       const auto near = m.see(0, 156, 8000);
-      if (m.rand() % 60 == 0 && !(near && m.q("alliesNearTarget", {36.0}))) m.set(3);
+      if (m.rand() % 60 == 0 && !(near && m.q("alliesNearTarget", {36}))) m.set(3);
     }
     if (m.c.clock > m.c.deadline) m.rand();
     break;
@@ -513,7 +529,7 @@ void warrior(M &m) {
     const auto blocking = m.field(0x478);
     if (m.ev() & 1) {
       std::uint32_t flags = 8;
-      if (s != 7 && (count == 3 || count == 5) && !m.q("alliesNearTarget", {36.0}))
+      if (s != 7 && (count == 3 || count == 5) && !m.q("alliesNearTarget", {36}))
         flags = count == 3 ? 0x440008u : 0x100008u;
       m.hit(0, 36, 8000, flags);
     }
@@ -535,7 +551,7 @@ void warrior(M &m) {
   case 0x10: flee(m); break;
   case 0x12: if (!(m.anim() & 0x10)) m.set(3); break;
   case 0x13: if (m.q("notStunned")) m.set(3); break;
-  case 0x14: m.act("deadUpdate", {20.0}); break;
+  case 0x14: m.act("deadUpdate", {20}); break;
   case 0x17: if (m.c.clock > m.c.deadline) m.set(3); break;
   default: m.set(0);
   }
@@ -545,13 +561,18 @@ void warrior(M &m) {
 void clockwork(M &m) {
   const auto sub = m.field(0x3c8) & 0xff;
   const auto s = m.s();
+  variant(sub <= 1, "Clockwork +0x3c8");  // MOD:1125-1127: 0 cutter, 1 hammer
+  if (!m.c.object_flags)
+    throw Unsupported("creature_ai_m1_3: Clockwork object flags (+0xc flag 2) not supplied");
+  // Object flag 2, as this tick starts (the research walk held it clear).
+  bool flag2 = (*m.c.object_flags & 2) != 0;
   if (s > 0x18) unwalked("Clockwork state above 0x18");
-  if (!head(m, 0.4)) return;
+  if (!head(m, Class::Clockwork)) return;
   switch (s) {
   case 0: if (m.sight() || m.q("away")) m.set(1); break;
   case 1:
     if (!m.sight()) m.act("moveToDest");
-    else { m.act("turn"); if (m.see(0, double(m.field(0x3ae) & 0xffff), 8000)) m.set(3); }
+    else { m.act("turn"); if (m.see(0, m.field(0x3ae) & 0xffff, 8000)) m.set(3); }
     break;
   case 3:
     if (!m.target()) m.set(0);
@@ -593,25 +614,30 @@ void clockwork(M &m) {
   case 0x12: if (!(m.anim() & 0x10)) m.set(3); break;
   case 0x13: if (m.q("notStunned")) m.set(3); break;  // C:409
   case 0x14:
-    if ((m.ev() & 6) && (m.ev() & 4)) { m.act("damageInRadius"); m.rand(); m.act("poolNew"); }
-    m.act("deadUpdate", {20.0});
+    // M2:3711-3716 (Observed) / MOD:729-735: only while object flag 2 is
+    // clear, event 0x2 or 0x4 bursts the wreck (0x4 adds the radius damage,
+    // a draw and the light) and sets object flags 0x4003.
+    if (!flag2 && (m.ev() & 6)) {
+      if (m.ev() & 4) { m.act("damageInRadius"); m.rand(); m.act("poolNew"); }
+      flag2 = true;
+    }
+    m.act("deadUpdate", {20});
     break;
   default: m.set(0);
   }
-  if (sub) {  // C:410-411: hammer steam puffs
-    const bool burst = s == 0x14 && (m.ev() & 6);
+  // C:410-411, M2:3721-3723, MOD:738-742: hammer steam puffs, each one own
+  // draw & 1 and, while object flag 2 is clear, a unit-ball velocity.
+  if (sub)
     for (int i = 0; i < 2; ++i)
-      if ((m.rand() & 1) && !burst) m.unit_ball();
-  }
+      if ((m.rand() & 1) && !flag2) m.unit_ball();
 }
 
 // ---- C:414-422 Droid (MOD:749-802) --------------------------------------
 void droid(M &m) {
   const auto s = m.s();
   if (s > 0x18) unwalked("Droid state above 0x18");
-  if (!head(m, 1.0)) return;
-  // C:416-417: self-destruct time +0x3cc < clock (99 goes; 100/101 do not).
-  if (m.field(0x3cc) < m.c.clock && s != 0x14 && s != 0x17) m.set(0x17);
+  if (!head(m, Class::Droid)) return;
+  if (droid_fuse_due(s, m.field(0x3cc), m.c.clock)) m.set(0x17);
   switch (s) {
   case 0: if (m.sight()) m.set(3); else if (m.q("away")) m.set(1); break;
   case 1: if (m.sight()) m.set(3); else m.act("moveToDest"); break;
@@ -641,7 +667,7 @@ void droid(M &m) {
 void ironguardian(M &m) {
   const auto s = m.s();
   if (s > 0x18) unwalked("IronGuardian state above 0x18");
-  if (!head(m, 0.0)) return;
+  if (!head(m, Class::IronGuardian)) return;
   const auto timer = m.field(0x3cc);
   switch (s) {
   case 0:  // C:426-427: counter + 1 > 120 (119 stays; 120 and 121 go)
@@ -687,36 +713,49 @@ void ironguardian(M &m) {
     }
     if (!(m.anim() & 8)) m.set(3);
     break;
-  case 0x14: m.act("deadUpdate", {30.0}); break;
+  case 0x14: m.act("deadUpdate", {30}); break;
   default: m.set(0);
   }
 }
 
 // ---- C:442-452 Froglock (MOD:889-950) -----------------------------------
 void froglock(M &m) {
+  // MOD:1142, M2:4130-4134: hand-1 part 0x12 trident, 0x10 blowgun.
+  variant(m.c.holder_hand1 == 0x12 || m.c.holder_hand1 == 0x10, "Froglock holder hand-1 part");
   const bool blowgun = m.c.holder_hand1 == 0x10;
+  if (!m.c.water) throw Unsupported("creature_ai_m1_3: Froglock water state not supplied");
+  const auto &w = *m.c.water;
+  for (auto b : {w.was_standing, w.ahead, w.ahead_before})
+    variant(b <= 1, "Froglock water byte (+0x460/+0x461/+0x462)");
+  // Helper 0x265754 (M2:4143-4145, Observed): water was just entered, or the
+  // water ahead has just ended. Its callers re-request the CURRENT state.
+  const bool water_changed = (!w.was_standing && w.standing) || (w.ahead_before && !w.ahead);
   const auto s = m.s();
   if (s == 7 || s == 8) unwalked("Froglock state 7/8 body (blow darts)");  // C:451
   if (s > 0x18) unwalked("Froglock state above 0x18");
-  if (!head(m, 0.5)) return;
+  if (!head(m, Class::Froglock)) return;
   switch (s) {
   case 0:
     if (m.sight()) m.set(3);
     else if (m.q("away") || m.c.clock > m.c.deadline) m.set(1);
     break;
-  case 1: if (m.sight()) m.set(0); else m.act("moveToDest"); break;
+  case 1:  // M2:4152-4153: after moveToDest the helper re-requests 1
+    if (m.sight()) m.set(0);
+    else { m.act("moveToDest"); if (water_changed) m.set(1); }
+    break;
   case 3:
     if (!m.target()) m.set(0);
     else if (!blowgun) {
       if (m.see(0, 40, 6000)) m.set(6);
       else if (!m.see(0, 300, X) && m.see(0, 450, 1000)) m.set(0x17);
       else if (m.see(0, 40, X)) m.act("turn");
-      else m.act("moveToTarget");
+      else { m.act("moveToTarget"); if (water_changed) m.set(3); }  // M2:4157
     } else {
       if (m.see(0, 100, X)) m.set(0x10);
-      else if (m.see(0, 400, 6000)) m.set(7);
+      // C:447-448, M2:4158-4159: 7 dry, 8 while the standing-in-water cflag is set.
+      else if (m.see(0, 400, 6000)) m.set(w.standing ? 8 : 7);
       else if (m.see(0, 400, X)) m.act("turn");
-      else m.act("moveToTarget");
+      else { m.act("moveToTarget"); if (water_changed) m.set(3); }  // M2:4160
     }
     break;
   case 5:
@@ -727,10 +766,13 @@ void froglock(M &m) {
     if (m.target() && (m.ev() & 1)) m.hit_reach(36, 8);
     if (!(m.anim() & 8)) m.set(5);
     break;
-  case 0x10: flee(m); break;
+  case 0x10:  // M2:4178-4179: the helper first re-requests 0x10
+    if (water_changed) m.set(0x10);
+    else flee(m);
+    break;
   case 0x12: if (!(m.anim() & 0x10)) m.set(3); break;
   case 0x13: if (m.q("notStunned")) m.set(0); break;
-  case 0x14: m.act("deadUpdate", {25.0}); break;
+  case 0x14: m.act("deadUpdate", {25}); break;
   case 0x17: if (!(m.anim() & 0x10)) m.set(3); break;
   default: break;
   }
@@ -740,7 +782,7 @@ void froglock(M &m) {
 void amphian(M &m) {
   const auto s = m.s();
   if (s > 0x18) unwalked("Amphian state above 0x18");
-  if (!head(m, 0.5)) return;
+  if (!head(m, Class::Amphian)) return;
   switch (s) {
   case 0: if (m.sight()) m.set(3); else if (m.q("away")) m.set(1); break;
   case 1: if (m.sight()) m.set(3); else m.act("moveToDest"); break;
@@ -777,7 +819,7 @@ void amphian(M &m) {
     if (!(m.anim() & 8)) m.set(5);
     break;
   case 0x13: if (m.q("notStunned")) m.set(3); break;  // C:468
-  case 0x14: m.act("deadUpdate", {20.0}); break;
+  case 0x14: m.act("deadUpdate", {20}); break;
   case 0x17: if (m.c.clock > m.c.deadline) m.set(5); break;
   default: m.set(0);
   }
@@ -787,7 +829,7 @@ void amphian(M &m) {
 void seamonster(M &m) {
   const auto s = m.s();
   if (s > 0x18) unwalked("SeaMonster state above 0x18");
-  if (!head(m, 0.2)) return;
+  if (!head(m, Class::SeaMonster)) return;
   switch (s) {
   case 0: if (m.sight()) m.set(3); else if (m.q("away")) m.set(1); break;
   case 1: if (m.sight()) m.set(3); else m.act("moveToDest"); break;
@@ -815,7 +857,7 @@ void seamonster(M &m) {
   case 0x10: flee(m); break;
   case 0x12: if (!(m.anim() & 0x10)) m.set(5); break;
   case 0x13: if (m.q("notStunned")) m.set(5); break;
-  case 0x14: m.act("deadUpdate", {30.0}); break;
+  case 0x14: m.act("deadUpdate", {30}); break;
   case 0x17: case 0x18: if (!(m.anim() & 8)) m.set(3); break;
   default: break;
   }
@@ -900,7 +942,7 @@ std::optional<Class> class_of_constructor(std::uint32_t ctor) {
 }
 
 const std::vector<LevelCreature> &level_creatures() {
-  // C:41-56 / REF:19-44 (Executed factory selection, 807 records).
+  // C:41-56 / REF:19-42 (Executed factory selection, 807 records).
   static const std::vector<LevelCreature> t = {
     {"blood1", "Kobold", 118, 0x3d0, 0x27f0c0}, {"blood1", "Koboldtough", 8, 0x3d0, 0x27f0c0},
     {"blood1", "koboldshaman", 5, 0x3d0, 0x27f0c0}, {"blood1", "WarWraith", 9, 0x468, 0x2c07a8},
@@ -928,14 +970,14 @@ const std::vector<LevelCreature> &level_creatures() {
   return t;
 }
 const std::map<std::string, unsigned> &level_record_totals() {
-  static const std::map<std::string, unsigned> t = {  // REF:46-48
+  static const std::map<std::string, unsigned> t = {  // REF:43-45
     {"blood1", 363}, {"strife", 283}, {"drundar", 270}, {"drunare", 39}, {"drunarm", 302},
     {"innovat1", 297}, {"inmine1", 213}, {"inmine2", 118}, {"innovat2", 71}, {"islc1", 262},
     {"islc2", 255}};
   return t;
 }
 const std::vector<KeyCount> &key_counts() {
-  // C:35-39, REF:52-57: key names only. Which RalosZek record fights is an
+  // C:35-39, REF:49-54: key names only. Which RalosZek record fights is an
   // inference from the keys (C:488-491), not ported as behaviour.
   static const std::vector<KeyCount> t = {
     {"drundar", "Ogre", {"miniboss"}, {}, 1},
@@ -953,11 +995,15 @@ const LevelCreature &factory_pick(const std::string &level, const std::string &t
 
 std::vector<std::uint32_t> Tick::requests() const {
   std::vector<std::uint32_t> r;
-  for (const auto &e : events) if (e.name == "set") r.push_back(std::uint32_t(e.args.at(0)));
+  for (const auto &e : events) if (e.name == "set") r.push_back(std::uint32_t(e.args.at(0) / ARG_SCALE));
   return r;
 }
 bool Tick::has(const std::string &name) const {
   return std::any_of(events.begin(), events.end(), [&](const Event &e) { return e.name == name; });
+}
+
+bool droid_fuse_due(std::uint32_t state, std::int64_t self_destruct, std::int64_t clock) {
+  return self_destruct < clock && state != 0x14 && state != 0x17;
 }
 
 Tick tick(Class c, const Context &ctx, const Answer &answer) {
@@ -994,6 +1040,9 @@ std::int64_t EntryWrite::resolve(std::int64_t clock, const std::function<std::ui
 SetResult set_state(Class c, const SetContext &sc, std::uint32_t requested) {
   if (c == Class::Kobold && requested == 9)
     throw Unsupported("creature_ai_m1_3: Kobold state 9 entry (FrostArmor) is Unknown");  // C:271-272
+  // Every setState row ran with the class variant field at 0 (SetContext).
+  if (sc.variant != 0 && (c == Class::Kobold || c == Class::Orc || c == Class::Goblin || c == Class::Clockwork))
+    throw Unsupported("creature_ai_m1_3: setState with a nonzero class variant was not executed (Unknown)");
   SetResult r;
   r.requested = requested;
   // Creature_filterState 0x10a9c0 (C:115-122), same order as the audited
@@ -1015,6 +1064,14 @@ SetResult set_state(Class c, const SetContext &sc, std::uint32_t requested) {
   r.filtered = std::uint32_t(state);
   const auto &table = entries(c);
   const auto it = table.find(r.filtered);
+  // CAI13-3: a landing is executed only for a SET_ENTRY row (MOD:1163-1197,
+  // DT:401-436) or for a check_filter landing (DT:442-461). Anything else,
+  // for example WarWraith 8 or Droid 9, may have no case and store 0 (C:124).
+  constexpr std::uint32_t FILTER_LANDINGS[] = {0, 3, 5, 6, 0x10, 0x13, 0x14};
+  if (it == table.end() &&
+      std::find(std::begin(FILTER_LANDINGS), std::end(FILTER_LANDINGS), r.filtered) == std::end(FILTER_LANDINGS))
+    throw Unsupported("creature_ai_m1_3: setState landing " + std::to_string(r.filtered) +
+                      " for this class was not executed (Unknown)");
   r.landed = r.filtered;
   r.entry_known = it != table.end();
   if (it != table.end()) {

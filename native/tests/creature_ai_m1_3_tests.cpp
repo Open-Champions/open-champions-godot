@@ -7,6 +7,7 @@
 #include "champions/creature_ai_m1_3.hpp"
 #include "champions/core_state.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <map>
@@ -34,6 +35,14 @@ template <class F> bool refuses(F fn) {
   return false;
 }
 Raw f32(float v) { Raw r; std::memcpy(&r, &v, 4); return r; }
+// Event arguments are value x ARG_SCALE (C:198-246 compares floats to four decimals).
+std::int64_t U(double v) { return std::llround(v * double(A::ARG_SCALE)); }
+A::Event E(const std::string &name, const std::vector<double> &args) {
+  A::Event e{name, {}};
+  for (auto v : args) e.args.push_back(U(v));
+  return e;
+}
+double arg(const A::Event &e, std::size_t i) { return double(e.args.at(i)) / double(A::ARG_SCALE); }
 A::Answer answers(std::vector<std::int64_t> list) {
   auto at = std::make_shared<std::size_t>(0);
   return [list = std::move(list), at](const A::Event &) -> std::int64_t {
@@ -56,7 +65,7 @@ A::Answer see_map(std::map<std::tuple<double, double, double>, std::int64_t> s,
                   std::map<std::string, std::int64_t> other = {}) {
   return [s = std::move(s), other = std::move(other)](const A::Event &e) -> std::int64_t {
     if (e.name == "see") {
-      const auto it = s.find({e.args[0], e.args[1], e.args[3]});
+      const auto it = s.find({arg(e, 0), arg(e, 1), arg(e, 3)});
       return it == s.end() ? 0 : it->second;
     }
     const auto it = other.find(e.name);
@@ -67,7 +76,12 @@ A::Context base(std::uint32_t state, bool target = true) {
   A::Context c;
   c.state = state;
   c.target = target;
-  c.dmg_low = 11; c.dmg_high = 22; c.rating = 33;  // REF:89 DMG
+  c.dmg_low = 11; c.dmg_high = 22; c.rating = 33;  // REF:73 DMG
+  // The inputs the probe held fixed, stated explicitly (CAI13-1, CAI13-2):
+  // a dry Froglock trident, Clockwork object flags clear.
+  c.holder_hand1 = 0x12;
+  c.water = A::FroglockWater{};
+  c.object_flags = 0;
   return c;
 }
 std::vector<std::uint32_t> req(const A::Tick &t) { return t.requests(); }
@@ -91,8 +105,8 @@ const std::map<std::string, Class> NAMES = {
   {"Clockwork", Class::Clockwork}, {"Droid", Class::Droid}, {"IronGuardian", Class::IronGuardian},
   {"Froglock", Class::Froglock}, {"Amphian", Class::Amphian}, {"SeaMonster", Class::SeaMonster}};
 bool walked(Class c, std::uint32_t s) {
-  // MOD:153 Kobold ALL excludes 9 (and stops before 0x18); MOD:1110 Goblin
-  // and MOD:1145 Froglock exclude 7 and 8; others walk 0..0x18 (MOD:1090).
+  // MOD:153 Kobold ALL excludes 9 (and stops before 0x18); MOD:1114 Goblin
+  // and MOD:1141 Froglock exclude 7 and 8; others walk 0..0x18 (MOD:1090).
   if (s > 0x18) return false;
   if (c == Class::Kobold) return s != 9 && s < 0x18;
   if (c == Class::Goblin || c == Class::Froglock) return s != 7 && s != 8;
@@ -140,6 +154,8 @@ void vectors(const char *path) {
     c.active = f[14] != "0";
     c.seed = std::stoul(f[15], nullptr, 16);
     c.dmg_low = 11; c.dmg_high = 22; c.rating = 33;
+    c.water = A::FroglockWater{};  // MOD:1141-1142: the walk was dry
+    c.object_flags = 0;            // and started with object flags clear
     std::vector<std::int64_t> used;
     if (f[16] != "-") for (const auto &a : split(f[16], ',')) used.push_back(std::stoll(a));
     std::vector<A::Event> want;
@@ -148,7 +164,7 @@ void vectors(const char *path) {
         const auto bar = e.find('|');
         A::Event ev{e.substr(0, bar), {}};
         const auto rest = e.substr(bar + 1);
-        if (!rest.empty()) for (const auto &a : split(rest, ',')) ev.args.push_back(std::strtod(a.c_str(), nullptr));
+        if (!rest.empty()) for (const auto &a : split(rest, ',')) ev.args.push_back(U(std::strtod(a.c_str(), nullptr)));
         want.push_back(ev);
       }
     const auto got = A::tick(cls, c, answers(used));
@@ -156,7 +172,7 @@ void vectors(const char *path) {
       std::cerr << "vector mismatch: " << line << "\n got:";
       for (const auto &e : got.events) {
         std::cerr << ' ' << e.name;
-        for (auto a : e.args) std::cerr << ',' << a;
+        for (auto a : e.args) std::cerr << ',' << double(a) / double(A::ARG_SCALE);
       }
       std::cerr << " seed " << std::hex << got.seed << std::dec << "\n";
       check(false, "decision vector matches research model");
@@ -193,7 +209,7 @@ void head_and_slots() {
       {Class::Froglock, 0.5f}, {Class::Amphian, 0.5f}, {Class::SeaMonster, 0.2f}};
   for (const auto &n : NAMES) {
     const auto &i = A::info(n.second);
-    check(i.knockback == f32(knock.at(n.second)), n.first + " knock-back scale (C:77-80)");
+    check(i.knockback == U(knock.at(n.second)), n.first + " knock-back scale (C:77-80)");
     check(i.slot23 == 0x10ded0 && i.slot24 == 0x10e2c0 && i.slot25 == 0x10e658,
           n.first + " base pick/ally/sight slots (C:89-90)");
     check(i.slot2 == (n.second == Class::Orc ? 0x2a2eac : 0x116638), n.first + " slot 2 (C:91)");
@@ -208,8 +224,8 @@ void head_and_slots() {
             t.events[5].name == "knockback", "WarWraith picks before knock-back (C:80-81)");
     } else {
       check(t.events[3].name == "stepAnim" && t.events[4].name == "knockback" &&
-            t.events[4].args.size() == 1 && float(t.events[4].args[0]) == knock.at(n.second) &&
-            t.events[5].name == "pickTarget" && t.events[5].args == std::vector<double>{0},
+            t.events[4].args.size() == 1 && t.events[4].args[0] == U(knock.at(n.second)) &&
+            t.events[5].name == "pickTarget" && t.events[5].args == std::vector<std::int64_t>{0},
             n.first + " stepAnim, knock-back, pick order (C:73-77)");
     }
     const bool ally = n.second == Class::Kobold;
@@ -254,7 +270,7 @@ void thresholds() {
   const auto w0 = A::tick(Class::Warrior, base(3), see_map({{{0, 120, 8000}, 1}}, {{"alliesNearTarget", 0}}));
   const auto w1 = A::tick(Class::Warrior, base(3), see_map({{{0, 120, 8000}, 1}}, {{"alliesNearTarget", 1}}));
   check(req(w0).empty() && req(w1) == std::vector<std::uint32_t>{5} &&
-        w1.events[w1.events.size() - 2] == A::Event{"pickTarget", {1}}, "Warrior ally threshold and pickTarget(1)");
+        w1.events[w1.events.size() - 2] == E("pickTarget", {1}), "Warrior ally threshold and pickTarget(1)");
   // C:208 deadline +0xf4 against clock 100: strictly greater.
   for (std::int64_t dl : {99, 100, 101}) {
     auto k = base(0); k.deadline = dl;
@@ -292,7 +308,7 @@ void thresholds() {
     auto g = base(3); g.fields[0x3cc] = v;
     const auto t = A::tick(Class::IronGuardian, g);
     bool asked = false;
-    for (const auto &e : t.events) asked |= e.name == "cone" && e.args[0] == 240;
+    for (const auto &e : t.events) asked |= e.name == "cone" && e.args[0] == U(240);
     check(asked == (v == 99), "IronGuardian 10 clock " + std::to_string(v));
   }
 }
@@ -340,7 +356,7 @@ void hit_points() {
     c.seed = block;
     const auto t = A::tick(Class::Amphian, c, answers({1}));
     check((req(t) == std::vector<std::uint32_t>{0x17}) == p.below, "Amphian block at " + std::to_string(p.hp) + "/" + std::to_string(p.top));
-    check(t.draws == (p.below ? 1u : 1u), "Amphian draw count");
+    check(t.draws == 1u, "Amphian draw count");
     c.seed = noblock;
     const auto u = A::tick(Class::Amphian, c, answers({1}));
     check(u.draws == (p.below ? 2u : 1u), "the block draw is made only below half");
@@ -392,7 +408,7 @@ void orc_shaman_sight() {
   const auto t = A::tick(Class::Orc, c, see_map({{{0, 6000, 0x7fff}, 1}}));
   check(count(t, "turn") == 2 && req(t).empty(), "shaman far sight adds a turn");
   bool asked = false;
-  for (const auto &e : t.events) asked |= e == A::Event{"see", {0, 6000, 0, 0x7fff, 0}};
+  for (const auto &e : t.events) asked |= e == E("see", {0, 6000, 0, 0x7fff, 0});
   check(asked, "shaman asks see(0, 6000, 0x7fff)");
   check(count(A::tick(Class::Orc, c), "turn") == 1, "no far sight: one turn");
   check(req(A::tick(Class::Orc, c, see_map({{{0, 30, 6000}, 1}}))) == std::vector<std::uint32_t>{7}, "shaman in reach -> 7");
@@ -405,7 +421,7 @@ void guardian_turn() {
       auto c = base(s); c.alive_players = alive; c.ev = 1; c.anim = 8;
       const auto t = A::tick(Class::IronGuardian, c);
       check(t.has("turn") == (alive == 1), "IronGuardian turn alive=" + std::to_string(alive));
-      check(t.events.back() == A::Event{"hitAll", {0, 84, s == 7 ? 16384.0 : -16384.0, 0x4000, 11, 22, 33, 0x80008}},
+      check(t.events.back() == E("hitAll", {0, 84, s == 7 ? 16384.0 : -16384.0, 0x4000, 11, 22, 33, 0x80008}),
             "IronGuardian side swing facing");
     }
 }
@@ -575,10 +591,10 @@ void machines() {
   check(req(A::tick(Class::Amphian, base(0x13), answers({1}))) == std::vector<std::uint32_t>{3}, "Amphian 0x13 (C:468)");
   auto drain = base(7); drain.ev = 1; drain.anim = 8;
   const auto dt = A::tick(Class::WarWraith, drain);
-  check(dt.has("skill+0x5c") && dt.events[dt.events.size() - 2] == A::Event{"hitAtReach", {36, 11, 22, 33, 0x404}},
+  check(dt.has("skill+0x5c") && dt.events[dt.events.size() - 2] == E("hitAtReach", {36, 11, 22, 33, 0x404}),
         "WarWraith drain hitAtReach(36, 0x404) (C:290-291)");
   auto ogre7 = base(7); ogre7.ev = 1; ogre7.anim = 8;
-  check(A::tick(Class::Ogre, ogre7).events.back() == A::Event{"hitAll", {0, 60, 0, 6000, 1, 5, 33, 0x100001}},
+  check(A::tick(Class::Ogre, ogre7).events.back() == E("hitAll", {0, 60, 0, 6000, 1, 5, 33, 0x100001}),
         "Ogre shield-bash literal damage 1-5 (C:370)");
   auto ks = base(8, false); ks.fields[0x3cc] = 2; ks.ev = 1; ks.anim = 8;
   check(A::tick(Class::Kobold, ks, by_name({{"wounded", {1}}})).has("addSpell"), "Kobold shaman heals without a target (C:270)");
@@ -590,6 +606,143 @@ void machines() {
   check(dr.has("damageInRadius") && dr.has("objDelete") && count(dr, "poolNew") == 11, "Droid fuse ends (C:420-422)");
   auto hammer = base(0); hammer.fields[0x3c8] = 1; hammer.seed = seed_where([](auto d) { return (d[0] & 1) && (d[4] & 1); }, 5);
   check(A::tick(Class::Clockwork, hammer).draws >= 5, "hammer steam puffs draw every tick (C:410-411)");
+}
+
+using V = std::vector<std::uint32_t>;
+// --- CAI13-1: Froglock water (C:447-448; M2:4143-4160, Observed, never walked).
+void froglock_water() {
+  const auto in_reach = see_map({{{0, 400, 6000}, 1}});
+  auto blow = base(3); blow.holder_hand1 = 0x10;
+  check(req(A::tick(Class::Froglock, blow, in_reach)) == V{7}, "dry blowgun in reach -> 7 (C:447-448)");
+  blow.water = A::FroglockWater{true, 1, 0, 0};
+  check(req(A::tick(Class::Froglock, blow, in_reach)) == V{8}, "blowgun standing in water -> 8 (M2:4158-4159)");
+  auto five = blow; five.state = 5;
+  check(req(A::tick(Class::Froglock, five, in_reach)) == V{7}, "state 5 has no water branch (M2:4161-4162)");
+  // Helper 0x265754 (M2:4143-4145): entered water, or water ahead just ended.
+  const A::FroglockWater entered{true, 0, 0, 0}, ended{false, 0, 0, 1};
+  const A::FroglockWater still_in{true, 1, 0, 0}, ahead_on{false, 0, 1, 1};
+  for (std::uint32_t hand : {0x12u, 0x10u}) {
+    for (const auto &w : {entered, ended}) {
+      auto c = base(3); c.holder_hand1 = hand; c.water = w;
+      const auto t = A::tick(Class::Froglock, c);
+      check(req(t) == V{3} && t.events[t.events.size() - 2].name == "moveToTarget",
+            "moving Froglock re-requests 3 after moveToTarget (M2:4157, M2:4160)");
+      auto near = c;
+      const auto u = A::tick(Class::Froglock, near, see_map({{{0, 40, 0x7fff}, 1}, {{0, 400, 0x7fff}, 1}}));
+      check(req(u).empty() && u.has("turn"), "turning Froglock makes no water re-request");
+    }
+    for (const auto &w : {still_in, ahead_on}) {
+      auto c = base(3); c.holder_hand1 = hand; c.water = w;
+      check(req(A::tick(Class::Froglock, c)).empty(), "no water change: no re-request");
+    }
+  }
+  auto wander = base(1); wander.water = entered;
+  const auto tw = A::tick(Class::Froglock, wander);
+  check(req(tw) == V{1} && tw.events[tw.events.size() - 2].name == "moveToDest",
+        "state 1 re-requests 1 after moveToDest (M2:4152-4153)");
+  check(req(A::tick(Class::Froglock, wander, answers({1}))) == V{0}, "state 1 sight -> 0 without the helper");
+  auto flee = base(0x10); flee.water = ended;
+  const auto tf = A::tick(Class::Froglock, flee, answers({1}));
+  check(req(tf) == V{0x10} && !tf.has("attackReady") && !tf.has("flee"), "0x10 re-requests 0x10 first (M2:4178-4179)");
+  flee.water = still_in;
+  check(req(A::tick(Class::Froglock, flee, answers({1}))) == V{0}, "0x10 without a change: attack ready -> 0");
+  auto missing = base(0); missing.water.reset();
+  check(refuses([&] { A::tick(Class::Froglock, missing); }), "Froglock without a water state refuses");
+  for (std::uint32_t bad : {2u, 255u}) {
+    auto b = base(0); b.water = A::FroglockWater{false, bad, 0, 0};
+    check(refuses([&] { A::tick(Class::Froglock, b); }), "water byte outside 0/1 refuses");
+    b.water = A::FroglockWater{false, 0, 0, bad};
+    check(refuses([&] { A::tick(Class::Froglock, b); }), "water byte outside 0/1 refuses");
+  }
+}
+
+// --- CAI13-2: Clockwork object flag 2 (M2:3711-3716, M2:3721-3723, MOD:738-742).
+void clockwork_flag2() {
+  auto h = base(0); h.fields[0x3c8] = 1;
+  h.seed = seed_where([](auto d) { return (d[0] & 1) && (d[1] & 1); }, 2);
+  const auto clear = A::tick(Class::Clockwork, h);
+  check(clear.draws >= 8, "flag 2 clear: both odd puffs draw a unit-ball velocity");
+  h.object_flags = 2;
+  check(A::tick(Class::Clockwork, h).draws == 2, "flag 2 set: the puff draws stay, the velocities do not");
+  auto dead = base(0x14); dead.fields[0x3c8] = 1; dead.seed = h.seed;
+  dead.ev = 4; dead.object_flags = 0;
+  const auto burst = A::tick(Class::Clockwork, dead);
+  check(burst.has("damageInRadius") && burst.draws == 3, "burst tick: radius damage draw and two puff draws");
+  dead.object_flags = 0x4003;  // a later dead tick: the burst set flag 2 (M2:3716)
+  const auto later = A::tick(Class::Clockwork, dead);
+  check(!later.has("damageInRadius") && !later.has("poolNew") && later.draws == 2,
+        "after the burst: no second burst, no puff velocities");
+  auto cutter = base(0x14); cutter.ev = 4; cutter.object_flags = 2;
+  check(!A::tick(Class::Clockwork, cutter).has("damageInRadius"), "cutter wreck with flag 2 does not burst");
+  auto missing = base(0); missing.object_flags.reset();
+  check(refuses([&] { A::tick(Class::Clockwork, missing); }), "Clockwork without object flags refuses");
+}
+
+// --- CAI13-3: unexecuted setState landings refuse (C:124, DT:401-461).
+void unexecuted_landings() {
+  const std::vector<std::pair<Class, std::uint32_t>> refused = {
+    {Class::WarWraith, 8}, {Class::Droid, 9}, {Class::Goblin, 7}, {Class::Goblin, 8},
+    {Class::SeaMonster, 7}, {Class::SeaMonster, 8}, {Class::SeaMonster, 9}, {Class::SeaMonster, 0x17},
+    {Class::SeaMonster, 0x18}, {Class::Orc, 7}, {Class::Warrior, 9}, {Class::Warrior, 10}};
+  for (const auto &r : refused) {
+    A::SetContext s; s.target = true;
+    check(refuses([&] { A::set_state(r.first, s, r.second); }), "unexecuted landing refused");
+  }
+  // Filter landings without an entry row keep the executed landing only.
+  A::SetContext s; s.target = true;
+  const auto ww3 = A::set_state(Class::WarWraith, s, 3);
+  check(ww3.landed == 3 && !ww3.entry_known && ww3.writes.empty(), "WarWraith 3: filter landing, entry unknown");
+  const auto sm6 = A::set_state(Class::SeaMonster, s, 6);
+  check(sm6.landed == 6 && !sm6.entry_known, "SeaMonster 6: filter landing (DT:445), entry unknown");
+  // A redirect onto an executed landing is accepted: Droid 1 has no row, but a
+  // root timer turns it into 5 (DT:443). Root keeps 6-15, so 9 stays refused.
+  A::SetContext rooted; rooted.target = true; rooted.root = 30;
+  check(refuses([] { A::set_state(Class::Droid, {}, 1); }), "Droid 1 has no executed landing");
+  check(A::set_state(Class::Droid, rooted, 1).landed == 5, "rooted Droid 1 lands the filter's 5");
+  check(refuses([&] { A::set_state(Class::Droid, rooted, 9); }), "root keeps Droid 9, still unexecuted");
+  const auto cw9 = A::set_state(Class::Clockwork, s, 9);
+  check(cw9.landed == 9 && cw9.entry_known && cw9.writes.size() == 2, "Clockwork 9 entry (MOD:1184)");
+  const auto ig9 = A::set_state(Class::IronGuardian, s, 9);
+  check(ig9.landed == 9 && ig9.writes.size() == 1 && ig9.writes[0].offset == 0x3c8 && ig9.writes[0].base == 0,
+        "IronGuardian 9 entry (MOD:1190)");
+  // Every row ran with the class variant field at 0 (DT:410, DT:455).
+  A::SetContext v; v.target = true; v.variant = 1;
+  for (auto c : {Class::Kobold, Class::Orc, Class::Goblin, Class::Clockwork})
+    check(refuses([&] { A::set_state(c, v, 0); }), "setState with a nonzero variant refused");
+  check(!A::set_state(Class::Ogre, v, 0).refused, "classes without a variant field are not gated");
+  v.variant = 0;
+  check(A::set_state(Class::Kobold, v, 8).writes.at(0).base == 8, "Kobold 8 entry at variant 0 (MOD:1165)");
+}
+
+// --- CAI13-5: variant values outside the walked set refuse.
+void variants() {
+  const auto bad = [](Class c, std::uint32_t off, std::int64_t value) {
+    auto k = base(0); k.fields[off] = value;
+    return refuses([&] { A::tick(c, k); });
+  };
+  check(bad(Class::Kobold, 0x3cc, 3) && !bad(Class::Kobold, 0x3cc, 2), "Kobold +0x3cc 0-2 (MOD:152)");
+  check(bad(Class::Orc, 0x478, 6) && bad(Class::Orc, 0x478, -1) && !bad(Class::Orc, 0x478, 5), "Orc +0x478 0-5 (MOD:1111)");
+  check(bad(Class::Goblin, 0x3d4, 6) && !bad(Class::Goblin, 0x3d4, 5), "Goblin +0x3d4 0-5 (MOD:1115)");
+  check(bad(Class::Clockwork, 0x3c8, 2) && !bad(Class::Clockwork, 0x3c8, 1), "Clockwork +0x3c8 0/1 (MOD:1125-1127)");
+  for (std::uint32_t hand : {0u, 0x11u, 0x13u}) {
+    auto f = base(0); f.holder_hand1 = hand;
+    check(refuses([&] { A::tick(Class::Froglock, f); }), "Froglock holder other than 0x12/0x10 (MOD:1142)");
+  }
+}
+
+// --- Kernel hooks used by the live runtimes.
+void hooks() {
+  check(A::droid_fuse_due(0, 99, 100) && !A::droid_fuse_due(0, 100, 100) && !A::droid_fuse_due(0, 101, 100),
+        "Droid fuse +0x3cc < clock (C:416-417)");
+  check(!A::droid_fuse_due(0x14, 0, 100) && !A::droid_fuse_due(0x17, 0, 100), "no fuse in 0x14/0x17");
+  const auto k = A::tick(Class::Kobold, base(0));
+  check(k.body == 7 && k.events[k.body].name == "sight", "Kobold body starts after pickAlly");
+  auto ww = base(0); ww.fields[0x3c8] = 100;
+  const auto w = A::tick(Class::WarWraith, ww);
+  check(w.events[w.body - 1].name == "turn" && w.events[w.body].name == "sight", "WarWraith body starts after the fade turn");
+  auto ex = base(3); ex.active = false;
+  const auto e = A::tick(Class::Ogre, ex);
+  check(e.body == e.events.size(), "an early exit has an empty body");
 }
 } // namespace
 
@@ -609,6 +762,11 @@ int main(int argc, char **argv) {
     records();
     unknowns();
     machines();
+    froglock_water();
+    clockwork_flag2();
+    unexecuted_landings();
+    variants();
+    hooks();
     vectors(argv[1]);
   } catch (const std::exception &e) {
     std::cerr << "FAIL after " << checks << " checks: " << e.what() << "\n";

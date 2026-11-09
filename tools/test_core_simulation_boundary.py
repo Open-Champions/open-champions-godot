@@ -36,13 +36,13 @@ class SimulationBoundary(unittest.TestCase):
 
     def test_animation_decoder_paths_are_part_of_simulation_census(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 82)
+        self.assertEqual(len(paths), 84)
         self.assertTrue({"native/include/champions/animation_decoder.hpp",
                          "native/src/animation_decoder.cpp"} <= paths)
 
     def test_animation_cache_header_is_in_simulation_census(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 82)
+        self.assertEqual(len(paths), 84)
         self.assertIn("native/include/champions/session_anim_cache.hpp", paths)
         path = self.root / "native/include/champions/session_anim_cache.hpp"
         for bad in ('double pose;', '#include "godot_cpp/classes/node.hpp"'):
@@ -53,7 +53,7 @@ class SimulationBoundary(unittest.TestCase):
 
     def test_animation_runtime_paths_are_in_complete_simulation_census(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 82)
+        self.assertEqual(len(paths), 84)
         self.assertTrue({"native/include/champions/animation_runtime.hpp",
                          "native/src/animation_runtime.cpp"} <= paths)
 
@@ -190,10 +190,25 @@ class SimulationBoundary(unittest.TestCase):
 
     def test_session_animation_paths_remain_in_complete_simulation_boundary(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 82)
+        self.assertEqual(len(paths), 84)
         self.assertTrue({"native/include/champions/session.hpp", "native/src/session.cpp",
                          "native/include/champions/animation_clock.hpp",
                          "native/src/animation_clock.cpp"} <= paths)
+
+    def test_creature_ai_kernel_is_in_census_and_rejects_host_floats(self):
+        paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
+        self.assertEqual(len(paths), 84)
+        for name in ("native/include/champions/creature_ai_m1_3.hpp",
+                     "native/src/creature_ai_m1_3.cpp"):
+            self.assertIn(name, paths)
+            for text, error in (("std::vector<double> args;\n", "floating-point"),
+                                ('#include "godot_cpp/classes/node.hpp"\n', "dependency")):
+                with self.subTest(path=name, text=text):
+                    path = self.root / name
+                    path.write_text(text)
+                    with self.assertRaisesRegex(ValueError, error):
+                        check(self.root)
+                    path.write_text("")
 
     def test_animation_clock_cannot_import_presentation_or_host_arithmetic(self):
         for name in ("native/include/champions/animation_clock.hpp",
