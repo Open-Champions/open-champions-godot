@@ -1869,6 +1869,361 @@ void spawn_tool_lmp_count() {
   CHECK(entries.empty());
 }
 
+namespace {
+// Death reload, client round 2. Synthetic names, sizes and bytes only.
+// research-death-reload@98ea7a6 docs/death-reload-client-path.md, with
+// research-save-world@31a0ca6 docs/save-world.md and research-exits-r3@350fc8b.
+bool message_has(const std::function<void()> &f, const std::string &part) {
+  try {
+    f();
+  } catch (const std::exception &e) {
+    return std::string(e.what()).find(part) != std::string::npos;
+  }
+  return false;
+}
+void death_reload_r2_cases() {
+  // Step 9 stopped-slot rule (save-world.md:44-52; client-path.md:96).
+  {
+    LevelStates st;
+    const Act syn{{"SYN_", 10}};
+    CHECK(st.restore_decision("SYN_A").kind == Restore::Fresh &&
+          st.restore_decision("SYN_A").slot == 0);
+    for (int i = 0; i < 10; ++i)
+      CHECK(st.store("SYN_" + std::to_string(i), syn, 0, 0, false,
+                     {Blob::value_type(i)})
+                .written());
+    auto hit = st.restore_decision("SYN_7");
+    CHECK(hit.kind == Restore::Saved && hit.slot == 7);
+    // Ten misses with the gap empty: the stopped slot is 10 and loads fresh.
+    auto gap_empty = st.require_restorable("SYN_MISS", true);
+    CHECK(gap_empty.kind == Restore::Fresh && gap_empty.slot == 10);
+    // The eleventh key goes to gap slot 10 (exits-r4-travel.md:37-38).
+    CHECK(st.store("SYN_GHOST", syn, 0, 0, false, {0x4a}).written() &&
+          st.entries.size() == 11);
+    CHECK(st.restore_decision("SYN_MISS").kind == Restore::Gap &&
+          st.restore_decision("SYN_MISS").slot == 10);
+    // The gap's own name misses too: only slots 0..9 are compared.
+    CHECK(st.restore_decision("SYN_GHOST").kind == Restore::Gap);
+    CHECK(st.restore_decision("SYN_3").kind == Restore::Saved);
+    CHECK(message_has([&] { st.require_restorable("SYN_MISS", false); },
+                      "gap-slot restore refused: 'SYN_MISS'"));
+    CHECK(message_has([&] { st.require_restorable("SYN_MISS", true); },
+                      "holds 'SYN_GHOST'"));
+    CHECK(st.require_restorable("SYN_9", false).kind == Restore::Saved);
+  }
+  // Synthetic two-act world. Act 0 rows: hub, aa, aab; act 1: hub, bb.
+  std::map<std::string, Blob> files;
+  auto empty = lump({});
+  for (auto n : {"FX.LMP;1", "HUD.LMP;1", "MAPICONS.LMP;1", "ICONS.LMP;1",
+                 "LOADMISC.LMP;1", "GOODDOG.LMP;1", "SKELE_B.LMP;1"})
+    files[n] = empty;
+  auto make_level = [&](const std::string &name, Vec3 marker) {
+    auto main = lump({{"synthetic.world", {1, 2}},
+                      {"objects.ob", objects({record("Player1", {}, marker)})},
+                      {"script.scr", {1}},
+                      {"ntsc_dialog.bin", {2}},
+                      {"pal_dialog.bin", {3}}});
+    files[cd_file_name(name + ".gob")] =
+        gob({{name + ".lmp", main},
+             {"waterenv.lmp", lump({{"water.tex", {0}}})},
+             {"env.lmp", empty}});
+  };
+  make_level("aa", v(1, 1, 0));
+  make_level("aab", v(2, 2, 0));
+  make_level("bb", v(3, 3, 0));
+  LoadServices svc;
+  svc.disc = [&](const std::string &n) -> std::optional<Blob> {
+    auto i = files.find(n);
+    return i == files.end() ? std::nullopt : std::optional<Blob>(i->second);
+  };
+  svc.range = [&](const std::string &, std::size_t, std::size_t size) {
+    return Blob(size);
+  };
+  svc.player_lumps = [] { return false; };
+  svc.model_lumps = [](Bytes) { return std::vector<std::string>{}; };
+  svc.event = [](const std::string &) {};
+  struct Run {
+    State state;
+    std::vector<Blob> restored;
+    std::vector<unsigned> built;
+    std::vector<Vec3> built_at;
+    unsigned free_spots = 0;
+  };
+  auto hooks_for = [](Run &run) {
+    SessionHooks h;
+    h.find_free_spot = [&run](const Vec3 &p, Raw, Raw, bool) {
+      ++run.free_spots;
+      return p;
+    };
+    h.shared_draw = [] { return std::uint16_t(0); };
+    h.terrain_height = [](Raw, const Vec3 &) { return f(7); };
+    h.event = [](const std::string &) {};
+    h.script = [](const std::string &, const Blob &) {};
+    h.construct = [](const Record &) {};
+    h.restore_level_state = [&run](const Blob &b) {
+      run.restored.push_back(b);
+      return std::vector<Record>{record("Player1", {}, v(90, 90, 0))};
+    };
+    h.construct_player = [&run](unsigned slot, const Vec3 &p, std::uint16_t) {
+      run.built.push_back(slot);
+      run.built_at.push_back(p);
+    };
+    h.remove_flag39_items = [] {};
+    h.disable_unclaimed_pieces = [] {};
+    return h;
+  };
+  auto fresh_run = [&](Run &run) {
+    run.state.acts = acts;
+    for (unsigned i = 0; i < 2; ++i) {
+      run.state.players[i].active = true;
+      run.state.players[i].hp = 10;
+      run.state.players[i].max_hp = 20;
+    }
+  };
+  Placement two;
+  two.players = 2;
+  // A. Live buffer: the checkpoint header with each level's latest body.
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    Loader loader(svc);
+    SessionAdapter adapter(s, loader, hooks_for(run));
+    CHECK(adapter.request_script("aa", {}, false, 0));
+    adapter.change({}, {}, two);
+    s.quest_values["SYN_Q"] = 4;
+    s.spawn.pos[0] = v(11, 12, 0);
+    s.spawn.pos[1] = v(13, 14, 0);
+    s.players[0].persistent = {0x51};
+    // save_game: counted living player, act row found, current level stored.
+    auto saved = save_game(s, {0x10}, {0x63}, {2});
+    CHECK(saved.outcome == SaveGame::Built && saved.level_stored);
+    CHECK(s.saved && s.saved->level == "aa" && s.states.blobs.at("aa") == Blob{0x10});
+    // Play on: values change after the checkpoint, then leave aa with a
+    // newer body (the departure store writes into the same live directory).
+    s.quest_values["SYN_Q"] = 9;
+    s.players[0].persistent = {0x52};
+    s.pending.request("aab");
+    ChangeOptions leave;
+    leave.old_blob = {0x20};
+    adapter.change(leave, {}, two);
+    CHECK(s.level == "aab" && s.states.blobs.at("aa") == Blob{0x20});
+    // Die in aab, which was never stored: no departure store for it.
+    for (auto &p : s.players)
+      p.hp = 0;
+    CHECK(party_wipe(s) == Wipe::Reload);
+    CHECK(s.pending.name == "aa" && s.pending.orientation == ORIENT_RESTORE);
+    CHECK(s.loaded_from_save && s.quest_values["SYN_Q"] == 4 &&
+          s.players[0].persistent == Blob{0x51} && s.players[0].hp == 10);
+    // The live directory, not a copy from the checkpoint.
+    CHECK(s.states.blobs.at("aa") == Blob{0x20});
+    const auto entries_before = s.states.entries;
+    run.restored.clear();
+    run.built.clear();
+    run.built_at.clear();
+    run.free_spots = 0;
+    ChangeOptions death;
+    death.death_task = true;
+    death.old_blob = {0x30};
+    adapter.change(death, {}, two);
+    // Step 6: the dying level is not stored. Step 9: aa restores its latest
+    // body. Step 10: rank 3 keeps the saved poses (marker skipped, no
+    // free-spot search), z from terrain, both living slots built.
+    CHECK(s.states.entries == entries_before && !s.states.lookup("aab").first);
+    CHECK(run.restored == std::vector<Blob>{Blob{0x20}});
+    CHECK(s.spawn.rank == 3 && run.free_spots == 0);
+    CHECK(run.built == std::vector<unsigned>({0, 1}));
+    CHECK(run.built_at[0] == v(11, 12, 7) && run.built_at[1] == v(13, 14, 7));
+    CHECK(s.pending.orientation == ORIENT_CONSUMED);
+    // Step 11.
+    CHECK(death_task_done(s, "aa") && !death_task_done(s, "aab"));
+    s.pending.request("aa");
+    CHECK(!death_task_done(s, "aa"));
+  }
+  // B. No-checkpoint cases (save-world.md:247-260).
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    s.level = "aa";
+    // A living record at slot = g_numPlayers behind a dead party counts not.
+    s.players[0].hp = 0;
+    auto none = save_game(s, {0x10}, {}, {1});
+    CHECK(none.outcome == SaveGame::NoLivingPlayer && !s.saved &&
+          s.states.entries.empty());
+    // A record with HP but no built object counts not either.
+    s.players[0].hp = 10;
+    s.players[0].active = false;
+    CHECK(save_game(s, {0x10}, {}, {1}).outcome == SaveGame::NoLivingPlayer);
+    s.players[0].active = true;
+    // No act row is a prefix: CheckPoint text, no build, nothing stored.
+    s.level = "SYN_NOWHERE";
+    auto norow = save_game(s, {0x10}, {}, {1});
+    CHECK(norow.outcome == SaveGame::NoActRow && !s.saved &&
+          s.states.entries.empty());
+    // A death with no checkpoint in a found level refuses (uninitialised
+    // buffer Unknown); in a level outside every act it restarts (step 5b).
+    s.level = "aa";
+    s.players[0].hp = 0;
+    CHECK(message_has([&] { party_wipe(s); }, "holds no checkpoint"));
+    s.level = "SYN_NOWHERE";
+    s.players[0].persistent = {0x77};
+    s.quest_values["SYN_Q"] = 3;
+    CHECK(party_wipe(s) == Wipe::Restart);
+    CHECK(s.players[0].hp == 20 && s.players[1].hp == 20 &&
+          s.players[0].persistent == Blob{0x77} && s.quest_values["SYN_Q"] == 3 &&
+          s.pending.name == "SYN_NOWHERE" && s.pending.orientation == ORIENT_RESTORE &&
+          !s.loaded_from_save);
+    // Alternate death waits for the script (phase 10).
+    s.transient.alternate_death = true;
+    CHECK(party_wipe(s) == Wipe::Wait);
+  }
+  // C. Completed game: the build skips the level store, so the level keeps
+  // the body the directory already held (save-world.md:269-275).
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    s.level = "aa";
+    s.act = 0;
+    CHECK(save_game(s, {0x41}, {}, {2}).level_stored);
+    SaveGameOptions done;
+    done.players = 2;
+    done.game_complete = true;
+    auto r = save_game(s, {0x42}, {}, done);
+    CHECK(r.outcome == SaveGame::Built && !r.level_stored);
+    CHECK(s.states.blobs.at("aa") == Blob{0x41} && s.saved->level == "aa");
+    // Even outside every act a completed game builds (no save_findAct).
+    s.level = "SYN_NOWHERE";
+    CHECK(save_game(s, {0x43}, {}, done).outcome == SaveGame::Built &&
+          s.states.entries.size() == 1);
+  }
+  // D. Act change after the checkpoint (save-world.md:194, 293-296).
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    Loader loader(svc);
+    SessionAdapter adapter(s, loader, hooks_for(run));
+    CHECK(adapter.request_script("aa", {}, false, 0));
+    adapter.change({}, {}, two);
+    CHECK(save_game(s, {0x10}, {}, {2}).outcome == SaveGame::Built);
+    s.pending.request("bb");
+    ChangeOptions leave;
+    leave.old_blob = {0x11};
+    auto r = adapter.change(leave, {}, two);
+    (void)r;
+    // The act changed and the clear ran: this client drops slot 0 'aa'.
+    CHECK(s.act == 1 && s.states.entries.empty() && s.states.cleared_slot0 == "aa");
+    for (auto &p : s.players)
+      p.hp = 0;
+    CHECK(party_wipe(s) == Wipe::Reload && s.pending.name == "aa");
+    ChangeOptions death;
+    death.death_task = true;
+    CHECK(message_has([&] { adapter.change(death, {}, two); },
+                      "save_clearBuffer(0), which keeps directory slot 0 'aa'"));
+  }
+  {
+    // Slot 0 a different level: the checkpoint level comes back fresh.
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    Loader loader(svc);
+    SessionAdapter adapter(s, loader, hooks_for(run));
+    s.act = 0;
+    s.states.store("hub", acts[0], 0, 0, false, {0x01});
+    CHECK(adapter.request_script("aa", {}, false, 0));
+    adapter.change({}, {}, two);
+    CHECK(s.states.entries.size() == 1 && save_game(s, {0x10}, {}, {2}).level_stored);
+    s.pending.request("bb");
+    adapter.change({}, {}, two);
+    CHECK(s.states.cleared_slot0 == "hub" && !s.states.stored("aa"));
+    for (auto &p : s.players)
+      p.hp = 0;
+    CHECK(party_wipe(s) == Wipe::Reload);
+    run.restored.clear();
+    ChangeOptions death;
+    death.death_task = true;
+    adapter.change(death, {}, two);
+    // The header restored act 0, so this load sees no act change; aa misses
+    // with the gap empty and comes back fresh.
+    CHECK(s.level == "aa" && s.act == 0 && run.restored.empty() &&
+          s.states.cleared_slot0 == "hub");
+  }
+  // E. Gap slot during a death reload refuses with the precise reason.
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    Loader loader(svc);
+    SessionAdapter adapter(s, loader, hooks_for(run));
+    CHECK(adapter.request_script("aa", {}, false, 0));
+    adapter.change({}, {}, two);
+    CHECK(save_game(s, {0x10}, {}, {2}).level_stored);
+    for (int i = 0; i < 9; ++i)
+      s.states.store("SYN_K" + std::to_string(i), {}, 0, 0, true, {0x01});
+    s.states.store("SYN_GAP", {}, 0, 0, true, {0x02});
+    CHECK(s.states.entries.size() == 11);
+    // aa sits in slot 0, so it still restores; a checkpoint in a level that
+    // misses would meet the gap.
+    s.saved->level = "aab";
+    for (auto &p : s.players)
+      p.hp = 0;
+    CHECK(party_wipe(s) == Wipe::Reload && s.pending.name == "aab");
+    ChangeOptions death;
+    death.death_task = true;
+    CHECK(message_has([&] { adapter.change(death, {}, two); },
+                      "gap-slot restore refused: 'aab'"));
+  }
+  // F. Step 10 gates on the death load (exits-r4-travel.md:107-121): a dead
+  // slot and an inactive (non-peer) slot are not built; with a medal slot
+  // only that slot is; a death load leaves recall destinations on an act
+  // change.
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    Loader loader(svc);
+    SessionAdapter adapter(s, loader, hooks_for(run));
+    CHECK(adapter.request_script("bb", {}, false, 0));
+    adapter.change({}, {}, two);
+    s.players[2].active = true;
+    s.players[2].hp = 5;
+    s.players[3].active = false;
+    s.players[3].hp = 5;
+    s.players[1].hp = 0;
+    for (auto &p : s.players)
+      p.recall_dest = "SYN_DEST";
+    CHECK(save_game(s, {0x10}, {}, {4}).outcome == SaveGame::Built);
+    // A synthetic header act, so the death load itself changes act: step 6a
+    // skips the clear (no reset, directory kept) and still updates the act
+    // index; step 10 leaves record +0x24 (recall destination) alone.
+    s.saved->act = 0;
+    for (auto &p : s.players) {
+      p.recall_dest = "SYN_LATER";
+      p.hp = 0;
+    }
+    CHECK(party_wipe(s) == Wipe::Reload && s.pending.name == "bb" && s.act == 0);
+    run.built.clear();
+    Placement four;
+    four.players = 4;
+    ChangeOptions death;
+    death.death_task = true;
+    adapter.change(death, {}, four);
+    CHECK(run.built == std::vector<unsigned>({0, 2}));
+    CHECK(s.act == 1 && s.states.stored("bb") && !s.states.cleared_slot0);
+    for (auto &p : s.players)
+      CHECK(p.recall_dest == "SYN_DEST");
+    for (auto &p : s.players)
+      p.hp = 0;
+    CHECK(party_wipe(s) == Wipe::Reload);
+    run.built.clear();
+    four.medal_slot = 2;
+    adapter.change(death, {}, four);
+    CHECK(run.built == std::vector<unsigned>({2}));
+  }
+}
+} // namespace
 int main() {
   try {
     spawn_tool_lmp_count();
@@ -1883,6 +2238,7 @@ int main() {
     top_floor();
     integration();
     arena_executable_case();
+    death_reload_r2_cases();
     std::cout
         << "PASS level-flow: " << checks
         << " exact checks; reference fixtures and synthetic gate integration\n";

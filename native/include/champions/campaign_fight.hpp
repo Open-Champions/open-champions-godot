@@ -87,8 +87,20 @@ struct Counts {
   std::size_t pickups = 0, pickup_recipients = 0, prompts = 0;
   std::size_t starting_grants = 0, chests_built = 0, chests_opened = 0;
 };
+// An owner with its own loader performs the death reload as a card load fed
+// from its live save buffer (research-death-reload@98ea7a6
+// docs/death-reload-client-path.md:101-161). reload: phase 1 found; it applies
+// the live header (or throws a refusal) and the owner then loads the saved
+// level. restart: phase 1 not found; it requests the current level. Both
+// leave the requested load to the owner; this Fight then stops ticking.
+// names_match: phase 2, true once the requested level is loaded.
+struct DeathReloadOwner {
+  std::function<void()> reload, restart;
+  std::function<bool()> names_match;
+};
 struct DeathView {
   bool running = false, animation_started = false;
+  bool reload_requested = false, restart_requested = false;
   unsigned phase = 0, wipe_countdown = 0, dead_countdown = 0, fade = 0;
   std::size_t animation_steps = 0;
   Raw animation_time = 0, animation_flags = 0;
@@ -133,6 +145,8 @@ public:
   // Camera remains an explicit service. A request stops before unproved world
   // reconstruction; this does not authorize continuous play or actor revival.
   void bind_death_checkpoint(ps2_save::Bytes, ps2_save::LoadServices);
+  // Takes precedence over bind_death_checkpoint. All three callbacks required.
+  void bind_death_reload(DeathReloadOwner);
   // One ready tick of the shared World. `command` holds the session command
   // movement/attack/guard/swap bits plus heavy and two ability-slot requests.
   void tick(std::uint32_t command);

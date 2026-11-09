@@ -100,7 +100,8 @@ struct Fight::Impl {
   std::string death_error;
   ps2_save::Bytes death_checkpoint;
   ps2_save::LoadServices death_load_services;
-  bool death_world_requested = false;
+  DeathReloadOwner death_owner;
+  bool death_world_requested = false, death_restart_requested = false;
   script_commands::Host *host = nullptr;
   std::unique_ptr<campaign_actors::Runtime> actors;
   std::unique_ptr<mission2_actors::Runtime> mission2;
@@ -1059,13 +1060,26 @@ std::string Fight::start(const PlayerStart &start) {
       const auto rows = std::int32_t(p.exe->word(0x4f8e10 + 4 * act));
       if (rows < 0 || rows > 256) throw C::Unsupported("death flow: invalid act row count");
       for (int row = 0; row < rows; ++row) {
+        // A row matches when the name starts with it; the first match wins.
+        // Only the comparison with -1 is read (research-exits-r3@350fc8b
+        // docs/exits-r4-travel.md:12-17; client-path.md:89-91).
         const auto name = p.exe->word(list + 8 * row);
-        if (name && p.exe->string(name) == level) return act;
+        if (!name) continue;
+        const auto row_name = p.exe->string(name);
+        if (level.compare(0, row_name.size(), row_name) == 0) return act;
       }
     }
     return -1;
   };
   death_services.reload_checkpoint = [&p] {
+    // An owner with its own loader: save_load fed from its live save buffer,
+    // the card-load path (research-death-reload@98ea7a6
+    // docs/death-reload-client-path.md:101-129,145-149). It refuses by throwing.
+    if (p.death_owner.reload) {
+      p.death_owner.reload();
+      p.death_world_requested = true;
+      return;
+    }
     // Actual save_reload -> save_load on the shared memory, without first
     // saving the dying world. 0e3afdb8 docs/death-reload.md:23-31,52-62.
     try {
@@ -1079,10 +1093,18 @@ std::string Fight::start(const PlayerStart &start) {
   death_services.pending_level = [&p] {
     return !p.host->variables().memory.cstr(ps2_save::PENDING_LEVEL).empty();
   };
-  death_services.qualified_names_match = []() -> bool {
+  death_services.qualified_names_match = [&p]() -> bool {
+    if (p.death_owner.names_match) return p.death_owner.names_match();
     throw C::Unsupported("death reload refused: completed world reconstruction and qualified-name match Unknown");
   };
-  death_services.request_current_level = [] {
+  death_services.request_current_level = [&p] {
+    // Step 5b: request the current level with 0xfd; Flow then refills HP and
+    // removes the task (client-path.md:91).
+    if (p.death_owner.restart) {
+      p.death_owner.restart();
+      p.death_restart_requested = true;
+      return;
+    }
     // 0e3afdb8 docs/death-reload.md:32-35,58-62,91-97. The request/HP
     // branch is native-tested; this campaign owner has no replacement loader.
     throw C::Unsupported("same-level restart refused: death level-loader/object restoration is not bound; current records must be retained and HP restored only with a valid level request");
@@ -1097,6 +1119,14 @@ std::string Fight::start(const PlayerStart &start) {
   if (!player_error.empty()) { p.refuse(player_error); p.error = player_error; p.failed = true; }
   return player_error;
 }
+void Fight::bind_death_reload(DeathReloadOwner owner) {
+  auto &p = *p_;
+  if (p.death && p.death->running())
+    throw ps2_save::Unknown("death reload owner replacement refused during death reload");
+  if (!owner.reload || !owner.restart || !owner.names_match)
+    throw ps2_save::Unknown("death reload owner must bind reload, restart and the name match");
+  p.death_owner = std::move(owner);
+}
 void Fight::bind_death_checkpoint(ps2_save::Bytes data, ps2_save::LoadServices services) {
   auto &p = *p_;
   if (p.death && p.death->running())
@@ -1110,10 +1140,12 @@ void Fight::bind_death_checkpoint(ps2_save::Bytes data, ps2_save::LoadServices s
 void Fight::tick(std::uint32_t command) {
   auto &p = *p_;
   if (!p.started || p.failed) return;
-  if (p.death_world_requested) {
+  if (p.death_world_requested || p.death_restart_requested) {
     // mainloop_loadRequestedWorld precedes another old-world tick. Stop here:
     // do not run the stale Player against restored records or clear the pending
-    // request. 0e3afdb8 docs/death-reload.md:46-62,91-97.
+    // request. 0e3afdb8 docs/death-reload.md:46-62,91-97. A bound owner loads
+    // the requested level next, which replaces this Fight.
+    if (p.death_owner.reload) return;
     if (p.death_error.empty()) {
       p.death_error = "death reload refused: checkpoint request published; whole-world Creature/portal reconstruction and continuous death reload Unknown";
       p.refuse(p.death_error);
@@ -1347,6 +1379,8 @@ DeathView Fight::death_view() const {
   out.dead_countdown = unsigned(p.read(player_death_flow::DEAD_COUNTDOWNS, 2));
   out.fade = p.host ? p.host->fade_level() : 0;
   out.refusal = p.death_error;
+  out.reload_requested = p.death_world_requested;
+  out.restart_requested = p.death_restart_requested;
   out.animation_started = p.death_clip != 0;
   out.animation_steps = p.death_animation_steps;
   if (p.death_clip && p.player_state) {

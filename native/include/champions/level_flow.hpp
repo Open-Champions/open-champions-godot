@@ -316,6 +316,18 @@ struct StoreResult {
   std::optional<std::size_t> writer_offset;
   bool written() const { return writer_offset.has_value(); }
 };
+// level_loadScriptAndObjects 0x217978, the restore test at 0x217a18: names
+// are compared in slots 0..9 (loop 0x2179c0-0x2179f4); the test reads the
+// first name byte of the slot where the search stopped. A hit restores that
+// slot. A stop at an empty slot loads fresh. After ten misses the stop is gap
+// slot 10: an empty gap loads fresh, a written gap restores its body for
+// every missing name. research-save-world@31a0ca6 docs/save-world.md:44-52,
+// research-death-reload@98ea7a6 docs/death-reload-client-path.md:96.
+enum class Restore { Fresh, Saved, Gap };
+struct RestoreDecision {
+  Restore kind = Restore::Fresh;
+  std::size_t slot = 0; // the stopped slot
+};
 struct LevelStates {
   static constexpr std::size_t LIMIT = 0x4bc78 - 0x16118;
   // 0x8ab590 to the data at 0x8ab698 holds eleven 0x18-byte entries. The key
@@ -339,6 +351,23 @@ struct LevelStates {
   bool stored(const std::string &) const;
   // Owner bytes present for the key, and the key's data offset.
   std::pair<bool, std::size_t> lookup(const std::string &) const;
+  // The stopped-slot rule above. Does not refuse; see require_restorable.
+  RestoreDecision restore_decision(const std::string &) const;
+  // Client policy for that rule. A gap restore is the original's behaviour
+  // (save-world.md:44-52), but the port must choose a gap-slot policy and
+  // must not present slot 10 as an eleventh saved level (save-world.md
+  // :314-316; client-path.md:153-157). No policy is chosen, so it refuses
+  // with the key and the gap name. With cleared_slot0 checks on (a death
+  // reload), the key an act-change clear kept in slot 0 (below) also
+  // refuses, and so does any key once the dropped slot shifts the client's
+  // slot 9 onto the original's gap.
+  RestoreDecision require_restorable(const std::string &,
+                                     bool check_cleared_slot0) const;
+  // save_clearBuffer(0) keeps directory slot 0 with its name, its first
+  // 15000 bytes and the act-0 row-0 size; every other key is gone
+  // (save-world.md:194, Executed). This client clears the whole directory on
+  // an act change (begin_change), so it records the slot-0 key it dropped.
+  std::optional<std::string> cleared_slot0;
 };
 struct GateList {
   std::vector<std::string> names;
@@ -465,6 +494,23 @@ struct Transient {
   RecallCountdown recall_countdown;
   bool alternate_death = false, save_inhibit = false, paused = false;
 };
+// The header part of the live save buffer g_saveBuffer 0x895580: players,
+// poses, quests, gate destinations, level, act and difficulty. The level
+// directory is not part of it: it stays in State::states, live, and later
+// departure stores and act-change clears keep writing there. A death reload
+// reads the header with each level's latest stored body; it never restores a
+// frozen directory copy. research-death-reload@98ea7a6
+// docs/death-reload-client-path.md:55-73,137-143 (Inferred there, from
+// research-save-world@31a0ca6 docs/save-world.md:285-301).
+struct Checkpoint {
+  std::string level, sub;
+  int act = -1, difficulty = 1;
+  SpawnState spawn;
+  std::array<PlayerRecord, 4> players;
+  std::map<std::string, std::int32_t> quest_values;
+  GateList gates;
+  Blob camera;
+};
 struct State {
   Acts acts;
   int act = -1, difficulty = 1;
@@ -472,6 +518,7 @@ struct State {
   Pending pending;
   LevelStates states;
   Blob save_buffer; // owner serialization; cleared on an unlatched act change
+  std::optional<Checkpoint> saved; // live save-buffer header (see Checkpoint)
   std::map<std::string, std::int32_t> quest_values;
   GateList gates;
   GateTravel travel;
@@ -533,20 +580,54 @@ RecallEvent recall_tick(State &, unsigned players, bool cutscene_active,
                         std::uint32_t alive_count,
                         const std::array<Vec3, 4> &resolved_positions,
                         const std::string &hub);
-struct Checkpoint {
-  std::string level, sub;
-  int act = -1, difficulty = 1;
-  SpawnState spawn;
-  std::array<PlayerRecord, 4> players;
-  std::map<std::string, std::int32_t> quest_values;
-  GateList gates;
-  LevelStates states;
-  Blob camera;
+// save_game 0x218128 then save_build 0x221914 (save-world.md:241-275,
+// Executed). players: g_numPlayers; only slots below it count, and a slot
+// counts when it is active (object built) with HP above 0. object_test off
+// counts HP alone, for owners that do not track the player object.
+struct SaveGameOptions {
+  unsigned players = 4;
+  bool game_complete = false, object_test = true;
+  int card_state = 0;
 };
+enum class SaveGame {
+  NoLivingPlayer, // nothing happens (save-world.md:247-252)
+  NoActRow,       // CheckPoint text, no build, no store (save-world.md:255-260)
+  Built,
+};
+struct SaveGameResult {
+  SaveGame outcome = SaveGame::NoLivingPlayer;
+  bool level_stored = false; // the current level's body went into the directory
+};
+// Builds the header into State::saved and, unless the game is complete,
+// stores the current level into the live directory. A completed game skips
+// save_findAct and the level store, so that level keeps whatever body the
+// directory already held (save-world.md:269-275; client-path.md:69-71).
+SaveGameResult save_game(State &, const Blob &level_state, const Blob &camera,
+                         const SaveGameOptions & = {});
+// Earlier entry point: save_game without the object test. Returns the header
+// it built into State::saved, or nothing when no checkpoint was built.
 std::optional<Checkpoint> checkpoint(State &, const Blob &level_state,
                                      const Blob &camera, int card_state = 0);
+// A card load copies the whole card image into g_saveBuffer, directory
+// included (research-save-screen@c8895e2 docs/save-screen.md:258-279;
+// client-path.md:103-108): header and directory both come from the image.
+void card_load(State &, Checkpoint header, LevelStates directory);
 enum class Wipe { Wait, Reload, Restart };
+// deathTask 0x1e75e8 phase 1 (client-path.md:88-91). The act lookup is on the
+// current level. Found: save_load on the live buffer, i.e. the header in
+// State::saved with the live State::states, the loaded flag (rank 3 at load)
+// and the saved level requested with 0xfd. Not found: request the current
+// level with 0xfd and refill HP; nothing else changes. Alternate death: wait
+// for the script (phase 10). Found with no header ever built or card-loaded
+// refuses: the original's uninitialised-buffer behaviour is Unknown
+// (client-path.md:183).
+Wipe party_wipe(State &);
+// Same, with an explicit header instead of State::saved. The directory still
+// comes from State::states.
 Wipe party_wipe(State &, const std::optional<Checkpoint> &);
+// deathTask phase 2 (client-path.md:99): the task ends once the pending
+// request is empty and the loaded qualified name matches the requested one.
+bool death_task_done(const State &, const std::string &requested);
 struct Piece {
   std::int32_t tx = 0, ty = 0, tz = 0;
   std::int16_t cosine = 32767, sine = 0;
