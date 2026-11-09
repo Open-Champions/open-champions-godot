@@ -205,3 +205,4 @@ All gates ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pla
 | Native Release configure and build, `-j 4`, clean `build/native` | **PASS**, exit 0, 2 s + 121 s. 0 warnings in the changed files (10 in the whole build, all in other files, as in round 7) | 15.9 → 22.2 |
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3, 1 s | 22.2 → 22.2 |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 96 s, `template_release` 94 s; level texture 20 s / 19 s; creature animation `template_debug` 62 s. `lipo -archs` gives `x86_64 arm64` for all five libraries | 22.2 → 11.5 |
+| Full CTest `-j 3` | **PASS, 259/259** (259 registered, as in round 7), exit 0, 802 s, one run, no rerun, no timeout. `messages-exact` 7 s, `player-exact` 56 s, `session-facing-exact` 138 s | 11.5 → 6.2 |
