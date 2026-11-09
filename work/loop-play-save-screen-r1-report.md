@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — gates being recorded.
+STATUS: PASS — save/load screen play-flow contract ported from Observed/Executed research only; all seven gates green on the Mac mini. CTest 260/260, strict matrix 54/54, FULL_SAVE_LOAD 300/300 and FULL_TRACE unchanged, journeys 80/81 with pickup 10→11. Not yet driven by the host `Flow` (no card directory source; retail card I/O refused).
 
 # Play save screen round 1 — 2026-11-09
 
@@ -78,7 +78,11 @@ real timestamps (doc:27-29, 321-323). Every other unexecuted branch throws `Unkn
    '^(memcard-screen|frontend-exact|ps2-save|ps2-class-restore|menus-exact|native-save)$'
    -j 3`, 47.39 s (`work/pss/focused.log`); `memcard-screen` 118 checks. Registered tests:
    260 (259 + `memcard-screen`).
-3. Full CTest: pending.
+3. **Full CTest: PASS, 260/260**, `ctest --test-dir build/native --output-on-failure -j 3`
+   with standard input closed, 2,695.71 s, exit 0 (`work/pss/ctest.out`). Wave 37 was
+   259/259; the one added test is `memcard-screen`. It ran while the GDExtension build and
+   then the matrix used the mini's second job slot, on a mini at load average ~80 from other
+   users' jobs, hence the wall time.
 4. **Strict Godot matrix: PASS, 54/54**, exit 0. `python3 -u tools/godot_matrix.py matrix
    --godot ~/malik-champions/runtime/Godot.app/Contents/MacOS/Godot --captures --timeout 1200`
    (`work/pss/matrix.out`, `work/pss/matrix/results.json`). The unchanged `check-log` found
@@ -94,4 +98,37 @@ real timestamps (doc:27-29, 321-323). Every other unexecuted branch throws `Unkn
    touch the session save/load path that fixture drives.
 6. **FULL_TRACE: PASS, unchanged**, 36,402 bytes, SHA-256
    `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline edited.
-7. Journeys: pending.
+7. **Journeys: match wave 37.** Unchanged `tools/run_loop_playthrough.py`, serial headless
+   then rendered, standard input closed, disc `../../private-validation/rta-disc` read-only
+   (`work/pss/playthrough.out`, `work/pss/playthrough/*/result.json`; PNGs left on the mini
+   and then deleted with it — not tracked).
+
+   | Variant | Steps | Exit | Ending | Pickup | Log errors | Captures | `refused` rows |
+   | --- | --- | --- | --- | --- | --- | --- | --- |
+   | Headless | 80 | 1 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks | 0 | 0 | 27 |
+   | Rendered | 81 | 1 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks | 0 | 38 | 28 |
+
+   Six refusal kinds each; disc 994 files before and after. Wrapper exit 1 is the retained
+   full-journey refusal (death reload stays blocked). `fps` and memory figures are host-only.
+
+## Method notes
+
+- The task brief said to edit and commit on the MacBook worktree and sync to the mini; that
+  was followed (it supersedes the workflow note's mini-side commits). All commits are local
+  to `codex/play-save-screen`.
+- The first full rsync was too slow (native vectors ~1 GB), so the mini copy was seeded by a
+  local mini rsync from the sibling `play-quest-log` copy (same `70d2de19` base), then the
+  instructed `rsync -a --delete --exclude .git --exclude build --exclude work` ran from this
+  worktree, with `--exclude .godot` added so the mini's `.godot` was kept as instructed. The
+  stale import cache that came with the seed is the matrix first-run failure in gate 4.
+- Logs copied into `work/pss/` had `/Users/case/` rewritten to `~/`; only this report is
+  tracked. The mini `build/` was deleted at the end.
+
+## Remaining
+
+No host directory source binds the contract; the front-end `Flow` save/load actions remain
+the host-file and PS2-import paths. The refused items above, and the native sequencing
+listed in `docs/SAVE_SCREEN.md`, need further research (load steps 0/1/3, the fade
+integration, the writers of 0x88d3b0, 0x8e1ad8, 0x4f8f29 and of 0x88d3d8 after a save)
+before `Flow` can drive a card. Death reload stays refused. No push, PR, sibling edit,
+private-disc write, or process-name termination.
