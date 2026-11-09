@@ -1,0 +1,8 @@
+disc files before: 994
+import exit 0
+headless: {'exit_code': 1, 'log_errors': 0, 'result_written': True, 'pickup_verified': True, 'screenshots': 0, 'steps': 80, 'refusal_kinds': 8, 'loot_pickup': {'diagnostic_retry_placements': 0, 'drop_produced': True, 'fps': 74.0, 'inventory_units_after': 11, 'inventory_units_before': 10, 'memory_bytes': 189567682, 'picked_up': True, 'rendered': False, 'rendered_pickup_verified': False, 'result': 'passed', 'retry_kills': 0, 'step': 'loot_pickup', 'walk_ticks': 26, 'walked': True}}
+rendered: {'exit_code': 1, 'log_errors': 0, 'result_written': True, 'pickup_verified': True, 'screenshots': 38, 'steps': 81, 'refusal_kinds': 8, 'loot_pickup': {'diagnostic_retry_placements': 0, 'drop_produced': True, 'fps': 2.0, 'inventory_units_after': 11, 'inventory_units_before': 10, 'memory_bytes': 104806629, 'picked_up': True, 'rendered': True, 'rendered_pickup_verified': False, 'result': 'passed', 'retry_kills': 0, 'step': 'loot_pickup', 'walk_ticks': 26, 'walked': True}}
+disc files: 994 before, 994 after
+exit 1
+disc files after: 994
+journey-done
