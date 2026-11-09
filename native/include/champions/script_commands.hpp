@@ -407,7 +407,10 @@ public:
     std::optional<bool> equipment_pending, peers_ready, stores_complete, save_gate_ready;
     std::vector<std::string> refusals;
   };
-  LoadingReadiness loading_readiness(const std::string &destination);
+  // report_arrival_limits names the round-4 Unknowns without changing the
+  // booleans above. 366b65a:docs/loading-arrival-r4.md:184-207.
+  LoadingReadiness loading_readiness(const std::string &destination,
+                                     bool report_arrival_limits = false);
   loading_equipment::Runtime &equipment_loading() { return *equipment_loading_; }
   // One simulated ready tick: the Script task runs the front half, then
   // promotes the back. It runs with an empty queue too.

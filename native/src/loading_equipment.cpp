@@ -199,4 +199,175 @@ Runtime::Pair Runtime::lookup(std::uint32_t c, const std::string &identity) {
   m.string(c+0xc,requested); m.store(c+0xa,2,1); m.word(0x4ef3ec,0);
   return {}; // completing call has zero outputs; only next matching lookup publishes
 }
+
+namespace {
+constexpr int kClasses[12] = {0, 0, 3, 3, 1, 1, 4, 4, 2, 2, 5, 6};
+constexpr std::uint32_t kWeapons[12] = {
+    0x3f7f50, 0x3f7f50, 0x3f7650, 0x3f7650, 0x3f8910, 0x3f8910,
+    0x3f9250, 0x3f9250, 0x3f7a10, 0x3f7a10, 0x3f7f50, 0x3f87d0};
+constexpr std::uint32_t kArmor[12][3] = {
+    {0x3fb110, 0x3fb150, 0x3fb210}, {0x3fb110, 0x3fb150, 0x3fb210},
+    {0x3fb110, 0x3fb150, 0x3fb210}, {0x3fb110, 0x3fb150, 0x3fb210},
+    {0x3fb110, 0x3fb150, 0x3fb210}, {0x3fb110, 0x3fb150, 0x3fb210},
+    {0x3fa210, 0x3fa250, 0x3fa310}, {0x3fa210, 0x3fa250, 0x3fa310},
+    {0x3fb110, 0x3fb150, 0x3fb210}, {0x3fb110, 0x3fb150, 0x3fb210},
+    {0x3fb110, 0x3fb150, 0x3fb210}, {0x3fb110, 0x3fb150, 0x3fb210}};
+constexpr std::uint32_t kDeltas[12][3] = {
+    {0x4878, 0x4a08, 0x4ff8}, {0x28d8, 0x2a68, 0x3058},
+    {0x177f8, 0x17938, 0x17e38}, {0x159e8, 0x15b28, 0x16028},
+    {0xff68, 0x100a8, 0x105a8}, {0xe168, 0xe2a8, 0xe7a8},
+    {0xb448, 0xb588, 0xba88}, {0x9648, 0x9788, 0x9c88},
+    {0x86a8, 0x87f8, 0x8d28}, {0x6808, 0x6958, 0x6e88},
+    {0x13be8, 0x13d28, 0x14228}, {0x11de8, 0x11f28, 0x12428}};
+constexpr unsigned kArmorSlots[3] = {4, 10, 12};
+constexpr std::uint32_t kDeferCount = 0x86da78, kDeferQueued = 0x86da7c, kParity = 0x4f8690;
+constexpr std::uint32_t kSaveInhibit = 0x50605c, kPostAction = 0x86fa80, kInPost = 0x4f8698;
+constexpr std::uint32_t kPlayers = 0x4d8ae0, kDifficulty = 0x4f719c, kQuestCount = 0x43d0;
+
+int armor_index(unsigned slot) {
+  for (int i = 0; i < 3; ++i)
+    if (kArmorSlots[i] == slot) return i;
+  return -1;
+}
+[[noreturn]] void reject(const char *why) { throw amx::HostFault(why); }
+void require_clear(builtins::Memory &m) {
+  if (m.word(kDeferCount) || m.word(kDeferQueued) || m.word(kParity))
+    reject("arrival prefix disturbed the deferred queue");
+}
+[[noreturn]] void stop_at(ArrivalPrefix &out, std::uint32_t boundary, const char *reason,
+                          builtins::Memory &m) {
+  require_clear(m);
+  out.boundary = boundary;
+  out.refusal = reason;
+  throw amx::HostFault(reason);
+}
+}
+
+StartingSelection starting_selection(int body, std::uint32_t seed, int kind) {
+  // 366b65a:docs/starting-equipment-r4.md:27-56.
+  if (body < 0 || body > 11 || (seed != 7 && seed != 20973) || (kind != -1 && kind != 1))
+    reject("starting selection outside executed controls");
+  StartingSelection out;
+  out.body = body;
+  out.class_index = kClasses[body];
+  out.weapon_slot = (body == 2 || body == 3 || body == 6 || body == 7) ? 2u : 0u;
+  out.weapon_definition = kWeapons[body];
+  for (int i = 0; i < 3; ++i) {
+    out.armor_definitions[i] = kArmor[body][i];
+    out.armor_header_deltas[i] = kDeltas[body][i];
+    auto cache = Runtime::cache(kArmorSlots[i], 0);
+    if (!cache) reject("starting selection outside executed controls");
+    out.armor_caches[i] = *cache;
+  }
+  return out;
+}
+HeaderChoice header_choice(std::uint32_t player_count, int override_byte) {
+  // 366b65a:docs/starting-equipment-r4.md:76-83. Combinations are (1|2, 0|1).
+  if ((player_count != 1 && player_count != 2) || (override_byte != 0 && override_byte != 1))
+    reject("header selection outside executed controls");
+  HeaderChoice out;
+  out.primary = player_count < 2 && override_byte == 0 ? 0x535c08u : 0x535bf8u;
+  out.primary_groups = header_group_count(out.primary);
+  out.secondary = 0x535c28;
+  out.secondary_groups = header_group_count(out.secondary);
+  return out;
+}
+std::uint32_t header_group_count(std::uint32_t identifier) {
+  if (identifier == 0x535c08) return 243;
+  if (identifier == 0x535bf8) return 245;
+  if (identifier == 0x535c28) return 155;
+  reject("header group count unavailable");
+}
+std::uint32_t armor_header_delta(int body, unsigned slot) {
+  if (body < 0 || body > 11) reject("armor metadata outside executed controls");
+  const int index = armor_index(slot);
+  if (index < 0) reject("armor metadata outside executed controls");
+  return kDeltas[body][index];
+}
+CacheSpan cache_span(std::uint32_t begin, std::uint32_t split, std::int16_t tail) {
+  // 366b65a:docs/starting-equipment-r4.md:134-135.
+  CacheSpan out;
+  out.offset = begin * 0x800u;
+  out.size = (split - begin + std::uint32_t(tail)) * 0x800u;
+  return out;
+}
+std::int32_t generic_weapon_index(std::int16_t definition_short, bool flag_bit_36,
+                                  std::int32_t variant) {
+  // 366b65a:docs/starting-equipment-r4.md:156-160.
+  const auto sum = std::int64_t(definition_short) + (flag_bit_36 ? std::int64_t(variant) : 0);
+  if (sum < std::numeric_limits<std::int32_t>::min() || sum > std::numeric_limits<std::int32_t>::max())
+    reject("generic weapon index overflow");
+  return static_cast<std::int32_t>(sum);
+}
+void reset_arrival_queue(builtins::Memory &m) {
+  // 366b65a:docs/loading-arrival-r4.md:78-91.
+  m.word(kDeferCount, 0);
+  m.word(kDeferQueued, 0);
+  m.word(kParity, 0);
+  m.word(kSaveInhibit, 0);
+  m.byte(kPostAction, 0);
+}
+void run_arrival_prefix(builtins::Variables &v, const ArrivalControl &c, ArrivalPrefix &out) {
+  // 366b65a:docs/loading-arrival-r4.md:154-191. Difficulty one and one player
+  // are the initialized-record controls. An unlisted route is "route state".
+  if (c.route < 0 || c.route > 2) throw amx::HostFault("route state");
+  if (c.mission < 0 || c.mission > 12 || (c.available_on != 0 && c.available_on != 1))
+    reject("arrival prefix arguments were not supplied");
+  auto &m = v.memory;
+  m.word(kPlayers, 1);
+  m.word(kDifficulty, 1);
+  reset_arrival_queue(m);
+  if (c.route == 2) {
+    if (c.quest_title.empty() || c.quest_text.empty() || c.var_name.empty() || c.post_name.empty())
+      reject("arrival prefix arguments were not supplied");
+    for (int slot = 0; slot < 4; ++slot) {
+      m.byte(v.player_record(slot) + 0x4c1a, c.choice_bit ? 2 : 0);
+      if (c.completion_set) {
+        const auto where = v.mission_byte(slot, 1, c.mission);
+        m.byte(where, m.read(where) | 2);
+      }
+    }
+    m.word(v.player_record(0) + kQuestCount, c.quest_list_full ? 8u : 0u);
+  }
+  out = {};
+  if (c.route != 1) out.missing_entry = -1;
+  if (c.route == 1) stop_at(out, 0x14222c, "resource bootstrap", m);
+  if (c.route == 0) {
+    m.word(kSaveInhibit, static_cast<std::uint32_t>(c.save_inhibit));
+    out.executed.push_back(0x1473b4);
+    v.mission_set_available(1, c.mission, c.available_on);
+    out.executed.push_back(0x1420d0);
+    v.mission_set_complete(1, c.mission, -1);
+    out.executed.push_back(0x1420a4);
+    stop_at(out, 0x142320, "object load", m);
+  }
+  (void)v.mission_complete(1, c.mission);
+  out.executed.push_back(0x142084);
+  if (!c.completion_set) {
+    (void)v.choice_get(0x4c1a);
+    out.executed.push_back(0x142044);
+    v.quest_add(c.quest_title, c.quest_text);
+    out.executed.push_back(0x1433c8);
+  }
+  v.mission_set_available(1, c.mission, c.available_on);
+  out.executed.push_back(0x1420d0);
+  v.quest_set(c.var_name, c.var_first);
+  out.executed.push_back(0x143540);
+  v.quest_set(c.var_name, c.var_second);
+  out.executed.push_back(0x143540);
+  v.set_post_action(c.post_name);
+  out.executed.push_back(0x143ee4);
+  (void)v.choice_get(0x4c1b);
+  out.executed.push_back(0x142010);
+  // Explicit post-action phase. The private action body is not run.
+  // 366b65a:docs/loading-arrival-r4.md:163-179: 0x1edac0 clears the name and
+  // sets 0x4f8698, then 0x143500 runs, then stop before 0x143f1c.
+  m.byte(kPostAction, 0);
+  m.byte(kInPost, 1);
+  out.post_action = true;
+  (void)v.quest_get(c.var_name);
+  out.executed.push_back(0x143500);
+  out.quest_count = static_cast<int>(m.word(v.player_record(0) + kQuestCount));
+  stop_at(out, 0x143f1c, "cutscene runtime", m);
+}
 }

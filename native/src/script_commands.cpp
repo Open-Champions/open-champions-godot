@@ -1330,7 +1330,8 @@ Stop Host::run_start() {
 
 // All addresses/conditions below: research-loading-readiness@9dd49046,
 // docs/loading-readiness.md (line ranges beside each operation).
-Host::LoadingReadiness Host::loading_readiness(const std::string &destination) {
+Host::LoadingReadiness Host::loading_readiness(const std::string &destination,
+                                                bool report_arrival_limits) {
   LoadingReadiness out;
   out.deferred_complete = loading_deferred_complete_ && !faulted_ && !refusal_stopped_;
   if (!out.deferred_complete)
@@ -1419,6 +1420,16 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination) {
   } else known = false;
   if (known) out.equipment_pending = pending;
   else out.refusals.push_back("Equipment readiness unavailable: runtime player/slot/model publication or specialized I/O unbound.");
+  // 366b65a:docs/loading-arrival-r4.md:184-207. Naming these limits does not
+  // clear deferred_complete or publish equipment. The live route ordinal is
+  // not selected here, so the observed prefix is not applied.
+  if (report_arrival_limits) {
+    out.refusals.push_back("normal deferred census");
+    out.refusals.push_back("route state");
+    out.refusals.push_back("object load");
+    out.refusals.push_back("resource bootstrap");
+    out.refusals.push_back("cutscene runtime");
+  }
   return out;
 }
 
