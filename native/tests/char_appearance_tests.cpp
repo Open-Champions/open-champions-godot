@@ -362,6 +362,28 @@ void poses() {
             t->flags == 3 && one.count == 2,
         "creation install keeps the blend at count 1 (executed 0x3daaaaab)");
 
+  // CCA:472-485 selection preview: one unit step per run pass, active
+  // previews only. Expected times are the research reference's unit_advance
+  // (flags 3, speed 1, REF:374) chained from the install's time 0, as the
+  // frame rows check them (tools/difftest_char_frame.py:336-342 @ 7931517).
+  {
+    ac::AnimSystem preview_system;
+    ac::AnimState preview(8);
+    plant(preview.tracks[0]);
+    ca::install_creation_clip(preview, clip(30), blend);
+    const Raw steps[4] = {0x3f7fffff, 0x3fffffff, 0x403fffff, 0x407ffffe};
+    for (Raw want : steps) {
+      ca::preview_run_pass(preview_system, preview, true);
+      check(preview.tracks[0].time == want && preview.count == 1, "preview run pass steps once");
+    }
+    ac::AnimState idle_preview(8);
+    ca::install_creation_clip(idle_preview, clip(30), blend);
+    idle_preview.tracks[0].time = 0x11111111;
+    check(ca::preview_run_pass(preview_system, idle_preview, false) == 0 &&
+              idle_preview.tracks[0].time == 0x11111111 && idle_preview.tracks[0].weight == ZERO,
+          "inactive preview is not stepped");
+  }
+
   // CCA:389-400 inventory stand.
   check(ca::inventory_lump_address(0) == 0x538488 && ca::inventory_lump_address(11) == 0x538528, "lump table");
   for (int c = 0; c < 9; ++c) {

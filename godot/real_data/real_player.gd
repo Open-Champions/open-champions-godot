@@ -201,9 +201,14 @@ func _install_optional_layers(real: Node, reader: RefCounted, executable: String
 	# the body keeps its default-visible meshes.
 	status += " Body show mask +0x220 refused: equipment pass unresolved."
 
-# A part whose header +0x13 is -1 selects no attachment record (:210-215) and
-# is drawn in the same rest-pose space as the body. Any attachment index needs
-# animated joint matrices, which remain refused (:236-238).
+# A part whose header +0x13 is -1 selects no attachment record (:210-215).
+# Drawing it in the body's rest-pose space is Inferred, not executed: the VU1
+# section (:567-606) runs only a part on an attach record. Handoff 11
+# (:665-667) says mesh weights address joints as index*4, the joint qwords the
+# parent's model_draw wrote, so a part with no attach record is taken to use
+# the parent's joints; with the body in rest pose that is its bind pose. Any
+# attachment index needs V * P_j (:596-602), and this client's pose sample
+# gives a part draw no per-joint P_j, so it is refused.
 func _draw_layer(real: Node, reader: RefCounted, selection: String, rows: Array, fingerprint: String,
 		layer: String, entry: Dictionary) -> void:
 	var model: Dictionary = reader.inspect_model(selection, int(entry.mesh_row), "rta", fingerprint)
@@ -265,7 +270,8 @@ func draw_selected_pose(weapon_class: int, role: int, tick: float) -> Dictionary
 	actor.mesh = prepared.mesh
 	actor.position = Vector3(0, -prepared.bounds.position.y, 0)
 	if binder != null: binder.apply(actor)
-	# Posed parts need animated joint matrices (refused); hide rest-pose layers.
+	# Skinning a header -1 part with the parent's posed joints is Inferred (see
+	# _draw_layer) and no per-joint P_j reaches a part draw: hide the layers.
 	for node in layer_nodes:
 		if is_instance_valid(node): node.visible = false
 	return {"ok": true, "slot": slot, "duration_ticks": int(sample.duration_ticks),

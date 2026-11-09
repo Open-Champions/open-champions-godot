@@ -377,6 +377,12 @@ std::int32_t inventory_draw_step(anim_clock::AnimSystem &system, anim_clock::Ani
   return anim_clock::anim_advance(system, ONE, state); // CCA:397-400
 }
 
+std::int32_t preview_run_pass(anim_clock::AnimSystem &system, anim_clock::AnimState &state,
+                              bool active) {
+  // CCA:479-484: speed 1 from 0x1163a4, active previews only.
+  return active ? anim_clock::anim_advance(system, ONE, state) : 0;
+}
+
 std::uint32_t display_idle_address(std::int32_t weapon_class) {
   // CCA:407-409; REF:339-340.
   switch (weapon_class) {

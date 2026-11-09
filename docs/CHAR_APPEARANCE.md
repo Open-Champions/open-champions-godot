@@ -34,6 +34,7 @@ reference module come from `tools/ref_char_attachment.py` at the same commit
 | Draw argument | absolute projection; 5 at ≥360, else `5-(360-m)*0x3c93e93e`, at least 1; inventory caller 1.5 | CCA:313-320 |
 | `0x174e78` gate | part flag `0x20` and a positive count | CCA:322-325, 435-440 |
 | Creation restart | bit `0x80` and count < 2; bit `0x08` picks the marked format; import literal → race slot byte+1 in 0..12; `anim_start` with flags 3 and the blend word loaded at `0x225584`: caller input, to be read from the executable by the consumer, and no consumer exists yet (forced to 0 on an empty state, kept at count 1 where the rate is the executed `0x3daaaaab`) | CCA:331-348 |
+| Selection preview step | one `anim_advance` at speed 1 per run pass, active previews only (`active` is caller input); the draw pass writes no time | CCA:472-490 |
 | Inventory stand | lump by model, idle by class, flags `0x43`, blend word loaded at `0x1c4078` (caller input, no consumer yet) forced off for cell 0; a current clip is not restarted; one unit step gives time `0x3f7fffff`, weight 1 | CCA:389-402 |
 | `player_resetIdleAnim` | guards; four definition clips at `class*0x68+{0x44,0x4c,0x54,0x5c}`; count 4; cell 0 weight/life 1; flags `0x1205`; `+0x462` idled cell 0; time and rate not written | CCA:403-415 |
 
@@ -50,7 +51,8 @@ reference module come from `tools/ref_char_attachment.py` at the same commit
   header `+0x13` as `attachment_slot`.
 - `godot/real_data/real_player.gd`, for an imported record with the four
   appearance bytes: plans each optional layer (absent / null pair / gate),
-  and draws a layer in the body's rest-pose space only when its gate passes
+  and draws a layer in the body's rest-pose space (**Inferred**, see
+  "Rest-pose layers" below) only when its gate passes
   for every cover and head input (hair on model 11 or model 10 skin 4, beard on
   model 11) and its mesh header `+0x13` is −1. New characters without the four
   bytes are unchanged.
@@ -65,16 +67,35 @@ reference module come from `tools/ref_char_attachment.py` at the same commit
   equipment pass (CCA:430-433). Without that pass the mask is not established;
   the body keeps its default-visible meshes. Equipment parts themselves are not
   drawn for the same reason.
-- **Joint matrices.** Animated joint evaluation is Unknown (CCA:236-238,
-  433-434, 460-461). A layer whose header selects an attachment record is
-  `refused joint matrix`; rest-pose layers are hidden during explicit pose samples.
-- **Creation-preview step.** No direct call in `0x225478–0x22e700` targets
-  `anim_advance`, and the task that steps the preview is Unknown
-  (CCA:352-378, 651-654). The creation install stores time 0 and weight 0 and
-  no step is added. The client has no creation-preview object.
-- **Pixel parity.** The shell packet image, the projection's three factors,
-  and VU/GS output are not modelled (CCA:317, 447-448, 630-633). Only the
-  shell parameters and the gate are.
+- **Joint matrices: no pose input for part draws.** The PASS tip executes
+  them (CCA:567-606; handoff 11, CCA:665-667): `J_j = P_j · T` per joint and
+  slot 0 `V · P_j · T` for a part on an attach record, with row 0 of `V`
+  negated when mirrored. The client gap is the pose input. The real-data player
+  draws a rest pose; its explicit pose sample
+  (`ChampionsArchiveInspector.sample_skinned_resources`) returns skinned body
+  vertices only and refuses any model whose header `+0x13` is not −1
+  (`native/src/skinning.cpp:19-20`), so no per-joint `P_j` reaches a part draw
+  and `attachment_matrix` stays a copy. A layer whose header selects an
+  attachment record is `refused joint matrix`. The private probe found no
+  resolved hair or beard that selects one (59 and 14 pairs, all header −1).
+  Rest-pose layers are hidden during pose samples, because skinning a header
+  −1 part with the parent's joints is Inferred (see "Rest-pose layers" below).
+- **Creation-preview step: ported, no client object.** The PASS tip executes
+  the step (CCA:472-485): in the run pass, `runObjects` → `NPC_run` →
+  `Creature_stepAnim` calls `anim_advance` from `0x1163a4` at speed 1 on each
+  active preview, once per run pass. The draw pass and `playerSel_task` write
+  no time (CCA:484, 487-490). `preview_run_pass` ports that step, and its test
+  checks four chained run passes and an inactive preview. Which previews are
+  active in a real session is Inferred (CCA:496-501), so `active` is caller
+  input. The client has no creation-preview object: the frontend draws a 2D
+  body-texture card (`godot/ui/frontend_menus.gd` `_draw_body_asset_preview`),
+  so nothing calls the step. The intro install (CCA:503-524), preview
+  visibility and the preview body mask (CCA:526-565; handoff 6-7, CCA:653-657) have no
+  client consumer for the same reason and are not ported.
+- **Pixel parity.** Not modelled: the shell packet image (CCA:446-447), the
+  projection's three factors (CCA:317), console VU rounding and the GS
+  rasterizer (CCA:448, 576, 628-629). Only the shell parameters and the gate
+  are.
 - **Blend words: caller input, no consumer yet.** The spec names the 0.2 and
   0.1 blend loads only by address (CCA:346, 396). The API takes them as caller
   input; a consumer is to read them from the executable at `0x225584` and
@@ -89,5 +110,14 @@ reference module come from `tools/ref_char_attachment.py` at the same commit
   not the compiled word. A private probe confirmed that the owner's
   executable loads exactly those two words at the two sites (pass/fail only,
   `work/loop-play-char-appearance-r1-report.md`).
+- **Rest-pose layers (Inferred).** A hair or beard mesh whose header `+0x13`
+  is −1 selects no attachment record (CCA:210-215). The client draws it as a
+  child of the body in the body's rest-pose space. No research row executes
+  that case: the VU1 section runs only a part on an attach record
+  (CCA:567-606). The choice rests on handoff 11 (CCA:665-667): mesh weights
+  address joints as `index*4`, the joint qwords the parent's `model_draw`
+  wrote, so a part with no attach record is taken to use the parent's joints,
+  which for a rest-pose body is its bind pose. The layers are hidden during
+  pose samples for the same reason.
 - **Transition setups** (CCA:380-387) and the menu count/handoff rules
   (CCA:44-136) are outside this round's requested scope.

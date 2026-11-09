@@ -9,13 +9,16 @@
 // "SE4:n" cites research-loading-readiness @ 366b65a
 //   docs/starting-equipment-r4.md line n (reused, not re-derived; CCA:253-259).
 //
-// Refused here, with the reason kept in docs/CHAR_APPEARANCE.md:
-//  - animated joint matrices (CCA:236-238, 447-448, 632-633): the attachment
-//    record's matrix is copied, never evaluated against a pose;
-//  - who advances the creation preview (CCA:352-378, 651-654): no step is
-//    added to the creation clip;
-//  - pixel parity / the 0x174e78 packet image and VU/GS output (CCA:236-238,
-//    458-460): only the parameters and the gate are modelled.
+// Not ported, with the reason kept in docs/CHAR_APPEARANCE.md:
+//  - joint matrices J_j = P_j * T and the attach slot V * P_j * T are executed
+//    (CCA:567-606, 665-667), but the client's pose sample returns skinned body
+//    vertices only and gives a part draw no per-joint P_j, so the attachment
+//    record's matrix is copied, never composed with a pose;
+//  - the selection preview step is ported (preview_run_pass, CCA:472-485), but
+//    the client has no creation-preview object, so nothing calls it;
+//  - pixel parity: the shell packet image (CCA:446-447), the projection's three
+//    factors (CCA:317), console VU rounding and the GS rasterizer (CCA:448,
+//    576, 628-629); only the shell parameters and the gate are modelled.
 // Resource names, archive bytes and format templates are caller input read
 // from the owner's files at run time; nothing retail is embedded.
 #include "champions/animation_clock.hpp"
@@ -304,6 +307,17 @@ anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_cloc
 // The inventory draw's one unit step from 0x1c0a10, before model_draw. From a
 // fresh cell this gives time 0x3f7fffff and weight 1.
 std::int32_t inventory_draw_step(anim_clock::AnimSystem &system, anim_clock::AnimState &state);
+
+// Selection preview step, Executed (CCA:472-485): in the run pass, runObjects
+// -> NPC_run -> Creature_stepAnim calls anim_advance from 0x1163a4 on the
+// preview's obj+0x114 at speed 1, once per run pass, and only for a preview
+// whose +0xa8 bit 63 is set. The draw pass, playerSel_task, its init cache and
+// start reach no time writer (CCA:484, 487-490), so the menu code never steps
+// it. Which previews are active in a real session is Inferred (CCA:496-501):
+// `active` is caller input. Only the anim_advance is modelled, not the rest of
+// Creature_stepAnim. Returns the event bits, or 0 with nothing written.
+std::int32_t preview_run_pass(anim_clock::AnimSystem &system, anim_clock::AnimState &state,
+                              bool active);
 
 // player_resetIdleAnim 0x1b2470 (CCA:403-415; research-player-anim cda95dc
 // docs/spec/player-animation-selection.md:58-66 for cells 1..3 weight/life 0).
