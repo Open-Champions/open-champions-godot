@@ -299,14 +299,45 @@ bool cancel_pending(bool loaded, bool frontend, bool card_busy, bool pvp,
                     bool any_alive);
 using Act = std::vector<std::pair<std::string, std::uint32_t>>;
 using Acts = std::vector<Act>;
+// save_findAct 0x217d30: the current act first, then acts 0..n-1; a row
+// matches when the name starts with it, and the first match wins (hub2 takes
+// hub, storm1a takes an earlier storm1). -1 when nothing matches.
+// research-exits-r3@e86f3de docs/exits-r4-travel.md:12-23.
 int find_act(const Acts &, const std::string &, int current);
+// save_storeLevelState 0x21777c. The original returns 0 on every path
+// (docs/exits-r4-travel.md:27); ret is that register and is never a status.
+// skipped: card word 0x88d3a0 is 4 or level flag 0x800 is set, so the
+// directory is untouched. entry: the key exists afterwards, created or kept,
+// including when the writer is not called (:36-41). writer_offset: the data
+// offset save_writeLevelState 0x218600 is called at, or none.
+struct StoreResult {
+  int ret = 0;
+  bool skipped = false, entry = false;
+  std::optional<std::size_t> writer_offset;
+  bool written() const { return writer_offset.has_value(); }
+};
 struct LevelStates {
   static constexpr std::size_t LIMIT = 0x4bc78 - 0x16118;
+  // 0x8ab590 to the data at 0x8ab698 holds eleven 0x18-byte entries. The key
+  // search covers the first ten; a new key is appended, as an 11th entry
+  // after ten (research-exits-r3@e86f3de tools/ref_exit_travel.py:109-128).
+  // A 12th entry would overlap the data and was not run, so it refuses.
+  static constexpr std::size_t SEARCHED = 10, ENTRIES = 11;
   std::vector<std::pair<std::string, std::uint32_t>> entries;
+  // Owner serialization handed to the writer. Retail object, decal and
+  // explored-map bytes are Unknown (docs/exits-r4-travel.md:41-43).
   std::map<std::string, Blob> blobs;
-  bool store(const std::string &, const Act &, int card = 0,
-             std::uint32_t flags = 0, bool fixed = false,
-             const Blob &blob = {});
+  // rows is the current act (empty for act -1). Size: 35000 when `fixed`
+  // (byte 0x4f85c5); else hub* takes row 0; else save_levelIndexInAct
+  // 0x2187a0, the first row the name starts with; no row stores nothing.
+  StoreResult store(const std::string &, const Act &rows, int card = 0,
+                    std::uint32_t flags = 0, bool fixed = false,
+                    const Blob &blob = {});
+  // save_levelStateStored 0x2182d4: the directory key, written or not
+  // (docs/exits-r4-travel.md:110-111). Refuses when the name is not among
+  // the first ten keys of an 11-entry directory: that scan was not run.
+  bool stored(const std::string &) const;
+  // Owner bytes present for the key, and the key's data offset.
   std::pair<bool, std::size_t> lookup(const std::string &) const;
 };
 struct GateList {
@@ -460,13 +491,23 @@ struct ChangeOptions {
   std::string hub = "hub";
   Blob old_blob;
 };
+// Not a status: mainloop_loadRequestedWorld's return register is not one
+// (docs/exits-r4-travel.md:122-123). stored: the departure writer ran.
+// had_saved_state: save_levelStateStored hit for the new name, which keeps
+// the idle-voice countdown; saved_bytes: owner bytes exist for that key.
 struct ChangeResult {
   bool stored = false, act_changed = false, reset_act = false,
-       had_saved_state = false;
+       had_saved_state = false, saved_bytes = false;
   std::uint8_t orientation = 0;
 };
-// Preparation through split/reset. Host executes teardown/load/placement in the
-// adapter.
+// Preparation through split/reset of mainloop_loadRequestedWorld 0x320edc
+// (docs/exits-r4-travel.md:51-85). Empty level or death task skips the
+// departure store; the front end skips the act check; the act index changes
+// even when the clear block is skipped; the clear needs an act change, no
+// card latch and no death task. prev is written before the split at the
+// first '_'; the orientation byte is saved and replaced with 0xfe. The
+// original store returns 0, so the caller's nonzero early return is not
+// modelled. Host executes teardown/load/placement in the adapter.
 ChangeResult
 begin_change(State &, const ChangeOptions &,
              const std::function<void(const std::string &)> &event = {});
