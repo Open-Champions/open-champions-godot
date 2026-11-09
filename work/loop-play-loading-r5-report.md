@@ -190,7 +190,25 @@ All on the mini, in the worktree above, with one `build/` root. Builds used `-j 
 |---|---|---|
 | Native Release configure and build | **PASS**, exit 0, 2 s + 394 s. 0 warnings in the changed files (10 in the whole build, all in other files) | 92.9 → 93.0 |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 329 s and `template_release` 432 s; level texture 76 s / 82 s; creature animation `template_debug` 210 s. `lipo -archs` gives `x86_64 arm64` for all five libraries (`build-status.txt`) | 93.0 → 90.8 |
-GATES_REST
+| Focused `ctest -R ^script-commands` | **PASS**, 3/3 (`script-commands`, `-measure-usage`, `-measure-empty`), 1 s (`focused.log`). The bare test binary also gives `script-commands ok` (`tests-fixed.out`) | 2.1 → 2.1 |
+CTEST_ROW
+| Strict Godot matrix: `tools/godot_matrix.py matrix --captures --timeout 1200` after `Godot --headless --path godot --import` (3 s, exit 0) | **54/54 PASS**, exit 0, 170 s. The unchanged `check-log` finds 0 diagnostic errors in all 105 matrix logs. Same case list as round 5 and wave 37 | 2.3 → 67.9 |
+| Combat (`playable_wave_smoke_full_combat`) | **2,645 checks, 0 failures** | (in matrix) |
+| FULL_SAVE_LOAD | **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 are both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, as in round 5 | (in matrix) |
+| FULL_TRACE | **PASS, unchanged**: 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659` | (in matrix) |
+| Journeys: unchanged `tools/run_loop_playthrough.py`, headless then rendered | Headless **80** steps, rendered **81**. Both exit 1, the retained full-journey refusal. 0 log errors. 6 refusal kinds each. Refused rows **27 / 28**. Pickup **10→11**, 52 walk ticks, 0 diagnostic retries. Rendered captures **38**. Disc files **994 / 994**. 167 s. All of these equal round 5 | 74.0 → 89.5 |
+| Journeys, rerun (same build, same command, `playthrough-rerun/`) | The same counts. 212 s | 78.2 → 68.1 |
+
+**Journeys, step by step against round 5.** `work/plr5-fix/compare_journey.py` compares every key of every step, the step order, the refusal list and the capture count. It ignores only the host-only `fps` and `memory_bytes`, and prints indices and key names only. Results:
+
+- **Rerun vs round 5** (`journey-compare-rerun.txt`): every step is identical except headless step 65 and rendered step 66. There, only `swing_wall_msec` differs, a wall-clock measurement of the enemy-fight swing (73,328 → 45,963 ms headless). The refusal lists are identical, and so are the captures (0 / 38).
+- **First run vs round 5** (`journey-compare.txt`): the same, plus headless step 18 `dialog_choice_close` (`choices_taken` 4 → 5) and step 27 `hub_trigger_mission_menu`. At step 27, `script_executed_commands` has one more `addQuest` (2 → 3) and one more `setMissionAvailable` (3 → 4); every other command count is equal. Rendered has no such difference.
+- **Why that is run-to-run variance, not this change.**
+  - The rerun of the identical build matches round 5 at both steps (`journey-compare-fix-vs-rerun.txt` shows the first run and the rerun differ in exactly these keys).
+  - The journey driver presses Enter every 8 process frames until the dialog closes (`godot/tests/loop_playthrough.gd:784-792`), so the number of choices taken depends on frame timing. Round 5's own headless and rendered runs already differ there (4 and 3).
+  - The step-27 counts follow it exactly: `addQuest` and `setMissionAvailable` are `choices_taken − 2` and `− 1` in all six runs.
+  - The first run started as the mini's load rose from 2 to about 90 (`load.txt`).
+  - Nothing outside `loading_equipment.*` and the tests calls `run_arrival_prefix`, `through_round` or `arrival_hide_mask` (`git grep`), so this fix cannot reach the journey.
 
 ## Files
 
