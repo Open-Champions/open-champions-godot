@@ -1,6 +1,6 @@
 # Play loading readiness, round 5
 
-STATUS: IN PROGRESS. Gates are recorded below as they finish.
+STATUS: DONE. Rounds 5 and 6 add Observed arrival stages to the synthetic prefixes. Live arrival stays refused. Every gate passed. The full CTest needed one serial rerun of three exact-vector tests that had timed out under mini load (details below). Journeys match wave 37 at 80/81 steps with pickup 10→11.
 
 Research pin: `research-loading-readiness` `56a6760` (rounds 5 and 6; audits `research-loading-readiness-r5r6-fix.md` and `research-loading-readiness-r6-fix.md`, final verdict PASS). Client base: wave 37 VERIFIED `70d2de19`. Branch `codex/play-loading-r5`.
 
@@ -111,6 +111,7 @@ Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pl
 | Native Release configure and build | **PASS**, exit 0, 4 s + 596 s (`configure.log`, `build.log`). No warning in the changed files. |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 634 s and `template_release` 555 s; level texture 117 s / 112 s; creature animation `template_debug` 414 s. `lipo -archs` reports `x86_64 arm64` for all five libraries (`build-status.txt`). |
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3 (`script-commands`, `-measure-usage`, `-measure-empty`). `script-commands ok`. |
+| Full CTest `-j 3` | 259 registered (the same count as wave 37). First run: **256/259**, 3,120 s. Three tests failed, each on the test script's own subprocess timeout while the mini's load average was about 86–133: `messages-exact` (120 s limit in `tools/test_messages_vectors.py`), `player-exact` (180 s in `tools/test_player_vectors.py`) and `session-facing-exact` (600 s in `tools/test_session_facing_vectors.py`). None of them touches loading code. Serial rerun of exactly those three: **3/3 PASS**, 104 s, 133 s and 297 s (`ctest-rerun3.out`). That makes 259/259. No test or timeout was changed. |
 | Strict Godot matrix: `tools/godot_matrix.py matrix --captures --timeout 1200` | **54/54 PASS**, exit 0, 397 s. Fresh isolated projects. The unchanged `check-log` found 0 diagnostic errors in all 105 matrix logs. Matches wave 37's 54/54 case for case. See the first-run note below. |
 | FULL_SAVE_LOAD | **PASS**, 300/300. Continued and uninterrupted presentation SHA-256 are identical: `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`. |
 | FULL_TRACE | **PASS, unchanged**: 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. Synthetic combat: 2,645 checks, 0 failures, the same as wave 37. |
@@ -118,3 +119,21 @@ Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pl
 **First matrix run (not the gate).** The first run went 29/54. All 25 failures had the same error: `res://.godot/imported/open_champions_avatar.png-….ctex` was missing. My one headless import (`--editor --quit-after 120`, 44 s) ended before the scan had finished. Under a mini load average of about 86, the log reads `WARNING: Scan thread aborted`, and the matrix's own `editor` case was cut short the same way. I then ran `Godot --headless --path godot --import` (exit 0, 30 s, no errors). It imported the project's only `.import` asset, the avatar PNG. After that I reran the whole matrix with the same command, and it passed 54/54. I changed no tool, test or case, and filtered nothing. The first run's logs are kept as `work/play-loading-r5/matrix-run1-incomplete-import/`.
 
 **Versus round 4's 58/61.** Round 4 ran on its own older base `d07f7e4e`, which predates `tools/godot_matrix.py`. It used a copied matrix driver (`work/loading-r2-tools/godot_matrix.py`) with a different, 61-case list. That list included `loading_disc_cases`, which exits 2 without a game folder. Its other two failures were `ui_layout_smoke`'s old four-argument `hud_text_glyphs` call and `native_fx_visual`'s relative capture path. Neither remains on wave 37's tree: `ui_layout_smoke` and `native_fx_visual` both pass here. So this branch should be compared with wave 37's 54-case list, and against that list it matches exactly.
+| Journeys: unchanged `tools/run_loop_playthrough.py`, headless then rendered | Headless **80** steps, rendered **81**. Both exit 1, the retained full-journey refusal, as in wave 37. 0 log errors. Six refusal kinds each, the same six as wave 37. Refused rows **27 / 28**. Pickup **10→11**, drop produced, walked and picked up, 52 walk ticks, 0 diagnostic retries. Rendered captures **38**. `player_death` stays refused with `saved_level_reloaded` false. Disc files **994 before / 994 after**. 303 s total. |
+
+**Journey differences versus wave 37.**
+
+- **Simulation results:** none. Step counts, refused-row counts, refusal kinds, pickup, walk ticks, captures, the death refusal and the disc count all equal wave 37's recorded 80/81, 27/28, six kinds, 10→11, 52, 38 and 994.
+- **Host-only:** loot-pickup `fps` is 58 headless and 2 rendered. That measures the mini's load at the time, not the simulation.
+- **Not compared index by index:** wave 37's per-index step artifacts are only in the playable-integration worktree, which I was told not to touch.
+- **Why these changes do not show:** `blood1_arrival` is `refused` with an empty `loading_refusal`, as before. The new readiness limit names live in `loading_readiness().refusals`, and that list never reaches the journey: `real_data_play.gd:736-757` reads only the booleans and a fixed error string. The round-5 stages are opt-in synthetic APIs, and the live loader applies no prefix.
+
+## Files
+
+- `native/include/champions/loading_equipment.hpp`: `ArrivalControl` round-6 controls, `ArrivalPrefix::callees` / `loader_promoted`, `arrival_hide_mask`.
+- `native/src/loading_equipment.cpp`: `arrival_hide_mask` and `run_arrival_r6`. Round 4's `run_arrival_prefix` body is unchanged.
+- `native/src/script_commands.cpp` and `native/include/champions/script_commands.hpp`: the seven round-6 limit names on the live readiness path.
+- `gdextension/src/session_controller.cpp`: comment only.
+- `native/tests/script_commands_tests.cpp`: `test_loading_r6_hide_mask` and `test_loading_r6_arrival`, with synthetic fixtures only. `test_loading_r4_*` is unchanged.
+
+No test, baseline, fixture or tool was weakened or edited. Nothing was pushed and no PR was opened. I did not touch `~/champions-re` or playable-integration. No process was killed by name. The private disc was read only. The mini's `build/` was deleted after the gates.
