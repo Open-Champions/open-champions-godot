@@ -68,10 +68,14 @@ func run() -> void:
 		var refused: Dictionary = service.skill_screen(partial)
 		check(not refused.get("ok", false) and str(refused.get("error", "")).contains("needs " + missing) and int(service.state().skill_points) == 4, "skill row without " + missing + " refuses")
 	check(not service.skill_screen(skill_row({"gate": 0})).get("ok", false), "the latch word is not a caller field")
-	check(not service.state().local_menu_known, "local menu state starts unknown")
-	service.set_local_menu_open(false)
+	# The host menu states g_localMenuOpen: closed at start, open while shown.
+	check(service.state().local_menu_known and not service.state().local_menu_open, "the host menu states a closed local menu at start")
+	menus.open_screen("inventory")
+	check(service.state().local_menu_open, "an open host menu sets the local menu flag")
+	menus.close_menu()
+	check(service.state().local_menu_known and not service.state().local_menu_open, "closing the host menu clears the local menu flag")
 	service.reset()
-	check(service.state().local_menu_known, "a stated menu state survives a new ledger")
+	check(service.state().local_menu_known and not service.state().local_menu_open, "a stated menu state survives a new ledger")
 	var thresholds := PackedInt32Array()
 	for index in range(81):
 		thresholds.append(index * 100)

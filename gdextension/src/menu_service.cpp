@@ -76,6 +76,7 @@ class ChampionsMenuService : public RefCounted {
     out["level_message_force"] = int(notice.force);
     out["level_message_undecided"] = notice.undecided;
     out["local_menu_known"] = ledger_->local_menu_known();
+    out["local_menu_open"] = ledger_->local_menu_open();
     out["hp"] = int64_t(ledger_->hit_points());
     out["max_hp"] = int64_t(ledger_->max_hit_points());
     out["mana"] = int64_t(ledger_->mana());

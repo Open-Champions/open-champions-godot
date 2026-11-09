@@ -267,6 +267,7 @@ public:
   // caller states it, the store is not decided (LevelNotice::undecided).
   void set_local_menu_open(bool open);
   bool local_menu_known() const { return local_menu_known_; }
+  bool local_menu_open() const { return local_menu_open_; }
   // What player_giveExp's hud_showMessage calls left on this machine.
   struct LevelNotice {
     int calls = 0;
