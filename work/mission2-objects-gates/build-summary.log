@@ -1,0 +1,24 @@
+== configure.log
+real	0m14.087s
+sys	0m1.126s
+== build.log
+[ 17%] Built target champions-mission2-objects
+[ 47%] Built target champions-mission2-objects-tests
+[ 61%] Built target champions-mission2-actors
+[ 66%] Built target champions-mission2-route
+[ 84%] Built target champions-mission2-route-tests
+[ 84%] Built target champions-mission2-actors-tests
+real	11m43.443s
+sys	0m46.498s
+== ext-build.log
+[ 62%] Built target champions-mission2-actors
+[100%] Built target champions-archive-extension
+== tex-build.log
+[100%] Built target champions-level-texture-preview
+== creature-build.log
+[100%] Built target champions-combat-play
+native exit=0 00:48:45
+ext-archive exit=0 00:55:16
+ext-level-texture exit=0 00:56:46
+ext-creature-anim exit=0 01:00:05
+focused exit=0 01:00:47

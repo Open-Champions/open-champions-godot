@@ -1,0 +1,9 @@
+Test project ~/malik-champions/open-champions/worktrees/play-mission2-objects/build/native
+    Start 245: mission2-route
+1/2 Test #245: mission2-route ...................   Passed    0.54 sec
+    Start 246: mission2-objects
+2/2 Test #246: mission2-objects .................   Passed    0.27 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.82 sec
