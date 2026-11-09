@@ -69,6 +69,7 @@ The new code is opt-in through `ArrivalControl::through_round = 6`. Round 4 stay
 - The replacement's `deleteMonster` `0x144b44` (r6:127-136):
   - returns on an empty name table;
   - with one creature object whose property list is absent, records `GameObject_dtor` `0x14cf90`, stores vtable `0x5122a8` at `+0x48`, and lists three `0x1a1698` calls. It frees nothing, the name count is unchanged and the object can still be found.
+  - *(Fix round, PLR5-1.)* That dtor is modeled only when the object's `+0x48` table is already the GameObject table `0x5122a8`. Any other table is refused before any dtor store, and before the property-list check. "Frees nothing" rests on r6's "does not call `pool_free`" and is flagged under "Fix round" below.
 - After that the stage stops at `0x199944` with `cut_runFrame tasks`, because the two registered tasks are not run (r5:156).
 - Alternatively, with `first_frame` 0 or 1, the first `cut_runFrame` runs instead of the replacement (r6:144-149). It stores 0 at `0x4039ac` (planted `0x11111111`) and does not store setup byte `0x44fcd2`. The stage then refuses at `0x14f498` with `cut_setup`.
 
@@ -92,6 +93,7 @@ Other refusals, each for something that was not executed:
 - An inventory hit: `0x1c1cb0`.
 - More than one object of a name.
 - A non-creature show, hide or delete target.
+- *(Fix round, PLR5-1.)* A delete target whose `+0x48` table is not the GameObject table `0x5122a8`: `delete of an object outside the GameObject table was not executed`.
 - A lump table with more than one record.
 - A nonzero or missing cut header, or a missing resource: `0x19b4dc` / `0x17365c`.
 - A network session or a player object.
@@ -100,18 +102,18 @@ Other refusals, each for something that was not executed:
 
 The live `loading_readiness(..., true)` keeps round 4's five names. It also appends the seven round-6 Unknowns (r6:181-185): live route selection, dbg_printf/warm-up, nonzero clip, slot 19 nonzero, delete with a property list, `cut_setup` onward, and the level-name bytes the loader stores. The readiness booleans are unchanged. `blood1_arrival` stays `refused`.
 
-**Not modeled.** The research names `0x1a1698` and `0x23d7ac` but does not record their stores. They are listed in `ArrivalPrefix::callees`, but their effects are not applied.
+**Not modeled.** The research names `0x1a1698` and `0x23d7ac` but does not record their stores. They are listed in `ArrivalPrefix::callees`, but their effects are not applied. *(Fix round, PLR5-3.)* Their stores are Unknown and not applied. This is now exposed in the result as `ArrivalPrefix::unmodeled`, which lists `0x23d7ac` when slot 19 runs to a return and `0x1a1698` when the handle clears run.
 
 ## Gates
 
-Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/play-loading-r5`, an rsynced copy that excludes `.git`, `build`, `work` and `.godot`. Builds used `-j 4` and CTest used `-j 3`, with standard input closed. Logs are in the ignored folder `work/play-loading-r5/`, with the mini home path replaced by `~/`. The mini was heavily shared during these runs, with load averages up to about 86.
+Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/play-loading-r5`, an rsynced copy that excludes `.git`, `build`, `work` and `.godot`. Builds used `-j 4` and CTest used `-j 3`, with standard input closed. Logs are in the ignored folder `work/play-loading-r5/`, with the mini home path replaced by `~/`. The mini was heavily shared during these runs, with load averages up to about 86. *(Fix round, PLR5-4: this round-5 load figure, and the 86–133 below, are unlogged observations. No round-5 log retains them. The fix round logs `uptime` before and after every gate step.)*
 
 | Gate | Result |
 |---|---|
 | Native Release configure and build | **PASS**, exit 0, 4 s + 596 s (`configure.log`, `build.log`). No warning in the changed files. |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 634 s and `template_release` 555 s; level texture 117 s / 112 s; creature animation `template_debug` 414 s. `lipo -archs` reports `x86_64 arm64` for all five libraries (`build-status.txt`). |
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3 (`script-commands`, `-measure-usage`, `-measure-empty`). `script-commands ok`. |
-| Full CTest `-j 3` | 259 registered (the same count as wave 37). First run: **256/259**, 3,120 s. Three tests failed, each on the test script's own subprocess timeout while the mini's load average was about 86–133: `messages-exact` (120 s limit in `tools/test_messages_vectors.py`), `player-exact` (180 s in `tools/test_player_vectors.py`) and `session-facing-exact` (600 s in `tools/test_session_facing_vectors.py`). None of them touches loading code. Serial rerun of exactly those three: **3/3 PASS**, 104 s, 133 s and 297 s (`ctest-rerun3.out`). That makes 259/259. No test or timeout was changed. |
+| Full CTest `-j 3` | 259 registered (the same count as wave 37). First run: **256/259**, 3,120 s. Three tests failed, each on the test script's own subprocess timeout while the mini's load average was about 86–133 (an unlogged observation, see PLR5-4): `messages-exact` (120 s limit in `tools/test_messages_vectors.py`), `player-exact` (180 s in `tools/test_player_vectors.py`) and `session-facing-exact` (600 s in `tools/test_session_facing_vectors.py`). None of them touches loading code. Serial rerun of exactly those three: **3/3 PASS**, 104 s, 133 s and 297 s (`ctest-rerun3.out`). That makes 259/259. No test or timeout was changed. |
 | Strict Godot matrix: `tools/godot_matrix.py matrix --captures --timeout 1200` | **54/54 PASS**, exit 0, 397 s. Fresh isolated projects. The unchanged `check-log` found 0 diagnostic errors in all 105 matrix logs. Matches wave 37's 54/54 case for case. See the first-run note below. |
 | FULL_SAVE_LOAD | **PASS**, 300/300. Continued and uninterrupted presentation SHA-256 are identical: `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`. |
 | FULL_TRACE | **PASS, unchanged**: 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. Synthetic combat: 2,645 checks, 0 failures, the same as wave 37. |
@@ -127,6 +129,68 @@ Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pl
 - **Host-only:** loot-pickup `fps` is 58 headless and 2 rendered. That measures the mini's load at the time, not the simulation.
 - **Not compared index by index:** wave 37's per-index step artifacts are only in the playable-integration worktree, which I was told not to touch.
 - **Why these changes do not show:** `blood1_arrival` is `refused` with an empty `loading_refusal`, as before. The new readiness limit names live in `loading_readiness().refusals`, and that list never reaches the journey: `real_data_play.gd:736-757` reads only the booleans and a fixed error string. The round-5 stages are opt-in synthetic APIs, and the live loader applies no prefix.
+
+## Fix round (audit `play-loading-r5`, VERDICT FIX)
+
+Audit: `cursor-runs/audits/play-loading-r5.md` (0 HIGH, 2 MEDIUM, 2 LOW). Base of the fix: `dd7a01e2`. Fix commit: `e947eb4`. Every behaviour cites the PASS research `research-loading-readiness@56a6760` (`docs/loading-arrival-r5.md`, `-r6.md` and their difftests). Nothing is ported from round 7 (`4487a88`), which is still under audit.
+
+### PLR5-1 (MEDIUM): the route-2 delete did not check the object's table
+
+- **Finding.** The replacement's `deleteMonster` stage modeled `GameObject_dtor` `0x14cf90` for any creature object with no property list. The research reaches `0x14cf90` only as slot 1 of a plain GameObject (r6:127-136; `difftest_arrival_stage_r6.py:114-124`, `plant_actor` = `GameObject_ctor` `0x14cb10` + `|0x20`). The test planted `+0x48 = 0` and still expected the GameObject result.
+- **Fix.** `run_arrival_r6` now requires `m.word(obj + 0x48) == 0x5122a8` before modeling the destructor. Any other table is refused with `delete of an object outside the GameObject table was not executed`. That happens after the creature-flag check and before the property-list check, because the property walk belongs to `0x14cf90` itself. The test plants `0x5122a8` for the passing case and still shows the dtor's `+0x48` store with the write record (`stored_at(…, before_delete)`). Three refusal cases were added:
+  - table `0x5133c0`: callees stop at `cut_start`'s 15, `+0x48` is not stored, and the name count is unchanged;
+  - table word 0;
+  - table 0 with a property list, which shows the table is checked first.
+- **Evidence.** In `work/plr5-fix/mutations.txt`, M1 deletes the gate. Exactly the three new refusal checks fail. With the fix: `script-commands ok`.
+- **Flag: "does not free".** The passing delete still frees nothing and stores no name count, as r6:129-136 and 175-177 ("do not free it or store the name count") say. Round 7 (`4487a88`, under audit) corrects that claim: it says `0x14cf90(obj, 3)` tail-jumps to `pool_free` `0x150470`. As instructed, I did not implement freeing. The no-free model is kept and flagged here and in a code comment at the delete. If round 7 passes its audit, this stage needs a port (free-list stores), or it should be refused until then.
+
+### PLR5-2 (MEDIUM): zero-valued `cut_start` finals were not discriminated
+
+- **Finding.** Nine finals are 0: words `0x44fd2c`, `0x44fd28`, `0x44fcfc`, `0x44fd00`, `0x44fce8`, `0x83d198`, `0x83d18c` and bytes `0x44fcd2`, `0x44fcec`. They started at 0 in the Host and were never planted, so deleting their stores passed.
+- **Fix.** Before every route-2 run that checks `finals()` (the empty-table run, the delete run, and both first-frame runs), the test plants `0xa5a5a5a5` at each of those words and `0xa5` at each byte. `finals()` then has to see 0, and a new `finals_stored(mark)` also requires a recorded store at all nine addresses after the mark. A check confirms the sentinels are in place before the first run. The first-frame `!stored_at(m, 0x44fcd2, post + 1)` check is unchanged.
+- **Evidence** (`mutations.txt`):
+  - M2 (no zero-word stores), M3 (no zero-byte stores) and M4 (no `0x83d198`/`0x83d18c` stores) each fail 7 checks with the fixed test, including the original finals check.
+  - Run against round 5's test file (`dd7a01e2`), M2 fails only the delete checks, and those fail because of the new PLR5-1 gate (that test plants `+0x48 = 0`). The finals check still passes there. That is the weakness the audit describes.
+
+### PLR5-3 (LOW): unmodeled callees looked the same as applied ones
+
+- **Finding.** `0x23d7ac` (slot 19) and `0x1a1698` (`handle_clear`) were listed in `callees` with no stores applied, and the header comment said every listed callee "ran as the research records it".
+- **Fix.**
+  - The `ArrivalPrefix::callees` comment now says that being listed means only that the call was reached and returned, not that its stores were applied.
+  - The new `ArrivalPrefix::unmodeled` lists `0x23d7ac` when slot 19 runs to a return (r6:107) and `0x1a1698` when the three handle clears run (r6:132). A refused slot 19 is not listed.
+  - The "Not modeled" paragraph above says their stores are Unknown and are not applied.
+- **Evidence.** New checks:
+  - `{0x23d7ac}` after the flag-clear header;
+  - empty after a refused slot 19;
+  - `{0x1a1698}` after the delete;
+  - empty on the empty-table and first-frame runs.
+
+  M5 and M6 (each push removed) each fail exactly their check.
+
+### PLR5-4 (LOW): the load figures were not logged
+
+- **Fix.** The round-5 "86" and "86–133" figures are now marked above as unlogged observations. Every fix-round gate step writes `uptime` before and after to `work/plr5-fix/load.txt` and to its status line. Raising `player-exact`'s 180 s timeout is outside this branch and not done here; I recommend it separately.
+
+### How the mini was set up
+
+The mini's `repo.git` is a shallow clone without this branch's history, so the branch could not be added there without a ~3 GB transfer. Instead, `~/malik-champions/open-champions/worktrees/play-loading-r5` is a standalone repo on branch `codex/play-loading-r5`:
+
+- Its `objects/info/alternates` points at `repo.git/objects`.
+- It holds one pack of the 700 KB of objects that `repo.git` lacks.
+- `dd7a01e2` is its shallow root.
+- `fsck --connectivity-only` is clean, and its tree is identical to the MacBook's (`42e3702d`).
+
+Commits were made there and fetched to the MacBook from that repo (not from `repo.git`), with `--ff-only`. Nothing was pushed.
+
+### Fix-round gates
+
+All on the mini, in the worktree above, with one `build/` root. Builds used `-j 4` and CTest used `-j 3`, with standard input closed. Logs are in the ignored `work/plr5-fix/`, with the home path replaced by `~/`. Load averages (1/5/15 min) before and after each step are in `load.txt` and the status files.
+
+| Gate | Result | Load before → after |
+|---|---|---|
+| Native Release configure and build | **PASS**, exit 0, 2 s + 394 s. 0 warnings in the changed files (10 in the whole build, all in other files) | 92.9 → 93.0 |
+| GDExtensions | **PASS**, each exit 0. Archive `template_debug` 329 s and `template_release` 432 s; level texture 76 s / 82 s; creature animation `template_debug` 210 s. `lipo -archs` gives `x86_64 arm64` for all five libraries (`build-status.txt`) | 93.0 → 90.8 |
+GATES_REST
 
 ## Files
 
