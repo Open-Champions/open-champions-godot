@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — play-levelup-hud round 2 (2026-11-09), FIX of audit play-levelup-hud-r1 (MEDIUM LU-1, LOW LU-2..LU-9).
+STATUS: DONE — play-levelup-hud round 2 (2026-11-09), FIX of audit play-levelup-hud-r1 (MEDIUM LU-1, LOW LU-2..LU-9), all nine fixed. CTest 260/260, matrix 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, journeys 80/81 with pickup 10→11.
 
 # play-levelup-hud round 2
 
@@ -22,8 +22,16 @@ Mutation check on the mini copy only (then restored, re-synced, touched and rebu
 
 - Native Release configure/build `-j 4`: **PASS**, exit 0 (`work/r2/build.log`). GDExtensions: **PASS**, exit 0; archive and level-texture `template_debug` / `template_release`, creature-animation `template_debug`, all `lipo -archs` = `x86_64 arm64` (`work/r2/gdext.log`).
 - Focused CTest (`levelup-hud|menus|ui-layout|strings|hud`): **PASS 7/7** (`work/r2/focused-ctest.log`). `levelup-hud` 137 checks (117 in round 1), `menus-exact` 331 (317).
+- Full CTest `-j 3`: **PASS 260/260**, 1,699.63 s, exit 0 (`work/r2/ctest.out`), on the final code. A first run (`work/r2/ctest-try1.out`, 48 min under heavy load from other mini jobs) had `messages-exact` and `player-exact` stop at their own 120 s / 180 s subprocess timeouts; both passed alone (`work/r2/retimed-ctest.log`, player-exact 73 s) and in the final run (73 s / 172 s). No timeout was changed.
 - Strict Godot matrix `--captures --timeout 1200` (exit status and log diagnostics as gates): **PASS 54/54**, exit 0 (`work/r2/matrix/results.json`). `menu_smoke` 115 checks, 0 failures (94 in round 1). A first run (`work/r2/matrix-try1*`) failed only `menu_smoke` "local menu state starts unknown": the smoke's service comes from `game_menus`, which now states a closed local menu at start, as intended. The check was changed to assert that wiring (closed at start, open after `open_screen`, closed after `close_menu`, kept across `reset`); the unknown state stays covered in `menus-exact`.
 - Full synthetic combat: **2,645 checks, 0 failures** (`work/r2/matrix/playable_wave_smoke_full_combat.log`).
 - FULL_SAVE_LOAD: **PASS 300/300**; continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical to round 1 and wave 37.
 - FULL_TRACE: **PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline edited; this round changes the menu ledger, the skill sender, the HUD green-bar conversion and the host menu flag, not the simulation tick.
 - Journeys (unchanged `tools/run_loop_playthrough.py`, headless then rendered, stdin closed): headless **80** steps, rendered **81**, pickup **10→11** (produced, walked, picked up, 52 walk ticks), 0 log errors, 38 rendered captures, 27/28 refused rows, 6 refusal kinds, ending `player_death` refused. Disc 994 files before and after. Wrapper exit 1 is the retained full-journey refusal, as in round 1 and wave 37 (`work/r2/playthrough.out`).
+- Mini `build/` deleted afterwards.
+
+## Still refused or stated as limits
+
+Unchanged from round 1 (per-skill virtual bodies, inclusive cursor-box edges, the `save_load` steps not run, VU1 tiles, scripted map icons, ammunition and thrown notices, other `hud_showMessage` callers, the `+0x58` writer). Added this round: alternative unlocks off their executed prerequisite chain, after a failed prerequisite-0 check, or on a row of the other kind; prerequisite kinds other than 0/1; a `-1` low word with a nonzero high word; latch-changing exits whose order is not given; skill-screen calls off page 5. Stated limits: the play view cannot tell a real zero maximum from "not available" and draws the green bar only when `next > base` (LU-7); the host menu stands for `g_localMenuOpen`, whose original writer is not in the notes (LU-8). The play skills page still does not read the class trees, so nothing in play calls the sender (gap `skill-confirm-input`).
+
+No push, PR, private-disc write, edit to `~/champions-re` or `playable-integration`, or process-name kill.
