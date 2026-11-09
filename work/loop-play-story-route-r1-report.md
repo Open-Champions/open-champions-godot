@@ -1,6 +1,6 @@
 # Play story route, round 1
 
-STATUS: IN PROGRESS. Gates are recorded below as they finish.
+STATUS: PASS. Twelve-row menu table and acts, row-0 confirm, tested cursor rules, and a missions 3-5 entry gate over the research's 75 executed entries; missions 6-12 are requested and refused. CTest 261/261 (two load timeouts passed alone), strict Godot 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, journeys 80/81 with pickup 10 to 11 and 8 refusal kinds, identical step pairs. Private probe 212/213; the miss is a real client gap (`tormenta` `start` stops at the refused `autoPropSetState` before mission 5's availability store).
 
 Branch `codex/play-story-route` from wave 38 VERIFIED `16b66176`. Code commit
 `5f5b4ad6`. Research pin `t3/research-story-route-r3` `3c7987c`,
@@ -135,6 +135,7 @@ Explained differences in that run:
 | Release `cmake --build build/native -j 4` | PASS, exit 0 (`work/play-story-route-r1/build.log`). New targets `champions-story-route-tests`, `champions-story-route-probe`. |
 | GDExtensions, `template_debug`, Release, `-j 4` | PASS, exit 0 for the archive extension, level-texture and creature-animation (`ext-build.log`, `tex-build.log`, `anim-build.log`). |
 | Focused CTest `story-route`, `quests`, `script-commands`, `dialog`, `mission2-route`, `mission1-scripts`, `script-items` | PASS 7/7 (`ctest-focused.log`). `story-route` 635 checks. |
+| Full CTest `ctest --test-dir build/native --output-on-failure -j 3`, stdin closed | PASS 261/261. 261 registered (wave 38's 260 plus `story-route`). In the full run 259 passed; `messages-exact` and `player-exact` failed only on their harnesses' own subprocess timeouts (120 s and 180 s, `tools/test_messages_vectors.py:76-77`, `tools/test_player_vectors.py:149`) at a mini load average above 130. Rerun alone, both passed (29.82 s and 77.14 s, `ctest-rerun.log`). Neither covers changed code. Real time 3093.66 s (`ctest.out`). |
 | Strict Godot matrix `python3 tools/godot_matrix.py matrix --godot <mini Godot 4.5.2> --captures --timeout 1200`, stdin closed | PASS 54/54, 0 failed, including the graphical cases (`matrix.out`, `matrix/results.json`). The unchanged `check-log` classifier found 0 errors across all 105 case and engine logs. |
 | Full synthetic combat | PASS, 2,645 checks, 0 failures (`matrix/playable_wave_smoke_full_combat-engine.log`). Same as wave 38. |
 | FULL_SAVE_LOAD | PASS 300/300. Uninterrupted and continued presentation both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`. Same as wave 38. |
@@ -166,3 +167,54 @@ false, as in wave 38.
 
 The journeys never open the mission menu past mission 2, so the new
 missions 3-12 selection and the mission 3-5 gate do not change them.
+
+## Method
+
+Edited and committed on the MacBook worktree, as the task asked (the mini
+workflow note's "commit on the mini" step does not apply here). Builds and
+tests ran on the Mac mini in `~/malik-champions/open-champions/worktrees/play-story-route`,
+synced with `rsync -a --delete --exclude .git --exclude build --exclude work --exclude .godot`.
+`--exclude .godot` keeps the mini's import cache. The first full rsync was
+too slow under the mini's load (about 68 MB of 1 GB in 15 minutes; the tree
+carries about 985 MB of tracked test vectors), so it was stopped and the
+mini directory was seeded once with a local copy of the mini's
+`play-mission2-route` tree (excluding `.git`, `build/`, `work/`, with its
+`.godot`); every later sync sent only this branch's differences. The mini's
+Godot 4.5.2 and `~/malik-champions/runtime/godot-cpp` were used, the disc was
+read-only, `cmake --build -j 4`, `ctest -j 3`, at most two heavy jobs. Only
+PIDs this session started were stopped (none were killed on the mini). Logs
+were copied into `work/play-story-route-r1/` with the mini home path
+rewritten to `~/`. `template_release` extensions were not rebuilt; the
+matrix and journeys load `template_debug`. The mini `build/` was deleted
+afterwards. No test, baseline, fixture or harness was changed. No push, no
+pull request, nothing under `~/champions-re` or the integration worktree.
+
+Commands:
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR=<godot-cpp> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release -j 4
+cmake -S gdextension/level_texture -B build/level-texture-debug -DGODOT_CPP_DIR=<godot-cpp> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/level-texture-debug -j 4
+cmake -S gdextension/creature_anim -B build/creature-anim-debug -DGODOT_CPP_DIR=<godot-cpp> -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/creature-anim-debug --target champions-creature-animation -j 4
+ctest --test-dir build/native --output-on-failure -R '^(story-route|quests|script-commands|dialog|mission2-route|mission1-scripts|script-items)$' -j 1
+ctest --test-dir build/native --output-on-failure -j 3 < /dev/null
+build/native/champions-story-route-probe ../../private-validation/rta-disc
+python3 tools/godot_matrix.py matrix --godot <Godot> --captures --timeout 1200 --out work/r1/matrix < /dev/null
+python3 tools/run_loop_playthrough.py --godot <Godot> --game-folder ../../private-validation/rta-disc --out work/r1/playthrough < /dev/null
+```
+
+## Remaining
+
+- `autoPropSetState` in `tormenta` `start` (above). Mission 5's level start
+  cannot complete in the client until that native has evidence and a port.
+- `soundSequence` refuses after the completion grants when no sound resource
+  is bound; the grants themselves land first.
+- `preloadResource` stops `tormenta` `preStart` after the entrance write; in
+  the scene that stops the level script before `start`.
+- Who restores `0x8e2f10`, the menu draw, the loader body, arrival, dialog
+  selection and object use in mission 3-5 levels, and missions 6-12 stay
+  refused. No continuous hub-to-mission-5 session was run.
