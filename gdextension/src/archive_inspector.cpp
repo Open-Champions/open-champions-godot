@@ -374,7 +374,7 @@ public:
     }
 
     // Constructor handle requests 0x1a1ea0-0x1a21f4 (research-char-appearance
-    // 153d1c3 docs/spec/created-character-appearance.md:138-170). The six
+    // 7931517 docs/spec/created-character-appearance.md:138-170). The six
     // format templates and the model prefix are read from the owner's
     // executable; the native module only orders and formats them.
     Dictionary player_appearance_requests(const PackedByteArray &executable_bytes,

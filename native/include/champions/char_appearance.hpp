@@ -2,17 +2,17 @@
 // Created-character appearance, attachment, equipment-visual, shell and pose
 // contracts for Return to Arms US v2.00. Godot-free and deterministic.
 //
-// Every rule below is Observed/Executed in research-char-appearance @ 153d1c3
-// (audits research-char-appearance-r2 and -r3-fix PASS). "CCA:n" cites
+// Every rule below is Observed/Executed in research-char-appearance @ 7931517
+// (audits research-char-appearance-r2, -r3-fix and -r4 PASS). "CCA:n" cites
 //   docs/spec/created-character-appearance.md line n at that commit,
 // "REF:n" cites tools/ref_char_attachment.py line n at that commit, and
 // "SE4:n" cites research-loading-readiness @ 366b65a
 //   docs/starting-equipment-r4.md line n (reused, not re-derived; CCA:253-259).
 //
 // Refused here, with the reason kept in docs/CHAR_APPEARANCE.md:
-//  - animated joint matrices (CCA:236-238, 433-434, 460-461): the attachment
+//  - animated joint matrices (CCA:236-238, 447-448, 632-633): the attachment
 //    record's matrix is copied, never evaluated against a pose;
-//  - who advances the creation preview (CCA:351-364, 482-485): no step is
+//  - who advances the creation preview (CCA:352-378, 651-654): no step is
 //    added to the creation clip;
 //  - pixel parity / the 0x174e78 packet image and VU/GS output (CCA:236-238,
 //    458-460): only the parameters and the gate are modelled.
@@ -73,7 +73,7 @@ struct Request {
 
 // printf subset used by the six constructor templates: %s %d %c and %%.
 // Arguments are consumed in order prefix, number, letter (REF of the
-// appearance reference, tools/ref_char_appearance.py:59-74 @ 153d1c3).
+// appearance reference, tools/ref_char_appearance.py:59-74 @ 7931517).
 // Any other conversion, or a conversion/argument count mismatch, refuses.
 std::string format_resource(const std::string &format, const std::string &prefix,
                             std::optional<std::int32_t> number = {},
@@ -129,7 +129,7 @@ Draws appearance_draws(std::int32_t model, std::int32_t skin, bool covered,
                        bool head_present, bool head_exception,
                        const Handles &handles);
 
-// ---- body show mask (CCA:201-208, 410-419) ---------------------------------
+// ---- body show mask (CCA:201-208, 424-433) ---------------------------------
 inline constexpr std::uint64_t ALL_SHOWN = ~std::uint64_t(0);
 inline constexpr std::uint32_t BODY_MASK_COUNTER = 0x41b514;
 inline constexpr std::int32_t BODY_MASK_COUNTER_LIMIT = 0x111;
@@ -147,7 +147,7 @@ std::uint64_t initial_body_mask(std::uint32_t counter, std::uint64_t default_hid
                                 bool table_enabled,
                                 const std::array<VariantRecord, 32> &records);
 
-// One Player_draw frame's ordering (CCA:403-419): the body draw reads object
+// One Player_draw frame's ordering (CCA:417-433): the body draw reads object
 // +0x220 *before* Player_drawEquipped rebuilds it, so the body always uses
 // the previous pass's mask. Only actually drawn parts clear their hide bits.
 class BodyMask {
@@ -166,7 +166,7 @@ private:
   bool open_ = false;
 };
 
-// mesh_runs 0x177df4-0x177eb0 / 0x178cbc-0x178d74 (CCA:229-232, 414-416):
+// mesh_runs 0x177df4-0x177eb0 / 0x178cbc-0x178d74 (CCA:229-232, 428-430):
 // (start, length) of coalesced shown runs; empty spans emit nothing. The
 // 64-mesh EE shift edge is preserved, not corrected (REF:96-122).
 std::vector<std::pair<std::uint32_t, std::uint32_t>>
@@ -220,12 +220,12 @@ struct PartDraw {
   bool shell_reset = false;            // 0x179978 when override != -1
 };
 // One 0x1a3b90-0x1a3df8 iteration (CCA:283-298). Does not switch on the
-// record class word (+0x50 is not read, CCA:280-281, 473-475).
+// record class word (+0x50 is not read, CCA:280-281, 642).
 PartDraw equipped_part_draw(std::uint32_t pointer_slot, std::uint32_t definition_slot,
                             std::uint32_t body_model, const PartHeader &part,
                             bool both_handles);
 
-// ---- shell parameters and the 0x174e78 gate (CCA:300-325, 421-434) ---------
+// ---- shell parameters and the 0x174e78 gate (CCA:300-325, 435-448) ---------
 inline constexpr std::uint32_t SHELL_BLOCK = 0x3e9cd0, SHELL_POINTER = 0x41c160,
                                SHELL_COUNT = 0x41c164, SHELL_RESET_POINTER = 0x41c150;
 inline constexpr Raw INVENTORY_DRAW_ARGUMENT = 0x3fc00000; // 0x1c0c64, 1.5
@@ -248,13 +248,13 @@ void reset_shell(ShellState &state);
 // model_draw 0x177da4 / model_drawPart 0x178c88: flag 0x20 and count > 0.
 bool shell_pass_gate(std::uint16_t part_flags, std::int32_t shell_count);
 
-// ---- poses (CCA:326-401) ---------------------------------------------------
+// ---- poses (CCA:326-415) ---------------------------------------------------
 namespace anim_clock = animation_clock;
 inline constexpr std::uint32_t CREATION_FORMAT = 0x53ff68,
                                CREATION_FORMAT_MARKED = 0x53ff58,
                                CREATION_IMPORT_LITERAL = 0x53fd38,
                                CREATION_RACE_BYTE = 0x8e2c91;
-// The 0.2 blend word is loaded at 0x225584 (CCA:344-347). The spec does not
+// The 0.2 blend word is loaded at 0x225584 (CCA:345-348). The spec does not
 // publish its bits, so callers read it from the owner's executable.
 inline constexpr std::uint32_t CREATION_BLEND_SITE = 0x225584;
 inline constexpr std::uint32_t CREATION_FLAGS = 3;  // addiu 3 at 0x225580
@@ -267,8 +267,10 @@ struct CreationStart {
   // nullopt: the descriptor name is used. Otherwise the race literal address.
   std::optional<std::uint32_t> race_literal;
 };
-// 0x2254bc-0x2255b4. nullopt: no restart (gate failed, or the import literal
-// with a race byte outside 0..12 after +1).
+// 0x2254bc-0x2255b4. nullopt: no restart (the 0x80 / count gate failed).
+// With the import literal, a race byte outside -1..11 (slot 0..12 after +1)
+// throws Refused: the reference keeps the input name there (REF:345-350), but
+// that case was never executed (CCA:339-342).
 std::optional<CreationStart> creation_restart(std::uint16_t object_0x11a,
                                               std::uint8_t object_0x118,
                                               bool descriptor_is_import_literal,
@@ -278,13 +280,13 @@ std::string creation_clip_name(const std::string &name, const std::string &forma
 // anim_start(blend, state, clip, 3): time 0, weight 0; on an empty state the
 // blend is forced to 0 (rate 1); with one cell present the cell keeps the blend
 // (the spec's executed rate there is 0x3daaaaab). No anim_advance is added
-// (CCA:482-485).
+// (CCA:651-654).
 anim_clock::Track *install_creation_clip(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
                                          Raw blend_word);
 
-// inventory_selectIdleAnim 0x1c3f08 (CCA:375-388): lump by model, clip by
+// inventory_selectIdleAnim 0x1c3f08 (CCA:389-402): lump by model, clip by
 // weapon class, flags 0x43, 0.1 blend (forced off for cell 0).
-// The 0.1 blend word is loaded at 0x1c4078; forced off for cell 0 (CCA:382).
+// The 0.1 blend word is loaded at 0x1c4078; forced off for cell 0 (CCA:396).
 inline constexpr std::uint32_t INVENTORY_BLEND_SITE = 0x1c4078;
 inline constexpr std::uint32_t INVENTORY_FLAGS = 0x43;
 inline constexpr std::array<std::uint32_t, 12> INVENTORY_LUMPS{{
@@ -299,7 +301,7 @@ anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_cloc
 // fresh cell this gives time 0x3f7fffff and weight 1.
 std::int32_t inventory_draw_step(anim_clock::AnimSystem &system, anim_clock::AnimState &state);
 
-// player_resetIdleAnim 0x1b2470 (CCA:389-401; research-player-anim cda95dc
+// player_resetIdleAnim 0x1b2470 (CCA:403-415; research-player-anim cda95dc
 // docs/spec/player-animation-selection.md:58-66 for cells 1..3 weight/life 0).
 inline constexpr std::uint32_t IDLE_ROW_SIZE = 0x68, IDLE_FLAGS = 0x1205;
 inline constexpr std::array<std::uint32_t, 4> IDLE_CELL_OFFSETS{{0x44, 0x4c, 0x54, 0x5c}};

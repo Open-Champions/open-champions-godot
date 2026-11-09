@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Synthetic checks for created-character appearance wiring
-# (research-char-appearance 153d1c3 docs/spec/created-character-appearance.md).
+# (research-char-appearance 7931517 docs/spec/created-character-appearance.md).
 # No owner file is read; the request binding is exercised on refusals only.
 const RealPlayer = preload("res://real_data/real_player.gd")
 const Fixture = preload("res://tests/skinning_fixture.gd")

@@ -1,5 +1,5 @@
 // Created-character appearance contracts. Citations: see char_appearance.hpp
-// (CCA = research-char-appearance@153d1c3 docs/spec/created-character-appearance.md,
+// (CCA = research-char-appearance@7931517 docs/spec/created-character-appearance.md,
 //  REF = tools/ref_char_attachment.py at that commit, SE4 =
 //  research-loading-readiness@366b65a docs/starting-equipment-r4.md).
 #include "champions/char_appearance.hpp"
@@ -159,7 +159,7 @@ void BodyMask::part_drawn(std::uint64_t part_hide) {
 void BodyMask::end_equipment_pass() {
   if (!open_)
     throw Refused("no equipment pass is open");
-  stored_ = pass_; // object +0x220, read by the next body draw (CCA:416-419)
+  stored_ = pass_; // object +0x220, read by the next body draw (CCA:430-433)
   open_ = false;
 }
 
@@ -310,19 +310,25 @@ void reset_shell(ShellState &s) {
 }
 
 bool shell_pass_gate(std::uint16_t flags, std::int32_t count) {
-  return (flags & 0x20) && count > 0; // CCA:322-323, 423-425
+  return (flags & 0x20) && count > 0; // CCA:322-323, 437-439
 }
 
 std::optional<CreationStart> creation_restart(std::uint16_t h11a, std::uint8_t c118,
                                               bool import_literal, std::int8_t race) {
-  // CCA:331-341.
+  // CCA:331-342.
   if (!(h11a & 0x80) || c118 >= 2)
     return std::nullopt;
   CreationStart s{(h11a & 0x08) ? CREATION_FORMAT_MARKED : CREATION_FORMAT, std::nullopt};
   if (import_literal) {
     const std::int32_t slot = std::int32_t(race) + 1;
+    // Only bytes -1..11 (slots 0..12) were executed (CCA:339-342; the
+    // creation rows check that the copied address exists,
+    // tools/difftest_char_picture.py:409-410, 483-486). The reference keeps
+    // the input name otherwise (REF:345-350), but no out-of-range byte was
+    // ever run, so it is refused rather than guessed. It is not the
+    // gate-failed "no restart".
     if (slot < 0 || slot >= std::int32_t(CREATION_RACE_LITERALS.size()))
-      return std::nullopt;
+      throw Refused("race byte outside the executed -1..11 copy range");
     s.race_literal = CREATION_RACE_LITERALS[std::size_t(slot)];
   }
   return s;
@@ -347,7 +353,7 @@ std::uint32_t inventory_lump_address(std::int32_t model) {
 }
 
 std::uint32_t inventory_idle_address(std::int32_t weapon_class) {
-  // CCA:376-378; REF:336-338.
+  // CCA:390-392; REF:336-338.
   switch (weapon_class) {
   case 1: return 0x538538;
   case 2: return 0x538548;
@@ -361,18 +367,18 @@ std::uint32_t inventory_idle_address(std::int32_t weapon_class) {
 
 anim_clock::Track *inventory_select_idle(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
                                          Raw blend_word) {
-  // CCA:379-382: an already-current clip keeps its frame.
+  // CCA:393-396: an already-current clip keeps its frame.
   if (const auto *top = state.top(); top && clip && top->clip == clip)
     return nullptr;
   return anim_clock::anim_start(blend_word, state, std::move(clip), INVENTORY_FLAGS);
 }
 
 std::int32_t inventory_draw_step(anim_clock::AnimSystem &system, anim_clock::AnimState &state) {
-  return anim_clock::anim_advance(system, ONE, state); // CCA:383-386
+  return anim_clock::anim_advance(system, ONE, state); // CCA:397-400
 }
 
 std::uint32_t display_idle_address(std::int32_t weapon_class) {
-  // CCA:393-395; REF:339-340.
+  // CCA:407-409; REF:339-340.
   switch (weapon_class) {
   case 1: return 0x5375d8;
   case 2: return 0x5375e8;
@@ -392,7 +398,7 @@ std::array<std::uint32_t, 4> idle_cell_offsets(std::int32_t weapon_class) {
 
 bool reset_idle_anim(anim_clock::AnimState &state, bool player_present, Raw hp,
                      bool display_only, const IdleClips &clips) {
-  // CCA:389-391: no player, or hit points not greater than 0, writes nothing.
+  // CCA:403-405: no player, or hit points not greater than 0, writes nothing.
   if (!player_present || !lt(ZERO, hp))
     return false;
   if (state.capacity < 4)
@@ -403,8 +409,8 @@ bool reset_idle_anim(anim_clock::AnimState &state, bool player_present, Raw hp,
     auto &cell = state.tracks[i];
     cell.clip = (i == 0 && display_only) ? clips.display : clips.table[i];
     cell.flags = IDLE_FLAGS;
-    // cell 0 weight and life 1 (CCA:392-393); cells 1..3 are 0
-    // (player-animation-selection.md:61). time and rate untouched (CCA:395-396).
+    // cell 0 weight and life 1 (CCA:406-407); cells 1..3 are 0
+    // (player-animation-selection.md:61). time and rate untouched (CCA:409-410).
     cell.weight = i == 0 ? ONE : ZERO;
     cell.life = i == 0 ? ONE : ZERO;
   }

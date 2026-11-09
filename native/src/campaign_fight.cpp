@@ -824,8 +824,8 @@ struct Fight::Impl {
   }
   // player_resetIdleAnim 0x1b2470 (research-player-anim cda95dc,
   // player-animation-selection.md:58-66): idle, walk, run 1 and run 2 of the
-  // weapon-class row into cells 0..3. research-char-appearance 153d1c3
-  // created-character-appearance.md:389-397 adds that the time and rate words
+  // weapon-class row into cells 0..3. research-char-appearance 7931517
+  // created-character-appearance.md:403-411 adds that the time and rate words
   // are not written (a prior value survives) and that object byte +0x462
   // replaces cell 0 with the class idled name.
   void reset_idle_anim() {

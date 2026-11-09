@@ -1,7 +1,7 @@
 // Synthetic checks for the created-character appearance contracts. Expected
-// values come from research-char-appearance@153d1c3 (docs/spec/
+// values come from research-char-appearance@7931517 (docs/spec/
 // created-character-appearance.md "CCA:n", tools/ref_char_attachment.py
-// "REF:n", audits research-char-appearance-r2 / -r3-fix). Templates, tokens
+// "REF:n", audits research-char-appearance-r2 / -r3-fix / -r4). Templates, tokens
 // and handles are synthetic; no retail name or byte is used.
 #include "champions/char_appearance.hpp"
 #include <cstdio>
@@ -151,7 +151,7 @@ void masks() {
   check(ca::initial_body_mask(0x111, 0xff, true, records) == ca::variant_show_mask(0xff, true, 1, records),
         "at 0x111 variant bit one");
 
-  // CCA:403-419: the body uses the previous pass's stored mask.
+  // CCA:417-433: the body uses the previous pass's stored mask.
   ca::BodyMask object(0x0123456789abcdefULL);
   check(object.body_draw_argument() == 0x0123456789abcdefULL, "first body draw reads +0x220 as stored");
   object.begin_equipment_pass(ca::ALL_SHOWN);
@@ -315,7 +315,7 @@ void plant(ac::Track &t) {
 }
 
 void poses() {
-  // CCA:331-341 gate, format and race literal.
+  // CCA:331-342 gate, format and race literal.
   check(!ca::creation_restart(0x00, 0, false, 0), "bit 0x80 required");
   check(!ca::creation_restart(0x80, 2, false, 0), "count below 2 required");
   check(ca::creation_restart(0x80, 1, false, 0)->format_address == ca::CREATION_FORMAT, "standing format");
@@ -326,12 +326,20 @@ void poses() {
               ca::CREATION_RACE_LITERALS[std::size_t(race + 1)],
           "race literal");
   check(ca::CREATION_RACE_LITERALS[0] == ca::CREATION_RACE_LITERALS[1], "bytes -1 and 0 share an address");
-  check(!ca::creation_restart(0x80, 0, true, 12) && !ca::creation_restart(0x80, 0, true, -2),
-        "only slots 0..12 are copied");
+  // Bytes outside -1..11 were never executed (CCA:339-342): refused, not
+  // merged with the gate-failed "no restart". The gate still decides first,
+  // and a descriptor name that is not the literal never reads the byte.
+  for (int race : {12, -2, 127, -128})
+    refuses([race] { ca::creation_restart(0x80, 0, true, std::int8_t(race)); },
+            "race byte outside the executed copy range refuses");
+  check(!ca::creation_restart(0x00, 0, true, 12) && !ca::creation_restart(0x80, 2, true, -2),
+        "a failed gate is no restart even for an unexecuted byte");
+  check(ca::creation_restart(0x80, 0, false, 12) && !ca::creation_restart(0x80, 0, false, 12)->race_literal,
+        "the race byte is read only for the import literal");
   check(ca::creation_clip_name("race", "%s_stand.anm") == "race_stand.anm", "leading %s");
   refuses([] { ca::creation_clip_name("r", "x%s"); }, "format must lead with %s");
 
-  // CCA:342-347 install: sentinels cleared; the blend is forced to 0 on an
+  // CCA:343-348 install: sentinels cleared; the blend is forced to 0 on an
   // empty state and kept at count 1. Blend words are synthetic here; the
   // original word at 0x225584 is caller input from the executable.
   const Raw blend = 0x3e800000; // synthetic 0.25
@@ -350,7 +358,7 @@ void poses() {
             t->rate == rta::div(ONE, rta::mul(blend, ac::SIXTY)) && t->rate != ONE && one.count == 2,
         "creation install keeps the blend at count 1");
 
-  // CCA:375-386 inventory stand.
+  // CCA:389-400 inventory stand.
   check(ca::inventory_lump_address(0) == 0x538488 && ca::inventory_lump_address(11) == 0x538528, "lump table");
   for (int c = 0; c < 9; ++c) {
     const bool own = c == 1 || c == 2 || c == 3 || c == 4 || c == 5 || c == 7;
@@ -371,7 +379,7 @@ void poses() {
   ca::inventory_draw_step(system, fresh);
   check(fresh.tracks[0].time == 0x3f7fffff && fresh.tracks[0].weight == ONE, "first inventory frame");
 
-  // CCA:389-401 player_resetIdleAnim.
+  // CCA:403-415 player_resetIdleAnim.
   check(ca::idle_cell_offsets(2) == std::array<std::uint32_t, 4>{{0xd0 + 0x44, 0xd0 + 0x4c, 0xd0 + 0x54, 0xd0 + 0x5c}},
         "row offsets");
   for (int c = 0; c < 9; ++c) {

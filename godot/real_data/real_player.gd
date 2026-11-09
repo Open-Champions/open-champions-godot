@@ -135,7 +135,7 @@ func install(real: Node, visual: MeshInstance3D, reader: RefCounted,
 		status += " Selection flag 0x506040 is unknown; select.lmp is a host preview choice."
 	return true
 
-# Optional hair/beard layers, research-char-appearance 153d1c3
+# Optional hair/beard layers, research-char-appearance 7931517
 # docs/spec/created-character-appearance.md. `requests` are the native
 # constructor requests (:158-164); `rows` maps lower-case names to archive
 # rows. A layer whose style is -1 has no requests and cleared handles; a
@@ -196,7 +196,7 @@ func _install_optional_layers(real: Node, reader: RefCounted, executable: String
 		if entry.draw == "pending": _draw_layer(real, reader, selection, rows, fingerprint, layer, entry)
 		words.append("%s %s" % [layer, str(entry.draw).replace("_", " ")])
 	status += " Appearance layers: " + ", ".join(words) + "."
-	# :201-208, 403-419: the body draw consumes object +0x220 from the previous
+	# :201-208, 417-433: the body draw consumes object +0x220 from the previous
 	# equipment pass. Equipped parts are unresolved, so that mask is unknown and
 	# the body keeps its default-visible meshes.
 	status += " Body show mask +0x220 refused: equipment pass unresolved."
