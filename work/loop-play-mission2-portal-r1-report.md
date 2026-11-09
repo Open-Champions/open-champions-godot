@@ -242,7 +242,7 @@ killed. Standard input was closed for CTest, Godot and the probe.
    seven failures are the same disclosed `m3-gnome-kill` #1-6 and
    `m5-start` #1. Disc files: 994 before, 994 after.
 
-Privacy: no file this branch changed contains a `/Users/` path. The mini
+Privacy: no file this branch changed contains a macOS absolute home path (the slash, `Users`, slash prefix; written split here so this report adds no match). The mini
 `build/` (6.5 GB) was deleted afterwards; 34 GB was free and the tree is
 1.2 GB. No push, PR, install, `/tmp` use on the mini, private-disc write,
 research or `playable-integration` edit, or process-name kill.
