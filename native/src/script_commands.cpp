@@ -245,6 +245,10 @@ Host::Host(std::shared_ptr<WorldAuthority> authority)
                                   std::to_string(static_cast<unsigned>(stop)) + ")");
     return std::uint64_t(0);
   };
+  // g_scriptMachine 0x86b270 is the loaded level script. This host's level
+  // script is its machine; givePlayerItem's weapon hook reads this statement
+  // (research-items 5a683b4 docs/give-player-item.md:131-136).
+  items_->level_script_loaded = [this] { return machine_ != nullptr; };
   variables_->stub_creature = [this](const objects::GameObject &obj) {
     const auto info = stub_info_.find(obj.addr);
     return stubs_.count(obj.addr) != 0 && info != stub_info_.end() &&
@@ -577,6 +581,14 @@ amx::NativeMap Host::command_map() {
         counts_.stopped[i]+=1;
         throw RefusedResult("refused hub availability write outside documented offer");
       }
+      // The item service is told which handler is running (restored after a
+      // nested entry run by an item notification).
+      struct CommandScope {
+        script_items::Service &items;
+        std::string was;
+        CommandScope(script_items::Service &s, const char *name) : items(s), was(s.command) { s.command = name; }
+        ~CommandScope() { items.command = was; }
+      } command_scope(*items_, kRows[i].name);
       std::optional<amx::Address> result;
       try {
         result = function(machine, params);

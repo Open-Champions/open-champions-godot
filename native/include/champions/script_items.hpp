@@ -201,6 +201,16 @@ public:
   std::vector<Call> calls;
   Counts counts;
 
+  // The script command whose handler is running ("" outside one). The script
+  // host sets it around every command it dispatches. givePlayerItem's equip
+  // reaches script_runByName through inventory_equipItem (research-items
+  // 5a683b4 docs/give-player-item.md:123-136), and only that command's
+  // no-level-script return is executed research.
+  std::string command;
+  // Whether g_scriptMachine 0x86b270 holds a loaded level script. Unbound is
+  // not an answer: the givePlayerItem weapon hook then refuses.
+  std::function<bool()> level_script_loaded;
+
   // world_createObject(typeName, position, angle, props) for
   // ScriptGenerator_spawn: the new object's address or 0. Without it a spawn
   // refuses. dynamic_type gives the object's RTTI name ("8Skeleton").
