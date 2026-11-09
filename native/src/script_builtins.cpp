@@ -2147,6 +2147,7 @@ amx::Address Variables::run_script(const std::optional<std::string> &name) {
       memory.word(MISSING_STAMP,memory.word(DRAW_FRAME)+20u);
     return -1;
   }
+  if(before_entry) before_entry(*name);
   auto outer20=string_slot, outer30=quest_string_slot,
        outer80=dialog_string_slot, outerd0=cutscene_string_slot;
   auto outer_menu=std::move(menu_string_slots);

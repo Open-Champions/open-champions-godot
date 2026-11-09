@@ -19,7 +19,8 @@ add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/scr
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/loading_equipment.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
-    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp")
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/story_route.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
     champions-script-builtins champions-level-flow champions-fx-sim champions-quests
@@ -54,7 +55,27 @@ else()
 endif()
 endif()
 
+if(TARGET champions-archive)
+# Private story-route acceptance over a selected read-only disc. Counts only.
+add_executable(champions-story-route-probe "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tools/story_route_probe.cpp")
+target_link_libraries(champions-story-route-probe PRIVATE champions-script-commands champions-archive)
+if(MSVC)
+    target_compile_options(champions-story-route-probe PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-story-route-probe PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+endif()
+
 if(BUILD_TESTING AND TARGET champions-archive)
+    # Story route after the first menu request (docs/STORY_ROUTE.md).
+    add_executable(champions-story-route-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/story_route_tests.cpp")
+    target_link_libraries(champions-story-route-tests PRIVATE champions-script-commands)
+    if(MSVC)
+        target_compile_options(champions-story-route-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-story-route-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME story-route COMMAND champions-story-route-tests)
     add_executable(champions-mission1-scripts-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/mission1_scripts_tests.cpp")
     target_link_libraries(champions-mission1-scripts-tests PRIVATE champions-script-commands)
     add_test(NAME mission1-scripts COMMAND champions-mission1-scripts-tests)

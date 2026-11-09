@@ -311,7 +311,8 @@ void menu_tick(Menu &state, int button, const MenuWorld &world) {
     const int medal = world.mission_medal(mission);
     if (button & BTN_CROSS) {
       bool accepted = false;
-      if (state.col == 0 && helper_value(0, info, available, complete, medal))
+      if (state.col == 0 && (helper_value(0, info, available, complete, medal) ||
+                             (state.row == 0 && world.row0_open)))
         accepted = true;
       else if (state.col == 1 && helper_value(7, info, available, complete, medal))
         accepted = true;
@@ -701,6 +702,7 @@ bool Campaign::tick_menu(int button, const MenuInputs &inputs) {
   world.pause = inputs.pause;
   world.slot_active = inputs.slot_active;
   world.fade = inputs.fade;
+  world.row0_open = true;
   for (int mission = 0; mission < MISSIONS; ++mission) {
     const auto byte = players_[0].missions[static_cast<std::size_t>(mission_index(difficulty_, mission))];
     if (byte & 1u)

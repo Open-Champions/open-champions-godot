@@ -349,6 +349,7 @@ void Host::install() {
   variables_->run_reward_script = [this](const std::string &name) {
     variables_->run_script(name);
   };
+  variables_->before_entry = [this](const std::string &name) { gate_entry(name); };
   // These answers reach only handlers that discard them (research 52984db
   // docs/script-effects.md: charmMonster, followPlayer, startMusic and
   // hudFadeScreen return 0 or hud_stepFade's own value).
@@ -483,8 +484,13 @@ amx::NativeMap Host::command_map() {
       // Unknown. Address zero can contain a readable string in an AMX
       // image; that is not evidence for the null call's runtime target.
       // Do not dispatch it, nor the inferred boss-music path, in this mode.
+      // In a story-route level (entry gate set) the executed travel entries pass
+      // data offset 0 and research recorded the level they request
+      // (research-story-route-r3 3c7987c docs/story-route.md:638-670, :832-848),
+      // so that string is read as the binder reads it.
       if (complete_commands_ &&
-          ((std::strcmp(kRows[i].name, "newWorld") == 0 && machine.cell(machine.params + 4) == 0) ||
+          ((std::strcmp(kRows[i].name, "newWorld") == 0 && machine.cell(machine.params + 4) == 0 &&
+            !entry_gate_) ||
            (inferred_route(kRows[i].name) &&
             machine.cell(machine.params + (cflag ? 8 : 4)) == 0))) {
         counts_.callee_refusals += 1;
@@ -1272,6 +1278,12 @@ Stop Host::enter(const std::string &name, bool optional) {
       counts_.missing_entries += 1;
     return Stop::Missing;
   }
+  try {
+    gate_entry(name);
+  } catch (const std::exception &error) {
+    remember(error);
+    return stopped();
+  }
   if (mission1_) {
     const auto offset = mission1_->offset_of(name);
     if (offset) return run_mission1_entry(*offset);
@@ -1621,6 +1633,17 @@ Stop Host::mission1_bridge_request(unsigned index) {
   return mission1_site(at[index]);
 }
 
+void Host::gate_entry(const std::string &entry) {
+  if (!entry_gate_ || !entry_gate_->entry)
+    return;
+  const auto reason = entry_gate_->entry(entry, object_entry_depth_ > 0);
+  if (!reason)
+    return;
+  counts_.entry_refusals += 1;
+  last_refusal_ = "refused entry " + *reason;
+  throw RefusedResult(last_refusal_);
+}
+
 Stop Host::run(const std::string &entry) {
   const auto stop = enter(entry, false);
   if (stop != Stop::Complete)
@@ -1639,12 +1662,15 @@ Stop Host::run_object_entry(std::size_t record_index, const std::string &entry,
   const auto previous_player = memory.word(0x4d8ae4);
   memory.word(SELECTED_WORD, record_addresses_[record_index]);
   memory.word(0x4d8ae4, active_player);
+  ++object_entry_depth_;
   try {
     const auto result = run(entry);
+    --object_entry_depth_;
     memory.word(SELECTED_WORD, previous);
     memory.word(0x4d8ae4, previous_player);
     return result;
   } catch (...) {
+    --object_entry_depth_;
     memory.word(SELECTED_WORD, previous);
     memory.word(0x4d8ae4, previous_player);
     throw;

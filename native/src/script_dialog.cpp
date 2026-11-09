@@ -421,6 +421,9 @@ void Host::dialog_message(const dialog::Bytes &msg) {
   dialog_guard(kind == dialog::MSG_OPEN ? "open" : kind == dialog::MSG_CONFIRM ? "confirm" : "message", [&] {
     if (kind == dialog::MSG_OPEN) {
       dialog_counts_.start_messages += 1;
+      // Story-route boundary: this level's dialog selection was not run.
+      if (entry_gate_ && !entry_gate_->dialog_refusal.empty())
+        throw dialog::Refused(entry_gate_->dialog_refusal);
       const auto m = dialog::parse_start_message(msg);
       // world_findObjectsByName(name, ..., 100) of the host's own objects.
       auto &list = dialog_host_.objects[m.name];

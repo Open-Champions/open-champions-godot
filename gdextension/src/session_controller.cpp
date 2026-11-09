@@ -4,6 +4,7 @@
 #include "champions/ui_text_gaps.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/story_route.hpp"
 #include "champions/pickups.hpp"
 #include "champions/ui_layout.hpp"
 #include "champions/ui_text_layout.hpp"
@@ -1066,7 +1067,13 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     }
     // Mission-2 objective execution is Unknown in the PASS research audit.
     // Reuse the existing VM, but never advance past an unsupported command.
-    next->require_complete_commands(mission2_story(level_name));
+    // Missions 3-5 story levels: only the entries research-story-route-r3
+    // 3c7987c sections 7-8 executed may start, and an unsupported command
+    // stops the script (docs/STORY_ROUTE.md).
+    const std::string story_level = level_name.to_lower().utf8().get_data();
+    next->require_complete_commands(mission2_story(level_name) ||
+                                    rta::story_route::story_level(story_level));
+    next->set_entry_gate(rta::story_route::gate_for(story_level));
     // The same options word feeds the native mixer and the script's private
     // playback model. Without an options file, use the documented boot default.
     next->set_music_volume(music_volume_bits < 0
@@ -2081,6 +2088,18 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["orientation"] = int64_t(scripts_->variables().memory.read(0x41b720));
   result["entrance"] = String::utf8(scripts_->level().entrance.c_str());
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
+  // Missions 6-12: the menu may request the table level; its in-level beats
+  // are not established, so the load is refused (docs/story-route.md:349-354).
+  if (bool(result["queued"])) {
+    const int mission = rta::story_route::table_mission(scripts_->campaign().rows(), name);
+    if (mission >= 1) {
+      if (const auto refusal = rta::story_route::in_level_refusal(mission)) {
+        result["queued"] = false;
+        result["error"] = String::utf8(refusal->c_str());
+        return result;
+      }
+    }
+  }
   // Preflight every table-proved act boundary before presentation loads a
   // new world, not only mission 2. Same predicate as prepare_campaign_entry:
   // research-quests@7efd3ce docs/quests.md:266-298.
@@ -2154,6 +2173,20 @@ Dictionary ChampionsSessionController::script_mission_menu_state() const {
       row["draw_present"] = i == 0 || available;
       row["complete"] = complete;
       row["medal"] = int64_t(medal);
+      // Missions 3-5: preflight the story request's act transfer, as mission 2's.
+      // Missions 6-12: request then refuse (docs/story-route.md:349-354).
+      String story_refusal;
+      if (i >= 2 && i <= 4 && available) {
+        try {
+          if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
+          const auto request = rta::story_route::story_request(campaign, int(i), script_act_tables_->names);
+          rta::script_commands::require_campaign_act_transfer(
+              *scripts_, *script_act_tables_, request.level, player_ && player_->imported);
+        } catch (const std::exception &error) { story_refusal = String::utf8(error.what()); }
+      }
+      row["story_refusal"] = story_refusal;
+      const auto in_level = rta::story_route::in_level_refusal(mission);
+      row["in_level_refusal"] = String::utf8(in_level ? in_level->c_str() : "");
       row["medal_column"] = bool(rta::quests::helper_value(6, info, available, complete, medal));
       row["bonus_column"] = bool(rta::quests::helper_value(10, info, available, complete, medal));
       rows.push_back(row);
@@ -2183,6 +2216,15 @@ Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits
       const auto destination = rta::script_commands::mission2_story_destination(scripts_->campaign());
       rta::script_commands::require_campaign_act_transfer(
           *scripts_, *script_act_tables_, destination, player_ && player_->imported);
+    }
+    if (menu.state == 2 && menu.row >= 2 && menu.row <= 4 && menu.col == 0 &&
+        pad_bits == rta::quests::BTN_CROSS &&
+        scripts_->campaign().mission_available(menu.row + 1)) {
+      if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
+      const auto request = rta::story_route::story_request(scripts_->campaign(), menu.row,
+                                                           script_act_tables_->names);
+      rta::script_commands::require_campaign_act_transfer(
+          *scripts_, *script_act_tables_, request.level, player_ && player_->imported);
     }
     rta::quests::MenuInputs inputs;
     // -1: the real scene uses the executed hud_stepFade(4) body at state 6,
