@@ -1,6 +1,6 @@
 # Play story route, round 1
 
-STATUS: PASS. Twelve-row menu table and acts, row-0 confirm, tested cursor rules, and a missions 3-5 entry gate over the research's 75 executed entries; missions 6-12 are requested and refused. CTest 261/261 (two load timeouts passed alone), strict Godot 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, journeys 80/81 with pickup 10 to 11 and 8 refusal kinds, identical step pairs. Private probe 212/213; the miss is a real client gap (`tormenta` `start` stops at the refused `autoPropSetState` before mission 5's availability store).
+STATUS: PASS after fix round 1 (audit play-story-route-r1 VERDICT FIX, SR1-1..SR1-7 fixed). Twelve-row menu table and acts, row-0 confirm, tested cursor rules, and a missions 3-5 entry gate over 75 entries (71 executed, 4 statically parsed); missions 6-12 story loads and missions 3-12 medal/bonus loads are refused. CTest 261/261, strict Godot 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, journeys equal to wave 38 step by step. Private probe 234/241: the seven misses are two disclosed client gaps, `islgnome` kill-state entrances stopping at the unported `killMonster` before `islc2` (m3-gnome-kill 0/6) and `tormenta` `start` stopping at `autoPropSetState` before mission 5's availability store (m5-start 0/1).
 
 Branch `codex/play-story-route` from wave 38 VERIFIED `16b66176`. Code commit
 `5f5b4ad6`. Research pin `t3/research-story-route-r3` `3c7987c`,
@@ -266,3 +266,51 @@ now checked per row.
 | GDExtensions `template_debug`, Release, `-j 4` | PASS, exit 0 for the archive extension, level-texture and creature-animation (`ext-build.log`, `tex-build.log`, `anim-build.log`). |
 | Focused CTest `story-route`, `quests`, `script-commands`, `dialog`, `mission2-route`, `mission1-scripts`, `script-items` | PASS 7/7 (`ctest-focused.log`). `story-route` 789 checks. |
 | Private probe `champions-story-route-probe <disc>`, counts only | **234/241**, exit 1 (`probe.log`). The seven failures are the two disclosed gaps: `m3-gnome-kill` #1-6 and `m5-start` #1. Their client-stop groups pass, 6/6 and 1/1. Every other group passes. Round 1's 212/213 maps to this as follows: the 12 old `m3-gnome` cases became 6 + 6 + 6 (+6 cases), and `medal-bonus-refused` is new (+22). |
+| Full CTest `ctest --test-dir build/native --output-on-failure -j 3`, stdin closed | PASS **261/261**, no timeouts this time, so no rerun was needed. Real time 1531.01 s (`ctest.out`). |
+| Strict Godot matrix `python3 tools/godot_matrix.py matrix --godot <mini Godot 4.5.2> --captures --timeout 1200`, stdin closed | PASS 54/54, 0 failed (`matrix.out`, `matrix/results.json`). It ran in parallel with CTest: two heavy jobs. |
+| Full synthetic combat | PASS, 2,645 checks, 0 failures (`matrix/playable_wave_smoke_full_combat-engine.log`). |
+| FULL_SAVE_LOAD | PASS 300/300. Continued and uninterrupted presentation both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, as in wave 38 and round 1. |
+| FULL_TRACE | PASS, unchanged. 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`, headless. |
+| Journeys, unchanged `tools/run_loop_playthrough.py`, headless then rendered, stdin closed, read-only disc | Headless 80 steps and 27 refused rows. Rendered 81 steps, 28 refused rows and 38 captures. Pickup 10 to 11 on both, 52 walk ticks, 0 retry kills, 8 refusal kinds, 0 log errors. Godot exit 1 is the retained full-journey refusal. Disc files 994 before and 994 after (`playthrough/`, `playthrough.out`). |
+
+Journeys against wave 38 (`playable-integration/work/playable-wave38/playthrough/*/result.json`),
+compared by script:
+
+- Every step's name and result pair is identical at every index in both
+  variants (80/80 and 81/81). The refused-row counts are equal (27 and 28).
+- The refusal-kind sets are equal (8 and 8). Every count matches except
+  the rendered node-3 close-fade retry counter in the hub-action kind: 1
+  here, 3 in wave 38. Headless is 2 in both. Round 1 recorded the same
+  headless 2 and rendered 1. Wave 38 gives 1-4 as the expected range, and
+  progression round 3 explains the counter as the close-fade retry under
+  the display-frame schedule, not a second grant
+  (`work/loop-play-progression-r3-report.md:34`).
+- Host-only fields: headless loot `fps` 128, rendered 2 (mini shared).
+  `rendered_pickup_verified` stays false, `player_death` stays refused and
+  `saved_level_reloaded` stays false, as in wave 38.
+- The journeys never open the mission menu past mission 2 or request a
+  medal or bonus level, so the fix round changes none of their steps.
+
+### Fix round 1 method
+
+Edited and committed on the MacBook worktree, as in round 1. The mini bare
+repo has no `codex/play-story-route` branch and the mini directory is not a
+git worktree, so the MacBook branch only advances by its own commits, which
+is a fast-forward. Code was synced to
+`~/malik-champions/open-champions/worktrees/play-story-route` with round 1's
+`rsync -a --delete --exclude .git --exclude build --exclude work --exclude .godot`,
+plus `--exclude local`. The first sync was piped through `head` and cut
+short. It was rerun to completion, and the seven changed files' SHA-256 on
+the mini matched the MacBook. That sync also removed untracked
+`tools/__pycache__` and stale extension binaries on the mini; the extension
+builds recreated the binaries. Builds and gates ran only on the mini:
+`/opt/homebrew/bin/cmake`, one `build/` directory, `-j 4`, `ctest -j 3`, at
+most two heavy jobs, and `TMPDIR` inside `work/fix1/`. `df` showed 34 GiB
+free before the build and 52 GiB before the gates. One clang
+`-fsyntax-only` check of the three changed native sources ran on the
+MacBook before the sync; nothing was built or run there. Only PIDs this
+session started were waited on; none were killed. Logs were copied into
+`work/play-story-route-fix1/` with the mini home path rewritten to `~/`. The
+mini `build/` was deleted afterwards. No push, no pull request, nothing
+installed, nothing under `/tmp` on the mini, and no disc text in tracked
+files. The probe prints group counts and case numbers only.
