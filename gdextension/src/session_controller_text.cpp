@@ -2,6 +2,7 @@
 // string tables and the help chime from the user's game folder, the HUD text
 // state for drawing, and help_task's offline pause.
 #include "session_controller.hpp"
+#include "champions/quest_log.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/strings.hpp"
 #include <godot_cpp/core/class_db.hpp>
@@ -52,6 +53,7 @@ void ChampionsSessionController::bind_text_methods() {
   ClassDB::bind_method(D_METHOD("text_key_units", "key"), &ChampionsSessionController::text_key_units);
   ClassDB::bind_method(D_METHOD("text_lookup", "key"), &ChampionsSessionController::text_lookup);
   ClassDB::bind_method(D_METHOD("quest_journal"), &ChampionsSessionController::quest_journal);
+  ClassDB::bind_method(D_METHOD("quest_journal_calls"), &ChampionsSessionController::quest_journal_calls);
   ClassDB::bind_method(D_METHOD("help_frame", "confirm"), &ChampionsSessionController::help_frame);
 }
 
@@ -204,6 +206,48 @@ Dictionary ChampionsSessionController::quest_journal() const {
     out["entries"] = entries;
     if (record.quest_count == 0)
       out["empty"] = units(scripts_->text().peek(rta::quests::QUEST_PLACEHOLDER));
+    return out;
+  } catch (const std::exception &error) {
+    return text_failure(error);
+  }
+}
+
+// Inventory page 4's text calls for record 0 (research-quest-log 965ec52
+// docs/spec/quest-log.md 252-265, native quest_log::page_calls). The font
+// argument is the stand-in FONT_WORD, as the bust plan passes it; text
+// pointers are 1-based lookup indices. The empty page's calls are complete.
+// A populated page is refused: every draw after its first title sits at a y
+// that adds a loaded font's text_drawWrapped return, which is Unknown
+// (quest-log.md 76 and 288), and what 0x1802e0 stores is Unknown (75, 289).
+Dictionary ChampionsSessionController::quest_journal_calls() const {
+  Dictionary out;
+  out["ok"] = false;
+  if (!scripts_) return out;
+  try {
+    const auto &record = scripts_->campaign().record(0);
+    out["count"] = int64_t(record.quest_count);
+    if (record.quest_count != 0) {
+      out["error"] = "populated journal page refused: a loaded font's text_drawWrapped return (the y of every "
+                     "draw after the first title) and the stores of 0x1802e0 are Unknown";
+      return out;
+    }
+    const auto page = rta::quest_log::page_calls(record.quests, record.quest_count, rta::quest_log::FONT_WORD, {});
+    Array calls;
+    for (const auto &call : page.calls) {
+      Dictionary item;
+      item["name"] = String(call.name.c_str());
+      Array args;
+      for (const auto value : call.args) args.push_back(int64_t(value));
+      item["args"] = args;
+      item["key"] = String(call.key.c_str());
+      calls.push_back(item);
+    }
+    Array lookups;
+    for (const auto &key : page.lookups) lookups.push_back(String(key.c_str()));
+    out["ok"] = true;
+    out["empty"] = page.empty;
+    out["calls"] = calls;
+    out["lookups"] = lookups;
     return out;
   } catch (const std::exception &error) {
     return text_failure(error);

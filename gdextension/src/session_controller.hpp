@@ -178,6 +178,7 @@ private:
   static void bind_text_methods();
   static void bind_hub_methods();
   godot::Dictionary quest_journal() const;
+  godot::Dictionary quest_journal_calls() const;
   void apply_text(champions::simulation::rta::script_commands::Host &);
   void note_help_box();
   void release_help_pause();

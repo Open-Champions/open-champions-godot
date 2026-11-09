@@ -343,3 +343,46 @@ supersedes the "stay refused" table above for the item commands:
 | Chain end quest variables | 107 | 123 |
 
 Every mission, menu, act and table count is unchanged.
+
+## Quest log (2026-11-08)
+
+`codex/play-quest-log` implements the Observed part of
+`t3/research-quest-log` `965ec52` `docs/spec/quest-log.md` section 6
+(audits `research-quest-log-r2` and `research-quest-log-r2-fix`, PASS).
+Synthetic keys only; `champions-quest-log-tests` (CTest `quest-log`) checks
+every row below. Citations are `quest-log.md:line` at that commit.
+
+| Behaviour | Code | Research |
+|---|---|---|
+| Storage order. `quest_add` appends on each player in order and returns at the first player whose count is 8 or whose stored title matches; earlier players keep the quest, a later call still runs, and bytes past the new terminator stay | `Campaign::quest_add`, `Variables::quest_add` (unchanged) | `quest-log.md:213`, `ref_quest_log.py:73-86` |
+| `quest_remove` covers every match with the nine-byte `NoQuests` placeholder and slides only the entries after the last match; the count drops by one. `A, B, A` becomes visible `NoQuests, B` | `Campaign::quest_remove`, `Variables::quest_remove` (unchanged) | `quest-log.md:214-215`, `ref_quest_log.py:89-107` |
+| `mission_setComplete` sets or clears bit 1 on all four records, leaves the other bits, writes nothing for mission 13, and does not read or write the quest span | `Campaign::mission_set_complete`, `Variables::mission_set_complete` (unchanged); the binder test records every store | `quest-log.md:216` |
+| `quest_clearAll` covers the used entries of the first `g_numPlayers` records and stores count 0; a later record keeps its list and count | new `Campaign::quest_clear_all`, the list part of `clear_for_act_change` | `quest-log.md:217`, `ref_quest_log.py:110-118` |
+| `addQuest` and `removeQuest` are the only script commands that write the journal. Every other campaign command the host runs leaves the binder span byte-identical | host test over 16 commands | `quest-log.md:225-232` |
+| The page reads stored order, not sorted, with no completed row | `quest_log::page_calls` | `quest-log.md:219-223`, `78` |
+| Populated batch per entry: `text_begin(font, 6, 0x80323c3c, -1)`, `text_setClip(0, 119, 320, 440)`, `0x1802e0(0x80323c3c, -1)`, title lookup, `text_drawWrapped(24, y, ptr, 288, 82, 418, 21)`, `0x1802e0(0x802d2d2d, -1)`, body lookup, the same wrap at the updated y, `text_end`. y starts at 114, each wrap return is added, then 22 after the body | `quest_log::page_calls`, `quest_log::row_positions` | `quest-log.md:259-263`, `75-76`, `ref_quest_log.py:121-133` |
+| Empty: `text_begin` with the same arguments, lookup `NoQuests`, `text_drawWideCentered(160, 224, ptr, 1000000)`, `text_end`; no clip, no wrap | `quest_log::page_calls` count 0 | `quest-log.md:77`, `263-265` |
+| `savePlayer` copies the medal player's quest span, tails included; `restorePlayer` writes it back over a changed span and keeps the live medal byte; the other player's span is left alone (medal slots 0 and 1) | `Variables::save_player_record` / `restore_player_record` (unchanged) | `quest-log.md:269-277` |
+
+`page_calls` takes the wrap return as a caller callback. `text_lookup` is a
+call with a key; a text pointer argument is the 1-based lookup index. The
+session's `quest_journal_calls()` returns the empty page's calls with the
+`0x4f7104` font stand-in, and the Godot journal interprets them like the
+other text plans (gamefontsmall, layer 6, colour `0x80323c3c`). Glyph
+placement is this client's centring of that call, not a measured pixel.
+
+Refused, with reasons:
+
+- **Populated page draws.** A loaded font's `text_drawWrapped` return is
+  Unknown (`quest-log.md:76`, `288`), so every y after the first title is not
+  a value here, and what `0x1802e0` stores is Unknown (`75`, `289`).
+  `quest_journal_calls()` refuses a non-empty list and the journal keeps
+  `layout_refused` with no text or sprite submission. No return is invented.
+- **Parchment.** The 320×350 header is validated. Its displayed crop and the
+  third sprite argument's role are Unknown (`quest-log.md:74`, `290`), so the
+  `(0, −4, 104, 5, 0x80808080)` submission is not made.
+- **Pixel parity.** Coordinates are call arguments; no retail frame was
+  measured (`quest-log.md:16-21`, `82-84`).
+- Not in scope: the `save_build` / `save_load` player block (no PS2 card image
+  here, see Saves), which `addQuest` sites a played session reaches, and
+  quest-variable round trip (`quest-log.md:290-293`).
