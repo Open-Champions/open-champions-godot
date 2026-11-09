@@ -269,6 +269,23 @@ int main(int argc, char **argv) {
                                     entries[4].story == "tormenta");
         for (int mission = 3; mission <= 5; ++mission)
           tally.add("menu-table", route::story_level_mission(entries[std::size_t(mission - 1)].story) == mission);
+        // Medal and bonus levels of missions 3-12 are refused at load
+        // (docs/story-route.md:268); an empty column has nothing to load.
+        for (int mission = 3; mission <= 12; ++mission) {
+          const auto &row = rows[std::size_t(mission - 1)];
+          for (const auto *name : {&row.medal, &row.bonus}) {
+            const auto match = route::table_match(rows, *name);
+            tally.add("medal-bonus-refused",
+                      name->empty() || (match.mission == mission && route::load_refusal(rows, *name).has_value()));
+          }
+        }
+        // The mission 4 and 5 medal levels research names (:562-563).
+        tally.add("medal-bonus-refused", route::table_match(rows, "watmedal").mission == 4 &&
+                                             route::table_match(rows, "watmedal").column == route::Column::Medal &&
+                                             route::load_refusal(rows, "watmedal").has_value());
+        tally.add("medal-bonus-refused", route::table_match(rows, "tormedal").mission == 5 &&
+                                             route::table_match(rows, "tormedal").column == route::Column::Medal &&
+                                             route::load_refusal(rows, "tormedal").has_value());
       } catch (const std::exception &) {
         tally.add("menu-table", false);
       }
@@ -372,14 +389,30 @@ int main(int argc, char **argv) {
         plant.vars["startedQuest"] = 1;
       if (state >= 2)
         plant.vars["finishedQuest"] = state == 3 ? 1 : 0;
-      const int kills = state == 1 || state == 2 ? 8 : 0;
-      tally.add("m3-gnome", with("islgnome", plant, [&](sc::Host &h) {
-                  const auto stop = h.run(entry);
-                  const auto k = command("killMonster");
-                  const auto calls = h.counts().executed[k] + h.counts().refused[k];
-                  if (kills == 0)
+      const auto k = command("killMonster");
+      if (state == 0 || state == 3) {
+        tally.add("m3-gnome", with("islgnome", plant, [&](sc::Host &h) {
+                    const auto stop = h.run(entry);
+                    const auto calls = h.counts().executed[k] + h.counts().refused[k];
                     return ran(stop) && calls == 0 && pending(h) == "islc2" && entrance(h) == doors[std::size_t(i)];
-                  return calls >= 1 && calls <= std::uint64_t(kills) && untouched(h);
+                  }));
+        continue;
+      }
+      // Research outcome (docs/story-route.md:454-463): eight killMonster
+      // calls, then the entrance still requests islc2 with its door.
+      tally.add("m3-gnome-kill", with("islgnome", plant, [&](sc::Host &h) {
+                  const auto stop = h.run(entry);
+                  const auto calls = h.counts().executed[k] + h.counts().refused[k];
+                  return ran(stop) && calls == 8 && pending(h) == "islc2" && entrance(h) == doors[std::size_t(i)] &&
+                         untouched(h);
+                }));
+      // Client: killMonster is a Partial row the host does not route, so the
+      // entrance stops at the first call, before islc2 is requested. Counted
+      // as its own group so the mission 3 gap stays visible (not a match).
+      tally.add("m3-gnome-kill-client-stop", with("islgnome", plant, [&](sc::Host &h) {
+                  const auto stop = h.run(entry);
+                  return stops_at(h, stop, "killMonster") && h.counts().refused[k] == 1 &&
+                         h.counts().executed[k] == 0 && pending(h) == PENDING_SENTINEL && untouched(h);
                 }));
     }
   }
@@ -397,14 +430,17 @@ int main(int argc, char **argv) {
   tally.add("m3-complete", with("islcave1", {}, [](sc::Host &h) {
               return ran(h.run("callScri7351")) && missions(h, 3, 0xA2, 0xA2) && quests(h) == 0;
             }));
-  for (const auto *entry : {"setMissi5f9f", "setMissidce3", "setMissie8e9", "setMissic4"}) {
-    const bool quest = std::string(entry) == "setMissie8e9" || std::string(entry) == "setMissic4";
-    // Section 7 does not mention store calls on these; two stop at the
-    // client's refused activateStore after the availability write.
-    tally.add("m4-offer", with("hub", {}, [&](sc::Host &h) {
-                const auto stop = h.run(entry);
-                return (ran(stop) || stops_at(h, stop, "activateStore")) && missions(h, 4, 0xA1, 0xA0) &&
-                       quests(h) == (quest ? 1 : 0);
+  // Section 7 does not mention store calls on these (store_known false); the
+  // list records which ones stop at the client's refused activateStore on
+  // the disc (client_store_stop), and each row is checked against that.
+  for (const auto &entry : route::availability_entries()) {
+    if (entry.mission != 4)
+      continue;
+    tally.add("m4-offer", with(entry.level, {}, [&](sc::Host &h) {
+                const auto stop = h.run(entry.name);
+                const bool stop_ok = entry.client_store_stop ? stops_at(h, stop, "activateStore") : ran(stop);
+                return !entry.store_known && stop_ok && missions(h, 4, 0xA1, 0xA0) &&
+                       quests(h) == (entry.adds_quest ? 1 : 0);
               }));
   }
 

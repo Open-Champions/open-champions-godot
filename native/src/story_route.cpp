@@ -24,20 +24,20 @@ const char *const S7_TRAVEL = "docs/story-route.md:430-440";
 const char *const S7_RACER = "docs/story-route.md:442-450 (static parse)";
 const char *const S7_GNOME = "docs/story-route.md:454-463";
 const char *const S7_BLESS = "docs/story-route.md:465-474";
-const char *const S7_DONE = "docs/story-route.md:476-487";
+const char *const S7_DONE = "docs/story-route.md:476-485";
 const char *const S7_CAVE = "docs/story-route.md:489-494";
 const char *const S8_WSTART = "docs/story-route.md:599-611";
 const char *const S8_WINTRO = "docs/story-route.md:613-621";
-const char *const S8_WATER1 = "docs/story-route.md:623-636";
+const char *const S8_WATER1 = "docs/story-route.md:623-634";
 const char *const S8_KEYS = "docs/story-route.md:638-662";
 const char *const S8_BACK = "docs/story-route.md:664-670";
 const char *const S8_SHARD = "docs/story-route.md:672-726";
-const char *const S8_IFF46 = "docs/story-route.md:745-750";
+const char *const S8_IFF46 = "docs/story-route.md:745-748";
 const char *const S8_TSTART = "docs/story-route.md:752-760";
 const char *const S8_TPRE = "docs/story-route.md:762-767";
 const char *const S8_TCUT = "docs/story-route.md:773-780";
 const char *const S8_GOL = "docs/story-route.md:789-796";
-const char *const S8_GOLQ = "docs/story-route.md:804-809";
+const char *const S8_GOLQ = "docs/story-route.md:804-807";
 const char *const S8_ENDTOR = "docs/story-route.md:811-830";
 const char *const S8_TTRAVEL = "docs/story-route.md:832-848";
 
@@ -64,7 +64,10 @@ std::vector<Entry> build_entries() {
       {"islgnome", "entrance2", 3, Kind::Travel, S7_GNOME},
       {"islgnome", "entrance3", 3, Kind::Travel, S7_GNOME},
       // The eight killMonster calls run in this callee when startedQuest is 1
-      // and finishedQuest is absent or 0 (docs/story-route.md:454-463).
+      // and finishedQuest is absent or 0 (docs/story-route.md:454-463). The
+      // client does not port killMonster (Partial, not routed), so with the
+      // gnome quest started and not finished the entrance stops at the first
+      // call, before islc2 is requested: a disclosed mission 3 play gap.
       {"islgnome", "failQuest", 3, Kind::Action, S7_GNOME},
       {"islc2", "iffbe4", 3, Kind::Condition, S7_BLESS},
       {"islc2", "if9be1", 3, Kind::Condition, S7_BLESS},
@@ -122,7 +125,7 @@ std::vector<RefusedEntry> build_refused() {
   for (const char *level : {"wate2a", "wate2b", "wate2c"})
     out.push_back({level, "brokeFinalWall",
                    "faults at pc 0x146ecc inside addParticleOnObject before its quest removal; the "
-                   "statements after the fault are Unknown (docs/story-route.md:728-737)"});
+                   "statements after the fault are Unknown (docs/story-route.md:728-736)"});
   for (const char *level : {"watg2a", "watg2b", "watg2c"})
     out.push_back({level, "holeCheck",
                    "returns without its completion stores with no plug object; the distance that "
@@ -225,6 +228,39 @@ int table_mission(const std::vector<quests::MissionRow> &rows, const std::string
   return 0;
 }
 
+TableMatch table_match(const std::vector<quests::MissionRow> &rows, const std::string &requested) {
+  const auto base = lower(requested.substr(0, requested.find('_')));
+  const auto is = [&](const std::string &name) { return !name.empty() && lower(name) == base; };
+  // Story and evil first, as table_mission matches them.
+  if (const int mission = table_mission(rows, requested)) {
+    const auto &info = rows[static_cast<std::size_t>(mission - 1)];
+    return {mission, is(info.story) ? Column::Story : Column::Evil};
+  }
+  for (int row = 0; row < MENU_MISSIONS && static_cast<std::size_t>(row) < rows.size(); ++row) {
+    const auto &info = rows[static_cast<std::size_t>(row)];
+    if (is(info.medal))
+      return {row + 1, Column::Medal};
+    if (is(info.bonus))
+      return {row + 1, Column::Bonus};
+  }
+  return {};
+}
+
+std::optional<std::string> load_refusal(const std::vector<quests::MissionRow> &rows,
+                                        const std::string &requested) {
+  const auto match = table_match(rows, requested);
+  if (match.mission < 1)
+    return std::nullopt;
+  if (match.column == Column::Story || match.column == Column::Evil)
+    return in_level_refusal(match.mission);
+  if (match.mission < 3)
+    return std::nullopt;
+  return "mission " + std::to_string(match.mission) + " " +
+         (match.column == Column::Medal ? "medal" : "bonus") +
+         " level was not run; the medal and bonus columns are not re-run (docs/story-route.md:268, "
+         ":562-563)";
+}
+
 const std::vector<Entry> &observed_entries() {
   static const std::vector<Entry> entries = build_entries();
   return entries;
@@ -245,17 +281,21 @@ bool story_level(const std::string &level) { return story_level_mission(level) !
 
 const std::vector<Availability> &availability_entries() {
   // Mission 4: docs/story-route.md:504-510. Missions 5 and 6:
-  // docs/story-route.md:861-880 (store calls :866-875).
+  // docs/story-route.md:861-878 (store calls :868-876).
   static const std::vector<Availability> entries = {
-      {"hub", "setMissi5f9f", 4, false, false}, {"hub", "setMissidce3", 4, false, false},
-      {"hub", "setMissie8e9", 4, true, false},  {"hub", "setMissic4", 4, true, false},
-      {"hub", "setMissif825", 5, false, false}, {"hub", "setMissibbbb", 5, false, true},
-      {"hub", "setMissi9389", 5, false, true},  {"hub2", "setMissif825", 5, false, false},
-      {"hub2", "setMissibbbb", 5, false, true}, {"hub2", "setMissi9389", 5, false, true},
-      {"hub", "setMissi95d5", 6, false, false}, {"hub", "setMissi4082", 6, false, true},
-      {"hub", "setMissicaba", 6, true, false},  {"hub", "setMissi6d46", 6, true, true},
-      {"hub2", "setMissi95d5", 6, false, false}, {"hub2", "setMissi4082", 6, false, true},
-      {"hub2", "setMissic3ab", 6, false, true},
+      // Mission 4: store calls Unknown in research; two stop at the client's
+      // refused activateStore on the disc (client observation).
+      {"hub", "setMissi5f9f", 4, false, false, false, false},
+      {"hub", "setMissidce3", 4, false, false, false, true},
+      {"hub", "setMissie8e9", 4, true, false, false, false},
+      {"hub", "setMissic4", 4, true, false, false, true},
+      {"hub", "setMissif825", 5, false, false, true, false}, {"hub", "setMissibbbb", 5, false, true, true, false},
+      {"hub", "setMissi9389", 5, false, true, true, false},  {"hub2", "setMissif825", 5, false, false, true, false},
+      {"hub2", "setMissibbbb", 5, false, true, true, false}, {"hub2", "setMissi9389", 5, false, true, true, false},
+      {"hub", "setMissi95d5", 6, false, false, true, false}, {"hub", "setMissi4082", 6, false, true, true, false},
+      {"hub", "setMissicaba", 6, true, false, true, false},  {"hub", "setMissi6d46", 6, true, true, true, false},
+      {"hub2", "setMissi95d5", 6, false, false, true, false}, {"hub2", "setMissi4082", 6, false, true, true, false},
+      {"hub2", "setMissic3ab", 6, false, true, true, false},
   };
   return entries;
 }
@@ -285,7 +325,7 @@ std::string dialog_refusal(const std::string &level) {
     return {};
   return "dialog selection in mission " + std::to_string(mission) +
          " levels was not run; node reachability is Inferred at best (docs/story-route.md:412-421, "
-         ":442-450, :465-475, :782-802)";
+         ":442-450, :465-474, :782-802)";
 }
 
 std::optional<script_commands::EntryGate> gate_for(const std::string &level) {

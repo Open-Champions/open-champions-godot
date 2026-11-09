@@ -2090,14 +2090,13 @@ Dictionary ChampionsSessionController::script_level_request() const {
   result["post_action_pending"] = !scripts_->variables().memory.cstr(0x86fa80).empty();
   // Missions 6-12: the menu may request the table level; its in-level beats
   // are not established, so the load is refused (docs/story-route.md:349-354).
+  // Medal and bonus levels of missions 3-12 are refused too: those columns
+  // were not re-run (docs/story-route.md:268, :562-563).
   if (bool(result["queued"])) {
-    const int mission = rta::story_route::table_mission(scripts_->campaign().rows(), name);
-    if (mission >= 1) {
-      if (const auto refusal = rta::story_route::in_level_refusal(mission)) {
-        result["queued"] = false;
-        result["error"] = String::utf8(refusal->c_str());
-        return result;
-      }
+    if (const auto refusal = rta::story_route::load_refusal(scripts_->campaign().rows(), name)) {
+      result["queued"] = false;
+      result["error"] = String::utf8(refusal->c_str());
+      return result;
     }
   }
   // Preflight every table-proved act boundary before presentation loads a

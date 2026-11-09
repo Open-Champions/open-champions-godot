@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <vector>
@@ -510,8 +511,8 @@ void test_object_use_refused() {
 
 void test_observed_effects() {
   // Availability: record 0 only (docs/story-route.md:391-398, :599-611).
-  // Completion: all four records (docs/story-route.md:476-494, :623-636).
-  // Quest action: one quest, mission bytes unchanged (:424-428, :804-809).
+  // Completion: all four records (docs/story-route.md:476-494, :623-634).
+  // Quest action: one quest, mission bytes unchanged (:424-428, :804-807).
   // Travel: level, entrance, orientation 0xff with no object (:430-440, :638-670, :832-848).
   // Removal of the last quest leaves NoQuests (:556-560, :708-712, :815-830).
   auto image = build_calls(
@@ -620,7 +621,7 @@ void test_item_count_condition() {
 
 void test_hub_availability() {
   // The hub entries set the next mission's bit on record 0 only; caba/6d46
-  // add a quest (docs/story-route.md:504-510, :861-880). Authored bodies with
+  // add a quest (docs/story-route.md:504-510, :861-878). Authored bodies with
   // the listed native shape; activateStore stays a refused shop call.
   for (const auto &entry : route::availability_entries()) {
     std::vector<Call> calls = {{"setMissionAvailable", {entry.mission, 1}}};
@@ -654,6 +655,109 @@ void test_hub_availability() {
   }
 }
 
+void test_entry_basis() {
+  // 71 entries were executed and 4 (the islc1 racer wrappers) were a static
+  // parse, not a run (docs/story-route.md:442-450). failQuest, endMission and
+  // the two steppedOnTrigger entries ran only inside their callers
+  // (:454-463, :476-485, :489-494, :623-634).
+  std::set<std::string> parsed;
+  int executed = 0;
+  for (const auto &entry : route::observed_entries()) {
+    if (std::string(entry.evidence).find("static parse") != std::string::npos)
+      parsed.insert(entry.name);
+    else
+      ++executed;
+  }
+  check(executed == 71 && parsed == std::set<std::string>{"postActifb1b", "postActi6592", "postActi928c",
+                                                          "postActifd9a"},
+        "71 executed and 4 statically parsed entries");
+}
+
+void test_hub_research_table() {
+  // A literal table from the research, independent of the list's own flags.
+  // store: 1 research names a changeSwoop(0)/activateStore pair, 0 research says
+  // the entry has neither (:868-876), -1 research does not say (section 7).
+  struct Row {
+    const char *level, *name;
+    int mission;
+    bool quest;
+    int store;
+  };
+  const Row research[] = {
+      // Mission 4, docs/story-route.md:504-510: e8e9 and c4 add a quest; store calls not mentioned.
+      {"hub", "setMissi5f9f", 4, false, -1},
+      {"hub", "setMissidce3", 4, false, -1},
+      {"hub", "setMissie8e9", 4, true, -1},
+      {"hub", "setMissic4", 4, true, -1},
+      // Mission 5, :861-863, no quest; store pairs on bbbb and 9389, :868-871.
+      {"hub", "setMissif825", 5, false, 0},
+      {"hub", "setMissibbbb", 5, false, 1},
+      {"hub", "setMissi9389", 5, false, 1},
+      {"hub2", "setMissif825", 5, false, 0},
+      {"hub2", "setMissibbbb", 5, false, 1},
+      {"hub2", "setMissi9389", 5, false, 1},
+      // Mission 6 on hub, :863-867 (Q-hub on caba and 6d46); stores :868-869.
+      {"hub", "setMissi95d5", 6, false, 0},
+      {"hub", "setMissi4082", 6, false, 1},
+      {"hub", "setMissicaba", 6, true, 0},
+      {"hub", "setMissi6d46", 6, true, 1},
+      // Mission 6 on hub2, :867-868, no quest; stores :870-871.
+      {"hub2", "setMissi95d5", 6, false, 0},
+      {"hub2", "setMissi4082", 6, false, 1},
+      {"hub2", "setMissic3ab", 6, false, 1},
+  };
+  const auto &list = route::availability_entries();
+  check(list.size() == std::size(research), "the hub list has the research's seventeen entries");
+  for (const auto &want : research) {
+    const std::string label = std::string(want.level) + " " + want.name;
+    const auto found = std::find_if(list.begin(), list.end(), [&](const route::Availability &entry) {
+      return std::string(entry.level) == want.level && std::string(entry.name) == want.name;
+    });
+    check(found != list.end(), label + " is listed");
+    if (found == list.end())
+      continue;
+    check(found->mission == want.mission, label + " mission matches research");
+    check(found->adds_quest == want.quest, label + " quest matches research");
+    check(found->store_known == (want.store >= 0), label + " store basis matches research");
+    check(want.store < 0 ? !found->store_calls : found->store_calls == (want.store == 1),
+          label + " store calls match research, and Unknown claims none");
+    check(!found->client_store_stop || want.store < 0, label + " disc observation only where research is silent");
+  }
+}
+
+void test_medal_bonus_refused() {
+  // Medal and bonus columns were not re-run (docs/story-route.md:268);
+  // watmedal and tormedal were not run (:562-563).
+  auto rows = authored_rows();
+  for (int row = 0; row < 12; ++row) {
+    rows[std::size_t(row)].medal = story(row + 1) + "m";
+    rows[std::size_t(row)].bonus = story(row + 1) + "b";
+  }
+  for (int mission = 1; mission <= 12; ++mission) {
+    const auto label = " of mission " + std::to_string(mission);
+    const auto medal = route::table_match(rows, story(mission) + "m_sub");
+    const auto bonus = route::table_match(rows, story(mission) + "b");
+    check(medal.mission == mission && medal.column == route::Column::Medal, "medal name maps" + label);
+    check(bonus.mission == mission && bonus.column == route::Column::Bonus, "bonus name maps" + label);
+    const auto medal_refusal = route::load_refusal(rows, story(mission) + "m");
+    const auto bonus_refusal = route::load_refusal(rows, story(mission) + "b");
+    if (mission >= 3)
+      check(medal_refusal && bonus_refusal && medal_refusal->find(":268") != std::string::npos &&
+                medal_refusal->find("medal") != std::string::npos && bonus_refusal->find("bonus") != std::string::npos,
+            "medal and bonus loads refuse" + label);
+    else
+      check(!medal_refusal && !bonus_refusal, "medal and bonus keep their policy" + label);
+    const auto story_refusal = route::load_refusal(rows, story(mission));
+    check(route::table_match(rows, story(mission)).column == route::Column::Story &&
+              bool(story_refusal) == (mission >= 6),
+          "story load refuses only for missions 6-12" + label);
+  }
+  check(route::table_match(rows, evil(10)).column == route::Column::Evil && route::load_refusal(rows, evil(10)),
+        "an evil name maps to the story column and refuses");
+  check(route::table_match(rows, "auth-other").mission == 0 && !route::load_refusal(rows, "auth-other"),
+        "a name outside the table is not refused here");
+}
+
 void test_kept_refusals() {
   check(refuses(route::refuse_menu_draw) && refuses(route::refuse_input_restorer) &&
             refuses(route::refuse_loader_body) && refuses(route::refuse_arrival),
@@ -675,6 +779,9 @@ int main() {
   test_offset_zero_travel();
   test_item_count_condition();
   test_hub_availability();
+  test_entry_basis();
+  test_hub_research_table();
+  test_medal_bonus_refused();
   test_kept_refusals();
   if (failed) {
     std::cerr << failed << " of " << checks << " checks failed\n";

@@ -484,10 +484,15 @@ amx::NativeMap Host::command_map() {
       // Unknown. Address zero can contain a readable string in an AMX
       // image; that is not evidence for the null call's runtime target.
       // Do not dispatch it, nor the inferred boss-music path, in this mode.
-      // In a story-route level (entry gate set) the executed travel entries pass
-      // data offset 0 and research recorded the level they request
-      // (research-story-route-r3 3c7987c docs/story-route.md:638-670, :832-848),
-      // so that string is read as the binder reads it.
+      // In a story-route level (entry gate set) the string is read as the
+      // binder reads it. Research ran each listed travel entry through the
+      // original binder and recorded the pending level it wrote
+      // (research-story-route-r3 3c7987c docs/story-route.md:430-440,
+      // :638-670, :832-848). That those shipped entries pass data offset 0 is
+      // a client observation on the disc, not a research line; the private
+      // story-route probe reads offset 0 and reproduces every recorded level
+      // (groups m3-travel, m4-travel, m4-back, m5-travel). Only listed entries
+      // can start in a gated level.
       if (complete_commands_ &&
           ((std::strcmp(kRows[i].name, "newWorld") == 0 && machine.cell(machine.params + 4) == 0 &&
             !entry_gate_) ||
