@@ -1,0 +1,539 @@
+Test project ~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native
+        Start 147: create-fixtures
+        Start 235: script-commands
+        Start 237: script-commands-measure-usage
+  1/260 Test #147: create-fixtures ......................   Passed    0.19 sec
+        Start 255: frontend-exact
+  2/260 Test #255: frontend-exact .......................   Passed    0.02 sec
+        Start 242: quests
+  3/260 Test #242: quests ...............................   Passed    0.03 sec
+        Start 238: script-commands-measure-empty
+  4/260 Test #237: script-commands-measure-usage ........   Passed    0.41 sec
+  5/260 Test #238: script-commands-measure-empty ........   Passed    0.18 sec
+        Start 248: mission2-actors
+        Start 210: level-flow-exact
+  6/260 Test #248: mission2-actors ......................   Passed    0.17 sec
+        Start 253: ps2-save
+  7/260 Test #210: level-flow-exact .....................   Passed    0.20 sec
+        Start 256: campaign-inventory
+  8/260 Test #253: ps2-save .............................   Passed    0.19 sec
+        Start   1: campaign-actors
+  9/260 Test #256: campaign-inventory ...................   Passed    0.20 sec
+        Start   2: blood1-actors
+ 10/260 Test   #1: campaign-actors ......................   Passed    0.27 sec
+        Start   3: resource-manager
+ 11/260 Test   #2: blood1-actors ........................   Passed    0.31 sec
+        Start   4: player-state
+ 12/260 Test   #3: resource-manager .....................   Passed    0.26 sec
+        Start   5: fx-exact
+ 13/260 Test   #4: player-state .........................   Passed    0.28 sec
+        Start   6: fx-render
+ 14/260 Test #235: script-commands ......................   Passed    1.47 sec
+        Start   7: fx-recipes
+ 15/260 Test   #6: fx-render ............................   Passed    0.50 sec
+        Start   8: fx-skills
+ 16/260 Test   #8: fx-skills ............................   Passed    0.76 sec
+        Start   9: fx-sim
+ 17/260 Test   #9: fx-sim ...............................   Passed    0.32 sec
+        Start  10: native-fx-synthetic
+ 18/260 Test  #10: native-fx-synthetic ..................   Passed    0.26 sec
+        Start  11: level-lights
+ 19/260 Test  #11: level-lights .........................   Passed    0.31 sec
+        Start  12: level-texture
+ 20/260 Test  #12: level-texture ........................   Passed    0.21 sec
+        Start  13: level-draw
+ 21/260 Test  #13: level-draw ...........................   Passed    0.20 sec
+        Start  14: level-draw-measure-atlas-refused
+ 22/260 Test  #14: level-draw-measure-atlas-refused .....   Passed    0.24 sec
+        Start  15: water-draw
+ 23/260 Test  #15: water-draw ...........................   Passed    0.26 sec
+        Start  16: game-profiles
+ 24/260 Test  #16: game-profiles ........................   Passed    0.37 sec
+        Start  17: native-save
+ 25/260 Test   #7: fx-recipes ...........................   Passed    4.94 sec
+        Start  18: native-snapshot
+ 26/260 Test   #5: fx-exact .............................   Passed    6.62 sec
+        Start  19: native-save-access
+ 27/260 Test  #19: native-save-access ...................   Passed    5.11 sec
+        Start  20: native-save-partition
+ 28/260 Test  #17: native-save ..........................   Passed  150.77 sec
+        Start  21: native-save-indexed
+ 29/260 Test  #20: native-save-partition ................   Passed  173.69 sec
+        Start  22: messages-api
+ 30/260 Test  #22: messages-api .........................   Passed    0.24 sec
+        Start  23: messages-exact
+ 31/260 Test  #18: native-snapshot ......................   Passed  282.99 sec
+        Start  24: messages-integrity
+ 32/260 Test  #24: messages-integrity ...................   Passed   12.95 sec
+        Start  25: script-builtins-api
+ 33/260 Test  #25: script-builtins-api ..................   Passed    0.28 sec
+        Start  26: script-builtins-exact
+ 34/260 Test  #23: messages-exact .......................***Failed  122.61 sec
+        Start  27: arena-match-host
+ 35/260 Test  #27: arena-match-host .....................   Passed    0.65 sec
+        Start  28: arena-scheduler-runtime
+ 36/260 Test  #28: arena-scheduler-runtime ..............   Passed   16.31 sec
+        Start  29: arena-match-exact
+ 37/260 Test  #29: arena-match-exact ....................   Passed    0.90 sec
+        Start  30: arena-monsters-exact
+ 38/260 Test  #30: arena-monsters-exact .................   Passed   20.65 sec
+        Start  31: simulation-boundary
+ 39/260 Test  #31: simulation-boundary ..................   Passed    0.33 sec
+        Start  32: core-trace-integrity
+ 40/260 Test  #32: core-trace-integrity .................   Passed   47.67 sec
+        Start  33: core-arithmetic-exact
+ 41/260 Test  #33: core-arithmetic-exact ................   Passed    6.41 sec
+        Start  34: core-math-exact
+ 42/260 Test  #34: core-math-exact ......................   Passed   15.16 sec
+        Start  35: core-state-exact
+ 43/260 Test  #35: core-state-exact .....................   Passed    1.15 sec
+        Start  36: items-exact
+ 44/260 Test  #36: items-exact ..........................   Passed    7.30 sec
+        Start  37: item-generation-exact
+ 45/260 Test  #37: item-generation-exact ................   Passed    2.18 sec
+        Start  38: item-names-exact
+ 46/260 Test  #38: item-names-exact .....................   Passed    1.57 sec
+        Start  39: combat-common-exact
+ 47/260 Test  #39: combat-common-exact ..................   Passed    9.62 sec
+        Start  40: combat-damage-exact
+ 48/260 Test  #40: combat-damage-exact ..................   Passed    5.73 sec
+        Start  41: combat-stats-exact
+ 49/260 Test  #41: combat-stats-exact ...................   Passed   15.98 sec
+        Start  42: combat-items-exact
+ 50/260 Test  #42: combat-items-exact ...................   Passed    1.20 sec
+        Start  43: fire-touch-exact
+ 51/260 Test  #43: fire-touch-exact .....................   Passed    1.05 sec
+        Start  44: amx-image-exact
+ 52/260 Test  #44: amx-image-exact ......................   Passed    2.51 sec
+        Start  45: amx-execute-exact
+ 53/260 Test  #45: amx-execute-exact ....................   Passed    2.50 sec
+        Start  46: amx-host-exact
+ 54/260 Test  #46: amx-host-exact .......................   Passed    2.98 sec
+        Start  47: netwire-codec-exact
+ 55/260 Test  #47: netwire-codec-exact ..................   Passed   16.66 sec
+        Start  48: netwire-session-exact
+ 56/260 Test  #48: netwire-session-exact ................   Passed    6.35 sec
+        Start  49: netwire-tick-exact
+ 57/260 Test  #49: netwire-tick-exact ...................   Passed    8.88 sec
+        Start  50: amx-validation-transport
+ 58/260 Test  #50: amx-validation-transport .............   Passed    2.68 sec
+        Start  51: session-replay-transport
+ 59/260 Test  #51: session-replay-transport .............   Passed   32.05 sec
+        Start  52: session-owned-host
+ 60/260 Test  #52: session-owned-host ...................   Passed    0.26 sec
+        Start  53: session-replay-exact
+ 61/260 Test  #53: session-replay-exact .................   Passed   14.56 sec
+        Start  54: objects-runtime-host
+ 62/260 Test  #54: objects-runtime-host .................   Passed    0.33 sec
+        Start  55: objects-runtime-exact
+ 63/260 Test  #55: objects-runtime-exact ................   Passed   13.90 sec
+        Start  56: objects-runtime-transport
+ 64/260 Test  #21: native-save-indexed ..................   Passed  463.03 sec
+        Start  57: session-objects-host
+ 65/260 Test  #57: session-objects-host .................   Passed    1.36 sec
+        Start  58: session-objects-exact
+ 66/260 Test  #56: objects-runtime-transport ............   Passed   57.34 sec
+        Start  59: session-objects-transport
+ 67/260 Test  #26: script-builtins-exact ................   Passed  327.89 sec
+        Start  60: creature-hp-host
+ 68/260 Test  #60: creature-hp-host .....................   Passed    0.24 sec
+        Start  61: creature-hp-exact
+ 69/260 Test  #61: creature-hp-exact ....................   Passed    1.53 sec
+        Start  62: creature-hp-transport
+ 70/260 Test  #62: creature-hp-transport ................   Passed    6.96 sec
+        Start  63: creature-movement-host
+ 71/260 Test  #63: creature-movement-host ...............   Passed    0.31 sec
+        Start  64: creature-water-host
+ 72/260 Test  #64: creature-water-host ..................   Passed    0.18 sec
+        Start  65: creature-movement-exact
+ 73/260 Test  #65: creature-movement-exact ..............   Passed    1.53 sec
+        Start  66: creature-movement-transport
+ 74/260 Test  #66: creature-movement-transport ..........   Passed    9.48 sec
+        Start  67: creature-turn-host
+ 75/260 Test  #67: creature-turn-host ...................   Passed    0.33 sec
+        Start  68: creature-turn-exact
+ 76/260 Test  #68: creature-turn-exact ..................   Passed    1.66 sec
+        Start  69: creature-turn-transport
+ 77/260 Test  #69: creature-turn-transport ..............   Passed   21.69 sec
+        Start  70: combat-creature-host
+ 78/260 Test  #70: combat-creature-host .................   Passed    0.26 sec
+        Start  71: combat-creature-exact
+ 79/260 Test  #71: combat-creature-exact ................   Passed    1.44 sec
+        Start  72: combat-creature-transport
+ 80/260 Test  #72: combat-creature-transport ............   Passed    7.40 sec
+        Start  73: raw-handles-host
+ 81/260 Test  #73: raw-handles-host .....................   Passed    0.64 sec
+        Start  74: raw-handles-exact
+ 82/260 Test  #74: raw-handles-exact ....................   Passed   31.64 sec
+        Start  75: raw-handles-transport
+ 83/260 Test  #75: raw-handles-transport ................   Passed   35.00 sec
+        Start  76: session-hp-host
+ 84/260 Test  #76: session-hp-host ......................   Passed    5.53 sec
+        Start  77: session-hp-exact
+ 85/260 Test  #58: session-objects-exact ................   Passed  257.55 sec
+        Start  78: session-hp-transport
+ 86/260 Test  #59: session-objects-transport ............   Passed  268.15 sec
+        Start  79: session-combat-host
+ 87/260 Test  #77: session-hp-exact .....................   Passed  137.64 sec
+        Start  80: session-combat-exact
+ 88/260 Test  #79: session-combat-host ..................   Passed   20.23 sec
+        Start  81: session-combat-transport
+ 89/260 Test  #78: session-hp-transport .................   Passed  153.02 sec
+        Start  82: session-terrain-host
+ 90/260 Test  #82: session-terrain-host .................   Passed    2.34 sec
+        Start  83: session-terrain-exact
+ 91/260 Test  #80: session-combat-exact .................   Passed  184.69 sec
+        Start  84: session-terrain-transport
+ 92/260 Test  #81: session-combat-transport .............   Passed  187.23 sec
+        Start  85: creature-movement-borrowed-host
+ 93/260 Test  #85: creature-movement-borrowed-host ......   Passed    0.29 sec
+        Start  86: session-creature-host
+ 94/260 Test  #86: session-creature-host ................   Passed    5.85 sec
+        Start  87: session-creature-exact
+ 95/260 Test  #83: session-terrain-exact ................   Passed  107.51 sec
+        Start  88: session-creature-transport
+ 96/260 Test  #84: session-terrain-transport ............   Passed  111.81 sec
+        Start  89: session-control-host
+ 97/260 Test  #89: session-control-host .................   Passed    5.83 sec
+        Start  90: session-control-exact
+ 98/260 Test  #90: session-control-exact ................   Passed   25.28 sec
+        Start  91: session-control-transport
+ 99/260 Test  #87: session-creature-exact ...............   Passed  157.22 sec
+        Start  92: frame-clock-traces
+100/260 Test  #91: session-control-transport ............   Passed   43.90 sec
+        Start  93: session-control-creature-host
+101/260 Test  #93: session-control-creature-host ........   Passed   20.22 sec
+        Start  94: session-control-creature-exact
+102/260 Test  #94: session-control-creature-exact .......   Passed   47.47 sec
+        Start  95: session-control-creature-transport
+103/260 Test  #88: session-creature-transport ...........   Passed  212.01 sec
+        Start  96: terrain-file-host
+104/260 Test  #96: terrain-file-host ....................   Passed    0.38 sec
+        Start  97: terrain-file-exact
+105/260 Test  #97: terrain-file-exact ...................   Passed    1.17 sec
+        Start  98: terrain-file-transport
+106/260 Test  #98: terrain-file-transport ...............   Passed   11.53 sec
+        Start  99: world-queries-host
+107/260 Test  #99: world-queries-host ...................   Passed    0.31 sec
+        Start 100: world-queries-exact
+108/260 Test #100: world-queries-exact ..................   Passed    0.94 sec
+        Start 101: world-queries-transport
+109/260 Test #101: world-queries-transport ..............   Passed   10.31 sec
+        Start 102: model-forms-validation-transport
+110/260 Test #102: model-forms-validation-transport .....   Passed    1.49 sec
+        Start 103: world-raycast-host
+111/260 Test #103: world-raycast-host ...................   Passed    0.52 sec
+        Start 104: world-geometry-host
+112/260 Test #104: world-geometry-host ..................   Passed    0.43 sec
+        Start 105: world-geometry-exact
+113/260 Test #105: world-geometry-exact .................   Passed    0.86 sec
+        Start 106: world-geometry-transport
+114/260 Test  #95: session-control-creature-transport ...   Passed   56.20 sec
+        Start 107: animation-clock-api
+115/260 Test #107: animation-clock-api ..................   Passed    0.29 sec
+        Start 108: animation-clock-exact
+116/260 Test #108: animation-clock-exact ................   Passed    2.88 sec
+        Start 109: animation-clock-transport
+117/260 Test #106: world-geometry-transport .............   Passed   12.57 sec
+        Start 110: session-turn-host
+118/260 Test #110: session-turn-host ....................   Passed    3.54 sec
+        Start 111: session-turn-exact
+119/260 Test #109: animation-clock-transport ............   Passed   20.94 sec
+        Start 112: session-turn-transport
+120/260 Test  #92: frame-clock-traces ...................   Passed  152.71 sec
+        Start 113: session-anim-cache-api
+121/260 Test #113: session-anim-cache-api ...............   Passed    6.17 sec
+        Start 114: session-anim-cache-exact
+122/260 Test #111: session-turn-exact ...................   Passed  120.90 sec
+        Start 115: session-anim-cache-provenance
+123/260 Test #115: session-anim-cache-provenance ........   Passed   22.05 sec
+        Start 116: session-anim-cache-transport
+124/260 Test #114: session-anim-cache-exact .............   Passed  181.74 sec
+        Start 117: session-anim-cache-generation
+125/260 Test #117: session-anim-cache-generation ........   Passed    0.51 sec
+        Start 118: session-animation-host
+126/260 Test #118: session-animation-host ...............   Passed    4.04 sec
+        Start 119: session-animation-exact
+127/260 Test #112: session-turn-transport ...............   Passed  259.88 sec
+        Start 120: session-animation-transport
+128/260 Test #119: session-animation-exact ..............   Passed  122.45 sec
+        Start 121: animation-runtime-api
+129/260 Test #121: animation-runtime-api ................   Passed    0.29 sec
+        Start 122: animation-runtime-exact
+130/260 Test #122: animation-runtime-exact ..............   Passed    6.90 sec
+        Start 123: animation-runtime-transport
+131/260 Test #123: animation-runtime-transport ..........   Passed   35.49 sec
+        Start 124: animation-decoder-api
+132/260 Test #124: animation-decoder-api ................   Passed    0.30 sec
+        Start 125: animation-decoder-exact
+133/260 Test #125: animation-decoder-exact ..............   Passed    8.29 sec
+        Start 126: animation-decoder-transport
+134/260 Test #126: animation-decoder-transport ..........   Passed   34.23 sec
+        Start 127: animation-decoder-private-input
+135/260 Test #127: animation-decoder-private-input ......   Passed    6.61 sec
+        Start 128: skills-a-api
+136/260 Test #128: skills-a-api .........................   Passed    0.86 sec
+        Start 129: skills-a-ctor
+137/260 Test #129: skills-a-ctor ........................   Passed    0.22 sec
+        Start 130: skills-a-exact
+138/260 Test #116: session-anim-cache-transport .........   Passed  359.20 sec
+        Start 131: skill-kernel-adapters
+139/260 Test #131: skill-kernel-adapters ................   Passed    0.42 sec
+        Start 132: skill-kernel-exact
+140/260 Test #132: skill-kernel-exact ...................   Passed    1.54 sec
+        Start 133: skills-range-kernel-exact
+141/260 Test #133: skills-range-kernel-exact ............   Passed    2.22 sec
+        Start 134: skills-handle-kernel-adapters
+142/260 Test #134: skills-handle-kernel-adapters ........   Passed    0.13 sec
+        Start 135: skills-handle-kernel-exact
+143/260 Test #135: skills-handle-kernel-exact ...........   Passed    1.29 sec
+        Start 136: skills-spell-kernel-adapters
+144/260 Test #136: skills-spell-kernel-adapters .........   Passed    0.14 sec
+        Start 137: skills-spell-kernel-exact
+145/260 Test #137: skills-spell-kernel-exact ............   Passed    1.21 sec
+        Start 138: private-validation-report
+146/260 Test #138: private-validation-report ............   Passed    1.86 sec
+        Start 139: animation-pose-trace
+147/260 Test #139: animation-pose-trace .................   Passed    0.24 sec
+        Start 140: animation-skeleton
+148/260 Test #140: animation-skeleton ...................   Passed    0.35 sec
+        Start 141: skinning-positions
+149/260 Test #141: skinning-positions ...................   Passed    0.27 sec
+        Start 142: model-parser
+150/260 Test #142: model-parser .........................   Passed    0.61 sec
+        Start 143: create-model-fixtures
+151/260 Test #143: create-model-fixtures ................   Passed    0.21 sec
+        Start 144: texture-parser
+152/260 Test #144: texture-parser .......................   Passed    0.62 sec
+        Start 145: create-texture-fixtures
+153/260 Test #145: create-texture-fixtures ..............   Passed    0.07 sec
+        Start 146: archive-parser
+154/260 Test #146: archive-parser .......................   Passed    0.18 sec
+        Start 148: cli-nested
+155/260 Test #148: cli-nested ...........................   Passed    0.23 sec
+        Start 149: cli-unicode-path
+156/260 Test #149: cli-unicode-path .....................   Passed    0.09 sec
+        Start 150: cli-invalid
+157/260 Test #150: cli-invalid ..........................   Passed    0.09 sec
+        Start 151: cli-help
+158/260 Test #151: cli-help .............................   Passed    0.16 sec
+        Start 152: cli-missing-arguments
+159/260 Test #152: cli-missing-arguments ................   Passed    0.08 sec
+        Start 153: player-host
+160/260 Test #153: player-host ..........................   Passed    0.31 sec
+        Start 154: player-vector-harness
+161/260 Test #154: player-vector-harness ................   Passed    0.56 sec
+        Start 155: player-exact
+162/260 Test #120: session-animation-transport ..........   Passed  261.56 sec
+        Start 156: monsters-1-unit
+163/260 Test #156: monsters-1-unit ......................   Passed    0.30 sec
+        Start 157: monsters-1-exact
+164/260 Test #130: skills-a-exact .......................   Passed  122.76 sec
+        Start 158: skills-b-host
+165/260 Test #158: skills-b-host ........................   Passed    0.86 sec
+        Start 159: skills-b-exact
+166/260 Test #159: skills-b-exact .......................   Passed  111.94 sec
+        Start 160: skills-b-transport
+167/260 Test #160: skills-b-transport ...................   Passed   12.78 sec
+        Start 161: skills-c-api
+168/260 Test #161: skills-c-api .........................   Passed    0.52 sec
+        Start 162: skills-c-exact
+169/260 Test #155: player-exact .........................***Failed  240.09 sec
+        Start 163: texture-upscale
+170/260 Test #163: texture-upscale ......................   Passed    0.19 sec
+        Start 164: ui_font
+171/260 Test #164: ui_font ..............................   Passed    0.16 sec
+        Start 165: ui_art_shape
+172/260 Test #165: ui_art_shape .........................   Passed    0.30 sec
+        Start 166: ui-layout-exact
+173/260 Test #166: ui-layout-exact ......................   Passed    0.18 sec
+        Start 167: ui-font-page-exact
+174/260 Test #167: ui-font-page-exact ...................   Passed    0.14 sec
+        Start 168: ui-layout-dynamic-exact
+175/260 Test #168: ui-layout-dynamic-exact ..............   Passed    0.15 sec
+        Start 169: menus-exact
+176/260 Test #169: menus-exact ..........................   Passed    0.30 sec
+        Start 170: session-recovery-api
+177/260 Test #157: monsters-1-exact .....................***Failed  223.90 sec
+        Start 171: session-recovery-exact
+178/260 Test #171: session-recovery-exact ...............   Passed  109.68 sec
+        Start 172: session-facing-api
+179/260 Test #162: skills-c-exact .......................   Passed  273.60 sec
+        Start 173: session-facing-exact
+180/260 Test #170: session-recovery-api .................   Passed  193.63 sec
+        Start 174: horsemen-mount-contract
+181/260 Test #174: horsemen-mount-contract ..............   Passed    1.25 sec
+        Start 175: control_anim_cache-legacy-bytes
+182/260 Test #175: control_anim_cache-legacy-bytes ......   Passed   28.53 sec
+        Start 176: control_anim_cache-api
+183/260 Test #176: control_anim_cache-api ...............   Passed  120.43 sec
+        Start 177: control_anim_cache-exact
+184/260 Test #172: session-facing-api ...................   Passed  269.28 sec
+        Start 178: control_anim_cache-provenance
+185/260 Test #178: control_anim_cache-provenance ........   Passed   26.02 sec
+        Start 179: play-session-boundary
+186/260 Test #177: control_anim_cache-exact .............   Passed   70.90 sec
+        Start 180: play-session-runtime
+187/260 Test #179: play-session-boundary ................   Passed   11.56 sec
+        Start 181: play-session-exact-1
+188/260 Test #180: play-session-runtime .................   Passed  117.72 sec
+        Start 182: play-session-exact-2
+189/260 Test #181: play-session-exact-1 .................   Passed  154.90 sec
+        Start 183: inventory-icons
+190/260 Test #183: inventory-icons ......................   Passed    0.36 sec
+        Start 184: inventory-icon-assoc
+191/260 Test #184: inventory-icon-assoc .................   Passed    0.37 sec
+        Start 185: horsemen-runtime-fight
+192/260 Test #185: horsemen-runtime-fight ...............   Passed    0.76 sec
+        Start 186: combat-runtime-host
+193/260 Test #186: combat-runtime-host ..................   Passed    0.91 sec
+        Start 187: combat-runtime-exact
+194/260 Test #187: combat-runtime-exact .................   Passed   17.59 sec
+        Start 188: combat-runtime-2-host
+195/260 Test #188: combat-runtime-2-host ................   Passed    0.85 sec
+        Start 189: combat-runtime-2-exact
+196/260 Test #182: play-session-exact-2 .................   Passed  139.65 sec
+        Start 190: combat-runtime-3-host
+197/260 Test #190: combat-runtime-3-host ................   Passed    1.03 sec
+        Start 191: combat-runtime-3-exact
+198/260 Test #191: combat-runtime-3-exact ...............   Passed    0.74 sec
+        Start 192: combat-runtime-4-host
+199/260 Test #173: session-facing-exact .................   Passed  480.63 sec
+        Start 193: combat-runtime-4-exact
+200/260 Test #193: combat-runtime-4-exact ...............   Passed    0.45 sec
+        Start 194: combat-runtime-5-host
+201/260 Test #192: combat-runtime-4-host ................   Passed    1.00 sec
+        Start 195: combat-runtime-5-exact
+202/260 Test #195: combat-runtime-5-exact ...............   Passed    0.83 sec
+        Start 196: combat-runtime-6-host
+203/260 Test #194: combat-runtime-5-host ................   Passed    1.06 sec
+        Start 197: combat-runtime-6-exact
+204/260 Test #196: combat-runtime-6-host ................   Passed    0.29 sec
+        Start 198: player-wading-exact
+205/260 Test #197: combat-runtime-6-exact ...............   Passed    1.01 sec
+        Start 199: player-wading-runtime
+206/260 Test #198: player-wading-exact ..................   Passed    0.98 sec
+        Start 200: combat-play
+207/260 Test #199: player-wading-runtime ................   Passed    0.55 sec
+        Start 201: play-spells
+208/260 Test #200: combat-play ..........................   Passed    0.36 sec
+        Start 202: combat-free-spot-host
+209/260 Test #201: play-spells ..........................   Passed    0.53 sec
+        Start 203: combat-free-spot-exact
+210/260 Test #203: combat-free-spot-exact ...............   Passed    0.54 sec
+        Start 204: netplay
+211/260 Test #202: combat-free-spot-host ................   Passed    3.25 sec
+        Start 205: potion-ctors-exact
+212/260 Test #205: potion-ctors-exact ...................   Passed    2.94 sec
+        Start 206: combat-ctors-exact
+213/260 Test #206: combat-ctors-exact ...................   Passed    1.86 sec
+        Start 207: combat-ctors-3-reference
+214/260 Test #207: combat-ctors-3-reference .............   Passed    0.27 sec
+        Start 208: combat-ctors-2-exact
+215/260 Test #208: combat-ctors-2-exact .................   Passed    2.10 sec
+        Start 209: playable-combat-fx
+216/260 Test #209: playable-combat-fx ...................   Passed    2.75 sec
+        Start 211: level-flow-water-adapter
+217/260 Test #211: level-flow-water-adapter .............   Passed    0.31 sec
+        Start 212: level-play
+218/260 Test #212: level-play ...........................   Passed    0.26 sec
+        Start 213: arena-modes-exact
+219/260 Test #213: arena-modes-exact ....................   Passed    0.21 sec
+        Start 214: arena-modes-damage
+220/260 Test #214: arena-modes-damage ...................   Passed    0.32 sec
+        Start 215: fixture-save
+221/260 Test #215: fixture-save .........................   Passed   15.12 sec
+        Start 216: creature-anim-api
+222/260 Test #216: creature-anim-api ....................   Passed    0.35 sec
+        Start 217: creature-anim-exact
+223/260 Test #217: creature-anim-exact ..................   Passed   12.81 sec
+        Start 218: creature-dispatch-exact
+224/260 Test #218: creature-dispatch-exact ..............   Passed   10.90 sec
+        Start 219: creature-dispatch-api
+225/260 Test #219: creature-dispatch-api ................   Passed    0.33 sec
+        Start 220: own-machines-exact
+226/260 Test #220: own-machines-exact ...................   Passed    0.32 sec
+        Start 221: animated-combat-play
+227/260 Test #221: animated-combat-play .................   Passed    0.47 sec
+        Start 222: native-audio
+228/260 Test #222: native-audio .........................   Passed    0.34 sec
+        Start 223: music-volume-host
+229/260 Test #223: music-volume-host ....................   Passed    0.19 sec
+        Start 224: music-volume-exact
+230/260 Test #224: music-volume-exact ...................   Passed    0.54 sec
+        Start 225: playable-audio
+231/260 Test #225: playable-audio .......................   Passed    0.38 sec
+        Start 226: real-data-measure-usage
+232/260 Test #226: real-data-measure-usage ..............   Passed    0.19 sec
+        Start 227: real-data-measure-empty
+233/260 Test #227: real-data-measure-empty ..............   Passed    0.07 sec
+        Start 228: player-services
+234/260 Test #228: player-services ......................   Passed    0.35 sec
+        Start 229: real-world-adapter
+235/260 Test #229: real-world-adapter ...................   Passed    0.30 sec
+        Start 230: model-texture-bind
+236/260 Test #230: model-texture-bind ...................   Passed    0.32 sec
+        Start 231: strings-exact
+237/260 Test #231: strings-exact ........................   Passed    6.16 sec
+        Start 232: mission1-scripts
+238/260 Test #232: mission1-scripts .....................   Passed    0.69 sec
+        Start 233: level-factory
+239/260 Test #233: level-factory ........................   Passed    0.21 sec
+        Start 234: level-objects
+240/260 Test #234: level-objects ........................   Passed    0.77 sec
+        Start 236: script-effects
+241/260 Test #236: script-effects .......................   Passed    0.21 sec
+        Start 239: script-items
+242/260 Test #239: script-items .........................   Passed    3.75 sec
+        Start 240: item-drops
+243/260 Test #240: item-drops ...........................   Passed    0.50 sec
+        Start 241: net-launch
+244/260 Test #241: net-launch ...........................   Passed    0.24 sec
+        Start 243: dialog
+245/260 Test #243: dialog ...............................   Passed    1.09 sec
+        Start 244: dialog_gaps
+246/260 Test #244: dialog_gaps ..........................   Passed    0.38 sec
+        Start 245: minotaur-class
+247/260 Test #245: minotaur-class .......................   Passed    0.44 sec
+        Start 246: minotaur-stats-exact
+248/260 Test #189: combat-runtime-2-exact ...............   Passed  151.29 sec
+        Start 247: campaign-fight-adopt
+249/260 Test #246: minotaur-stats-exact .................   Passed    0.86 sec
+        Start 249: campaign-fight-boundaries
+250/260 Test #249: campaign-fight-boundaries ............   Passed    0.41 sec
+        Start 250: player-death-flow
+251/260 Test #250: player-death-flow ....................   Passed    0.99 sec
+        Start 251: pickups
+252/260 Test #251: pickups ..............................Subprocess aborted***Exception:   0.64 sec
+        Start 252: campaign-rewards
+253/260 Test #252: campaign-rewards .....................   Passed    0.28 sec
+        Start 254: ps2-class-restore
+254/260 Test #254: ps2-class-restore ....................   Passed    0.28 sec
+        Start 257: ui-text-gaps-exact
+255/260 Test #257: ui-text-gaps-exact ...................   Passed    0.47 sec
+        Start 258: hud-extras
+256/260 Test #258: hud-extras ...........................   Passed    0.27 sec
+        Start 259: hud-player-live
+257/260 Test #259: hud-player-live ......................   Passed    0.35 sec
+        Start 260: hub-services
+258/260 Test #260: hub-services .........................   Passed    0.21 sec
+259/260 Test #247: campaign-fight-adopt .................   Passed   35.26 sec
+260/260 Test #204: netplay ..............................   Passed  295.92 sec
+
+98% tests passed, 4 tests failed out of 260
+
+Label Time Summary:
+fx             =  13.14 sec*proc (5 tests)
+native-fx-2    =  13.14 sec*proc (5 tests)
+
+Total Test time (real) = 3127.65 sec
+
+The following tests FAILED:
+	 23 - messages-exact (Failed)
+	155 - player-exact (Failed)
+	157 - monsters-1-exact (Failed)
+	251 - pickups (Subprocess aborted)
+Errors while running CTest
+Output from these tests are in: ~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native/Testing/Temporary/LastTest.log
+Use "--rerun-failed --output-on-failure" to re-run the failed cases verbosely.
+exit 8
