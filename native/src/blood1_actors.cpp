@@ -1,4 +1,5 @@
 #include "champions/blood1_actors.hpp"
+#include "champions/creature_ai_m1_3.hpp"
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -254,10 +255,50 @@ Actor &Runtime::at(std::uint32_t address) {
   return *it->second;
 }
 
+namespace ai = creature_ai_m1_3;
+void Runtime::enter(Actor &a, std::uint32_t requested) {
+  const auto address = a.object->addr;
+  // Only Kobold setState(8) (+0x3c8 = 8, MOD:1165; research-campaign-combat
+  // fbb2e1d), executed from a live state-3 rig (DT:410). WarWraith 8 has no
+  // executed row: the kernel refuses it (CAI13-3).
+  if (a.kind == Kind::WarWraith && requested == 8) {
+    try { ai::set_state(ai::Class::WarWraith, {}, requested); }
+    catch (const ai::Unsupported &e) { throw Unsupported(std::string("class setState: ") + e.what()); }
+  }
+  if (a.kind == Kind::WarWraith || requested != 8)
+    throw Unsupported("class setState: non-death transition Unknown");
+  if (a.death_reported || a.state == 0x14)
+    throw Unsupported("class setState: request on a dead actor Unknown");
+  auto &m = a.hp.mem;
+  ai::SetContext sc;
+  sc.target = m.load(address + 0x234, 4) != 0;
+  sc.root = std::uint16_t(m.load(address + 0x314, 2));
+  sc.cooldown = std::uint16_t(m.load(address + 0x318, 2));
+  sc.stun = std::uint16_t(m.load(address + 0x31c, 2));
+  sc.x31a = std::uint16_t(m.load(address + 0x31a, 2));
+  sc.x231 = std::int8_t(m.load(address + 0x231, 1));
+  sc.variant = a.variant;  // tough 1 / shaman 2 never ran setState (DT:410)
+  ai::SetResult r;
+  try { r = ai::set_state(ai::Class::Kobold, sc, requested); }
+  catch (const ai::Unsupported &e) { throw Unsupported(std::string("class setState: ") + e.what()); }
+  required(services_.filter_state, "Creature_filterState/request");
+  if (services_.filter_state(address, requested)) return;  // global refusal
+  if (r.refused || r.filtered != requested)
+    throw Unsupported("class setState: filterState redirect of a non-death request Unknown");
+  for (const auto &c : r.cleared) m.store(address + c.first, 2, std::uint64_t(c.second));
+  for (const auto &w : r.writes)  // +0x3c8 s32 (M2:4978)
+    m.store(address + w.offset, 4, std::uint32_t(w.resolve(std::int64_t(world_.frame), [&a] {
+      return std::uint32_t(a.object->rand());
+    })));
+  a.state = r.landed;
+  m.store(address + 0x232, 2, r.landed);
+  // The cast clip and the rest of Kobold_setState were not compared.
+  throw Unsupported("Kobold setState(8): entry stored; clip start and remaining setState calls Unknown");
+}
+
 void Runtime::set_state(std::uint32_t address, std::uint32_t state) {
   auto &a = at(address);
-  if (state != 0x14)
-    throw Unsupported("class setState: non-death transition Unknown");
+  if (state != 0x14) { enter(a, state); return; }
   if (a.death_reported) return;
   if (a.kind == Kind::WarWraith)
     required(services_.loot_generate, "loot_generateDrops");
@@ -301,15 +342,24 @@ void Runtime::tick(std::uint32_t address) {
   }
   if (a.state == 3 && in.has_target)
     throw Unsupported("class run/state3: target decision Unknown");
-  if (a.state == 7 && in.has_target)
-    throw Unsupported("class run/state7 targeted attack or drain Unknown");
   if ((a.state == 6 || a.state == 7) && !in.animation_over)
     throw Unsupported("class run/attack animation completion answer Unknown");
+  // Targeted state 7 (C:267-268 Kobold, C:289-292 WarWraith drain; Executed in
+  // every variant, MOD:109-117, MOD:194-204): its inputs and services are
+  // required before any effect.
+  if (a.state == 7 && in.has_target) {
+    if (a.kind == Kind::WarWraith) {
+      required(services_.cold_weapons, "WarWraith_run/drain ColdWeapons skill value");
+      required(services_.drain_at_reach, "WarWraith_run/drain hitTargetAtReach");
+    } else if (!in.second_event) {
+      throw Unsupported("Kobold_run/state7: animation event bit 1 answer Unknown");
+    }
+  }
   if (a.state != 0 && a.state != 3 && a.state != 6 && a.state != 7 &&
       a.state != 0x14)
     throw Unsupported("class run: state or AI branch Unknown");
   const bool wraith = a.kind == Kind::WarWraith;
-  if (wraith && a.state == 6 && in.has_target && !in.target_position)
+  if (wraith && (a.state == 6 || a.state == 7) && in.has_target && !in.target_position)
     throw Unsupported("WarWraith_run/targeted attack: target position Unknown");
   auto fade = wraith ? std::uint32_t(a.hp.mem.load(address + 0x3c8, 1)) : 0u;
   if (wraith && fade > 100)
@@ -373,6 +423,14 @@ void Runtime::tick(std::uint32_t address) {
   case 7:
     if (wraith)
       a.hp.mem.store(address + 0x3c8, 1, fade > 2 ? fade - 2 : 0);
+    if (a.state == 7 && in.has_target) {
+      if (!wraith) {
+        required(services_.settle, "Kobold_run/settle");
+        services_.settle(address);
+      }
+      targeted_attack7(a, in, fade);
+      break;
+    }
     if (!wraith) {
       required(services_.settle, "Kobold_run/settle");
       services_.settle(address);
@@ -421,6 +479,60 @@ void Runtime::tick(std::uint32_t address) {
       services_.dead_update(address);
     }
     break;
+  }
+}
+
+void Runtime::targeted_attack7(Actor &a, const TickInput &in, std::uint32_t fade) {
+  const auto address = a.object->addr;
+  const bool wraith = a.kind == Kind::WarWraith;
+  required(services_.turn_target, "Creature_turnToTarget");
+  required(services_.state_change, "class run/attack completion");
+  if (wraith) required(services_.grid_update, "WarWraith_run/obj_updateGridCell");
+  else required(services_.hit_target_in_arc, "Creature_hitTargetInArc");
+  // The state body is creature_ai_m1_3's (research-campaign-combat fbb2e1d);
+  // the runtime already ran the head, so only events from Tick::body on are
+  // dispatched, in order.
+  ai::Context c;
+  c.state = 7;
+  c.target = true;
+  c.ev = (in.hit_event ? 1u : 0u) | (in.second_event.value_or(false) ? 2u : 0u);
+  c.anim = *in.animation_over ? 0u : 8u;
+  c.fields[0x3cc] = a.variant;
+  c.fields[0x3c8] = fade;
+  const auto answer = [&](const ai::Event &e) -> std::int64_t {
+    if (e.name != "hitAtReach") return 0;
+    // M2:6162-6165: ColdWeapons value, then hitTargetAtReach(36, 0x404).
+    const auto cold = services_.cold_weapons(address);
+    const auto hit = services_.drain_at_reach(address, 0x404, cold);
+    // M2:6165-6167 (Observed): a landed drain heals by max HP / 15. The
+    // research did not compare that write (C:291-292) and gives the factor
+    // only approximately, so it is refused rather than skipped.
+    if (hit) throw Unsupported("WarWraith drain landed: max HP / 15 heal not compared");
+    return 0;
+  };
+  ai::Tick t;
+  try { t = ai::tick(wraith ? ai::Class::WarWraith : ai::Class::Kobold, c, answer); }
+  catch (const ai::Unsupported &e) { throw Unsupported(std::string("class run/state7: ") + e.what()); }
+  for (std::size_t i = t.body; i < t.events.size(); ++i) {
+    const auto &e = t.events[i];
+    if (e.name == "hitInArc") {
+      services_.hit_target_in_arc(address, std::uint32_t(e.args.at(7) / ai::ARG_SCALE));
+    } else if (e.name == "turn") {
+      services_.turn_target(address);
+      if (wraith) {  // M2:6149-6150: the z-follow runs in both attack states
+        auto &height = a.object->pos[2];
+        const auto target_height = (*in.target_position)[2];
+        const auto step = div(from_int(1), from_int(6));
+        if (lt(height, target_height)) height = add(height, step);
+        else if (lt(target_height, height)) height = sub(height, step);
+        a.hp.mem.store(address + 0x18, 4, height);
+        services_.grid_update(address);
+      }
+    } else if (e.name == "set") {
+      services_.state_change(address, std::uint32_t(e.args.at(0) / ai::ARG_SCALE));
+    } else if (e.name != "skill+0x5c" && e.name != "hitAtReach") {
+      throw Unsupported("class run/state7: kernel event " + e.name + " has no runtime service");
+    }
   }
 }
 

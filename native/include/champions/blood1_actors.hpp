@@ -22,6 +22,9 @@ struct TickInput {
   // Caller answers the class +0xf4 deadline after its state-0 setup.
   std::optional<std::int64_t> idle_deadline;
   std::optional<objects::Vec3> target_position;
+  // Animation-event bit 1 (Creature_stepAnim result & 2); the targeted
+  // Kobold state 7 hits on it (C:267-268). Missing there refuses.
+  std::optional<bool> second_event;
 };
 struct Services {
   std::function<void(std::uint32_t)> model_init, animation_init, creature_init;
@@ -47,6 +50,12 @@ struct Services {
   std::function<void(std::uint32_t)> death_remainder, delete_object;
   std::function<void(std::uint32_t)> handle_clear;
   std::function<void(std::uint32_t, std::uint32_t)> handle_link;
+  // WarWraith drain (state 7, M2:6162-6165): the SKILL[14 ColdWeapons]
+  // skill-table +0x5c value at the monster level, then hitTargetAtReach(36,
+  // flags 0x404) with that cold rider, returning the hit result. A nonzero
+  // result refuses: the max HP / 15 heal was not compared (C:291-292).
+  std::function<std::uint32_t(std::uint32_t)> cold_weapons;
+  std::function<Raw(std::uint32_t, std::uint32_t, std::uint32_t)> drain_at_reach;
 };
 std::array<Raw, 5> balance_lookup(const std::uint8_t *, std::size_t,
                                   const std::string &type_name);
@@ -85,6 +94,8 @@ class Runtime {
   std::vector<resources::Handle> handles_;
   void retire_stale(std::uint32_t);
   std::uint32_t resolve(const std::string &, const std::string &);
+  void enter(Actor &, std::uint32_t);
+  void targeted_attack7(Actor &, const TickInput &, std::uint32_t);
   Actor &construct_impl(Kind, const objects::Vec3 &, std::uint32_t,
                         objects::Props, Raw, const std::function<void(Actor &)> &);
 public:

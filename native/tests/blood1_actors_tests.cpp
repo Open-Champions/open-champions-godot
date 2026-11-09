@@ -152,6 +152,14 @@ void run_seed(std::uint32_t seed) {
     calls.emplace_back("generateDrops"); drops.push_back(args);
   };
   s.death_remainder = [&](std::uint32_t) { calls.emplace_back("deathRemainder"); };
+  R::Raw drain_result = 0;
+  std::uint32_t cold_value = 77;
+  std::vector<std::array<std::uint32_t, 2>> drains;
+  s.cold_weapons = [&](std::uint32_t) { calls.emplace_back("coldWeapons"); return cold_value; };
+  s.drain_at_reach = [&](std::uint32_t, std::uint32_t flags, std::uint32_t cold) {
+    calls.emplace_back("drainReach"); drains.push_back({{flags, cold}});
+    return drain_result;
+  };
   B::Runtime actors(world, resources, s);
   active_runtime = &actors;
   const std::array<B::Kind, 4> kinds{{B::Kind::Kobold, B::Kind::KoboldTough,
@@ -352,7 +360,53 @@ void run_seed(std::uint32_t seed) {
           "completed no-target attack also requests next state");
     a.state = 7;
     input.has_target = true; input.animation_over = false;
-    refuses([&] { actors.tick(address); }, "state7 targeted branch remains Unknown");
+    // research-campaign-combat fbb2e1d supersedes the old "state7 targeted
+    // branch remains Unknown" refusal: C:267-268 / MOD:109-117 (Kobold 7) and
+    // C:289-292 / MOD:194-204 (WarWraith drain) are Executed in every variant.
+    if (i != 3) {
+      input.second_event.reset();
+      refuses([&] { actors.tick(address); }, "Kobold targeted state 7 needs the event bit 1 answer");
+    }
+    input.second_event = false;
+    calls.clear(); transitions.clear(); hits.clear(); drains.clear();
+    actors.tick(address);
+    check(calls == (i == 3 ?
+          std::vector<std::string>{"damage","run","holder","step","target","knockback","turn","grid"} :
+          std::vector<std::string>{"damage","run","step","knockback","target","ally","settle","turn"}) &&
+          transitions.empty() && hits.empty() && drains.empty(),
+          "targeted state 7 without events turns and keeps the clip");
+    input.hit_event = true;
+    if (i == 3) {
+      drain_result = 0;
+      calls.clear(); drains.clear();
+      actors.tick(address);
+      check(calls == std::vector<std::string>{"damage","run","holder","step","target","knockback",
+                                              "coldWeapons","drainReach","turn","grid"} &&
+            drains == std::vector<std::array<std::uint32_t, 2>>{{{0x404, 77}}},
+            "drain asks ColdWeapons, then hitTargetAtReach(0x404) with it (M2:6162-6165)");
+      drain_result = 1;
+      calls.clear();
+      refuses([&] { actors.tick(address); }, "landed drain refuses: max HP / 15 heal not compared");
+      check(calls.back() == "drainReach", "nothing runs after a landed drain");
+      drain_result = 0;
+      auto no_cold = s;
+      no_cold.cold_weapons = {};
+      O::World cold_world(O::CallbackPolicy::ReferenceBase);
+      B::Runtime cold_runtime(cold_world, resources, no_cold);
+      auto &cw = cold_runtime.construct(B::Kind::WarWraith, {0,0,0}, 0, {}, R::from_int(100));
+      cw.state = 7;
+      calls.clear();
+      refuses([&] { cold_runtime.tick(cw.object->addr); }, "missing ColdWeapons answer refuses the drain");
+      check(calls == std::vector<std::string>{"damage", "run"}, "drain service refusal precedes effects");
+    } else {
+      input.second_event = true; input.animation_over = true;
+      calls.clear(); hits.clear(); transitions.clear();
+      actors.tick(address);
+      check(hits == std::vector<std::uint32_t>{0x80001u, 1u} && transitions == std::vector<std::uint32_t>{5} &&
+            calls.back() == "setState",
+            "Kobold targeted 7: ev&1 flags 0x80001, ev&2 flags 1, clip over -> 5 (C:267-268)");
+      input.second_event = false; input.animation_over = false;
+    }
     input.has_target = false; input.hit_event = false;
     a.state = 0;
     input.idle_deadline.reset();
@@ -479,6 +533,45 @@ void run_seed(std::uint32_t seed) {
   check(unfiltered.state == 0 &&
         unfiltered.hp.mem.load(unfiltered_addr + 0x31c, 2) == 7,
         "missing filter leaves state and timers untouched");
+  {
+    // research-campaign-combat fbb2e1d MOD:1165: live Kobold setState(8)
+    // stores +0x3c8 = 8 (rig in state 3, variant 0, DT:410). The clip start and
+    // the rest of setState stay refused; tough/shaman (variants 1/2) never ran
+    // setState, and WarWraith has no 8 row (CAI13-3).
+    O::World w8(O::CallbackPolicy::ReferenceBase);
+    auto s8 = s;
+    std::vector<std::uint32_t> filtered;
+    bool refuse8 = false;
+    s8.filter_state = [&](std::uint32_t, std::uint32_t st) { filtered.push_back(st); return refuse8; };
+    B::Runtime r8(w8, resources, s8);
+    for (auto kind : kinds) {
+      auto &k = r8.construct(kind, {0,0,0}, 0, {}, R::from_int(100));
+      const auto at = k.object->addr;
+      k.state = 3;
+      k.hp.mem.store(at + 0x232, 2, 3);
+      k.hp.mem.store(at + 0x234, 4, 0x1234);
+      if (kind != B::Kind::WarWraith) k.hp.mem.store(at + 0x3c8, 4, 6);
+      filtered.clear();
+      refuses([&] { r8.set_state(at, 8); }, "setState(8) refuses its unexecuted remainder or row");
+      if (kind == B::Kind::Kobold)
+        check(k.state == 8 && k.hp.mem.load(at + 0x232, 2) == 8 && k.hp.mem.load(at + 0x3c8, 4) == 8 &&
+              filtered == std::vector<std::uint32_t>{8}, "live Kobold setState(8) stores 8 and +0x3c8 = 8");
+      else
+        check(k.state == 3 && k.hp.mem.load(at + 0x232, 2) == 3 && filtered.empty(),
+              "tough, shaman and WarWraith setState(8) store nothing");
+      if (kind != B::Kind::Kobold) continue;
+      auto &g = r8.construct(B::Kind::Kobold, {0,0,0}, 0, {}, R::from_int(100));
+      const auto ga = g.object->addr;
+      g.state = 3; g.hp.mem.store(ga + 0x232, 2, 3);
+      refuse8 = true;
+      r8.set_state(ga, 8);
+      check(g.state == 3 && g.hp.mem.load(ga + 0x232, 2) == 3, "global filter refusal leaves the state");
+      refuse8 = false;
+      g.hp.mem.store(ga + 0x31c, 2, 9);  // stun: the filter would redirect to 0x13
+      refuses([&] { r8.set_state(ga, 8); }, "filter redirect of setState(8) refuses");
+      check(g.state == 3 && g.hp.mem.load(ga + 0x3c8, 4) == 0, "redirect stores nothing");
+    }
+  }
   const auto count = world.objects.size();
   resources.unload("kobold.lmp");
   refuses([&] {

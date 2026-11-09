@@ -63,6 +63,9 @@ class Runtime {
   Raw own(std::uint32_t);
   void run(Actor &);
   void death(Actor &);
+  // Non-death slot 27 through creature_ai_m1_3 (research-campaign-combat
+  // fbb2e1d): only executed entries, then the unexecuted rest refuses.
+  void enter(Actor &, std::uint32_t);
   void tail(Actor &);
 public:
   Runtime(WorldAuthority &, resources::Manager &, const arena_modes::Executable &, Services);

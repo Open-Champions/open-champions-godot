@@ -303,8 +303,25 @@ void lifetime_boundaries() {
   f.store(at + 0x300, 3600);
   f.runtime.tick(at); // expiry is strictly deadline < clock
   f.store(at + 0x300, 3601);
+  // Slot 27 reaches the runtime as in campaign_fight (0x27c0a0 -> set_state).
+  f.extra = [&f](const M::Call &c) -> R::Raw {
+    if (c.function == 0x27c0a0) { f.runtime.set_state(c.self, c.args.at(0)); return 0; }
+    if (c.function == 0x10c0f0) return f.active;
+    if (c.function == 0x1162b0) return f.events;
+    if (c.function == 0x10a9c0) return !f.deny_filter;
+    return 0;
+  };
+  f.calls.clear();
   refused([&] { f.runtime.tick(at); });
-  check(f.read(at + 0x232, 2) == 0, "unexecuted fuse entry cannot fabricate an explosion state");
+  // research-campaign-combat fbb2e1d C:416-417 / MOD:752-753 (fuse decision)
+  // and MOD:1189 (entry lands 0x17) supersede the old "stays 0" refusal. The
+  // fuse sound, flag 0x4000, explode clip and Droid_setState call order are
+  // still refused (M2:1502-1503 Observed only; C:151-153 checks membership).
+  check(f.read(at + 0x232, 2) == 0x17, "executed fuse entry stores 0x17");
+  check(f.calls.back().function == 0x10a9c0 &&
+        std::none_of(f.calls.begin(), f.calls.end(), [](const M::Call &c) {
+          return c.function == 0x16cfe0 || c.function == 0x10beb8 || c.function == 0x10f2c8;
+        }), "fuse refuses before any clip, slot-28 or loot call");
   Fixture guardian;
   auto &boss = guardian.actor(M::Kind::IronGuardian);
   guardian.store(R::creature_hp::G_SIM_FRAME, 1);
@@ -312,6 +329,53 @@ void lifetime_boundaries() {
   guardian.store(boss.object->addr + 0x3d4, 50);
   guardian.runtime.tick(boss.object->addr); // exhausted budget never attempts a spawn
   check(guardian.read(boss.object->addr + 0x3d4) == 50, "no invented Droid beyond the documented budget");
+}
+void executed_entries() {
+  // research-campaign-combat fbb2e1d MOD:1184 / MOD:1190: Clockwork and
+  // IronGuardian setState(9) entries, executed from a live state-3 rig with a
+  // target (DT:410). The clip start and the rest of setState stay refused.
+  for (auto k : {M::Kind::Cutter, M::Kind::IronGuardian}) {
+    Fixture f;
+    auto &a = f.actor(k);
+    const auto at = a.object->addr;
+    f.store(at + 0x232, 3, 2);
+    f.store(at + 0x234, 0x1234);
+    f.store(at + 0x300, 2500);
+    f.store(at + 0xf4, 7);
+    f.store(at + 0x4f8, 7);
+    if (k == M::Kind::IronGuardian) f.store(at + 0x3c8, 1);
+    f.calls.clear();
+    refused([&] { f.runtime.set_state(at, 9); });
+    check(f.read(at + 0x232, 2) == 9, "live state-9 entry stores 9");
+    if (k == M::Kind::Cutter)
+      check(f.read(at + 0xf4) == 2500 && f.read(at + 0x4f8) == 2500, "Clockwork 9: +0xf4 = +0x4f8 = clock (MOD:1184)");
+    else
+      check(f.read(at + 0x3c8) == 0 && f.read(at + 0xf4) == 7, "IronGuardian 9: +0x3c8 = 0 (MOD:1190)");
+    check(f.functions() == std::vector<unsigned>{0x10a9c0}, "state 9: filter service only, no clip start");
+    // A filter refusal or redirect was not executed for these requests.
+    Fixture g;
+    auto &b = g.actor(k);
+    g.store(b.object->addr + 0x232, 3, 2);
+    g.deny_filter = true;
+    refused([&] { g.runtime.set_state(b.object->addr, 9); });
+    check(g.read(b.object->addr + 0x232, 2) == 3, "filter refusal leaves the state");
+  }
+  // The hammer's variant (+0x3c8 = 1) never ran setState (DT:410), Droid 9 has
+  // no executed row (CAI13-3), and other states keep the old refusal.
+  for (auto k : {M::Kind::Hammer, M::Kind::Droid}) {
+    Fixture f;
+    auto &a = f.actor(k);
+    const auto at = a.object->addr;
+    f.store(at + 0x232, 3, 2);
+    f.calls.clear();
+    refused([&] { f.runtime.set_state(at, 9); });
+    check(f.read(at + 0x232, 2) == 3 && f.calls.empty(), "unexecuted state-9 entry stores nothing");
+  }
+  Fixture f;
+  auto &a = f.actor(M::Kind::Cutter);
+  f.calls.clear();
+  for (unsigned st : {0u, 5u, 6u, 0x10u, 0x12u, 0x13u, 0x17u}) refused([&] { f.runtime.set_state(a.object->addr, st); });
+  check(f.calls.empty() && f.read(a.object->addr + 0x232, 2) == 0, "other non-death requests refuse before any call");
 }
 // Host lifetime expectations follow the audited campaign helpers and pinned
 // ref_objects construction/destruction + ref_core pool reuse, not class AI.
@@ -456,7 +520,7 @@ void shared_world_damage() {
 } // namespace
 int main() {
   try {
-    constructors(); balance_rows(); ticks_and_damage(); death_and_explosion(); refusals_still_process_damage(); lifetime_boundaries(); registry_reuse(); shared_world_damage();
+    constructors(); balance_rows(); ticks_and_damage(); death_and_explosion(); refusals_still_process_damage(); lifetime_boundaries(); executed_entries(); registry_reuse(); shared_world_damage();
     std::cout << "mission2 actors: " << checks << " checks, 16 ticks/162 calls, 3 hit dispatches, 4 deaths, 1 explosion PASS\n";
     return 0;
   } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

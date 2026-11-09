@@ -1,5 +1,6 @@
 #include "champions/mission2_actors.hpp"
 #include "champions/actor_lifetime.hpp"
+#include "champions/creature_ai_m1_3.hpp"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -12,6 +13,10 @@ constexpr Profile PROFILES[] = {
     {Kind::Droid, 0x27b840, 0x500a88, 0x515da8, 0x27ba78, 0x27c0a0, 0x3d0, 10},
     {Kind::IronGuardian, 0x27a00c, 0x500960, 0x515c60, 0x27a390, 0x27b550, 0x3e8, 34}};
 bool clockwork(Kind k) { return k == Kind::Cutter || k == Kind::Hammer; }
+namespace ai = creature_ai_m1_3;
+ai::Class kernel_class(Kind k) {
+  return clockwork(k) ? ai::Class::Clockwork : k == Kind::Droid ? ai::Class::Droid : ai::Class::IronGuardian;
+}
 std::vector<unsigned> event_entries(Kind k) {
   if (clockwork(k)) return {3,4,5,12,13,14,15,22,6,7,8,16,17,18};
   if (k == Kind::Droid) return {3,9,10};
@@ -190,9 +195,12 @@ void Runtime::run(Actor &a) {
   call(0x115eb8, self, {}, {clockwork(a.kind) ? 0x3ecccccc : a.kind == Kind::Droid ? ONE : ZERO});
   call(0x10ded0, self, {0});
   const auto state = read(self + 0x232, 2);
-  if (a.kind == Kind::Droid && state != 0x14 && state != 0x17 &&
-      std::int32_t(read(self + 0x3cc)) < std::int32_t(read(self + 0x300)))
-    throw Unsupported("Droid expiry: setState(0x17) fuse entry unexecuted");
+  // C:416-417 / MOD:752-753 (Executed, 99/100/101 boundaries): the fuse is
+  // decided before the switch and requested through slot 27; the switch then
+  // still runs on the state read above (MOD:749-754).
+  if (a.kind == Kind::Droid &&
+      ai::droid_fuse_due(state, std::int32_t(read(self + 0x3cc)), std::int32_t(read(self + 0x300))))
+    call(profile(a.kind).set_state, self, {0x17});
   switch (state) {
   case 0: {
     const bool seen = call(0x10e658, self) != 0;
@@ -296,10 +304,50 @@ void Runtime::death(Actor &a) {
     if (!contain_) throw;
   }
 }
+void Runtime::enter(Actor &a, std::uint32_t requested) {
+  const auto self = a.object->addr;
+  // Only the entries research-campaign-combat fbb2e1d executed with their
+  // landing: Clockwork and IronGuardian 9 (MOD:1184, MOD:1190) and the Droid
+  // fuse 0x17 (MOD:1189, C:151-153). Checked before any call, so every other
+  // request keeps its refusal without touching the filter service.
+  const bool executed = (requested == 9 && a.kind != Kind::Droid) ||
+                        (requested == 0x17 && a.kind == Kind::Droid);
+  if (!executed) throw Unsupported("mission2 setState: unexecuted non-death transition");
+  // Every row ran on a live rig in state 3 (DT:410); no request on a dead
+  // actor was executed.
+  if (a.death_started || read(self + 0x232, 2) == 0x14)
+    throw Unsupported("mission2 setState: request on a dead actor unexecuted");
+  ai::SetContext sc;
+  sc.target = read(self + 0x234) != 0;
+  sc.root = std::uint16_t(read(self + 0x314, 2));
+  sc.cooldown = std::uint16_t(read(self + 0x318, 2));
+  sc.stun = std::uint16_t(read(self + 0x31c, 2));
+  sc.x31a = std::uint16_t(read(self + 0x31a, 2));
+  sc.x231 = std::int8_t(read(self + 0x231, 1));
+  if (clockwork(a.kind)) sc.variant = read(self + 0x3c8, 1);
+  ai::SetResult r;
+  try { r = ai::set_state(kernel_class(a.kind), sc, requested); }
+  catch (const ai::Unsupported &e) { throw Unsupported(std::string("mission2 setState: ") + e.what()); }
+  // Creature_filterState is the shared World's service (as for death). A
+  // refusal or a redirect of these requests was not executed here.
+  if (!call(0x10a9c0, self, {requested}) || r.refused || r.filtered != requested || r.landed != requested)
+    throw Unsupported("mission2 setState: filterState refusal or redirect of a non-death request unexecuted");
+  const auto clock = std::int64_t(std::int32_t(read(self + 0x300)));
+  for (const auto &w : r.writes)  // s32 fields (M2:1371, M2:3673-3674)
+    write(self + w.offset, std::uint32_t(w.resolve(clock, [this, self] { return own(self); })));
+  write(self + 0x232, r.landed, 2);
+  // What the research did not compare stays refused: the clip start and the
+  // rest of the class setState, in their original order (M2:1443-1446,
+  // M2:1500-1503, M2:3726-3728; Observed only). The Droid's slot-28 call is
+  // executed as membership, not as sequence (C:151-153).
+  if (a.kind == Kind::Droid)
+    throw Unsupported("Droid setState(0x17): fuse stored; fuse sound, object flag 0x4000, explode clip and slot-28 order unexecuted");
+  throw Unsupported("mission2 setState(9): entry stored; clip start and remaining setState calls unexecuted");
+}
 void Runtime::set_state(std::uint32_t self, std::uint32_t state) {
   auto *a = find(self);
   if (!a) throw Unsupported("mission2 setState: actor not live");
-  if (state != 0x14) throw Unsupported("mission2 setState: unexecuted non-death transition");
+  if (state != 0x14) { enter(*a, state); return; }
   death(*a);
 }
 void Runtime::take_damage(std::uint32_t self, std::uint32_t attacker, Raw flags, Raw amount) {

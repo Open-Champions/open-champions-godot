@@ -2,9 +2,10 @@
 # mission-2 actors. Included by the native tree and by the GDExtension after
 # script_commands_targets.cmake.
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/creature_ai_m1_3_library.cmake")
 add_library(champions-mission2-actors "${CMAKE_CURRENT_LIST_DIR}/src/mission2_actors.cpp")
 target_include_directories(champions-mission2-actors PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
-target_link_libraries(champions-mission2-actors PUBLIC champions-campaign-actors champions-arena-modes)
+target_link_libraries(champions-mission2-actors PUBLIC champions-campaign-actors champions-arena-modes champions-creature-ai-m1-3)
 set_target_properties(champions-mission2-actors PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-mission2-actors PRIVATE /W4 /utf-8 /fp:strict)
