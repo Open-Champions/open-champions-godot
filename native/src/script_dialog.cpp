@@ -7,6 +7,7 @@
 #include "champions/core_math.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <stdexcept>
 
 namespace champions::simulation::rta::script_commands {
@@ -71,6 +72,8 @@ std::string head(const std::exception &e) {
 void Host::attach_dialog(DialogLevel level, DialogServices services) {
   hub_offers_.reset();
   hub_services_.reset();
+  hub_warn_.reset();
+  hub_warn_resolved_ = false;
   hub_services_start_ = -1;
   hub_services_mismatch_.clear();
   hub_effect_.reset();
@@ -591,6 +594,7 @@ Host::HubResearch Host::hub_research() const {
   if (!machine_)
     return out;
   out.dedupe = hub_dialog::dedupe_tables(*machine_);
+  out.warn_entries = hub_dialog::warn_entries(*machine_).has_value();
   std::vector<std::string> requested;
   try {
     const hub_dialog::Static code(*machine_);
@@ -624,6 +628,38 @@ Host::HubResearch Host::hub_research() const {
 bool Host::hub_ring(std::uint32_t address) const {
   const auto *obj = variables_->obj_at(address);
   return dialog_level_.hub_level && obj && (obj->type_name == "apprings" || obj->type_name == "fpprings");
+}
+
+// research-hub-npcs@fbbfe65 docs/hub-services.md:374-383. K.poll re-queues
+// itself on every run (Executed), so one copy is always pending after a
+// warning; a second warning would queue a second copy, and what two copies do
+// together is Unknown. Whether the help box K.help shows pauses the game is
+// Inferred, not executed; the client's help box writes none of gamePaused's
+// inputs, so a K.poll run while a help box is up would count on a guess.
+std::string Host::hub_warn_refusal(const char *native, amx::Machine &machine) {
+  const bool defer = std::strcmp(native, "addDeferedCall") == 0;
+  const bool paused = std::strcmp(native, "gamePaused") == 0;
+  if (!defer && !paused)
+    return {};
+  if (!hub_warn_resolved_ && machine_) {
+    hub_warn_ = hub_dialog::warn_entries(*machine_);
+    hub_warn_resolved_ = true;
+  }
+  if (!hub_warn_)
+    return {};
+  if (paused)
+    return lower(variables_->deferred_running()) == lower(hub_warn_->poll) && hud_->help_open
+               ? "K.poll would count a run while the help box is up; whether it pauses is Inferred (HS:381-382)"
+               : std::string();
+  const auto address = machine.cell(machine.params + 4);
+  if (machine.get_addr(address) != amx::ERR_NONE)
+    return "a hub deferred-call name is not a resolvable literal, so K.poll copies cannot be counted";
+  if (lower(machine.get_string(address)) != lower(hub_warn_->poll))
+    return {};
+  // The running copy re-queuing itself is not a second copy.
+  return variables_->deferred_pending(hub_warn_->poll) != 0
+             ? "a second K.poll copy while one is pending is Unknown (HS:382-383)"
+             : std::string();
 }
 
 bool Host::dialog_trigger_supported(std::uint32_t address) const {

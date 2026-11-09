@@ -117,8 +117,20 @@ LOW). Only Observed or Executed rows are ported; the code is
   runs on which `gamePaused` is 0, and calls `activateMissionMenu` on the 6th
   without writing the entrance; a new warning restarts the count (HS:374-383).
   Per HSF-2 the count is of Script-task runs (`on_ready_tick` deferred
-  dispatch), never of frames. Whether the help box pauses the game is Inferred
-  and not modelled.
+  dispatch), never of frames: the client's double-buffered queue runs each
+  queued copy once per tick, and the test counts those ticks itself.
+  `K.use`, `K.help` and `K.poll` are found as HS:32-34 does: the single
+  `callScript` literal of public 0x54, then of `K.use`, then the
+  `addDeferedCall` literal of `K.help`, each at its researched public offset
+  (`hub_dialog::warn_entries`). Two cases stay Unknown and are refused in code,
+  stopping the level script (`hub_service_research().warn_refusals`):
+  - an `addDeferedCall` of `K.poll` while a copy is already pending (a second
+    warning). What several copies do together is Unknown (HS:382-383). The
+    running copy re-queuing itself is admitted;
+  - a `K.poll` run whose `gamePaused` call comes while a help box is up.
+    That the help box pauses the game is Inferred, not executed (HS:381-382),
+    and the client's help box writes none of `gamePaused`'s three inputs, so
+    counting that run would be a guess. The run is refused and not counted.
 - **PushTrigger record.** nethostonly=1 and radius 79 (hub) / 78 (hub2) are
   checked against the record (Observed, HS:363-366) and reported by
   `hub_service_targets`. Physical use at that radius stays refused: the
@@ -131,7 +143,8 @@ LOW). Only Observed or Executed rows are ported; the code is
 Refused Unknowns, reported by `hub_service_research().unknowns`: the use of
 L-INN's imported `checkPlayerGold` / `givePlayerGold` / `takePlayerGold`, and
 whether L-INN charges for the stay (HS:351-353, HSF-3); how a player reaches
-L-INN (HS:354); the cutscene caller; whether the help box pauses; several
-queued `K.poll` copies; the stack-read store index; the bag cell
+L-INN (HS:354); the cutscene caller; whether the help box pauses and several
+queued `K.poll` copies (both refused in code, above); the stack-read store
+index; the bag cell
 `removePlayerItem` deletes (HS:467-472). The hub-side mana restore charges
 nothing (Executed, HS:325); no fee or refund is applied anywhere.

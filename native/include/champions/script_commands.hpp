@@ -254,6 +254,10 @@ struct DialogCounts {
   // actions run under its five-native fence, and fence refusals by reason.
   std::uint64_t hub_service_opens = 0, hub_service_actions = 0;
   std::map<std::string, std::uint64_t> hub_service_refused;
+  // Mission-map warning Unknowns refused in hub / hub2 (HS:381-383): a second
+  // K.poll copy queued while one is pending, and a K.poll run that would count
+  // while a help box is up. Keyed by a generic reason.
+  std::map<std::string, std::uint64_t> hub_warn_refused;
 };
 
 // One level script. Not copied: its command closures capture this.
@@ -541,6 +545,8 @@ public:
     std::optional<hub_dialog::DedupeTables> dedupe;
     int dialog_files = 0, cutscene_line_lists = 0, backups = 0;
     bool cutscene_stem_requested = false;
+    // K.use / K.help / K.poll resolve at the researched offsets (HS:32-34).
+    bool warn_entries = false;
   };
   HubResearch hub_research() const;
   const dialog::Dialog &dialog() const { return dialog_; }
@@ -602,6 +608,8 @@ private:
   bool dialog_trigger_supported(std::uint32_t address) const;
   // The hub ring prop record (class apprings / fpprings) in a hub level.
   bool hub_ring(std::uint32_t address) const;
+  // Why a hub mission-map warning native must refuse (empty: it may run).
+  std::string hub_warn_refusal(const char *native, amx::Machine &machine);
   void dialog_trigger(std::uint32_t address);
 
   void install();
@@ -747,6 +755,10 @@ private:
   int hub_action_mission_ = 0;
   bool hub_action_running_ = false;
   std::optional<hub_dialog::Binding> hub_services_;
+  // K.use / K.help / K.poll of the loaded hub script, resolved once per
+  // load and attach (hub_dialog::warn_entries).
+  std::optional<hub_dialog::WarnEntries> hub_warn_;
+  bool hub_warn_resolved_ = false;
   int hub_services_start_ = -1;
   std::string hub_services_mismatch_;
   // The researched effect of the dialog action now running, and what it has

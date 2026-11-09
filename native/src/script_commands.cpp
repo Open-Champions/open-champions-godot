@@ -621,6 +621,20 @@ amx::NativeMap Host::command_map() {
           throw RefusedResult("refused hub dialog action: " + why);
         }
       }
+      // research-hub-npcs@fbbfe65 docs/hub-services.md:381-383: what several
+      // queued K.poll copies do together is Unknown, and that the warning help
+      // box pauses is Inferred only. Neither runs here: both stop the script.
+      if (dialog_attached_ && dialog_level_.hub_level) {
+        const auto why = hub_warn_refusal(kRows[i].name, machine);
+        if (!why.empty()) {
+          counts_.executed[i] -= 1;
+          counts_.refused[i] += 1;
+          counts_.stopped[i] += 1;
+          dialog_counts_.hub_warn_refused[why] += 1;
+          last_refusal_ = std::string("refused ") + kRows[i].name + ": " + why;
+          throw RefusedResult(last_refusal_);
+        }
+      }
       std::optional<amx::Address> result;
       try {
         result = function(machine, params);
@@ -1184,6 +1198,8 @@ bool Host::load(const amx::ByteVector &image) {
   hub_action_running_=false;
   hub_action_mission_=0;
   hub_services_.reset();
+  hub_warn_.reset();
+  hub_warn_resolved_=false;
   hub_services_start_=-1;
   hub_services_mismatch_.clear();
   hub_effect_.reset();

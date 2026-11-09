@@ -1,5 +1,6 @@
 #include "champions/script_builtins.hpp"
 #include <algorithm>
+#include <cctype>
 #include "champions/core_arithmetic.hpp"
 #include "champions/core_math.hpp"
 #include <limits>
@@ -2178,15 +2179,41 @@ void Variables::queue_deferred(const std::string &name) {
 // Native faults propagate before promotion; never continue an unsupported effect.
 void Variables::run_deferred() {
   std::int64_t index=0;
+  // Which entry runs, for deferred_pending / deferred_running only.
+  struct Running {
+    Variables &v; std::string name; std::int64_t next;
+    explicit Running(Variables &x) : v(x), name(x.deferred_running_), next(x.deferred_next_) {}
+    ~Running() { v.deferred_running_=name; v.deferred_next_=next; }
+  } running(*this);
   while(index<amx::s32(memory.word(DEFER_COUNT))) {
     const auto half=memory.word(DEFER_FLIP)&1;
     auto name=memory.cstr(DEFER_NAMES+half*64*0x50+std::uint32_t(index)*0x50);
     ++index;
+    deferred_running_=name;
+    deferred_next_=index;
     run_script(name);
   }
+  deferred_running_=running.name;
+  deferred_next_=running.next;
   memory.word(DEFER_COUNT,memory.word(DEFER_QUEUED));
   memory.word(DEFER_QUEUED,0);
   memory.word(DEFER_FLIP,memory.word(DEFER_FLIP)+1u);
+}
+std::size_t Variables::deferred_pending(const std::string &name) const {
+  const auto lower=[](std::string t) {
+    for(auto &c:t) c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return t;
+  };
+  const auto want=lower(name);
+  const auto front=memory.word(DEFER_FLIP)&1;
+  std::size_t out=0;
+  const auto count=[&](std::uint32_t half,std::int64_t from,std::int64_t to) {
+    for(auto i=std::max<std::int64_t>(from,0);i<std::min<std::int64_t>(to,64);++i)
+      if(lower(memory.cstr(DEFER_NAMES+half*64*0x50+std::uint32_t(i)*0x50))==want) ++out;
+  };
+  count(front^1u,0,amx::s32(memory.word(DEFER_QUEUED)));
+  count(front,deferred_running_.empty() ? 0 : deferred_next_,amx::s32(memory.word(DEFER_COUNT)));
+  return out;
 }
 void Variables::clear_deferred() {
   memory.word(DEFER_COUNT,0);memory.word(DEFER_QUEUED,0);memory.word(DEFER_FLIP,0);

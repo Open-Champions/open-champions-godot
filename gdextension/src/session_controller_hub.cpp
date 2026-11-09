@@ -29,8 +29,8 @@ const char *const UNKNOWNS[][2] = {
     {"inn_route", "How a player reaches L-INN is Unknown: no hub object or hub script requests it (HS:354)."},
     {"hub_restore_charge", "The hub-side mana restore charges nothing (Executed, HS:325). That is not a claim about L-INN."},
     {"cutscene_caller", "The caller of hub public 0x34a4 is Unknown and the line list's link to that cutscene is Inferred (HS:66-69); the line list is never offered as a dialog."},
-    {"help_box_pause", "Whether the warning help box pauses the game is Inferred, not executed (HS:381-382); K.poll counts only what gamePaused reads."},
-    {"poll_copies", "What several queued K.poll copies do together is Unknown (HS:382-383)."},
+    {"help_box_pause", "Whether the warning help box pauses the game is Inferred, not executed (HS:381-382). A K.poll run whose gamePaused call comes while a help box is up refuses and stops the level script; it is never counted."},
+    {"poll_copies", "What several queued K.poll copies do together is Unknown (HS:382-383). An addDeferedCall of K.poll while a copy is already pending (a second warning) refuses and stops the level script; K.poll re-queuing itself is admitted."},
     {"store_stack_index", "The stack-read activateStore index is fixture-dependent (HS:152-153); only backup-dialog writers use it and they are not wired."},
     {"dedupe_bag_cell", "Which bag cell removePlayerItem deletes is Unknown (HS:470)."},
 };
@@ -141,6 +141,12 @@ Dictionary ChampionsSessionController::hub_service_research() const {
   Dictionary fenced;
   for (const auto &[why, n] : counts.hub_service_refused) fenced[String::utf8(why.c_str())] = int64_t(n);
   out["dialog_action_refusals"] = fenced;
+  // HS:32-34, 381-383: K.use / K.help / K.poll resolved at the researched
+  // offsets, and the mission-map warning Unknowns refused in code.
+  out["warn_entries_resolved"] = facts.warn_entries;
+  Dictionary warned;
+  for (const auto &[why, n] : counts.hub_warn_refused) warned[String::utf8(why.c_str())] = int64_t(n);
+  out["warn_refusals"] = warned;
   out["warn_poll_runs"] = int64_t(rta::hub_dialog::WARN_POLL_RUNS);
   out["warn_poll_counts"] = "Script-task runs (on_ready_tick), not frames (HSF-2).";
   Dictionary unknowns;

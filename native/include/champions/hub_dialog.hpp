@@ -325,6 +325,53 @@ inline std::optional<DedupeTables> dedupe_tables(const amx::Machine &m) {
   return out;
 }
 
+// ---- The mission-map warning entries (HS:32-34, 373-383) -------------------
+// The PushTrigger action is public 0x54 in both hubs (HS:51). Its callScript
+// literal names K.use; K.use's callScript literal names K.help; K.help's
+// addDeferedCall literal names K.poll (HS:32, 34). Each must sit at the
+// researched public offset. Names are read from this script, never stored.
+inline constexpr int PUSH_ACTION = 0x54;
+struct WarnEntries {
+  Hub hub = Hub::Hub;
+  std::string use, help, poll;
+};
+inline std::optional<WarnEntries> warn_entries(const amx::Machine &m) {
+  struct Offsets {
+    Hub hub;
+    int use, help, poll;
+  };
+  constexpr Offsets researched[] = {{Hub::Hub, 0x49C0, 0x4A80, 0x4B0C}, {Hub::Hub2, 0x2210, 0x22D0, 0x235C}};
+  try {
+    const Static s(m);
+    // The one literal of `native` in `from` whose public sits at `want`.
+    const auto callee = [&](amx::Cell from, const char *native, int want) -> std::optional<std::string> {
+      std::optional<std::string> out;
+      for (const auto &name : s.literals(m, from, native))
+        if (public_offset(m, name) == std::optional<amx::Cell>(want)) {
+          if (out && *out != name)
+            return std::nullopt;
+          out = name;
+        }
+      return out;
+    };
+    if (!s.by_offset.count(PUSH_ACTION))
+      return std::nullopt;
+    for (const auto &r : researched) {
+      WarnEntries w;
+      w.hub = r.hub;
+      const auto use = callee(PUSH_ACTION, "callScript", r.use);
+      const auto help = use ? callee(r.use, "callScript", r.help) : std::nullopt;
+      const auto poll = help ? callee(r.help, "addDeferedCall", r.poll) : std::nullopt;
+      if (!poll)
+        continue;
+      w.use = *use, w.help = *help, w.poll = *poll;
+      return w;
+    }
+  } catch (const dialog::Refused &) {
+  }
+  return std::nullopt;
+}
+
 // ---- The full live-dialog binding ------------------------------------------
 struct Binding {
   Hub hub = Hub::Hub;

@@ -206,11 +206,20 @@ public:
   // selects another one. Loading remains the caller's responsibility.
   std::shared_ptr<amx::Machine> script_machine;
   amx::Address entry_pri = 0;
+private:
+  std::string deferred_running_;
+  std::int64_t deferred_next_ = 0;
+public:
   void set_script(std::shared_ptr<amx::Machine>);
   amx::Address run_script(const std::optional<std::string> &);
   void queue_deferred(const std::string &);
   void run_deferred();
   void clear_deferred();
+  // Queued copies of `name` (case-insensitive) not yet run: the back half,
+  // plus the front half's entries after the one now running. Read-only.
+  std::size_t deferred_pending(const std::string &name) const;
+  // The deferred entry run_deferred is running now (empty outside it).
+  const std::string &deferred_running() const { return deferred_running_; }
   void reset_script_state();
   void set_post_action(const std::string &);
   void run_post_action();

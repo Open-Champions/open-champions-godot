@@ -489,7 +489,8 @@ inline const std::vector<std::string> natives{"startDialog","setMissionAvailable
   "trigger"};
 // Unpacked strings: four bytes per character, so slots are 0x40 apart.
 constexpr a::Cell S_STARTED=0x800, S_INTRO=0x500, S_DEMO=0x540, S_QUEST=0x580, S_SCAN=0x5C0, S_POLL=0x600,
-                  S_ENT=0x640, S_SHARD=0x680, S_BLOOD=0x6C0, S_RING=0x700, RUNS=0x400, UNPAUSED=0x404;
+                  S_ENT=0x640, S_SHARD=0x680, S_BLOOD=0x6C0, S_RING=0x700, S_USE=0x740, S_HELP=0x780,
+                  S_WARN=0x7C0, UNPAUSED=0x404;
 using L=std::vector<a::AsmLine>;
 inline a::AsmInstruction I(const std::string &m,std::vector<a::AsmValue> o={}) { return {m,std::move(o),{},{}}; }
 inline void call(L &l,int native,const std::vector<a::Cell> &args) {
@@ -503,14 +504,14 @@ struct Fixture {
   Script script; sc::DialogLevel level; World world; std::vector<std::uint8_t> objects;
   hd::Hub hub;
   Fixture(hd::Hub h,Options o={}):hub(h) {
-    std::vector<a::Cell> code(0x5800/4,a::Cell(a::opcode_number("ZERO.pri")));
+    std::vector<a::Cell> code(0x6000/4,a::Cell(a::opcode_number("ZERO.pri")));
     a::ImageOptions options; options.data.resize(0x2000); options.natives=natives;
-    std::set<int> used;
+    std::map<int,int> used; // start -> end of each placed public
     // Assembled at offset 0, then placed: code-operand jumps are moved by `at`.
     auto put=[&](int at,const std::string &name,L lines) {
-      check_free(used,at);
       L body{I("PROC")}; body.insert(body.end(),lines.begin(),lines.end()); body.push_back(I("RETN"));
       auto assembly=a::assemble(body);
+      check_free(used,at,int(4*assembly.cells.size()));
       std::size_t cell=0;
       for(const auto &line:body) {
         const auto *ins=std::get_if<a::AsmInstruction>(&line);
@@ -545,18 +546,35 @@ struct Fixture {
       put(act.offset,"x"+std::to_string(act.offset),l);
     }
     L scan; for(int m=0;m<12;++m) call(scan,GETV,{S_STARTED+0x40*m});
-    put(0x4A00,"scan",scan);
-    put(0x4C00,"talk",{I("PUSH.C",{0}),I("PUSH.C",{0}),I("PUSH.C",{400}),I("PUSH.C",{12}),
+    put(0x5400,"scan",scan);
+    put(0x5600,"talk",{I("PUSH.C",{0}),I("PUSH.C",{0}),I("PUSH.C",{400}),I("PUSH.C",{12}),
                        I("SYSREQ.C",{START_DIALOG}),I("STACK",{16})});
     // start queues two checks with bounds 9 and 12 (HS:329-337 shape).
     L start; call(start,DEFER,{S_SHARD}); call(start,DEFER,{S_BLOOD}); put(0x4D00,"start",start);
     put(0x4E00,"shard",{I("CONST.pri",{0}),I("BOUNDS",{9}),I("BOUNDS",{9})});
     put(0x4F00,"blood",{I("CONST.pri",{0}),I("BOUNDS",{12}),I("BOUNDS",{12})});
-    // K.help / K.poll shape (HS:373-383): help queues poll; poll counts its runs,
-    // counts unpaused ones, calls activateMissionMenu on the 6th and re-queues.
-    L help; call(help,DEFER,{S_POLL}); put(0x5000,"help",help);
-    L poll{I("LOAD.pri",{RUNS}),I("ADD.C",{1}),I("STOR.pri",{RUNS})};
-    call(poll,PAUSED,{});
+    // The mission-map warning chain at the researched publics (HS:32-34,
+    // 373-383), resolved by the production code from literals and offsets:
+    // the PushTrigger action 0x54 calls K.use; K.use tests the warning (here a
+    // getv stands in for K.warn) and either calls K.help or writes the entrance
+    // and opens the menu; K.help restarts the count and queues K.poll; K.poll
+    // calls gamePaused once per run, counts unpaused runs, calls
+    // activateMissionMenu on the 6th, never writes the entrance, and re-queues
+    // itself. The tests count Script-task ticks outside the script.
+    const bool hub1=h==hd::Hub::Hub;
+    const int k_use=hub1 ? 0x49C0 : 0x2210, k_help=hub1 ? 0x4A80 : 0x22D0, k_poll=hub1 ? 0x4B0C : 0x235C;
+    L action; call(action,CALL_SCRIPT,{S_USE}); put(hd::PUSH_ACTION,"pa",action);
+    L use; call(use,GETV,{S_WARN});
+    use.push_back(I("JZER",{std::string("go")}));
+    call(use,CALL_SCRIPT,{S_HELP});
+    use.push_back(I("JUMP",{std::string("done")}));
+    use.push_back(a::Label{"go:"});
+    call(use,ENTRANCE,{S_ENT}); call(use,MENU,{});
+    use.push_back(a::Label{"done:"});
+    put(k_use,"kuse",use);
+    L help{I("CONST.pri",{0}),I("STOR.pri",{UNPAUSED})};
+    call(help,DEFER,{S_POLL}); put(k_help,"khelp",help);
+    L poll; call(poll,PAUSED,{});
     poll.push_back(I("JNZ",{std::string("requeue")}));
     poll.push_back(I("LOAD.pri",{UNPAUSED})); poll.push_back(I("ADD.C",{1})); poll.push_back(I("STOR.pri",{UNPAUSED}));
     poll.push_back(I("EQ.C.pri",{hd::WARN_POLL_RUNS}));
@@ -564,14 +582,13 @@ struct Fixture {
     call(poll,MENU,{});
     poll.push_back(a::Label{"requeue:"});
     call(poll,DEFER,{S_POLL});
-    put(0x5080,"poll",poll);
-    // The no-warning use: entrance, then the menu (HS:373).
-    L use; call(use,ENTRANCE,{S_ENT}); call(use,MENU,{}); put(0x5200,"use",use);
+    put(k_poll,"kpoll",poll);
     // K.walk's dispatch shape: trigger(ring record name, 0) (HS:395-399).
     L walk; call(walk,TRIGGER,{S_RING,0}); put(0x5300,"walk",walk);
     L walk1; call(walk1,TRIGGER,{S_RING,1}); put(0x5380,"walk1",walk1);
     script.image=a::build_image(code,options);
-    script.strings={{400,"npc"},{S_QUEST,"q"},{S_SCAN,"scan"},{S_POLL,"poll"},{S_ENT,"ent"},
+    script.strings={{400,"npc"},{S_QUEST,"q"},{S_SCAN,"scan"},{S_POLL,"kpoll"},{S_ENT,"ent"},
+                    {S_USE,"kuse"},{S_HELP,"khelp"},{S_WARN,"kw"},
                     {S_SHARD,"shard"},{S_BLOOD,"blood"},{S_INTRO,"vi"},{S_DEMO,"vd"},{S_RING,"ring"}};
     for(int m=0;m<12;++m) script.strings.emplace_back(S_STARTED+0x40*m,"s"+std::to_string(m+1));
     std::vector<dl::Node> nodes(rows.size());
@@ -597,8 +614,10 @@ struct Fixture {
     objects=objects_ob({{"NPC",0,{}, {"name=npc","showName=nm","dialogScript=talk","dialogOffset=0,0,0,0"}},
                         {h==hd::Hub::Hub ? "apprings" : "fpprings",0,{},{"name=ring"}}});
   }
-  static void check_free(std::set<int> &used,int at) {
-    if(!used.insert(at).second) throw std::logic_error("fixture public offset reused");
+  static void check_free(std::map<int,int> &used,int at,int size) {
+    for(const auto &[from,to]:used)
+      if(at<to && from<at+size) throw std::logic_error("fixture publics overlap");
+    used.emplace(at,at+size);
   }
   void load_into(sc::Host &host,Check check) const {
     check(load(host,script,objects),"hub table: authored host loads");
@@ -613,6 +632,116 @@ inline void set_mission(sc::Host &host,int n,int raw) {
   host.variables().memory.byte(host.variables().mission_byte(0,1,n),std::uint8_t(raw));
 }
 inline int mission(sc::Host &host,int n) { return host.variables().memory.read(host.variables().mission_byte(0,1,n)); }
+
+// research-hub-npcs@fbbfe65 docs/hub-services.md:373-383 (HSF-2: Script-task
+// runs, not frames). The tests count client Script-task ticks (on_ready_tick)
+// themselves and read gamePaused's executed count as the per-run record. The
+// action queues K.poll outside a tick, into the back half of the
+// double-buffered queue (research-loading-readiness@d6f035fa
+// docs/loading-arrival-r2.md:11-43): tick 1 only promotes it, and from tick 2
+// on each tick runs the one queued copy once. So run r is tick r + 1. The entrance field 0x4f8468 holds a
+// sentinel; the same PushTrigger path writes it when there is no warning.
+inline void warn_poll(Check check,const Fixture &h1,const Fixture &h2) {
+  const auto paused_runs=[](sc::Host &host) { return host.counts().executed[std::size_t(command_index("gamePaused"))]; };
+  const auto entrance_writes=[](sc::Host &host) { return host.counts().executed[std::size_t(command_index("setEntrance"))]; };
+  const auto menu_calls=[](sc::Host &host) { return host.counts().executed[std::size_t(command_index("activateMissionMenu"))]; };
+  const auto warned=[&](const Fixture &f,sc::Host &host) {
+    f.load_into(host,check);
+    host.variables().memory.string(0x4f8468,"prior");
+    host.variables().quest_set("kw",1);
+    return host.run("pa");
+  };
+  for(const Fixture *f:{&h1,&h2}) {
+    sc::Host probe; f->load_into(probe,check);
+    check(probe.hub_research().warn_entries,"hub warn: K.use, K.help and K.poll resolve at the researched publics");
+    // Control: no warning, so the same path writes the entrance and opens the menu.
+    probe.variables().memory.string(0x4f8468,"prior");
+    check(probe.run("pa")==sc::Stop::Complete && probe.variables().memory.cstr(0x4f8468)=="ent" &&
+          entrance_writes(probe)==1 && probe.campaign().menu_open(),
+          "hub warn: without a warning the action writes the entrance and opens the menu");
+  }
+  // HPS-2: the menu opens on the 6th unpaused run; runs listed in `paused`
+  // (1-based) are paused and not counted; recall blocks the call's menu.
+  // `want` is the tick the menu opens on (run + 1), -1 for none.
+  struct Pattern { std::set<int> paused; bool recall; int want; const char *what; };
+  const Pattern patterns[]={
+    {{},false,7,"hub warn: menu on the 6th unpaused run (tick 7)"},
+    {{2,3,4},false,10,"hub warn: runs 2-4 paused move the menu to run 9 (tick 10)"},
+    {{1,5,6,9},false,11,"hub warn: scattered paused runs are not counted (run 10, tick 11)"},
+    {{},true,-1,"hub warn: recall blocks the 6th-run menu"},
+  };
+  for(const Fixture *f:{&h1,&h2})
+    for(const auto &p:patterns) {
+      sc::Host host;
+      const auto stop=warned(*f,host);
+      if(p.recall) host.variables().memory.byte(0x41b51d,1);
+      check(stop==sc::Stop::Wait && !host.campaign().menu_open() && entrance_writes(host)==0 &&
+            host.variables().deferred_pending("kpoll")==1 && paused_runs(host)==0,
+            "hub warn: the warning queues one K.poll and writes nothing");
+      int opened=-1, menu_tick=-1;
+      bool one_run_per_tick=true;
+      for(int tick=1;tick<=14;++tick) {
+        host.variables().memory.word(0x41b4f4,p.paused.count(tick-1) ? 1u : 0u);
+        const auto runs=paused_runs(host), menus=menu_calls(host);
+        host.on_ready_tick();
+        one_run_per_tick=one_run_per_tick && paused_runs(host)==runs+(tick==1 ? 0u : 1u) &&
+                         host.variables().deferred_pending("kpoll")==1;
+        if(menu_calls(host)!=menus && menu_tick<0) menu_tick=tick;
+        if(opened<0 && host.campaign().menu_open()) opened=tick;
+      }
+      host.variables().memory.word(0x41b4f4,0);
+      check(one_run_per_tick,"hub warn: tick 1 promotes, each later tick runs K.poll once, one copy stays queued");
+      check(opened==p.want,p.what);
+      if(p.recall) check(menu_tick==7,"hub warn: with recall the 6th run still calls activateMissionMenu");
+      check(host.variables().memory.cstr(0x4f8468)=="prior" && entrance_writes(host)==0,
+            "hub warn: K.poll writes no entrance");
+      check(!host.stopped_on_refusal() && host.dialog_counts().hub_warn_refused.empty(),
+            "hub warn: one copy and no help box run unrefused");
+    }
+  // HPS-1: a second warning while K.poll is pending refuses (HS:382-383),
+  // whether it comes before or after the first tick.
+  for(const Fixture *f:{&h1,&h2})
+    for(int before:{0,2}) {
+      sc::Host host;
+      warned(*f,host);
+      for(int t=0;t<before;++t) host.on_ready_tick();
+      const auto runs=paused_runs(host);
+      const auto again=host.run("pa");
+      check(again==sc::Stop::Refused && host.stopped_on_refusal() &&
+            host.dialog_counts().hub_warn_refused.size()==1 && host.variables().deferred_pending("kpoll")==1,
+            "hub warn: a second K.poll copy while one is pending refuses");
+      for(int t=0;t<10;++t) host.on_ready_tick();
+      check(paused_runs(host)==runs && !host.campaign().menu_open() && entrance_writes(host)==0,
+            "hub warn: after that refusal K.poll no longer runs and no menu opens");
+    }
+  // HPS-1: K.poll counting while a help box is up refuses (HS:381-382: that
+  // the box pauses is Inferred). The help box is opened through the HUD state
+  // the client's help box sets.
+  // The box is opened before run `open_at` (tick open_at + 1) and closed two
+  // ticks later; runs before it count normally.
+  for(const Fixture *f:{&h1,&h2})
+    for(int open_at:{1,4}) {
+      sc::Host host;
+      warned(*f,host);
+      for(int tick=1;tick<=12;++tick) {
+        if(tick==open_at+1) host.hud().help_open=true;
+        if(tick==open_at+3) host.hud().help_open=false;
+        host.on_ready_tick();
+      }
+      check(host.stopped_on_refusal() && host.dialog_counts().hub_warn_refused.size()==1,
+            "hub warn: a K.poll run while the help box is up refuses");
+      check(paused_runs(host)==std::uint64_t(open_at-1) && menu_calls(host)==0 && !host.campaign().menu_open() &&
+            entrance_writes(host)==0,"hub warn: that run is not counted and no later run opens the menu");
+    }
+  // Other help-box and deferred uses are unaffected: start's two checks queue
+  // freely and gamePaused outside K.poll is not refused.
+  {
+    sc::Host host; h2.load_into(host,check);
+    host.hud().help_open=true;
+    check(host.run("start")==sc::Stop::Wait && host.dialog_counts().hub_warn_refused.empty(),
+          "hub warn: start's deferred checks are not K.poll copies");
+  }
+}
 
 inline void run(Check check,std::string &where) {
   where="researched hub tables";
@@ -761,28 +890,7 @@ inline void run(Check check,std::string &where) {
       check(host.portal_trigger_requests()==0 && host.stopped_on_refusal(),
             "hub table: other trigger values and non-hub levels refuse");
   }
-  // K.poll (HS:374-383, HSF-2): count Script-task runs. The 6th unpaused run
-  // calls the menu; paused runs are not counted; no entrance write; a dialog
-  // or recall blocks the menu but not the count.
-  for(int pattern=0;pattern<3;++pattern) {
-    sc::Host host; h2.load_into(host,check);
-    host.variables().memory.string(0x4f8468,"prior");
-    if(pattern==2) host.variables().memory.byte(0x41b51d,1);
-    host.run("help");
-    int opened_at=-1;
-    for(int tick=0;tick<40 && opened_at<0;++tick) {
-      const auto runs=a::s32(host.machine()->cell(RUNS));
-      host.variables().memory.word(0x41b4f4,pattern==1 && runs+1>=2 && runs+1<=4 ? 1u : 0u);
-      host.on_ready_tick();
-      if(host.campaign().menu_open()) opened_at=a::s32(host.machine()->cell(RUNS));
-      if(pattern==2 && a::s32(host.machine()->cell(UNPAUSED))>=hd::WARN_POLL_RUNS) break;
-    }
-    if(pattern==0) check(opened_at==6,"hub table: menu on the 6th K.poll run");
-    if(pattern==1) check(opened_at==9,"hub table: runs 2-4 paused move the menu to run 9");
-    if(pattern==2) check(opened_at<0 && a::s32(host.machine()->cell(UNPAUSED))==hd::WARN_POLL_RUNS,
-                         "hub table: recall blocks the 6th-run menu");
-    check(host.variables().memory.cstr(0x4f8468)=="prior","hub table: K.poll writes no entrance");
-  }
+  warn_poll(check,h1,h2);
 }
 } // namespace table
 } // namespace hub_offer_host_tests
