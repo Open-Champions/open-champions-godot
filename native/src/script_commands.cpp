@@ -1,8 +1,10 @@
 #include "champions/script_commands.hpp"
 #include "champions/objects.hpp"
+#include "champions/vendor_stock.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -1106,6 +1108,11 @@ level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &opt
   mirror();
   auto result = quests::change_level(*campaign_, flow_, options, {});
   quests::mirror_to_variables(*campaign_, *variables_, player_currents_known_);
+  // The act clear zeroed storeLevel with every quest value; that lifts a
+  // non-literal store's block. research-vendor-stock@fdf6752:
+  // docs/spec/vendor-stock.md:45-47,320-321.
+  if (vendor_stock_)
+    vendor_stock_->on_act_reset(result.reset_act);
   return result;
 }
 bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
@@ -1365,6 +1372,155 @@ Stop Host::run_start() {
   return classify();
 }
 
+namespace {
+// The binder lowercases quest-variable names.
+bool same_quest_name(const std::string &a, const std::string &b) {
+  if (a.size() != b.size()) return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (std::tolower(static_cast<unsigned char>(a[i])) !=
+        std::tolower(static_cast<unsigned char>(b[i])))
+      return false;
+  return true;
+}
+bool is_store_level(const std::string &name) {
+  return same_quest_name(name, items::kStoreLevelName);
+}
+} // namespace
+
+// research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:36-38,305-321.
+void Host::set_vendor_stock(items::VendorStock *stock) {
+  vendor_stock_ = stock;
+  stock_load_.reset();
+  if (!stock) {
+    variables_->on_script_quest_store = {};
+    return;
+  }
+  // storeLevel lives in this host's quest table 0x86da80. quest_get is the
+  // creating read (a missing name is created at 0).
+  items::VendorQuestVariables table;
+  table.read = [this](const std::string &name) {
+    return static_cast<std::int32_t>(variables_->quest_get(name));
+  };
+  table.present = [this](const std::string &name) {
+    for (const auto &entry : variables_->quest_vars())
+      if (same_quest_name(entry.first, name)) return true;
+    return false;
+  };
+  table.store = [this](const std::string &name, std::int32_t value) {
+    variables_->quest_set(name, value);
+  };
+  stock->bind_quest_variables(std::move(table));
+  // The VM call does not show whether the stored value was a pushed
+  // constant, so a script store of storeLevel cannot be classified as one of
+  // the authored literals (docs/spec/vendor-stock.md:313-319). It blocks the
+  // next pass until the act clear.
+  variables_->on_script_quest_store = [this](const std::string &name) {
+    if (vendor_stock_ && is_store_level(name))
+      vendor_stock_->note_unclassified_store("script built-in store of storeLevel");
+  };
+}
+
+void Host::record_stock(const items::VendorLoad &result) {
+  auto &load = *stock_load_;
+  load.matched = result.matched;
+  load.pending = result.pending;
+  load.generated = result.generated;
+  if (result.refused) load.refusals.push_back(result.reason);
+  if (result.generated) {
+    external_seed_->state = vendor_stock_->shared_seed();
+    cosmetic_seed_->state = vendor_stock_->cosmetic_seed();
+    // docs/spec/vendor-stock.md:220-222,341. The resource request is not completion.
+    if (result.resource_requested && !result.resource_completed)
+      load.refusals.push_back(result.resource_reason);
+  }
+}
+
+void Host::stock_on_load(const std::string &destination) {
+  stock_load_ = StockLoad{};
+  auto &load = *stock_load_;
+  load.destination = destination;
+  if (!vendor_stock_) return;
+  if (!exe_ || !exe_->string || destination.empty()) {
+    load.refusals.push_back("Store applicability unavailable: executable or destination absent.");
+    return;
+  }
+  std::array<std::string, 4> identifiers;
+  bool match = false;
+  try {
+    for (std::size_t i = 0; i < items::kShopDestinationAddresses.size(); ++i) {
+      identifiers[i] = exe_->string(items::kShopDestinationAddresses[i]);
+      if (identifiers[i].empty()) throw std::runtime_error("empty stock identifier");
+      match = match || destination == identifiers[i];
+    }
+  } catch (const std::exception &) {
+    load.refusals.push_back("Store applicability unavailable: identifier read failed.");
+    return;
+  }
+  if (!match) return;
+  load.matched = true;
+  // Session inputs only; none is defaulted. docs/spec/vendor-stock.md:36-43,
+  // 165-171,330-332.
+  const auto &m = variables_->memory;
+  if (seed_refused())
+    load.refusals.push_back("Shop stock refused: shared seed 0x404464 unbound or not the original's state.");
+  if (!cosmetic_seed_)
+    load.refusals.push_back("Shop stock refused: cosmetic seed 0x404460 unbound.");
+  if (!m.published(script_items::G_DIFFICULTY, 4))
+    load.refusals.push_back("Shop stock refused: difficulty 0x4f719c not published.");
+  std::vector<std::int32_t> classes;
+  std::int32_t players = 0;
+  if (!m.published(0x4d8ae0, 4)) {
+    load.refusals.push_back("Shop stock refused: player count 0x4d8ae0 not published.");
+  } else {
+    players = static_cast<std::int32_t>(m.word(0x4d8ae0));
+    if (players < 1 || players > 4) {
+      load.refusals.push_back("Shop stock refused: player count outside 1..4.");
+    } else {
+      for (std::int32_t slot = 0; slot < players; ++slot) {
+        const auto at = 0x4d8af0u + static_cast<std::uint32_t>(slot) * 0x4c30u + 0x50u;
+        if (!m.published(at, 4)) {
+          load.refusals.push_back("Shop stock refused: a player's class (+0x50) is not published.");
+          break;
+        }
+        classes.push_back(static_cast<std::int32_t>(m.word(at)));
+      }
+    }
+  }
+  if (!load.refusals.empty()) return;
+  try {
+    vendor_stock_->set_destinations(identifiers);
+    vendor_stock_->set_seeds(external_seed_->state, cosmetic_seed_->state);
+    vendor_stock_->set_difficulty(static_cast<std::int32_t>(m.word(script_items::G_DIFFICULTY)));
+    vendor_stock_->set_party(players, classes);
+    load.shared_at_begin = external_seed_->state;
+    cosmetic_at_begin_ = cosmetic_seed_->state;
+    record_stock(vendor_stock_->begin_load(destination));
+  } catch (const items::VendorRefused &error) {
+    load.refusals.push_back(error.what());
+  }
+}
+
+bool Host::step_vendor_stock() {
+  if (!stock_load_ || !stock_load_->pending) return true;
+  auto &load = *stock_load_;
+  if (!vendor_stock_ || !vendor_stock_->pending()) {
+    load.pending = false;
+    load.refusals.push_back("Shop stock pass was lost before it finished.");
+    return true;
+  }
+  // The original pass is synchronous. A draw from either seed between steps
+  // would be lost by the write-back, so the pass is discarded instead.
+  if (!external_seed_ || !cosmetic_seed_ || external_seed_->state != load.shared_at_begin ||
+      cosmetic_seed_->state != cosmetic_at_begin_) {
+    vendor_stock_->cancel();
+    load.pending = false;
+    load.refusals.push_back("Shop stock refused: a seed advanced during the stepped pass.");
+    return true;
+  }
+  record_stock(vendor_stock_->step());
+  return !load.pending;
+}
+
 // All addresses/conditions below: research-loading-readiness@9dd49046,
 // docs/loading-readiness.md (line ranges beside each operation).
 Host::LoadingReadiness Host::loading_readiness(const std::string &destination,
@@ -1389,13 +1545,27 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination,
   } else {
     try {
       bool match = false;
-      for (const auto address : {0x554678u, 0x554680u, 0x554688u, 0x554698u}) {
-        const auto identifier = exe_->string(address);
-        if (identifier.empty()) throw std::runtime_error("empty stock identifier");
-        match = match || destination == identifier;
+      std::array<std::string, 4> identifiers;
+      for (std::size_t i = 0; i < items::kShopDestinationAddresses.size(); ++i) {
+        identifiers[i] = exe_->string(items::kShopDestinationAddresses[i]);
+        if (identifiers[i].empty()) throw std::runtime_error("empty stock identifier");
+        match = match || destination == identifiers[i];
       }
       if (!match) out.stores_complete = true;
-      else out.refusals.push_back("Applicable transition stock generation/RNG unavailable.");
+      else if (!vendor_stock_) {
+        // research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:326-329.
+        out.refusals.push_back("Applicable transition stock generation/RNG unavailable.");
+      } else if (!stock_load_ || stock_load_->destination != destination) {
+        // A status query only: generation happens once, at the ordered stock
+        // point (stock_on_load). docs/spec/vendor-stock.md:17-25.
+        out.refusals.push_back("Shop stock not generated for this load: the ordered stock point has not run.");
+      } else if (stock_load_->pending) {
+        out.stores_complete = false;
+        out.refusals.push_back("Shop stock pass in progress; not ready.");
+      } else {
+        if (stock_load_->generated) out.stores_complete = true;
+        for (const auto &reason : stock_load_->refusals) out.refusals.push_back(reason);
+      }
     } catch (const std::exception &) {
       out.refusals.push_back("Store applicability unavailable: identifier read failed.");
     }

@@ -18,6 +18,10 @@ struct SessionHooks {
   std::function<void(unsigned, const Vec3 &, std::uint16_t)> construct_player;
   std::function<void()> remove_flag39_items;
   std::function<void()> disable_unclaimed_pieces;
+  // Optional. The session event still fires when this is empty. A matching
+  // shop destination regenerates; mode 0 is not this load.
+  // research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:326-329.
+  std::function<void(const std::string &level)> shop_stock;
 };
 class SessionAdapter {
   State &state_;

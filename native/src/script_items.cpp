@@ -473,6 +473,8 @@ std::uint64_t Service::machine_service(View &v, const std::string &name, const s
     if (name == "vars_get")
       return static_cast<std::uint32_t>(variables_.quest_get(var));
     variables_.quest_set(var, static_cast<amx::Cell>(sword(std::uint32_t(args.at(1)))));
+    if (variables_.on_script_quest_store)
+      variables_.on_script_quest_store(var);
     return 0;
   }
   if (name == "script_runByName") {

@@ -7,6 +7,7 @@
 #include "champions/campaign_entry.hpp"
 #include "champions/script_effects.hpp"
 #include "champions/script_items.hpp"
+#include "vendor_stock_fixture.hpp"
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -1343,6 +1344,112 @@ void test_loading_readiness() {
         "faulted absent machine cannot certify loading");
 }
 
+// research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:17-25,36-43,326-336.
+// The host supplies every stock input from the session and generates once,
+// at the ordered stock point, in steps. loading_readiness only reports the
+// recorded result. Resource completion stays refused. An unbound host keeps
+// the previous refusal.
+void test_vendor_stock_load() {
+  namespace items = champions::simulation::rta::items;
+  namespace fx = items::vendor_fixture;
+  auto stock = fx::ready(7, 7);
+  std::array<std::string, 4> names;
+  for (std::size_t i = 0; i < names.size(); ++i)
+    names[i] = "synthetic_stock_" + std::to_string(items::kShopDestinationAddresses[i]);
+  sc::Host host;
+  champions::simulation::rta::level_factory::Executable exe;
+  exe.string = [](std::uint32_t address) {
+    return std::string("synthetic_stock_") + std::to_string(address);
+  };
+  host.set_executable(exe);
+  host.set_vendor_stock(&stock);
+  const auto reasons = [](const sc::Host::LoadingReadiness &r) {
+    std::string all;
+    for (const auto &reason : r.refusals) all += reason + "|";
+    return all;
+  };
+  auto before = host.loading_readiness(names[0]);
+  check(!before.stores_complete.value_or(false) &&
+            reasons(before).find("ordered stock point has not run") != std::string::npos &&
+            stock.generations() == 0,
+        "readiness does not generate before the stock point");
+  // Missing session inputs refuse; none is defaulted.
+  host.stock_on_load(names[0]);
+  auto missing = host.loading_readiness(names[0]);
+  const auto missing_text = reasons(missing);
+  check(!missing.stores_complete.value_or(false) &&
+            missing_text.find("shared seed 0x404464") != std::string::npos &&
+            missing_text.find("cosmetic seed 0x404460") != std::string::npos &&
+            missing_text.find("player count 0x4d8ae0") != std::string::npos &&
+            stock.generations() == 0 && !stock.pending(),
+        "the host refuses stock until seeds and party are supplied");
+  SharedRandom shared(7);
+  champions::simulation::rta::CosmeticRandom cosmetic(7);
+  host.bind_seed(&shared);
+  host.bind_cosmetic_seed(&cosmetic);
+  host.start_single_player();
+  host.stock_on_load(names[0]);
+  check(reasons(host.loading_readiness(names[0])).find("class (+0x50) is not published") != std::string::npos,
+        "an unpublished player class refuses");
+  auto &memory = host.variables().memory;
+  memory.word(0x4d8af0 + 0x50, 0);
+  host.stock_on_load(names[0]);
+  for (int poll = 0; poll < 5; ++poll) {
+    auto pending = host.loading_readiness(names[0]);
+    check(pending.stores_complete == false &&
+              reasons(pending).find("in progress") != std::string::npos,
+          "a started pass reports not ready");
+  }
+  check(stock.generations() == 0 && shared.state == 7, "polling readiness neither generates nor draws");
+  int steps = 0;
+  while (!host.step_vendor_stock()) ++steps;
+  check(steps > 26 && stock.generations() == 1, "the stepped pass completes once");
+  check(host.variables().quest_get("storeLevel") == 0, "storeLevel was created at 0 in 0x86da80");
+  check(shared.state == stock.shared_seed() && shared.state != 7 &&
+            cosmetic.state == stock.cosmetic_seed(),
+        "both seeds are written back after the pass");
+  const auto after = shared.state;
+  for (int poll = 0; poll < 5; ++poll) {
+    auto done = host.loading_readiness(names[0]);
+    bool resource = false;
+    for (const auto &reason : done.refusals)
+      resource = resource || reason.find("resource completion unavailable") != std::string::npos;
+    check(done.stores_complete == true && resource, "the recorded pass is complete; the resource is not");
+  }
+  check(stock.generations() == 1 && shared.state == after,
+        "repeated readiness polls keep one generation and the shared seed");
+  check(host.loading_readiness(names[3]).stores_complete != true,
+        "another shop destination is not ready until its own stock point");
+  check(host.loading_readiness("synthetic_destination").stores_complete == true,
+        "a non-matching destination needs no stock");
+  // A seed draw between steps discards the pass.
+  host.stock_on_load(names[3]);
+  host.step_vendor_stock();
+  shared.draw();
+  host.step_vendor_stock();
+  auto drifted = host.loading_readiness(names[3]);
+  check(!drifted.stores_complete.value_or(false) &&
+            reasons(drifted).find("seed advanced during the stepped pass") != std::string::npos &&
+            stock.generations() == 1 && !stock.pending(),
+        "a seed draw during the pass refuses it");
+  // A script store of storeLevel cannot be classified as a literal by the VM
+  // call; it blocks the next pass until the act clear.
+  auto built = build_calls({{"start", {{"setv", {2000, 5}}}}}, {{2000, "storeLevel"}}, true);
+  plant(host, built);
+  check(host.run("start") == sc::Stop::Complete && host.variables().quest_get("storeLevel") == 5,
+        "the script stores storeLevel in 0x86da80");
+  check(stock.store_level_unestablished(), "the VM store marks storeLevel unestablished");
+  host.stock_on_load(names[0]);
+  while (!host.step_vendor_stock()) {}
+  check(reasons(host.loading_readiness(names[0])).find("not classified as an authored literal") != std::string::npos &&
+            stock.generations() == 1,
+        "the next pass refuses after an unclassified script store");
+  sc::Host unbound;
+  unbound.set_executable(exe);
+  check(!unbound.loading_readiness(names[0]).stores_complete,
+        "an unbound shop still refuses generation");
+}
+
 // d6f035fa:docs/loading-arrival-r2.md:11-43: authored scripts run the production
 // VM/queue; discriminate per-entry errors, promotion and native fault stops.
 void test_loading_r2_deferred() {
@@ -2210,6 +2317,7 @@ int main(int argc, char **argv) {
   test_refusals();
   test_wait_then_complete();
   test_loading_readiness();
+  test_vendor_stock_load();
   test_loading_r2_deferred();
   test_loading_r2_equipment();
   test_loading_r3_resources();

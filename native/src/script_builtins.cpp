@@ -1092,11 +1092,15 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     auto total = amx::s32(static_cast<std::uint32_t>(previous) +
                          std::uint64_t(static_cast<std::uint32_t>(value)));
     quest_set(text, total);
+    if (on_script_quest_store)
+      on_script_quest_store(text);
     return total;
   }
   auto value = argument(machine, 8);
   if (name == "setv") {
     quest_set(text, value);
+    if (on_script_quest_store)
+      on_script_quest_store(text);
     return 0;
   }
   if (name == "setpv") {

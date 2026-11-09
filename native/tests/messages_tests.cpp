@@ -195,6 +195,38 @@ int main() {
         shop_nested_memory.poke(it,4,0); // discard the earlier failure's retained copy
         shop_nested.shop_buy(0,0x20000);
         check(shop_nested_memory.load(r+0xe4,4)==41 && shop_nested_memory.load(r+0x1330,4)==1);
+        // Category 1 is 44. Full-price flags and slot 8 stay at 100.
+        // research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:236-244.
+        def->price = 100;
+        def->category = 1;
+        shop_memory.poke(def->addr + 0x1c, 1, 0);
+        shop_memory.poke(def->addr + 0x1d, 1, 1);
+        shop_memory.poke(0x20000, 4, def->addr);
+        shop_memory.poke(0x20000 + 4, 2, 1);
+        shop_memory.poke(0x20000 + 8, 8, 0);
+        shop_memory.poke(r + 0xe4, 4, 100);
+        shop.shop_buy(0, 0x20000);
+        check(shop_memory.load(r + 0xe4, 4) == 56);
+        shop_memory.poke(0x20000 + 8, 8, 0x30000000000ull);
+        shop_memory.poke(r + 0xe4, 4, 100);
+        shop.shop_buy(0, 0x20000);
+        check(shop_memory.load(r + 0xe4, 4) == 0);
+        shop_memory.poke(0x20000 + 8, 8, 0);
+        shop_memory.poke(def->addr + 0x1c, 1, 8);
+        shop_memory.poke(r + 0xe4, 4, 200);
+        shop.shop_buy(0, 0x20000);
+        check(shop_memory.load(r + 0xe4, 4) == 100);
+        // A one-count sale of value 100 credits 4 before dropItem.
+        // docs/spec/vendor-stock.md:246-254.
+        def->category = 0;
+        shop_memory.poke(def->addr + 0x1c, 1, 0);
+        shop_memory.poke(def->addr + 0x1d, 1, 0);
+        shop_memory.poke(it, 4, def->addr);
+        shop_memory.poke(it + 4, 2, 1);
+        for (unsigned i = 0; i < 4; ++i) shop_memory.poke(it + 0x24 + 8 * i, 2, 0xffff);
+        shop_memory.poke(r + 0xe4, 4, 0);
+        shop.shop_sell(0, 0, 0, 0, 0, 0, 2);
+        check(shop_memory.load(r + 0xe4, 4) == 4);
         // Scalar wrappers wrap the base only; adjacent scalar bytes stay unwrapped.
         Memory scalar_memory; Machine scalar(scalar_memory);
         check(s64(0x8000000000000000ull)==INT64_MIN && s64(UINT64_MAX)==-1);

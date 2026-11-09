@@ -379,9 +379,11 @@ void reference_cases() {
   CHECK(se.level == "aab" && se.sub == "s" && se.prev == "aa");
   CHECK(se.entrance == "door");
   se.quest_values["q"] = 5;
+  se.quest_values["storeLevel"] = 9;
   se.pending.request("bb");
   d = begin_change(se, {});
   CHECK(d.act_changed && se.quest_values["q"] == 0 &&
+        se.quest_values["storeLevel"] == 0 &&
         se.states.entries.empty());
   for (auto &player : se.players)
     CHECK(player.recall_dest == "None");
@@ -566,6 +568,7 @@ void robustness_and_state() {
   s.entrance = "door";
   s.post_action = "after";
   s.quest_values["q"] = 8;
+  s.quest_values["storeLevel"] = 9;
   s.players[0].persistent = {9};
   s.players[0].recall_dest = "aa";
   s.players[0].quests = {"q"};
@@ -575,7 +578,8 @@ void robustness_and_state() {
   ChangeOptions opts;
   opts.card_latch = true;
   auto r = begin_change(s, opts);
-  CHECK(r.act_changed && !r.reset_act && s.quest_values["q"] == 8);
+  CHECK(r.act_changed && !r.reset_act && s.quest_values["q"] == 8 &&
+        s.quest_values["storeLevel"] == 9);
   CHECK(s.entrance == "door" && s.post_action == "after" &&
         s.players[0].persistent == Blob({9}));
   CHECK(s.transient.objects.empty() && !s.transient.paused);
@@ -894,7 +898,7 @@ void integration() {
   };
   make_level("aa", v(20, 30, 40));
   make_level("aab", v(70, 80, 90));
-  std::vector<std::string> io, events, scripts;
+  std::vector<std::string> io, events, scripts, stock_levels;
   LoadServices svc;
   svc.disc = [&](const std::string &n) -> std::optional<Blob> {
     io.push_back(n);
@@ -949,6 +953,7 @@ void integration() {
   hooks.disable_unclaimed_pieces = [&] {
     events.push_back("disable_unclaimed");
   };
+  hooks.shop_stock = [&](const std::string &level) { stock_levels.push_back(level); };
   SessionAdapter adapter(state, loader, hooks);
   CHECK(adapter.request_script("aa", {}, false, 0));
   Placement placement;
@@ -1000,6 +1005,7 @@ void integration() {
   scripts.clear();
   loaded = adapter.change({}, {}, placement);
   CHECK(state.spawn.pos[0] == v(51, 52, 100) && state.spawn.rank == 1);
+  CHECK(stock_levels == std::vector<std::string>({"aa", "aab", "aa"}));
   CHECK(built == 3 && state.level == "aa");
   CHECK(scripts == std::vector<std::string>({"preStart", "start"}));
   // Missing required byte resource cannot publish a ready scene or be retried
