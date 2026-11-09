@@ -100,8 +100,8 @@ real timestamps (doc:27-29, 321-323). Every other unexecuted branch throws `Unkn
    `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline edited.
 7. **Journeys: match wave 37.** Unchanged `tools/run_loop_playthrough.py`, serial headless
    then rendered, standard input closed, disc `../../private-validation/rta-disc` read-only
-   (`work/pss/playthrough.out`, `work/pss/playthrough/*/result.json`; PNGs left on the mini
-   and then deleted with it — not tracked).
+   (`work/pss/playthrough.out`, `work/pss/playthrough/*/result.json`; the 38 rendered PNGs
+   stay in the mini's ignored `work/` and are not tracked).
 
    | Variant | Steps | Exit | Ending | Pickup | Log errors | Captures | `refused` rows |
    | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -121,7 +121,7 @@ real timestamps (doc:27-29, 321-323). Every other unexecuted branch throws `Unkn
   instructed `rsync -a --delete --exclude .git --exclude build --exclude work` ran from this
   worktree, with `--exclude .godot` added so the mini's `.godot` was kept as instructed. The
   stale import cache that came with the seed is the matrix first-run failure in gate 4.
-- Logs copied into `work/pss/` had `/Users/case/` rewritten to `~/`; only this report is
+- Logs copied into `work/pss/` had the mini's absolute home prefix rewritten to `~/`; only this report is
   tracked. The mini `build/` was deleted at the end.
 
 ## Remaining
