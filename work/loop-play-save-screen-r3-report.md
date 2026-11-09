@@ -97,4 +97,30 @@ caller outside itself, its test and its CMake line.
 8. **FULL_TRACE: PASS, unchanged**, 36,402 bytes, headless, SHA-256
    `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline
    was edited.
-9. **Journeys:** running (recorded in the next commit).
+9. **Journeys: PASS, step for step equal to round 2 (and so to wave 38).**
+   Unchanged `tools/run_loop_playthrough.py --godot … --game-folder
+   ../../private-validation/rta-disc --out work/pss3/playthrough` via round 2's
+   `journey.sh` with logs in `work/pss3`, serial headless then rendered, standard
+   input closed, read-only disc, after the import above. Wrapper exit 1 (as in
+   every wave), 201 s (`work/pss3/playthrough.out`,
+   `work/pss3/playthrough/*/result.json`; the 38 rendered PNGs stay in the
+   mini's ignored `work/` and are not tracked). Disc files 994 before and 994
+   after.
+
+   | Variant | Steps | Ending | Pickup | Captures | Refusal kinds (counts) |
+   | --- | --- | --- | --- | --- | --- |
+   | Headless | 80 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up, 52 walk ticks, 0 retries | 0 | 6, equal to round 2 |
+   | Rendered | 81 | `player_death` refused; `saved_level_reloaded` false | **10→11**, produced/walked/picked up | 38 | 6, equal to round 2 |
+
+   Compared index by index with round 2's `work/pss2/playthrough/*/result.json`:
+   every step name and result is identical in both variants, the `refusals`
+   map (kind and count) is identical, and every refused row is identical.
+   Besides the host-only `fps` and `memory_bytes`, three fields differ:
+   - Headless step 18 `dialog_choice_close` `choices_taken` is 4 (round 2: 5;
+     wave 38: 3; wave 37: 5). Step 27 `hub_trigger_mission_menu`
+     `script_executed_commands` follows it (`addQuest` 2 vs 3). Round 2's report
+     records these counts moving between waves 37 and 38 on the same native code,
+     from the close-fade dialog retry. Nothing on this path calls the memcard
+     module.
+   - `enemy_fight` `swing_wall_msec` (wall-clock time on a loaded mini) in both
+     variants.
