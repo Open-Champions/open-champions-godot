@@ -1,4 +1,5 @@
 #include "champions/ui_layout.hpp"
+#include "champions/core_arithmetic.hpp"
 #include "champions/ui_font.hpp"
 #include "champions/ui_font_page.hpp"
 #include <algorithm>
@@ -17,6 +18,7 @@ int checked(long long value) {
 }
 Clip clip(int l, int t, int r, int b) { return {l,t,r,b}; }
 std::uint32_t raw(float f) { std::uint32_t u; std::memcpy(&u,&f,sizeof u); return u; }
+float as_float(std::uint32_t u) { float f; std::memcpy(&f,&u,sizeof f); return f; }
 struct Bits { int sign{}, exponent{}; std::uint64_t mantissa{}; };
 Bits unpack(std::uint32_t u) {
     const int e = (u >> 23) & 255;
@@ -146,7 +148,9 @@ std::array<int,4> hudOrigins(bool network,const std::array<bool,4>&local_slots,i
     return values;
 }
 int barClipRight(int origin,float current,float maximum) {
-    if (origin<0 || !std::isfinite(current) || !std::isfinite(maximum) || current<0 || maximum<=0)
+    // Zero maximum saturates; current above the maximum is not clamped.
+    // hud-live-producers.md:59-65. Non-finite values stay refused.
+    if (origin<0 || !std::isfinite(current) || !std::isfinite(maximum) || maximum<0)
         throw FormatError("outside supported bar domain");
     const auto fraction=ps2Divide(raw(current),raw(maximum));
     const auto scaled=ps2Multiply(fraction,raw(99.f));
@@ -164,8 +168,14 @@ std::vector<HudLayer> hudBaseLayers(int x,std::uint32_t tick,float health,float 
     };
     bar("red",46,health,health_max,health_flash?0x80ffffff:0x80808080);
     if (local) {
-        if (acknowledged_level>0) bar("green",56,float(checked(static_cast<long long>(experience)-experience_base)),
-                                       float(checked(static_cast<long long>(experience_next)-experience_base)),0x80808080);
+        if (acknowledged_level>0) {
+            // 32-bit wrap, then the same unclamped fill. hud-live-producers.md:124-129.
+            // cvt.s.w is the core's from_int, not the host's round-to-nearest cast.
+            const auto base=static_cast<std::uint32_t>(experience)-static_cast<std::uint32_t>(experience_base);
+            const auto span=static_cast<std::uint32_t>(experience_next)-static_cast<std::uint32_t>(experience_base);
+            bar("green",56,as_float(champions::simulation::rta::from_int(base)),
+                as_float(champions::simulation::rta::from_int(span)),0x80808080);
+        }
         bar("blue",63,mana,mana_max,cooldown>0?0x2aacacac:0x80acacac);
     }
     out.push_back({{local?"hud_statusbar00.tex":"hud_multi.tex",checked(static_cast<long long>(x)-4),36,true,clip(0,0,1000,1000)},0x80808080,6});

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -96,8 +97,8 @@ int main(int argc,char**argv) {
     expect(barClipRight(27,8,4)==225,"fill is unclamped");
     const struct {float value,maximum;int right;} fractional[]={{1,3,59},{2,3,92},{3,7,69},{5,9,81},{17,31,81},{1,8,39},{0.1f,1,36},{0.7f,1,96}};
     for(const auto &v:fractional)expect(barClipRight(27,v.value,v.maximum)==v.right,"fractional PS2 fill vector");
-    rejects([]{barClipRight(27,0,0);},"zero maximum rejected");
-    rejects([]{barClipRight(27,-1,2);},"negative current rejected");
+    expect(barClipRight(27,40.f,0.f)==0x7fffffff,"zero-max health saturates");
+    expect(barClipRight(27,-5.f,0.f)==std::numeric_limits<int>::min(),"zero-max negative mana saturates");
     rejects([]{barClipRight(27,NAN,1);},"nan rejected");
     rejects([]{barClipRight(27,1,INFINITY);},"infinity rejected");
     expect(argc>1,"hud_pending.tsv path argument");

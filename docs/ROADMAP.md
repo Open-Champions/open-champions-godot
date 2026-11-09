@@ -31,7 +31,7 @@ The standalone [Return to Arms UI layout service](HUD_LAYOUT.md) computes
 documented static frame, base HUD and font metrics for later scene integration.
 Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,
 medal and net-camera arithmetic, plus the present-brightness formula, beside that service.
-The play scene's inventory, shop, skills, stats and level-up screens call the existing item handlers; undocumented frame positions stay refusals.
+The play scene's inventory, shop, skills, stats and level-up screens call the existing item handlers; undocumented frame positions stay refusals. The [level-up and HUD producers](LEVELUP_HUD.md) follow the executed skill-screen sender, the unclamped bars, per-tick regen, the acknowledged-level XP line, the level-up message, the inclusive cursor-box edges, and fractional automap reveal. Virtual skill bodies and the VU1 automap stay refused.
 The [front end](FRONTEND.md) (boot screens, main menu, character creation, options with the music slider, load/save and the game pause menu) is a native flow. Its documented draw calls (positions, frames, fonts, layers, tints, menu sound ids and the first-theme gate, research-menus-layout dc458d5) are painted with the user's own textures and fonts; class art, card rows, the intro picture and the credits layout stay a labelled host layout.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and

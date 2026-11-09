@@ -13,6 +13,7 @@
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -44,6 +45,14 @@ class ChampionsMenuService : public RefCounted {
   GDCLASS(ChampionsMenuService, RefCounted)
   std::unique_ptr<M::Ledger> ledger_;
   std::string scheme_ = "cross";
+  // g_localMenuOpen as the host menu last stated it; a replaced ledger keeps it.
+  bool local_menu_known_ = false;
+  bool local_menu_open_ = false;
+
+  void apply_local_menu() {
+    if (local_menu_known_)
+      ledger_->set_local_menu_open(local_menu_open_);
+  }
 
   Dictionary fill_state(Dictionary out) {
     out["gold"] = ledger_->gold();
@@ -59,6 +68,15 @@ class ChampionsMenuService : public RefCounted {
     out["hud_next_xp"] = hud_interval ? ledger_->hud_next_threshold() : 0;
     out["hud_xp_base"] = hud_interval ? ledger_->hud_base_threshold() : 0;
     out["xp_ready"] = ledger_->has_xp_rules();
+    // player_giveExp's hud_showMessage(text, 360, slot, 0); the text is not known.
+    const auto &notice = ledger_->level_notice();
+    out["level_message_calls"] = notice.calls;
+    out["level_message_stored"] = notice.stored;
+    out["level_message_frames"] = int(notice.frames);
+    out["level_message_force"] = int(notice.force);
+    out["level_message_undecided"] = notice.undecided;
+    out["local_menu_known"] = ledger_->local_menu_known();
+    out["local_menu_open"] = ledger_->local_menu_open();
     out["hp"] = int64_t(ledger_->hit_points());
     out["max_hp"] = int64_t(ledger_->max_hit_points());
     out["mana"] = int64_t(ledger_->mana());
@@ -95,6 +113,9 @@ protected:
     ClassDB::bind_method(D_METHOD("set_page", "page"), &ChampionsMenuService::set_page);
     ClassDB::bind_method(D_METHOD("set_scheme", "name"), &ChampionsMenuService::set_scheme);
     ClassDB::bind_method(D_METHOD("spend_skill", "is_skill", "value"), &ChampionsMenuService::spend_skill);
+    ClassDB::bind_method(D_METHOD("skill_screen", "row"), &ChampionsMenuService::skill_screen);
+    ClassDB::bind_method(D_METHOD("set_local_menu_open", "open"), &ChampionsMenuService::set_local_menu_open);
+    ClassDB::bind_method(D_METHOD("forget_local_menu"), &ChampionsMenuService::forget_local_menu);
     ClassDB::bind_method(D_METHOD("press_stat", "screen_arg", "row", "edge", "panel_gate", "elapsed"), &ChampionsMenuService::press_stat);
     ClassDB::bind_method(D_METHOD("give_xp", "amount"), &ChampionsMenuService::give_xp);
     ClassDB::bind_method(D_METHOD("give_kill_xp", "creature_experience", "creature_max_hp"), &ChampionsMenuService::give_kill_xp);
@@ -360,6 +381,7 @@ public:
           [&image](std::uint32_t at) { return image.word(at); }, -1);
       next->set_xp_rules(xp, formulas);
       ledger_ = std::move(next);
+      apply_local_menu();
       auto result = fill_state(success());
       result["unverified_definition"] = int64_t(unverified_definition);
       return result;
@@ -461,6 +483,71 @@ public:
       return failure(error);
     }
   }
+  void set_local_menu_open(bool open) {
+    local_menu_known_ = true;
+    local_menu_open_ = open;
+    ledger_->set_local_menu_open(open);
+  }
+  // The host no longer knows g_localMenuOpen: back to undecided.
+  void forget_local_menu() {
+    local_menu_known_ = false;
+    local_menu_open_ = false;
+    ledger_->forget_local_menu();
+  }
+  Dictionary skill_screen(const Dictionary &row) {
+    try {
+      // The tree row, panel and pad come from the caller; none is defaulted.
+      // Only the confirm mask is the executable's constant 0x40.
+      // levelup.md:129-159, 552-555.
+      for (const char *key : {"kind", "need", "ident", "pre_kind", "pre", "page", "resource", "in_table",
+                              "cursor", "edge", "held", "panel30"})
+        if (!row.has(key))
+          return failure(std::runtime_error(std::string("skill_screen row needs ") + key));
+      if (row.has("gate"))
+        return failure(std::runtime_error("the 0x4f4878 latch word is kept by the ledger"));
+      champions::levelup_hud::SkillAsk ask;
+      ask.kind = int(row.get("kind", Variant()));
+      // Only kind 0 (passive) and kind 1 (skill) rows send. levelup.md:198-204.
+      if (ask.kind != 0 && ask.kind != 1)
+        return failure(std::runtime_error("skill_screen row kind is 0 or 1"));
+      ask.need = int(row.get("need", Variant()));
+      ask.ident = static_cast<std::uint64_t>(int64_t(row.get("ident", Variant())));
+      ask.pre_kind = int(row.get("pre_kind", Variant()));
+      ask.pre = static_cast<std::uint64_t>(int64_t(row.get("pre", Variant())));
+      // "edge" is a point on the box edge, which is inside (levelup.md:139-151).
+      const String cursor = row.get("cursor", Variant());
+      if (cursor == "edge")
+        ask.cursor = champions::levelup_hud::Cursor::Edge;
+      else if (cursor == "outside")
+        ask.cursor = champions::levelup_hud::Cursor::Outside;
+      else if (cursor == "inside")
+        ask.cursor = champions::levelup_hud::Cursor::Inside;
+      else
+        return failure(std::runtime_error("skill_screen cursor is inside, outside or edge"));
+      ask.edge = static_cast<std::uint32_t>(int64_t(row.get("edge", Variant())));
+      ask.confirm_mask = 0x40;
+      ask.held = static_cast<std::uint32_t>(int64_t(row.get("held", Variant())));
+      ask.page = int(row.get("page", Variant()));
+      ask.panel30 = int(row.get("panel30", Variant()));
+      ask.resource = bool(row.get("resource", Variant()));
+      ask.in_table = bool(row.get("in_table", Variant()));
+      // Raw float word the skill's vtable+0x28 entry returned (levelup.md:198-203).
+      if (row.has("virtual_float")) {
+        ask.virtual_float = static_cast<std::uint32_t>(int64_t(row.get("virtual_float", 0)));
+        ask.virtual_float_planted = true;
+      }
+      const auto decision = ledger_->skill_screen(ask);
+      auto out = success();
+      out["sent"] = decision.sent;
+      out["recalc"] = decision.recalc;
+      out["send_kind"] = decision.kind;
+      out["send_value"] = int64_t(decision.value);
+      out["latch"] = int64_t(decision.gate);
+      return fill_state(out);
+    } catch (const std::exception &error) {
+      return failure(error);
+    }
+  }
   Dictionary open_level_up() {
     try {
       ledger_->open_level_up();
@@ -497,6 +584,7 @@ public:
   Dictionary reset() {
     try {
       ledger_ = std::make_unique<M::Ledger>();
+      apply_local_menu();
       scheme_ = "cross";
       return fill_state(success());
     } catch (const std::exception &error) {

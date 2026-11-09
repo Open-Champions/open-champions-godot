@@ -1,6 +1,7 @@
+include("${CMAKE_CURRENT_LIST_DIR}/levelup_hud_targets.cmake")
 add_library(champions-menus "${CMAKE_CURRENT_LIST_DIR}/src/menus.cpp")
 target_include_directories(champions-menus PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
-target_link_libraries(champions-menus PUBLIC champions-messages)
+target_link_libraries(champions-menus PUBLIC champions-messages champions-levelup-hud)
 set_target_properties(champions-menus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-menus PRIVATE /W4 /utf-8 /fp:strict)

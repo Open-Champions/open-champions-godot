@@ -296,7 +296,7 @@ std::vector<Gap> gaps() {
       {"item-info-frame",
        "One category-dependent frame submission was executed; its second call site and full localized fields remain unexecuted."},
       {"skill-confirm-input",
-       "The skill screen was not executed through to invmsg_sendSkillPoint. The handler spends one point and ignores the displayed cost."},
+       "Ledger::skill_screen follows the executed sender (levelup.md:127-218), but the play skills page does not read the class trees from the selected executable, so it never calls it. The handler spends one point and ignores the displayed cost."},
       {"pause-frames", "Pause-menu frame positions were not executed."},
       {"memory-card-frames", "Memory-card browser frame positions were not executed."},
       {"button-scheme-writer", "The writer of the byte at 0x41b69c was not found."},
@@ -318,7 +318,8 @@ std::vector<Gap> gaps() {
       {"inventory-box-variants", "Only the reset zero-state 15-piece sequence is executed; other cosmetic states are refused."},
       {"inventory-localized-fields", "The original text content and modifier/gem/requirement fields are unknown."},
       {"inventory-icon-pulse", "The selected icon uses the observed frame-zero alpha; the running frame source is not wired."},
-      {"skill-spend-sender", "The skill screen sender conditions remain Unknown; this client refuses skill spending."},
+      {"skill-virtual-bodies",
+       "The per-skill mana-cost bodies are not ported. A skill row sends only when the caller plants the mana float."},
       {"inventory-live-parity", "No original running-game pixel comparison has been made."},
       {"inventory-live-drop", "World placement and item prop construction are not wired to the imported player record."},
   };
@@ -655,7 +656,70 @@ void Ledger::spend_stat(int stat) {
 void Ledger::spend_skill(int is_skill, std::uint32_t value) {
   (void)is_skill;
   (void)value;
-  throw Refusal("skill-screen sender conditions are Unknown; skill spending refused");
+  throw Refusal("spend_skill is not the skills_screen sender");
+}
+
+void Ledger::set_local_menu_open(bool open) {
+  local_menu_open_ = open;
+  local_menu_known_ = true;
+}
+
+void Ledger::forget_local_menu() {
+  local_menu_open_ = false;
+  local_menu_known_ = false;
+}
+
+namespace {
+// The word skills_screen latches on page 5. levelup.md:155-159.
+constexpr std::uint32_t SKILL_LATCH = 0x4f4878;
+} // namespace
+
+std::uint32_t Ledger::skill_latch() const { return machine_->u32(SKILL_LATCH); }
+
+levelup_hud::SkillDecision Ledger::skill_screen(levelup_hud::SkillAsk ask) {
+  // The screen reads the panel page +0x50 and the owner's record.
+  // levelup.md:129-133, 155-159, 188-203.
+  // The screen was executed on page 0 (no latch; a preset word suppresses)
+  // and on page 5 (the latch). tools/difftest_levelup.py:240-243,
+  // levelup.md:155-159. No other page was run.
+  if (page() != 0 && page() != 5)
+    throw Refusal("skills_screen runs on page 0 or the level-up page 5 only");
+  if (ask.page != page())
+    throw Refusal("the caller's panel page is not the ledger's page");
+  ask.slot = 0;
+  ask.gate = skill_latch();
+  ask.class_id = machine_->s32(record() + 0x50);
+  ask.points = skill_points();
+  ask.acknowledged = static_cast<int>(acknowledged());
+  ask.max_mana = max_mana();
+  ask.skill_rank = [this](int id) { return machine_->skill_rank(0, id); };
+  ask.passive_rank = [this](std::uint64_t mask) { return passive_level_at(mask); };
+  levelup_hud::SkillDecision decision;
+  try {
+    decision = levelup_hud::skill_screen(ask);
+  } catch (const levelup_hud::Refusal &error) {
+    throw Refusal(error.what());
+  }
+  if (!decision.recalc) {
+    machine_->w32(SKILL_LATCH, decision.gate);
+    return decision;
+  }
+  if (!xp_ready_)
+    throw Refusal("selected executable level-up rules were not supplied");
+  auto before = memory_;
+  try {
+    ensure_recalc_supported();
+    machine_->w32(SKILL_LATCH, decision.gate);
+    // The screen's own player_recalcStats (0x1d5950). Message 7 then goes to
+    // inventory_onSkillPoint, which does not recalculate. levelup.md:214-227.
+    recalc_level_stats();
+    if (decision.sent)
+      machine_->on_skill_point(decision.slot, decision.kind, decision.value);
+  } catch (...) {
+    memory_ = std::move(before);
+    throw;
+  }
+  return decision;
 }
 
 void Ledger::set_xp_rules(XpTable table, std::array<ClassFormula, 8> formulas) {
@@ -739,28 +803,59 @@ int Ledger::give_xp(std::int32_t amount) {
     throw Refusal("earned level is outside experience table");
   ensure_recalc_supported();
   auto before = memory_;
+  const auto notice_before = level_notice_;
   try {
     const auto r = record();
-    const auto added = items::s32(static_cast<std::uint32_t>(experience()) + static_cast<std::uint32_t>(amount));
-    const auto exp = std::min(added, static_cast<std::int32_t>(xp_table_[80] - 1));
-    machine_->w32(r + 0x5c, static_cast<std::uint32_t>(exp));
-    int gained = 0;
-    while (level() >= 1 && level() < 80 && exp >= xp_table_[static_cast<std::size_t>(level())]) {
-      const auto prior = level();
-      machine_->w32(r + 0xe8, static_cast<std::uint32_t>(skill_points()) +
-                                static_cast<std::uint32_t>(skill_points_for_level(prior)));
-      machine_->w8(r + 0xec, machine_->u8(r + 0xec) + 3u);
-      machine_->w8(r + 0x59, static_cast<std::uint32_t>(prior + 1));
-      recalc_level_stats();
-      if (items::flt(0, machine_->u32(r + 0xac))) {
-        machine_->w32(r + 0xac, machine_->u32(r + 0xb0));
-        machine_->w32(r + 0xc0, machine_->u32(r + 0xc4));
-      }
-      ++gained;
+    levelup_hud::ExperienceState state;
+    state.experience = experience();
+    state.level = level();
+    state.skill_word = static_cast<std::uint32_t>(skill_points());
+    state.stat_byte = static_cast<std::uint8_t>(machine_->u8(r + 0xec));
+    state.health = hit_points();
+    state.mana = mana();
+    state.max_health = max_hit_points();
+    state.max_mana = max_mana();
+    // Each step stores the record, then player_recalcStats leaves the new
+    // maxima for the refill. levelup.md:31-41.
+    const auto result = levelup_hud::give_experience(
+        state, amount, xp_table_, [&](levelup_hud::ExperienceState &step) {
+          machine_->w32(r + 0x5c, static_cast<std::uint32_t>(step.experience));
+          machine_->w32(r + 0xe8, step.skill_word);
+          machine_->w8(r + 0xec, step.stat_byte);
+          machine_->w8(r + 0x59, static_cast<std::uint32_t>(step.level));
+          // The previous step's refill is on the record before this recalc,
+          // as the original refills +0xac / +0xc0 inside each iteration.
+          machine_->w32(r + 0xac, step.health);
+          machine_->w32(r + 0xc0, step.mana);
+          recalc_level_stats();
+          step.max_health = max_hit_points();
+          step.max_mana = max_mana();
+          step.health = hit_points();
+          step.mana = mana();
+        });
+    // Acknowledged level +0x58 is not written. levelup.md:42, 61-62.
+    machine_->w32(r + 0x5c, static_cast<std::uint32_t>(result.state.experience));
+    machine_->w32(r + 0xe8, result.state.skill_word);
+    machine_->w8(r + 0xec, result.state.stat_byte);
+    machine_->w8(r + 0x59, static_cast<std::uint32_t>(result.state.level));
+    machine_->w32(r + 0xac, result.state.health);
+    machine_->w32(r + 0xc0, result.state.mana);
+    // One hud_showMessage(text, 360, slot, 0) per step. This ledger is the
+    // owning machine; a zero force with the local menu open keeps the
+    // previous message. hud-live-producers.md:131-133, 179-189.
+    level_notice_.calls += result.steps;
+    if (result.steps > 0 && !local_menu_known_) {
+      // Nothing has stated g_localMenuOpen, so the store is not decided.
+      level_notice_.undecided += result.steps;
+    } else if (result.steps > 0 && !local_menu_open_) {
+      level_notice_.stored = true;
+      level_notice_.frames = levelup_hud::kLevelMessageFrames;
+      level_notice_.force = levelup_hud::kLevelMessageForce;
     }
-    return gained;
+    return result.steps;
   } catch (...) {
     memory_ = std::move(before);
+    level_notice_ = notice_before;
     throw;
   }
 }

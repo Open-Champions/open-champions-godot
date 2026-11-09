@@ -12,6 +12,12 @@ func check(value: bool, message: String) -> void:
 		failures += 1
 		push_error(message)
 
+# A complete skills_screen tree row and pad; the binding defaults none of them.
+func skill_row(extra: Dictionary) -> Dictionary:
+	var row := {"kind": 0, "need": 1, "ident": 1, "pre_kind": 0, "pre": -1, "page": 5, "resource": true, "in_table": true, "cursor": "inside", "edge": 0x40, "held": 0, "panel30": 0}
+	row.merge(extra, true)
+	return row
+
 func key(code: int, pressed := true) -> InputEventKey:
 	var event := InputEventKey.new()
 	event.physical_keycode = code
@@ -50,8 +56,49 @@ func run() -> void:
 	service.set_page(3)
 	check(service.press(2, 0x40).action == "none" and int(service.state().stat_points) == 3, "stats page does not spend")
 	var skill: Dictionary = service.spend_skill(0, 1)
-	check(not skill.get("ok", false) and str(skill.get("error", "")).contains("Unknown") and int(service.state().skill_points) == 4, "unknown skill sender refuses without spending")
+	check(not skill.get("ok", false) and str(skill.get("error", "")).contains("not the skills_screen sender") and int(service.state().skill_points) == 4, "bare spend is not the skill screen")
+	var off_page: Dictionary = service.skill_screen(skill_row({"page": 3}))
+	check(not off_page.get("ok", false) and str(off_page.get("error", "")).contains("page 5") and int(service.state().skill_points) == 4, "skill screen needs the level-up page")
+	service.set_page(5)
+	var no_rules: Dictionary = service.skill_screen(skill_row({}))
+	check(not no_rules.get("ok", false) and str(no_rules.get("error", "")).contains("level-up rules") and int(service.state().skill_points) == 4, "skill screen recalc refuses without the executable rules")
+	for missing in ["kind", "need", "ident", "pre_kind", "pre", "page", "resource", "in_table", "cursor", "edge", "held", "panel30"]:
+		var partial := skill_row({})
+		partial.erase(missing)
+		var refused: Dictionary = service.skill_screen(partial)
+		check(not refused.get("ok", false) and str(refused.get("error", "")).contains("needs " + missing) and int(service.state().skill_points) == 4, "skill row without " + missing + " refuses")
+	check(not service.skill_screen(skill_row({"gate": 0})).get("ok", false), "the latch word is not a caller field")
+	# The host menu states g_localMenuOpen: closed at start, open while shown.
+	check(service.state().local_menu_known and not service.state().local_menu_open, "the host menu states a closed local menu at start")
+	menus.open_screen("inventory")
+	check(service.state().local_menu_open, "an open host menu sets the local menu flag")
+	menus.close_menu()
+	check(service.state().local_menu_known and not service.state().local_menu_open, "closing the host menu clears the local menu flag")
 	service.reset()
+	check(service.state().local_menu_known and not service.state().local_menu_open, "a stated menu state survives a new ledger")
+	# Only the inventory and shop screens write the flag (claims-audit.md:103, :287).
+	menus.open_screen("pause")
+	check(service.state().local_menu_known and not service.state().local_menu_open, "the pause screen does not set the local menu flag")
+	menus.close_menu()
+	check(service.state().local_menu_known and not service.state().local_menu_open, "closing the pause screen leaves the flag closed")
+	menus.open_screen("save")
+	check(service.state().local_menu_known and not service.state().local_menu_open, "the save index screen does not set the local menu flag")
+	menus.close_menu()
+	for writer in ["shop", "shop-bag", "skills", "stats"]:
+		menus.open_screen(writer)
+		check(service.state().local_menu_known and service.state().local_menu_open, writer + " sets the local menu flag")
+		menus.close_menu()
+		check(service.state().local_menu_known and not service.state().local_menu_open, "closing " + writer + " clears the local menu flag")
+	menus.open_screen("inventory")
+	menus.open_screen("pause")
+	check(not service.state().local_menu_known, "pause straight from the inventory leaves the flag undecided")
+	menus.close_menu()
+	check(not service.state().local_menu_known, "closing that pause screen does not decide the flag")
+	service.reset()
+	check(not service.state().local_menu_known, "an undecided flag stays undecided on a new ledger")
+	menus.open_screen("inventory")
+	menus.close_menu()
+	check(service.state().local_menu_known and not service.state().local_menu_open, "the next inventory open and close state the flag again")
 	var thresholds := PackedInt32Array()
 	for index in range(81):
 		thresholds.append(index * 100)
@@ -73,6 +120,7 @@ func run() -> void:
 	check(xp.get("ok", false) and int(xp.levels_gained) == 1 and int(xp.level) == 6 and int(xp.experience) == 500, "exact XP threshold")
 	check(int(xp.skill_points) == 5 and int(xp.stat_points) == 6 and int(xp.max_hp) == 0x424c0000 and int(xp.max_mana) == 0x41880000, "level resource and point awards")
 	check(int(xp.acknowledged) == 4 and int(xp.hud_xp_base) == 300 and int(xp.hud_next_xp) == 400, "pending level HUD interval follows acknowledged level")
+	check(int(xp.level_message_calls) == 1 and xp.level_message_stored and int(xp.level_message_frames) == 360 and int(xp.level_message_force) == 0 and int(xp.level_message_undecided) == 0, "level step asks for the 360-frame force-0 message")
 	var opened: Dictionary = service.open_level_up()
 	check(int(opened.acknowledged) == 6 and int(opened.page) == 5, "opening inventory for level-up acknowledges")
 	check(int(opened.hud_xp_base) == 500 and int(opened.hud_next_xp) == 600, "acknowledged level advances HUD interval")
@@ -80,9 +128,32 @@ func run() -> void:
 	check(not service.press_stat(2, 3, 0x40, 0, 2999).sent, "stat timer gate")
 	var stat: Dictionary = service.press_stat(2, 3, 0x40, 0, 3000)
 	check(stat.get("ok", false) and stat.get("sent", false) and int(stat.base_stats[3]) == 14 and int(stat.stat_points) == 5, "stat row sends and spends")
+	var sent: Dictionary = service.skill_screen(skill_row({}))
+	check(sent.get("ok", false) and sent.get("sent", false) and int(sent.send_kind) == 0 and int(sent.send_value) == 1 and int(sent.skill_points) == 4, "passive row sends the mask and spends one point")
+	var outside: Dictionary = service.skill_screen(skill_row({"cursor": "outside"}))
+	check(outside.get("ok", false) and not outside.get("sent", false) and int(service.state().skill_points) == 4, "a cursor outside the tree does not send")
+	var latched: Dictionary = service.skill_screen(skill_row({"held": 2}))
+	check(latched.get("ok", false) and not latched.get("sent", false) and int(latched.latch) == 2, "held bit 2 on page 5 latches")
+	var kept: Dictionary = service.skill_screen(skill_row({"panel30": 1}))
+	check(kept.get("ok", false) and not kept.get("sent", false) and int(kept.latch) == 2 and int(service.state().skill_points) == 4, "the ledger keeps the latch word")
+	check(int(service.skill_screen(skill_row({"cursor": "outside", "panel30": 1})).latch) == 2, "an exit that would not change the latch leaves it")
+	var odd_kind: Dictionary = service.skill_screen(skill_row({"kind": 2}))
+	check(not odd_kind.get("ok", false) and str(odd_kind.get("error", "")).contains("kind is 0 or 1") and int(service.state().skill_points) == 4, "row kinds other than 0 and 1 refuse")
+	var high_zero: Dictionary = service.skill_screen(skill_row({"pre": 0x100000000}))
+	check(not high_zero.get("ok", false) and str(high_zero.get("error", "")).contains("0 low word"), "a 0 low word with a high word refuses")
+	var no_art: Dictionary = service.skill_screen(skill_row({"resource": false}))
+	check(not no_art.get("ok", false) and str(no_art.get("error", "")).contains("resource") and int(service.state().skill_points) == 4, "a missing resource that would change the latch refuses")
+	var no_art_kept: Dictionary = service.skill_screen(skill_row({"resource": false, "held": 2}))
+	check(no_art_kept.get("ok", false) and not no_art_kept.get("sent", false) and int(no_art_kept.latch) == 2, "a missing resource with an unchanged latch leaves it")
+	var edge: Dictionary = service.skill_screen(skill_row({"cursor": "edge"}))
+	check(edge.get("ok", false) and edge.get("sent", false) and int(edge.send_kind) == 0 and int(edge.send_value) == 1 and int(edge.latch) == 0 and int(edge.skill_points) == 3, "a cursor on the box edge sends")
+	service.set_page(0)
+	var page0: Dictionary = service.skill_screen(skill_row({"page": 0, "held": 2}))
+	check(page0.get("ok", false) and page0.get("sent", false) and int(page0.latch) == 0 and int(page0.skill_points) == 2, "the skills screen sends on page 0 without latching")
+	service.set_page(5)
 	var kill: Dictionary = service.give_kill_xp(0x42000000, 0x41f00000)
 	check(kill.get("ok", false) and int(kill.award) > 0 and int(kill.experience) == 500 + int(kill.award), "authored solo kill award reaches record")
-	check(not service.spend_skill(0, 1).get("ok", false), "skill sender stays refused")
+	check(not service.spend_skill(0, 1).get("ok", false), "bare skill spend stays refused")
 	var stats_snapshot: PackedByteArray = service.save_bytes().bytes
 	var missing_half := stats_snapshot.slice(0, stats_snapshot.size() - 4)
 	var oversized_half := stats_snapshot.duplicate()
@@ -130,7 +201,9 @@ func run() -> void:
 	var ids := {}
 	for gap in service.gaps().gaps:
 		ids[str(gap.id)] = true
-	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "skill-confirm-input", "skill-spend-sender", "pause-frames", "memory-card-frames"]:
+	check(not ids.has("skill-spend-sender"), "executed skill sender is no longer a refusal")
+	check(not ids.has("skill-cursor-edges"), "executed cursor-box edges are no longer a refusal")
+	for id in ["item-info-frame", "inventory-underbar", "inventory-localized-fields", "inventory-icon-pulse", "inventory-live-drop", "skill-confirm-input", "skill-virtual-bodies", "pause-frames", "memory-card-frames"]:
 		check(ids.has(id), "refusal " + id)
 	service.press(2, 0x40)
 	var dir := "user://menu-smoke-%d" % OS.get_process_id()

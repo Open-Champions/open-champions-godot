@@ -207,13 +207,20 @@ int countActiveNotices(const std::array<int, 8> &timers, int except_index) {
   return n;
 }
 int messageAlphaStep(int timer, int alpha) {
-  return std::min(timer < 32 ? timer * 4 : alpha + 3, 128);
+  // Signed halfword. Below 32 frames alpha becomes 4*timer; otherwise +3.
+  // A result that is not below 129 becomes 128. hud-live-producers.md:198-203.
+  const auto ticks = static_cast<std::int16_t>(static_cast<std::uint16_t>(timer));
+  if (ticks <= 0)
+    return alpha;
+  const int next = ticks < 32 ? ticks * 4 : alpha + 3;
+  return next >= 0x81 ? 0x80 : next;
 }
 MessageFrame messageFrame(int timer, int alpha, bool force, bool suppressed,
                           int width) {
   MessageFrame r;
   r.alpha = alpha;
-  if (timer <= 0 || (suppressed && !force))
+  const auto ticks = static_cast<std::int16_t>(static_cast<std::uint16_t>(timer));
+  if (ticks <= 0 || (suppressed && !force))
     return r;
   r.alpha = messageAlphaStep(timer, alpha);
   const int l = force ? 7 : 6, w = std::max(300, width);
