@@ -1,6 +1,6 @@
 # Play loading readiness, round 7
 
-STATUS: IN PROGRESS (build and CTest gates done; matrix and journeys pending).
+STATUS: DONE. The arrival stage moves from the r5/r6 pins to round 7 at `f8c780b` through the opt-in `through_round = 7`. The delete frees, the request selects its route, setState writes the clip entry, and the loader runs to `loadscreen_stop`. Every refusal the research keeps stays refused. Every gate passed. CTest was 259/259 in one run, with no rerun. The matrix was 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, and FULL_TRACE was unchanged. Live arrival stays refused, and the live loader applies no prefix.
 
 Research pin: `research-loading-readiness` `f8c780b34e772d71ed9a3b9fd2350226739dc6ca` (`docs/loading-arrival-r7.md` with its Round-8 and Round-9 fixes sections, and `tools/difftest_arrival_stage_r7.py`, `_r8.py`, `_r9.py`). Audits: `research-loading-readiness-r7.md`, `-r7-fix.md`, and `-r7-fix2.md`, which is PASS with LOWs R10-1 to R10-3 and the carried R8-10. Client base: the PASS tip of `codex/play-loading-r5`, `9cdead61` (audit `play-loading-r5-fix.md`, PASS, with one follow-up item). Branch `codex/play-loading-r7`.
 
@@ -119,9 +119,42 @@ Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pl
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3 (`script-commands`, `-measure-usage`, `-measure-empty`), 1 s (`focused.log`). The first focused run, before the test fix below, failed one check | 20.5 → 20.5 |
 | Full CTest `-j 3` | **PASS, 259/259** (259 registered, as in round 5), exit 0, 954 s, one run. No test timed out, so no test was rerun. Round 5's slow trio passed inside the parallel run: `messages-exact` 7 s, `player-exact` 62 s, `session-facing-exact` 196 s (`ctest.log`, `ctest-status.txt`) | 64.5 → 39.1 |
 
+| Strict Godot matrix: `tools/godot_matrix.py matrix --captures --timeout 1200`, after `Godot --headless --path godot --import` (4 s, exit 0) | **54/54 PASS**, exit 0, 156 s. The unchanged `check-log` finds 0 diagnostic errors in all 105 matrix logs. Same case list as round 5 | 33.8 → 17.5 |
+| Combat (`playable_wave_smoke_full_combat`) | **2,645 checks, 0 failures** | (in matrix) |
+| FULL_SAVE_LOAD | **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 are both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, as in round 5 | (in matrix) |
+| FULL_TRACE | **PASS, unchanged**: 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659` | (in matrix) |
+| Journeys: unchanged `tools/run_loop_playthrough.py`, headless then rendered | Headless **80** steps, rendered **81**. Both exit 1, the retained full-journey refusal, as in round 5. 0 log errors. 6 refusal kinds each, and the refusal lists are identical to round 5's. Pickup **10→11**, drop produced, walked and picked up, 52 walk ticks, 0 diagnostic retries. Rendered captures **38**. Disc files **994 before / 994 after** (also 994 after the rerun and the control). 110 s | 16.8 → 15.1 |
+| Journeys, rerun (same build, same command, `playthrough-rerun/`) | The same counts. Identical to the first run at every step except `swing_wall_msec`. 123 s | 16.4 → 40.6 |
+
 **The one failing first run.** `a host property list removes the name the same way` failed once. The test had made that object with the name both as a `new_object` name and as a `name=` host prop. `new_object` registers `name=` props itself (`script_builtins.cpp:327-329`), so the name was in the table twice, and the delete correctly refused it as naming two objects. The fix was to the test only: the object now gets its name from its prop alone, as loaded objects do. The code was not changed. That fix is in `3b77dc8b`.
 
-__MORE__
+**Journeys, step by step against round 5.** Round 5's own `compare_journey.py` compares every key of every step, the step order, the refusal list and the capture count. It ignores only the host-only `fps` and `memory_bytes`, and prints indices and key names only. The round-5 results are the mini's `play-loading-r5/work/plr5-fix/` `baseline-r5` (round 5), `playthrough` (fix round, first run) and `playthrough-rerun` (fix round, rerun). Outputs are `journey-compare.txt`, `journey-compare-rerun.txt`, `journey-compare-control.txt` and `journey-choices.txt`.
+
+- **Against every round-5 run:** the step counts (80/81), step order, refusal lists and captures (0/38) are identical. The only differing steps are these three:
+  - step 18 `choices_taken`;
+  - step 27 `script_executed_commands`;
+  - headless step 65 / rendered step 66 `swing_wall_msec`, a wall-clock time of the enemy-fight swing.
+
+  Against the round-5 fix's first run, headless differs only at step 65.
+- **Round 7 first run against its own rerun:** identical except `swing_wall_msec`.
+- **The choice count, step 18 / 27.** The journey driver presses Enter every 8 process frames until the dialog closes (`godot/tests/loop_playthrough.gd:784-792`), so the number of choices taken depends on frame timing. Step 27 follows it exactly: in all nine runs, `addQuest` = choices − 2 and `setMissionAvailable` = choices − 1.
+
+  | Run | headless choices | rendered choices |
+  |---|---|---|
+  | round 5 baseline | 4 | 3 |
+  | round 5 fix, first | 5 | 3 |
+  | round 5 fix, rerun | 4 | 3 |
+  | round 7 | 5 | 6 |
+  | round 7, rerun | 5 | 6 |
+  | **control: round 5's own build, run now** | **5** | **4** |
+
+  The rendered 6 is new, so I ran a control (`gates-journey-control.sh`). It uses round 5's tree and its own GDExtension libraries, built at 02:43–02:53 that day, with the same command, at round 7's load. The control's headless run is identical to round 7's at every step except `swing_wall_msec`. Its rendered run took 4 choices, a value no earlier run produced either. So the same round-5 build gives 3 or 4 rendered choices depending on the run, and the count is timing, not this change.
+
+  The code also cannot reach it. Nothing outside `loading_equipment.*` and the tests calls `run_arrival_prefix`, `through_round` or the four request functions (`git grep`). The live path's only change is six more names in `loading_readiness(…, true).refusals`. `session_controller.cpp:1990-1995` joins those into the `error` string and leaves `ok` and the booleans unchanged, and the refusal lists are identical to round 5's.
+
+  The control wrote only to round 7's `work/plr7/control-r5-now/`. `git status` of the round-5 copy is unchanged.
+
+The mini's `build/` was deleted after the gates.
 
 ## Files
 
