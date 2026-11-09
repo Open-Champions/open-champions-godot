@@ -1,4 +1,4 @@
-STATUS: PARTIAL — observed session vendor stock implemented and all gates PASS (2026-11-08/09). Native CTest 260/260, strict Godot 54/54, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, journeys 80/81 with pickup 10→11, identical to wave 37. Live retail stock stays refused for the listed research gates.
+STATUS: PARTIAL — fix round for audit VS-1..VS-7 done (2026-11-09); all gates PASS: native CTest 260/260, strict Godot 54/54, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged, journeys 80/81 with pickup 10→11, identical to wave 37. Live retail stock stays refused for the listed research gates.
 
 # Play vendors round 2 — session vendor stock
 
@@ -18,6 +18,7 @@ names, bytes or values are stored.
 - `38af1b9d` (this round): makes the generation loop match `ref:107-145`, and
   adds the bound quest variables and the non-literal taint.
 - Gate records `8c65c0c3`, `aa41d1a9`, `5d5e6cd8`, then this report.
+- Fix round: `76758a35` (code and tests), then gate records. See "Fix round" below.
 
 ## What is implemented (Observed only)
 
@@ -35,7 +36,7 @@ names, bytes or values are stored.
 | storeLevel: the creating read stores 0. Literal `setv` values are `hub`/`hub2` 0, 8, 7, 6, 5, 7, 6, `stobonus` 7 and `islgnome` 3. The guarded act change zeroes it (card latch and death task skip). It always lives in the session's quest-variable table; there is no private copy. | `read_store_level`, `apply_literal_setv`, `on_act_reset`, `bind_quest_variables`/`bind_quest_values`; the Host binds its 0x86da80 table; `vendor_stock_tests.cpp` runs the real `level_flow::begin_change` | spec:45-52, 303-322, 330 |
 | Prices: buy factor 0x3f199999 (100→59), category 1 0x3ee66666 (100→44), and full price for flag bits 0x30000000000 or slot 8. Sell 100/1→4, ×20 stack cases, minimum 1, forced 0 for slot 8 / 0x400000000000. Gold is debited before `giveItem` with its result ignored, and credited before `dropItem`. Cap 99,999,999. | `vendor_buy_price`, `vendor_sell_credit`, `vendor_buy_gold`, `vendor_sell_gold`; the existing `Machine::shop_buy`/`shop_sell` (`messages.cpp:974-1001`) with `messages_tests.cpp` 44/full-price/4 cases | spec:228-254, 337-338; ref:161-220 |
 
-## Corrections made in `38af1b9d`
+## Corrections made in `38af1b9d` (round 2; the watchdog part is superseded by the fix round)
 
 The earlier commit refused the whole pass on the first weapon/armour
 generator failure and on any bit-40 rejection. It also never stored rejected
@@ -134,7 +135,14 @@ Commit `76758a35` fixes VS-1..VS-7. Research is still only
 
 1. Release native build `--clean-first -j 4`: **PASS**, exit 0, 829 s (the mini's load average was about 88). GDExtensions `mac-template_debug`, `mac-template_release`, `level-texture-template_debug`, `level-texture-template_release`, `creature-template_debug`: **PASS**, every library `x86_64 arm64`, total 2,578 s.
 2. Focused CTest (`vendor-stock-exact`, `items-exact`, `messages-exact`, `messages-api`, `menus-exact`, `level-flow-exact`, `script-commands`, `script-items`), `-j 3`: **PASS 8/8**.
+3. Full CTest `-j 3`: **PASS 260/260**, 1,617 s, exit 0, in one run. An earlier full run (next to the Godot matrix, load average about 165) had 259/260: `messages-exact` failed because its own 120 s limit on the `champions-messages-trace` subprocess expired. That test and its code are unchanged in this round. It passed alone in 9 s (`--rerun-failed`) and in the clean run above. Nothing was relaxed.
 4. Headless editor import (exit 0), then the unchanged strict Godot dev matrix (`tools/godot_matrix.py matrix --captures --timeout 1200`): **PASS 54/54**, exit 0. It ran next to the full CTest on a heavily loaded mini.
 5. FULL_SAVE_LOAD: **PASS 300/300** presents. Continued and uninterrupted presentation SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical. Full synthetic combat 2,645 checks, 0 failures.
 6. FULL_TRACE: **PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
 7. Journeys, unchanged `tools/run_loop_playthrough.py` against the read-only disc: headless **80** steps and rendered **81** (38 captures), pickup **10→11**, 52 walk ticks, 0 log errors, 6 refusal kinds, disc files 994/994. Step/result pairs and refusal maps are identical to round 2 (and so to wave 37) at every index. Wrapper exit 1 is the retained death-reload refusal, as before.
+
+The mini `build/` was deleted afterwards.
+
+### Fix-round incident
+
+One sync command was run by mistake from my scratch directory instead of the worktree. Its `--delete` briefly replaced the mini copy's tracked sources with that directory's agent notes, while the GDExtension builds were running. The excluded `build/`, `work/`, `.godot` and `bin` directories were not touched. The correct sync ran seconds later, and a dry run confirmed the mini copy matched the worktree exactly. All five extension builds still exited 0, and every later gate ran on the restored sources. The copied notes stayed inside this worktree's synced copy under `~/malik-champions/` and were removed by the correct sync. Nothing was committed from them.
