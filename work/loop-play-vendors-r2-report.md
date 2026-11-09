@@ -22,3 +22,14 @@ Evidence in ignored `work/vendors-r2/`.
 3. Full CTest `-j 3`, standard input closed: **PASS 260/260**, 845.38 s,
    exit 0. Wave 37 was 259; the added test is `vendor-stock-exact`.
    Evidence `ctest.out`.
+4. Headless editor import first (`--import`, exit 0, `editor-import.log`),
+   because the mini copy had no `godot/.godot` (see "Incident" below).
+   Strict Godot dev matrix, unchanged `tools/godot_matrix.py matrix
+   --captures --timeout 1200`: **PASS 54/54**, exit 0. Evidence
+   `matrix/results.json`, `matrix-run.log`.
+5. FULL_SAVE_LOAD: **PASS 300/300**; continued and uninterrupted presentation
+   SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`,
+   identical. Full synthetic combat 2,645 checks, 0 failures.
+6. FULL_TRACE: **PASS, unchanged**, 36,402 bytes, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`.
+   Evidence `matrix/playable_wave_smoke_full_combat.log`.
