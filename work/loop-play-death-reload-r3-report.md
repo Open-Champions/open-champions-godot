@@ -72,7 +72,10 @@ calls `save_build(slot byte, 0)` before writing (save-screen:229, Executed).
 So "load A, save to B, die" reloads B.
 
 The same line shows `save_build` runs before the card write. A refused
-client save therefore leaves the live header unknown. The scene now calls
+client save therefore leaves the live header unknown. *Round 4 (audit
+PDR3-4):* that holds only for refusals at or after the save step; for the
+earlier ones the original's header would be unchanged, so clearing the mark
+there is conservative. The scene now calls
 the new `invalidate_live_checkpoint(reason)` on every refused real-level
 save. The controller's phase-1 owner then refuses with that reason, citing
 save-screen:229, instead of reloading an older file.
@@ -129,13 +132,19 @@ ordinal, class and raw +0x228/+0x22c words of every live built record whose
     `Build::Built`, so `adopt_classified` adds these records to
     `built_records_`;
   - `save_built_object_fields` reads every built record with the Creature
-    layout, and nothing writes +0x228 in a `ScriptGenerator`.
+    layout. *Corrected in round 4 (audit PDR3-2):* a `ScriptGenerator` is
+    0x4c bytes (`docs/monsters-2.md:7660`), so +0x228/+0x22c lie 0x1dc bytes
+    past the end of the object. The census read memory outside each object
+    (0 there), not a never-written HP word. Round 4 refuses such records by
+    class and size before any read or write.
 - **The journey's own `in_game_save`**: the same 16, plus `WarBoarSmall`
   ordinal 17, with +0x228 = `0xbffdfda8` (about −1.98). That is the
   journey's kill.
 
 The scene message is now "a built object's Creature HP word (+0x228) is not
-above 0; its save state is unverified". It is matched on the unchanged
+above 0; its save state is unverified". *Round 4:* that wording was wrong for
+these records, which have no +0x228 field; the class refusal has its own
+message now. It is matched on the unchanged
 native string, so the journey's `in_game_save` classification is unchanged.
 
 **PDR2-7. Gap-slot wording.** The `require_restorable` message, the controller
@@ -198,8 +207,9 @@ exits-r4:87).
 
 The question was why a fresh level has a built "Creature" with HP ≤ 0. The
 census answers it: the records are 16 `ScriptGenerator` objects, which are
-not Creatures. They are built objects whose +0x228 was never written, and the
-save reads every built record with the Creature layout.
+not Creatures. *Corrected in round 4 (audit PDR3-2):* they are 0x4c-byte
+objects with no +0x228 field, and the save applied the Creature layout to
+every built record, so it read past the end of each object.
 
 What research establishes:
 
@@ -216,12 +226,13 @@ Porting the dead-Creature record would not unblock this level. Saving
 refusal at script_commands_objects.cpp:138-139 is unchanged.
 
 Exact blocker: a card save on any level with a built `ScriptGenerator` (and
-any built Chest, by the same layout) refuses. The journey's checkpoint level
+any built Chest, by the same layout) refuses. Since round 4 this refusal is by
+class, before any field read. The journey's checkpoint level
 has 16 of them. FULL_SAVE_LOAD is therefore unaffected by Part 3.
 
-A side note, not changed: the header comment on `save_built_object_fields`
-("Only the five currently constructed Creature subclasses participate") is
-stale for the same reason. It is left as is, because editing it would have
+A side note, not changed in round 3 (fixed in round 4, PDR3-5): the header
+comment on `save_built_object_fields` ("Only the five currently constructed
+Creature subclasses participate") is stale for the same reason. It is left as is, because editing it would have
 required a rebuild while disk was under 30 GB.
 
 ## Gates (mini)

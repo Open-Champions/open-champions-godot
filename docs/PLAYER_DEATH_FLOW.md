@@ -180,7 +180,11 @@ gate list, level, act, difficulty) comes back together with each level's
     `State::saved` and the current level is stored into the live directory
     `State::states`. A completed game skips `save_build`'s lookup and the
     store, so that level keeps the body the directory already held
-    (save-world:269-275; save-format.md:58-60; client-path:69-71).
+    (save-world:269-275; save-format.md:58-60; client-path:69-71). With the
+    game complete, the header's level name is the fixed `gameComplete`
+    instead of the level name (save-format.md:37), as `ps2_save.cpp` writes
+    it. A death reload from that header refuses: what it reloads is not
+    researched (round 4).
   - At act −1 a non-hub name has no current-act row and is not stored
     (save-format.md:236-242). A `hub*` name there would read row 0 of no act,
     which was not executed, so it refuses.
@@ -270,7 +274,17 @@ gate list, level, act, difficulty) comes back together with each level's
   and, since round 3, after each successful card save: an offline card save
   calls `save_build(slot byte, 0)`, after which the image at 0x895580 starts
   with the live level name (save-screen:229, Executed). So "load A, save to B,
-  die" reloads B. A refused card save clears the mark with its reason.
+  die" reloads B. The mark moves only when an act row prefixes the saved
+  level: outside every act `save_build` writes nothing (save-format.md:55-58),
+  so "load A, save B outside every act, die in an act level" still reloads A
+  (round 4). A card save with the completed-game flag (byte 0x4f85c5) set, or
+  whose act lookup cannot run, clears the mark. A refused card save clears the
+  mark with its reason. That is conservative: only refusals at or after the
+  save step (the object directory, the card write and its companions)
+  correspond to `save_build`'s rebuild (save-screen:229). The earlier ones (an
+  open dialog or help box, unverifiable source data, campaign capture) come
+  before it, where the original's header would be unchanged; the client
+  refuses the later reload instead of guessing.
   `run_death_reload` then reloads that image with `restoring_real_level`, so
   the dying level is not stored (client-path:92). It keeps the live object
   directory rather than the card's copy (client-path:120-124). It restores the
@@ -304,8 +318,10 @@ place; this section lists what changed.
   completed-game skip is `save_build`'s, and covers its own `save_findAct`
   and the level store (save-format.md:55-60).
 - **Live header after a card save (PDR2-2).** A successful card save marks
-  the live header with the saved file (save-screen:229). A refused card save
-  clears the mark, and a later death reload refuses with that reason.
+  the live header with the saved file (save-screen:229); since round 4 only in
+  a level an act row prefixes. A refused card save clears the mark
+  (conservatively for refusals before the save step; see above), and a later
+  death reload refuses with that reason.
 - **Two object tests (PDR2-3).** `save_game` uses `object_built` and
   `object_flag8`; placement keeps the peer bit `active`.
 - **Step 5b (PDR2-4).** The HP refill covers slots below `g_numPlayers` only.
@@ -315,16 +331,18 @@ place; this section lists what changed.
 - **Research-backed pins.** An act change keeps the executed `hub` slot 0
   (save-world:194-195); a twelfth key rewrites the gap body (save-world:35-39,
   196). Both are described in the round 2 bullets above.
-- **The card-save refusal on a fresh level (PDR2-6).** The scene now says "a
-  built object's Creature HP word (+0x228) is not above 0", and
-  `built_creature_hp_census()` lists the refusing records (ordinal, class,
-  raw +0x228/+0x22c words). On the journey's freshly loaded checkpoint level
-  the census finds no dead Creature: the refusing records are 16
-  `ScriptGenerator` objects. `build_generator` reports them as built, and
-  `save_built_object_fields` reads every built record with the Creature layout,
-  so their never-written +0x228 word (0) fails the HP test. (The journey's own
-  earlier save also meets its killed enemy, a `WarBoarSmall` with a negative HP
-  word.)
+- **The card-save refusal on a fresh level (PDR2-6; corrected in round 4).**
+  On the journey's freshly loaded checkpoint level the refusing records are
+  16 `ScriptGenerator` objects, not dead Creatures. A `ScriptGenerator` is
+  0x4c bytes (`t3/research-save-world` `31a0ca6` `docs/monsters-2.md:7660`)
+  and has no +0x228 field: +0x228/+0x22c lie past the end of the object.
+  `build_generator` reports these as built, and `save_built_object_fields`
+  applied the Creature layout to every built record, so the round 3 census
+  read memory outside each object. It was not a never-written HP word. Since
+  round 4, the save, the restore and the census refuse or list such a
+  record by class and size, without reading a Creature word (see below).
+  (The journey's own earlier save also meets its killed enemy, a
+  `WarBoarSmall` with a negative HP word.)
 - **Not unblocked (Part 3).** What the original saves for a `ScriptGenerator`
   is not established: whether `world_saveFilter` 0x15d9c8 rebuilds it from
   `objects.ob` or a save routine writes it is open (`t3/research-save-world`
@@ -334,3 +352,30 @@ place; this section lists what changed.
   but porting it would not unblock this level. So the refusal stays, and a
   journey checkpoint, and with it a successful real-data death reload, remains
   blocked.
+
+## Death reload, client round 4 (2026-11-09)
+
+Audit `play-death-reload-r3` (FIX). The text above is corrected in place;
+this section lists what changed.
+
+- **Completed-game header name (PDR3-1).** With the game complete,
+  `save_game`'s header names `gameComplete`, not the level (save-format.md:37),
+  and `party_wipe` refuses a reload from it.
+- **Built objects without the Creature layout (PDR3-2, PDR3-5).** Each built
+  record carries its factory object size and whether a Creature constructor
+  path built it (the ported classes, the creature-family builder, the
+  Horsemen rows). `save_built_object_fields` refuses any other record, or a
+  Creature smaller than the layout (0x314 bytes, the end of +0x312), before
+  reading any field. `restore_built_object_fields` refuses it before its first
+  write. The message starts "built non-Creature object save state is
+  unresearched" and names the class and size (object-system.md:805-806). The
+  census, now `built_save_refusal_census()`, lists such records by record
+  class, constructed class and size under `not_creature`, and lists only
+  Creatures under `hp_not_above_zero`. The overall refusal stays:
+  research does not yet establish the per-class save walk.
+- **Card save outside every act (PDR3-3).** The scene marks the live header
+  through `mark_card_save_checkpoint`, which keeps the previous mark when no
+  act row prefixes the saved level (save-format.md:55-58).
+- **Refusal wording (PDR3-4).** Every refused card save still clears the mark,
+  and the comment, this document and the report now say that only the
+  refusals at or after the save step correspond to `save_build`.
