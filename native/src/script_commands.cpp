@@ -714,7 +714,8 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
     if (!found)
       return true;
     for (const auto *obj : *found)
-      if (!dialog_trigger_supported(obj->addr))
+      if (!dialog_trigger_supported(obj->addr) &&
+          !(hub_ring(obj->addr) && machine.cell(machine.params + 8) == 0))
         return true;
     return false;
   }
@@ -1058,7 +1059,9 @@ std::uint32_t Host::scene(const std::string &name,
     if (word_of(args[0]) == 3u) {
       const auto *portal = variables_->find_first("portal");
       const auto *object = variables_->obj_at(word_of(args[1]));
-      if (!portal || !object || portal != object || word_of(args[2]) != 0u)
+      // The named portal, or the hub ring record (research-hub-npcs@fbbfe65
+      // docs/hub-services.md:395-401): the request is counted, not rendered.
+      if (!object || word_of(args[2]) != 0u || (portal != object && !hub_ring(object->addr)))
         throw amx::HostFault("unsupported portal virtual request");
       ++portal_trigger_requests_;
       return 0;

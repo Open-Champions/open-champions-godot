@@ -216,6 +216,10 @@ std::uint32_t Host::dialog_scene(const std::string &name,
     dialog_.mutex_release();
     return 0;
   }
+  // research-hub-npcs@fbbfe65 docs/hub-services.md:395-401: the walk-in's
+  // trigger(ring, 0) reaches the ring, not a talker; the host counts it.
+  if (name == "virtual" && word(0) == 3u && hub_ring(word(1)))
+    return UINT32_MAX - 1;
   if (name == "virtual" && word(0) == 3u) {
     dialog_trigger(word(1));
     return 0; // Creature_trigger ignores trigger's value argument.
@@ -615,6 +619,11 @@ Host::HubResearch Host::hub_research() const {
     }
   }
   return out;
+}
+
+bool Host::hub_ring(std::uint32_t address) const {
+  const auto *obj = variables_->obj_at(address);
+  return dialog_level_.hub_level && obj && (obj->type_name == "apprings" || obj->type_name == "fpprings");
 }
 
 bool Host::dialog_trigger_supported(std::uint32_t address) const {

@@ -483,12 +483,13 @@ inline void run(Check check,std::string &where) {
 // shipped bytes, names, text keys or dialogue.
 namespace hd = champions::simulation::rta::hub_dialog;
 namespace table {
-enum N { START_DIALOG, AVAIL, STORE, SWOOP, QUEST, SETV, GETV, CALL_SCRIPT, GOLD, DEFER, PAUSED, MENU, ENTRANCE };
+enum N { START_DIALOG, AVAIL, STORE, SWOOP, QUEST, SETV, GETV, CALL_SCRIPT, GOLD, DEFER, PAUSED, MENU, ENTRANCE, TRIGGER };
 inline const std::vector<std::string> natives{"startDialog","setMissionAvailable","activateStore","changeSwoop",
-  "addQuest","setv","getv","callScript","givePlayerGold","addDeferedCall","gamePaused","activateMissionMenu","setEntrance"};
+  "addQuest","setv","getv","callScript","givePlayerGold","addDeferedCall","gamePaused","activateMissionMenu","setEntrance",
+  "trigger"};
 // Unpacked strings: four bytes per character, so slots are 0x40 apart.
 constexpr a::Cell S_STARTED=0x800, S_INTRO=0x500, S_DEMO=0x540, S_QUEST=0x580, S_SCAN=0x5C0, S_POLL=0x600,
-                  S_ENT=0x640, S_SHARD=0x680, S_BLOOD=0x6C0, RUNS=0x400, UNPAUSED=0x404;
+                  S_ENT=0x640, S_SHARD=0x680, S_BLOOD=0x6C0, S_RING=0x700, RUNS=0x400, UNPAUSED=0x404;
 using L=std::vector<a::AsmLine>;
 inline a::AsmInstruction I(const std::string &m,std::vector<a::AsmValue> o={}) { return {m,std::move(o),{},{}}; }
 inline void call(L &l,int native,const std::vector<a::Cell> &args) {
@@ -566,9 +567,12 @@ struct Fixture {
     put(0x5080,"poll",poll);
     // The no-warning use: entrance, then the menu (HS:373).
     L use; call(use,ENTRANCE,{S_ENT}); call(use,MENU,{}); put(0x5200,"use",use);
+    // K.walk's dispatch shape: trigger(ring record name, 0) (HS:395-399).
+    L walk; call(walk,TRIGGER,{S_RING,0}); put(0x5300,"walk",walk);
+    L walk1; call(walk1,TRIGGER,{S_RING,1}); put(0x5380,"walk1",walk1);
     script.image=a::build_image(code,options);
     script.strings={{400,"npc"},{S_QUEST,"q"},{S_SCAN,"scan"},{S_POLL,"poll"},{S_ENT,"ent"},
-                    {S_SHARD,"shard"},{S_BLOOD,"blood"},{S_INTRO,"vi"},{S_DEMO,"vd"}};
+                    {S_SHARD,"shard"},{S_BLOOD,"blood"},{S_INTRO,"vi"},{S_DEMO,"vd"},{S_RING,"ring"}};
     for(int m=0;m<12;++m) script.strings.emplace_back(S_STARTED+0x40*m,"s"+std::to_string(m+1));
     std::vector<dl::Node> nodes(rows.size());
     for(std::size_t i=0;i<rows.size();++i) {
@@ -585,11 +589,13 @@ struct Fixture {
     }
     level.level="synthetic";
     level.require_hub_services=h==hd::Hub::Hub2;
+    level.hub_level=true;
     level.files["npc.dbin"]=dl::build_dbin(nodes);
     dl::Node line; line.text="body";
     level.files["cut.dbin"]=dl::build_dbin({line});
     for(const char *key:{"nm","body","m","e","s","Affirmation","dialogMore"}) world.texts[key]=wide("authored");
-    objects=objects_ob({{"NPC",0,{}, {"name=npc","showName=nm","dialogScript=talk","dialogOffset=0,0,0,0"}}});
+    objects=objects_ob({{"NPC",0,{}, {"name=npc","showName=nm","dialogScript=talk","dialogOffset=0,0,0,0"}},
+                        {h==hd::Hub::Hub ? "apprings" : "fpprings",0,{},{"name=ring"}}});
   }
   static void check_free(std::set<int> &used,int at) {
     if(!used.insert(at).second) throw std::logic_error("fixture public offset reused");
@@ -740,6 +746,20 @@ inline void run(Check check,std::string &where) {
     check(facts.cutscene_line_lists==1 && facts.dialog_files==2,"hub table: the one-node line list is classified");
     dl::Node with; with.text="body"; with.choices={{"e","","",-1}}; with.raw_choices=1;
     check(!hd::cutscene_line_list({with}) && hd::cutscene_line_list({dl::Node{}}),"hub table: line-list shape rule");
+  }
+  // Walk-in (HS:395-401): trigger(ring, 0) is admitted with the dialog attached
+  // and only counted; another value, or a level that is not a hub, refuses.
+  for(int variant=0;variant<3;++variant) {
+    auto f=h1;
+    if(variant==2) f.level.hub_level=false;
+    sc::Host host; f.load_into(host,check);
+    const auto stop=host.run(variant==1 ? "walk1" : "walk");
+    if(variant==0)
+      check(stop==sc::Stop::Complete && host.portal_trigger_requests()==1 && !host.stopped_on_refusal(),
+            "hub table: walk-in trigger(ring, 0) is counted once");
+    else
+      check(host.portal_trigger_requests()==0 && host.stopped_on_refusal(),
+            "hub table: other trigger values and non-hub levels refuse");
   }
   // K.poll (HS:374-383, HSF-2): count Script-task runs. The 6th unpaused run
   // calls the menu; paused runs are not counted; no entrance write; a dialog

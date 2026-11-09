@@ -186,6 +186,9 @@ struct DialogLevel {
   // admitted only through the researched table (hub_dialog.hpp). Set for hub2;
   // a dialog that does not match it there refuses instead of running unbounded.
   bool require_hub_services = false;
+  // hub or hub2: the walk-in's trigger(ring name, 0) is admitted for the ring
+  // record and counted only (HS:395-401; its rendered effect is Inferred).
+  bool hub_level = false;
 };
 struct DialogServices {
   // text_lookup. Required: a conversation is refused without it.
@@ -597,6 +600,8 @@ private:
   void dialog_camera_apply(const Vec3 &pos, int yaw, int pitch, Raw h, bool dialog_open);
   void dialog_complete_read();
   bool dialog_trigger_supported(std::uint32_t address) const;
+  // The hub ring prop record (class apprings / fpprings) in a hub level.
+  bool hub_ring(std::uint32_t address) const;
   void dialog_trigger(std::uint32_t address);
 
   void install();

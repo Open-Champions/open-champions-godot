@@ -1190,6 +1190,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       // research-hub-npcs@fbbfe65 docs/hub-services.md:196-245: hub2's dialog
       // runs only through the researched table (hub_dialog.hpp).
       level.require_hub_services = std::string(level_name.utf8().get_data()) == "hub2";
+      level.hub_level = std::string(level_name.utf8().get_data()) == "hub" || level.require_hub_services;
       const Dictionary files = dialog.get("dbin", Dictionary());
       const Array keys = files.keys();
       for (int64_t i = 0; i < keys.size(); ++i)
