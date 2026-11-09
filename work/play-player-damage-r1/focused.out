@@ -1,0 +1,23 @@
+Test project ~/malik-champions/open-champions/worktrees/play-player-damage/build/native
+    Start 200: player-damage
+1/1 Test #200: player-damage ....................   Passed    0.85 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.88 sec
+player-damage: 118 checks passed
+Test project ~/malik-champions/open-champions/worktrees/play-player-damage/build/native
+    Start  31: simulation-boundary
+1/5 Test  #31: simulation-boundary ..............   Passed    0.17 sec
+    Start 186: combat-runtime-host
+2/5 Test #186: combat-runtime-host ..............   Passed    0.41 sec
+    Start 188: combat-runtime-2-host
+3/5 Test #188: combat-runtime-2-host ............   Passed    0.31 sec
+    Start 250: campaign-fight-boundaries
+4/5 Test #250: campaign-fight-boundaries ........   Passed    0.28 sec
+    Start 251: player-death-flow
+5/5 Test #251: player-death-flow ................   Passed    0.56 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   1.75 sec

@@ -1,0 +1,5 @@
+godot/bin/champions_archive.macos.template_debug.dylib x86_64 arm64
+godot/bin/champions_archive.macos.template_release.dylib x86_64 arm64
+godot/bin/champions_level_texture.macos.template_debug.dylib x86_64 arm64
+godot/bin/champions_level_texture.macos.template_release.dylib x86_64 arm64
+godot/creature_anim/bin/libchampions-creature-animation.template_debug.dylib x86_64 arm64
