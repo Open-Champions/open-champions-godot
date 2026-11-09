@@ -1,0 +1,326 @@
+[
+  {
+    "case": "editor",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/editor.log",
+    "status": "PASS",
+    "seconds": 43.98
+  },
+  {
+    "case": "default_scene",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/default_scene.log",
+    "status": "PASS",
+    "seconds": 15.58
+  },
+  {
+    "case": "archive_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/archive_smoke.log",
+    "status": "PASS",
+    "seconds": 9.91
+  },
+  {
+    "case": "control_anim_cache_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/control_anim_cache_smoke.log",
+    "status": "PASS",
+    "seconds": 10.51
+  },
+  {
+    "case": "frame_rate_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/frame_rate_smoke.log",
+    "status": "PASS",
+    "seconds": 6.96
+  },
+  {
+    "case": "frontend_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/frontend_smoke.log",
+    "status": "PASS",
+    "seconds": 15.41
+  },
+  {
+    "case": "fx_bridge_refusal_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/fx_bridge_refusal_smoke.log",
+    "status": "PASS",
+    "seconds": 9.99
+  },
+  {
+    "case": "fx_shade_batch_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/fx_shade_batch_smoke.log",
+    "status": "PASS",
+    "seconds": 8.91
+  },
+  {
+    "case": "inventory_icons_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/inventory_icons_smoke.log",
+    "status": "PASS",
+    "seconds": 6.4
+  },
+  {
+    "case": "level_library_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/level_library_smoke.log",
+    "status": "PASS",
+    "seconds": 9.53
+  },
+  {
+    "case": "level_lights_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/level_lights_smoke.log",
+    "status": "PASS",
+    "seconds": 8.32
+  },
+  {
+    "case": "level_texture_preview_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/level_texture_preview_smoke.log",
+    "status": "PASS",
+    "seconds": 6.34
+  },
+  {
+    "case": "level_texture_stream_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/level_texture_stream_smoke.log",
+    "status": "PASS",
+    "seconds": 6.53
+  },
+  {
+    "case": "level_textured_session_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/level_textured_session_smoke.log",
+    "status": "PASS",
+    "seconds": 8.92
+  },
+  {
+    "case": "menu_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/menu_smoke.log",
+    "status": "PASS",
+    "seconds": 8.71
+  },
+  {
+    "case": "native_audio_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/native_audio_smoke.log",
+    "status": "PASS",
+    "seconds": 8.19
+  },
+  {
+    "case": "native_fx_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/native_fx_smoke.log",
+    "status": "PASS",
+    "seconds": 7.75
+  },
+  {
+    "case": "play_hud_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/play_hud_smoke.log",
+    "status": "PASS",
+    "seconds": 8.38
+  },
+  {
+    "case": "play_session_runtime",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/play_session_runtime.log",
+    "status": "PASS",
+    "seconds": 18.84
+  },
+  {
+    "case": "playable_fx_camera_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_fx_camera_smoke.log",
+    "status": "PASS",
+    "seconds": 7.44
+  },
+  {
+    "case": "playable_wave_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke.log",
+    "status": "PASS",
+    "seconds": 14.09
+  },
+  {
+    "case": "playable_wave_smoke_play",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_play.log",
+    "status": "PASS",
+    "seconds": 24.37
+  },
+  {
+    "case": "playable_wave_smoke_ui",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_ui.log",
+    "status": "PASS",
+    "seconds": 27.39
+  },
+  {
+    "case": "playable_wave_smoke_combat",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_combat.log",
+    "status": "PASS",
+    "seconds": 22.43
+  },
+  {
+    "case": "playable_wave_smoke_level",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_level.log",
+    "status": "PASS",
+    "seconds": 26.93
+  },
+  {
+    "case": "playable_wave_smoke_animation",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_animation.log",
+    "status": "PASS",
+    "seconds": 29.02
+  },
+  {
+    "case": "playable_wave_smoke_fx",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_fx.log",
+    "status": "PASS",
+    "seconds": 31.01
+  },
+  {
+    "case": "playable_wave_smoke_textures",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_textures.log",
+    "status": "PASS",
+    "seconds": 35.45
+  },
+  {
+    "case": "playable_wave_smoke_audio",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_audio.log",
+    "status": "PASS",
+    "seconds": 43.47
+  },
+  {
+    "case": "playable_wave_smoke_full_combat",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_full_combat.log",
+    "status": "PASS",
+    "seconds": 63.73
+  },
+  {
+    "case": "playable_wave_smoke_wave12",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/playable_wave_smoke_wave12.log",
+    "status": "PASS",
+    "seconds": 13.67
+  },
+  {
+    "case": "ps2_save_import_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/ps2_save_import_smoke.log",
+    "status": "PASS",
+    "seconds": 11.41
+  },
+  {
+    "case": "real_water_texture_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/real_water_texture_smoke.log",
+    "status": "PASS",
+    "seconds": 10.21
+  },
+  {
+    "case": "scene_animation_preview_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/scene_animation_preview_smoke.log",
+    "status": "PASS",
+    "seconds": 12.57
+  },
+  {
+    "case": "scene_original_art_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/scene_original_art_smoke.log",
+    "status": "PASS",
+    "seconds": 14.26
+  },
+  {
+    "case": "scene_play_flow_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/scene_play_flow_smoke.log",
+    "status": "PASS",
+    "seconds": 16.99
+  },
+  {
+    "case": "script_commands_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/script_commands_smoke.log",
+    "status": "PASS",
+    "seconds": 7.27
+  },
+  {
+    "case": "session_facing_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/session_facing_smoke.log",
+    "status": "PASS",
+    "seconds": 13.15
+  },
+  {
+    "case": "session_music_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/session_music_smoke.log",
+    "status": "PASS",
+    "seconds": 9.73
+  },
+  {
+    "case": "session_recovery_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/session_recovery_smoke.log",
+    "status": "PASS",
+    "seconds": 13.8
+  },
+  {
+    "case": "session_sandbox_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/session_sandbox_smoke.log",
+    "status": "PASS",
+    "seconds": 8.47
+  },
+  {
+    "case": "texture_upscale_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/texture_upscale_smoke.log",
+    "status": "PASS",
+    "seconds": 6.36
+  },
+  {
+    "case": "ui_art_gallery_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/ui_art_gallery_smoke.log",
+    "status": "PASS",
+    "seconds": 5.72
+  },
+  {
+    "case": "ui_layout_dynamic_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/ui_layout_dynamic_smoke.log",
+    "status": "PASS",
+    "seconds": 7.9
+  },
+  {
+    "case": "ui_layout_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/ui_layout_smoke.log",
+    "status": "PASS",
+    "seconds": 7.35
+  },
+  {
+    "case": "creature_animation",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/creature_animation.log",
+    "status": "PASS",
+    "seconds": 67.15
+  },
+  {
+    "case": "creature_dispatch",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/creature_dispatch.log",
+    "status": "PASS",
+    "seconds": 79.44
+  },
+  {
+    "case": "creature_freed_callable",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/creature_freed_callable.log",
+    "status": "PASS",
+    "seconds": 48.86
+  },
+  {
+    "case": "creature_blend_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/creature_blend_smoke.log",
+    "status": "PASS",
+    "seconds": 12.5
+  },
+  {
+    "case": "level_texture_material_smoke",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/level_texture_material_smoke.log",
+    "status": "PASS",
+    "seconds": 16.24
+  },
+  {
+    "case": "scene_animation_preview_visual",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/scene_animation_preview_visual.log",
+    "status": "PASS",
+    "seconds": 16.97
+  },
+  {
+    "case": "scene_original_art_visual",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/scene_original_art_visual.log",
+    "status": "PASS",
+    "seconds": 24.78
+  },
+  {
+    "case": "session_recovery_visual",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/session_recovery_visual.log",
+    "status": "PASS",
+    "seconds": 21.52
+  },
+  {
+    "case": "native_fx_visual",
+    "log": "~/malik-champions/open-champions/worktrees/play-campaign-inventory/work/pci-r3/matrix/native_fx_visual.log",
+    "status": "PASS",
+    "seconds": 15.25
+  }
+]

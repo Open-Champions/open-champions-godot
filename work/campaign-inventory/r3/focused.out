@@ -1,24 +1,24 @@
 Test project ~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native
     Start 210: level-flow-exact
-1/8 Test #210: level-flow-exact .................   Passed    0.25 sec
+1/8 Test #210: level-flow-exact .................   Passed    0.27 sec
     Start 235: script-commands
-2/8 Test #235: script-commands ..................   Passed    0.92 sec
+2/8 Test #235: script-commands ..................   Passed    0.91 sec
     Start 242: quests
-3/8 Test #242: quests ...........................   Passed    0.26 sec
+3/8 Test #242: quests ...........................   Passed    0.25 sec
     Start 248: mission2-actors
-4/8 Test #248: mission2-actors ..................   Passed    0.25 sec
+4/8 Test #248: mission2-actors ..................   Passed    0.24 sec
     Start 251: pickups
-5/8 Test #251: pickups ..........................   Passed    0.36 sec
+5/8 Test #251: pickups ..........................   Passed    0.41 sec
     Start 253: ps2-save
-6/8 Test #253: ps2-save .........................   Passed    0.22 sec
+6/8 Test #253: ps2-save .........................   Passed    0.26 sec
     Start 255: frontend-exact
 7/8 Test #255: frontend-exact ...................   Passed    0.17 sec
     Start 256: campaign-inventory
-8/8 Test #256: campaign-inventory ...............   Passed    0.26 sec
+8/8 Test #256: campaign-inventory ...............   Passed    0.25 sec
 
 100% tests passed, 0 tests failed out of 8
 
-Total Test time (real) =   2.70 sec
+Total Test time (real) =   2.77 sec
 exit 0
 PASS campaign inventory
 463 PS2 save checks passed; 29 image and 51 checksum reference vectors

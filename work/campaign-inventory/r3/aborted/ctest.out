@@ -1,0 +1,191 @@
+Test project ~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native
+        Start 147: create-fixtures
+        Start 235: script-commands
+        Start 251: pickups
+  1/260 Test #147: create-fixtures ......................   Passed    0.16 sec
+        Start 256: campaign-inventory
+  2/260 Test #251: pickups ..............................   Passed    0.76 sec
+        Start 242: quests
+  3/260 Test #256: campaign-inventory ...................   Passed    0.65 sec
+  4/260 Test #242: quests ...............................   Passed    0.05 sec
+        Start 248: mission2-actors
+        Start 210: level-flow-exact
+  5/260 Test #248: mission2-actors ......................   Passed    0.20 sec
+        Start 253: ps2-save
+  6/260 Test #210: level-flow-exact .....................   Passed    0.37 sec
+        Start 255: frontend-exact
+  7/260 Test #255: frontend-exact .......................Subprocess aborted***Exception:   0.08 sec
+libc++abi: terminating due to uncaught exception of type std::runtime_error: a client load refusal: latch unknown
+
+        Start   1: campaign-actors
+  8/260 Test #253: ps2-save .............................   Passed    0.46 sec
+        Start   2: blood1-actors
+  9/260 Test   #1: campaign-actors ......................   Passed    0.24 sec
+        Start   3: resource-manager
+ 10/260 Test #235: script-commands ......................   Passed    1.60 sec
+        Start   4: player-state
+ 11/260 Test   #2: blood1-actors ........................   Passed    0.17 sec
+        Start   5: fx-exact
+ 12/260 Test   #3: resource-manager .....................   Passed    0.26 sec
+        Start   6: fx-render
+ 13/260 Test   #4: player-state .........................   Passed    0.32 sec
+        Start   7: fx-recipes
+ 14/260 Test   #6: fx-render ............................   Passed    0.64 sec
+        Start   8: fx-skills
+ 15/260 Test   #8: fx-skills ............................   Passed    0.79 sec
+        Start   9: fx-sim
+ 16/260 Test   #9: fx-sim ...............................   Passed    0.46 sec
+        Start  10: native-fx-synthetic
+ 17/260 Test  #10: native-fx-synthetic ..................   Passed    0.25 sec
+        Start  11: level-lights
+ 18/260 Test  #11: level-lights .........................   Passed    0.20 sec
+        Start  12: level-texture
+ 19/260 Test  #12: level-texture ........................   Passed    0.21 sec
+        Start  13: level-draw
+ 20/260 Test  #13: level-draw ...........................   Passed    0.37 sec
+        Start  14: level-draw-measure-atlas-refused
+ 21/260 Test  #14: level-draw-measure-atlas-refused .....   Passed    0.20 sec
+        Start  15: water-draw
+ 22/260 Test  #15: water-draw ...........................   Passed    0.22 sec
+        Start  16: game-profiles
+ 23/260 Test  #16: game-profiles ........................   Passed    0.22 sec
+        Start  17: native-save
+ 24/260 Test   #7: fx-recipes ...........................   Passed    3.54 sec
+        Start  18: native-snapshot
+ 25/260 Test   #5: fx-exact .............................   Passed    5.02 sec
+        Start  19: native-save-access
+ 26/260 Test  #19: native-save-access ...................   Passed    4.60 sec
+        Start  20: native-save-partition
+ 27/260 Test  #17: native-save ..........................   Passed  110.45 sec
+        Start  21: native-save-indexed
+ 28/260 Test  #20: native-save-partition ................   Passed  119.94 sec
+        Start  22: messages-api
+ 29/260 Test  #22: messages-api .........................   Passed    0.51 sec
+        Start  23: messages-exact
+ 30/260 Test  #18: native-snapshot ......................   Passed  183.98 sec
+        Start  24: messages-integrity
+ 31/260 Test  #24: messages-integrity ...................   Passed   10.04 sec
+        Start  25: script-builtins-api
+ 32/260 Test  #25: script-builtins-api ..................   Passed    0.33 sec
+        Start  26: script-builtins-exact
+ 33/260 Test  #23: messages-exact .......................***Failed  123.01 sec
+Traceback (most recent call last):
+  File "~/malik-champions/open-champions/worktrees/play-campaign-inventory/native/../tools/test_messages_vectors.py", line 90, in <module>
+    main()
+    ~~~~^^
+  File "~/malik-champions/open-champions/worktrees/play-campaign-inventory/native/../tools/test_messages_vectors.py", line 86, in main
+    compare(args.native,rows)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "~/malik-champions/open-champions/worktrees/play-campaign-inventory/native/../tools/test_messages_vectors.py", line 33, in compare
+    run = subprocess.run([str(exe)],input='\n'.join(row[1] for row in rows)+'\n',
+                         text=True,capture_output=True,timeout=120)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 556, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 1220, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 2153, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 1267, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native/champions-messages-trace']' timed out after 120 seconds
+
+        Start  27: arena-match-host
+ 34/260 Test  #27: arena-match-host .....................   Passed    0.48 sec
+        Start  28: arena-scheduler-runtime
+ 35/260 Test  #28: arena-scheduler-runtime ..............   Passed   10.75 sec
+        Start  29: arena-match-exact
+ 36/260 Test  #29: arena-match-exact ....................   Passed    0.29 sec
+        Start  30: arena-monsters-exact
+ 37/260 Test  #30: arena-monsters-exact .................   Passed   11.43 sec
+        Start  31: simulation-boundary
+ 38/260 Test  #31: simulation-boundary ..................   Passed    0.57 sec
+        Start  32: core-trace-integrity
+ 39/260 Test  #32: core-trace-integrity .................   Passed   34.62 sec
+        Start  33: core-arithmetic-exact
+ 40/260 Test  #33: core-arithmetic-exact ................   Passed    6.27 sec
+        Start  34: core-math-exact
+ 41/260 Test  #34: core-math-exact ......................   Passed    8.75 sec
+        Start  35: core-state-exact
+ 42/260 Test  #35: core-state-exact .....................   Passed    0.58 sec
+        Start  36: items-exact
+ 43/260 Test  #36: items-exact ..........................   Passed    4.18 sec
+        Start  37: item-generation-exact
+ 44/260 Test  #37: item-generation-exact ................   Passed    2.31 sec
+        Start  38: item-names-exact
+ 45/260 Test  #38: item-names-exact .....................   Passed    0.58 sec
+        Start  39: combat-common-exact
+ 46/260 Test  #39: combat-common-exact ..................   Passed    4.91 sec
+        Start  40: combat-damage-exact
+ 47/260 Test  #40: combat-damage-exact ..................   Passed    4.84 sec
+        Start  41: combat-stats-exact
+ 48/260 Test  #41: combat-stats-exact ...................   Passed    9.95 sec
+        Start  42: combat-items-exact
+ 49/260 Test  #42: combat-items-exact ...................   Passed    0.70 sec
+        Start  43: fire-touch-exact
+ 50/260 Test  #43: fire-touch-exact .....................   Passed    1.09 sec
+        Start  44: amx-image-exact
+ 51/260 Test  #44: amx-image-exact ......................   Passed    2.21 sec
+        Start  45: amx-execute-exact
+ 52/260 Test  #45: amx-execute-exact ....................   Passed    1.72 sec
+        Start  46: amx-host-exact
+ 53/260 Test  #46: amx-host-exact .......................   Passed    0.93 sec
+        Start  47: netwire-codec-exact
+ 54/260 Test  #47: netwire-codec-exact ..................   Passed   10.51 sec
+        Start  48: netwire-session-exact
+ 55/260 Test  #48: netwire-session-exact ................   Passed    4.44 sec
+        Start  49: netwire-tick-exact
+ 56/260 Test  #49: netwire-tick-exact ...................   Passed    4.84 sec
+        Start  50: amx-validation-transport
+ 57/260 Test  #26: script-builtins-exact ................   Passed  190.70 sec
+        Start  51: session-replay-transport
+ 58/260 Test  #50: amx-validation-transport .............   Passed    9.04 sec
+        Start  52: session-owned-host
+ 59/260 Test  #52: session-owned-host ...................   Passed    0.25 sec
+        Start  53: session-replay-exact
+ 60/260 Test  #21: native-save-indexed ..................   Passed  277.33 sec
+        Start  54: objects-runtime-host
+ 61/260 Test  #54: objects-runtime-host .................   Passed    0.26 sec
+        Start  55: objects-runtime-exact
+ 62/260 Test  #53: session-replay-exact .................   Passed    5.25 sec
+        Start  56: objects-runtime-transport
+ 63/260 Test  #55: objects-runtime-exact ................   Passed    6.01 sec
+        Start  57: session-objects-host
+ 64/260 Test  #57: session-objects-host .................   Passed    0.81 sec
+        Start  58: session-objects-exact
+ 65/260 Test  #51: session-replay-transport .............   Passed   20.00 sec
+        Start  59: session-objects-transport
+ 66/260 Test  #56: objects-runtime-transport ............   Passed   32.22 sec
+        Start  60: creature-hp-host
+ 67/260 Test  #60: creature-hp-host .....................   Passed    0.23 sec
+        Start  61: creature-hp-exact
+ 68/260 Test  #61: creature-hp-exact ....................   Passed    5.93 sec
+        Start  62: creature-hp-transport
+ 69/260 Test  #62: creature-hp-transport ................   Passed   14.31 sec
+        Start  63: creature-movement-host
+ 70/260 Test  #63: creature-movement-host ...............   Passed    0.40 sec
+        Start  64: creature-water-host
+ 71/260 Test  #64: creature-water-host ..................   Passed    0.20 sec
+        Start  65: creature-movement-exact
+ 72/260 Test  #65: creature-movement-exact ..............   Passed    1.62 sec
+        Start  66: creature-movement-transport
+ 73/260 Test  #66: creature-movement-transport ..........   Passed   13.34 sec
+        Start  67: creature-turn-host
+ 74/260 Test  #67: creature-turn-host ...................   Passed    0.36 sec
+        Start  68: creature-turn-exact
+ 75/260 Test  #68: creature-turn-exact ..................   Passed    1.64 sec
+        Start  69: creature-turn-transport
+ 76/260 Test  #69: creature-turn-transport ..............   Passed   16.94 sec
+        Start  70: combat-creature-host
+ 77/260 Test  #70: combat-creature-host .................   Passed    0.30 sec
+        Start  71: combat-creature-exact
+ 78/260 Test  #71: combat-creature-exact ................   Passed    1.68 sec
+        Start  72: combat-creature-transport
+ 79/260 Test  #72: combat-creature-transport ............   Passed   12.73 sec
+        Start  73: raw-handles-host
+ 80/260 Test  #73: raw-handles-host .....................   Passed    0.39 sec
+        Start  74: raw-handles-exact

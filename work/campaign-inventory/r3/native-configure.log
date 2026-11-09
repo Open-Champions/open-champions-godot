@@ -8,6 +8,6 @@
 -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
 -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
 -- Found Threads: TRUE
--- Configuring done (4.0s)
--- Generating done (0.8s)
+-- Configuring done (3.5s)
+-- Generating done (0.7s)
 -- Build files have been written to: ~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native
