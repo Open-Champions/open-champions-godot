@@ -62,11 +62,13 @@ struct SkillAsk {
   int acknowledged = 0;          // signed byte +0x58
   std::uint32_t max_mana = 0;    // float +0xc4
   // The caller's tree row (kind, need, ident, prerequisite kind and value).
+  // A prerequisite value of -1 (all 64 bits) passes whatever its kind.
   int kind = 0;
   int need = 0;
   std::uint64_t ident = 0;
-  int pre_kind = -1;
+  int pre_kind = 0;
   std::uint64_t pre = 0;
+  static constexpr std::uint64_t kNoPrerequisite = ~std::uint64_t{0};
   bool in_table = true;          // the passive-table walk saw a row before END
   bool resource = true;          // first picture lookup at 0x1d47b4 was nonzero
   Cursor cursor = Cursor::Inside;
@@ -74,7 +76,7 @@ struct SkillAsk {
   std::uint32_t confirm_mask = 0x40;  // word at 0x41bfbc
   std::uint32_t held = 0;        // pad +8
   int page = 0;                  // panel +0x50
-  std::uint32_t gate = 0;        // word at 0x4f4878 before the call
+  std::uint32_t gate = 0;        // word at 0x4f4878 before the call (see SkillDecision::gate)
   int panel30 = 0;               // panel +0x30
   // The float the skill's virtual entry vtable+0x28 returns. The bodies were
   // not run, so a kind-1 row needs this planted. levelup.md:150-158.
@@ -89,12 +91,18 @@ struct SkillDecision {
   int slot = 0;
   int kind = 0;         // 0 passive mask, 1 skill id
   std::uint32_t value = 0;
+  // The word at 0x4f4878 after the call. Page 5 with panel +0x30 zero stores
+  // pad+8 & 2 there; the caller keeps it for the next call. levelup.md:107-111.
+  std::uint32_t gate = 0;
 };
 // skills_screen 0x1d4660 sender. levelup.md:92-164.
 SkillDecision skill_screen(const SkillAsk &ask);
 
 // The executed extra unlocks: (class, row kind, row ident) also unlocked by
-// rank >= 1 of the skill. levelup.md:121-131.
+// rank >= 1 of the skill. levelup.md:121-131. Each was executed on its own
+// row, so on that row's prerequisite chain: the passive-0x40 rows on the
+// passive-prerequisite chain (kind 0), the skill rows on the skill chain
+// (kind 1). levelup.md:118-119, 133-138. Any other chain is refused.
 struct Alternative {
   int class_id;
   int kind;

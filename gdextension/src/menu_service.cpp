@@ -13,6 +13,7 @@
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -44,6 +45,14 @@ class ChampionsMenuService : public RefCounted {
   GDCLASS(ChampionsMenuService, RefCounted)
   std::unique_ptr<M::Ledger> ledger_;
   std::string scheme_ = "cross";
+  // g_localMenuOpen as the host menu last stated it; a replaced ledger keeps it.
+  bool local_menu_known_ = false;
+  bool local_menu_open_ = false;
+
+  void apply_local_menu() {
+    if (local_menu_known_)
+      ledger_->set_local_menu_open(local_menu_open_);
+  }
 
   Dictionary fill_state(Dictionary out) {
     out["gold"] = ledger_->gold();
@@ -65,6 +74,8 @@ class ChampionsMenuService : public RefCounted {
     out["level_message_stored"] = notice.stored;
     out["level_message_frames"] = int(notice.frames);
     out["level_message_force"] = int(notice.force);
+    out["level_message_undecided"] = notice.undecided;
+    out["local_menu_known"] = ledger_->local_menu_known();
     out["hp"] = int64_t(ledger_->hit_points());
     out["max_hp"] = int64_t(ledger_->max_hit_points());
     out["mana"] = int64_t(ledger_->mana());
@@ -368,6 +379,7 @@ public:
           [&image](std::uint32_t at) { return image.word(at); }, -1);
       next->set_xp_rules(xp, formulas);
       ledger_ = std::move(next);
+      apply_local_menu();
       auto result = fill_state(success());
       result["unverified_definition"] = int64_t(unverified_definition);
       return result;
@@ -469,30 +481,44 @@ public:
       return failure(error);
     }
   }
-  void set_local_menu_open(bool open) { ledger_->set_local_menu_open(open); }
+  void set_local_menu_open(bool open) {
+    local_menu_known_ = true;
+    local_menu_open_ = open;
+    ledger_->set_local_menu_open(open);
+  }
   Dictionary skill_screen(const Dictionary &row) {
     try {
+      // The tree row, panel and pad come from the caller; none is defaulted.
+      // Only the confirm mask is the executable's constant 0x40.
+      // levelup.md:94-111, 233-236.
+      for (const char *key : {"kind", "need", "ident", "pre_kind", "pre", "page", "resource", "in_table",
+                              "cursor", "edge", "held", "panel30"})
+        if (!row.has(key))
+          return failure(std::runtime_error(std::string("skill_screen row needs ") + key));
+      if (row.has("gate"))
+        return failure(std::runtime_error("the 0x4f4878 latch word is kept by the ledger"));
       champions::levelup_hud::SkillAsk ask;
-      ask.kind = int(row.get("kind", 0));
-      ask.need = int(row.get("need", 1));
-      ask.ident = static_cast<std::uint64_t>(int64_t(row.get("ident", 0)));
-      ask.pre_kind = int(row.get("pre_kind", -1));
-      ask.pre = static_cast<std::uint64_t>(int64_t(row.get("pre", 0)));
-      const String cursor = row.get("cursor", "inside");
+      ask.kind = int(row.get("kind", Variant()));
+      ask.need = int(row.get("need", Variant()));
+      ask.ident = static_cast<std::uint64_t>(int64_t(row.get("ident", Variant())));
+      ask.pre_kind = int(row.get("pre_kind", Variant()));
+      ask.pre = static_cast<std::uint64_t>(int64_t(row.get("pre", Variant())));
+      const String cursor = row.get("cursor", Variant());
       if (cursor == "edge")
         ask.cursor = champions::levelup_hud::Cursor::Edge;
       else if (cursor == "outside")
         ask.cursor = champions::levelup_hud::Cursor::Outside;
-      else
+      else if (cursor == "inside")
         ask.cursor = champions::levelup_hud::Cursor::Inside;
-      ask.edge = static_cast<std::uint32_t>(int(row.get("edge", 0x40)));
+      else
+        return failure(std::runtime_error("skill_screen cursor is inside, outside or edge"));
+      ask.edge = static_cast<std::uint32_t>(int64_t(row.get("edge", Variant())));
       ask.confirm_mask = 0x40;
-      ask.held = static_cast<std::uint32_t>(int(row.get("held", 0)));
-      ask.page = int(row.get("page", 5));
-      ask.gate = static_cast<std::uint32_t>(int(row.get("gate", 0)));
-      ask.panel30 = int(row.get("panel30", 0));
-      ask.resource = bool(row.get("resource", true));
-      ask.in_table = bool(row.get("in_table", true));
+      ask.held = static_cast<std::uint32_t>(int64_t(row.get("held", Variant())));
+      ask.page = int(row.get("page", Variant()));
+      ask.panel30 = int(row.get("panel30", Variant()));
+      ask.resource = bool(row.get("resource", Variant()));
+      ask.in_table = bool(row.get("in_table", Variant()));
       // Raw float word the skill's vtable+0x28 entry returned (levelup.md:150-158).
       if (row.has("virtual_float")) {
         ask.virtual_float = static_cast<std::uint32_t>(int64_t(row.get("virtual_float", 0)));
@@ -504,6 +530,7 @@ public:
       out["recalc"] = decision.recalc;
       out["send_kind"] = decision.kind;
       out["send_value"] = int64_t(decision.value);
+      out["latch"] = int64_t(decision.gate);
       return fill_state(out);
     } catch (const std::exception &error) {
       return failure(error);
@@ -545,6 +572,7 @@ public:
   Dictionary reset() {
     try {
       ledger_ = std::make_unique<M::Ledger>();
+      apply_local_menu();
       scheme_ = "cross";
       return fill_state(success());
     } catch (const std::exception &error) {

@@ -12,6 +12,12 @@ func check(value: bool, message: String) -> void:
 		failures += 1
 		push_error(message)
 
+# A complete skills_screen tree row and pad; the binding defaults none of them.
+func skill_row(extra: Dictionary) -> Dictionary:
+	var row := {"kind": 0, "need": 1, "ident": 1, "pre_kind": 0, "pre": -1, "page": 5, "resource": true, "in_table": true, "cursor": "inside", "edge": 0x40, "held": 0, "panel30": 0}
+	row.merge(extra, true)
+	return row
+
 func key(code: int, pressed := true) -> InputEventKey:
 	var event := InputEventKey.new()
 	event.physical_keycode = code
@@ -51,8 +57,21 @@ func run() -> void:
 	check(service.press(2, 0x40).action == "none" and int(service.state().stat_points) == 3, "stats page does not spend")
 	var skill: Dictionary = service.spend_skill(0, 1)
 	check(not skill.get("ok", false) and str(skill.get("error", "")).contains("not the skills_screen sender") and int(service.state().skill_points) == 4, "bare spend is not the skill screen")
-	check(not service.skill_screen({"kind": 0, "need": 1, "ident": 1, "pre_kind": -1, "cursor": "inside", "edge": 0x40, "page": 5}).get("ok", false) and int(service.state().skill_points) == 4, "skill screen recalc refuses without the executable rules")
+	var off_page: Dictionary = service.skill_screen(skill_row({"page": 3}))
+	check(not off_page.get("ok", false) and str(off_page.get("error", "")).contains("page 5") and int(service.state().skill_points) == 4, "skill screen needs the level-up page")
+	service.set_page(5)
+	var no_rules: Dictionary = service.skill_screen(skill_row({}))
+	check(not no_rules.get("ok", false) and str(no_rules.get("error", "")).contains("level-up rules") and int(service.state().skill_points) == 4, "skill screen recalc refuses without the executable rules")
+	for missing in ["kind", "need", "ident", "pre_kind", "pre", "page", "resource", "in_table", "cursor", "edge", "held", "panel30"]:
+		var partial := skill_row({})
+		partial.erase(missing)
+		var refused: Dictionary = service.skill_screen(partial)
+		check(not refused.get("ok", false) and str(refused.get("error", "")).contains("needs " + missing) and int(service.state().skill_points) == 4, "skill row without " + missing + " refuses")
+	check(not service.skill_screen(skill_row({"gate": 0})).get("ok", false), "the latch word is not a caller field")
+	check(not service.state().local_menu_known, "local menu state starts unknown")
+	service.set_local_menu_open(false)
 	service.reset()
+	check(service.state().local_menu_known, "a stated menu state survives a new ledger")
 	var thresholds := PackedInt32Array()
 	for index in range(81):
 		thresholds.append(index * 100)
@@ -74,7 +93,7 @@ func run() -> void:
 	check(xp.get("ok", false) and int(xp.levels_gained) == 1 and int(xp.level) == 6 and int(xp.experience) == 500, "exact XP threshold")
 	check(int(xp.skill_points) == 5 and int(xp.stat_points) == 6 and int(xp.max_hp) == 0x424c0000 and int(xp.max_mana) == 0x41880000, "level resource and point awards")
 	check(int(xp.acknowledged) == 4 and int(xp.hud_xp_base) == 300 and int(xp.hud_next_xp) == 400, "pending level HUD interval follows acknowledged level")
-	check(int(xp.level_message_calls) == 1 and xp.level_message_stored and int(xp.level_message_frames) == 360 and int(xp.level_message_force) == 0, "level step asks for the 360-frame force-0 message")
+	check(int(xp.level_message_calls) == 1 and xp.level_message_stored and int(xp.level_message_frames) == 360 and int(xp.level_message_force) == 0 and int(xp.level_message_undecided) == 0, "level step asks for the 360-frame force-0 message")
 	var opened: Dictionary = service.open_level_up()
 	check(int(opened.acknowledged) == 6 and int(opened.page) == 5, "opening inventory for level-up acknowledges")
 	check(int(opened.hud_xp_base) == 500 and int(opened.hud_next_xp) == 600, "acknowledged level advances HUD interval")
@@ -82,11 +101,16 @@ func run() -> void:
 	check(not service.press_stat(2, 3, 0x40, 0, 2999).sent, "stat timer gate")
 	var stat: Dictionary = service.press_stat(2, 3, 0x40, 0, 3000)
 	check(stat.get("ok", false) and stat.get("sent", false) and int(stat.base_stats[3]) == 14 and int(stat.stat_points) == 5, "stat row sends and spends")
-	var sent: Dictionary = service.skill_screen({"kind": 0, "need": 1, "ident": 1, "pre_kind": -1, "cursor": "inside", "edge": 0x40, "page": 5, "resource": true})
+	var sent: Dictionary = service.skill_screen(skill_row({}))
 	check(sent.get("ok", false) and sent.get("sent", false) and int(sent.send_kind) == 0 and int(sent.send_value) == 1 and int(sent.skill_points) == 4, "passive row sends the mask and spends one point")
-	var outside: Dictionary = service.skill_screen({"kind": 0, "need": 1, "ident": 1, "pre_kind": -1, "cursor": "outside", "edge": 0x40, "page": 5})
+	var outside: Dictionary = service.skill_screen(skill_row({"cursor": "outside"}))
 	check(outside.get("ok", false) and not outside.get("sent", false) and int(service.state().skill_points) == 4, "a cursor outside the tree does not send")
-	var edge: Dictionary = service.skill_screen({"kind": 1, "ident": 95, "cursor": "edge", "virtual_float": 0})
+	var latched: Dictionary = service.skill_screen(skill_row({"held": 2}))
+	check(latched.get("ok", false) and not latched.get("sent", false) and int(latched.latch) == 2, "held bit 2 on page 5 latches")
+	var kept: Dictionary = service.skill_screen(skill_row({"panel30": 1}))
+	check(kept.get("ok", false) and not kept.get("sent", false) and int(kept.latch) == 2 and int(service.state().skill_points) == 4, "the ledger keeps the latch word")
+	check(int(service.skill_screen(skill_row({"cursor": "outside", "panel30": 1})).latch) == 2, "an exit that would not change the latch leaves it")
+	var edge: Dictionary = service.skill_screen(skill_row({"kind": 1, "ident": 95, "cursor": "edge", "virtual_float": 0}))
 	check(not edge.get("ok", false) and str(edge.get("error", "")).contains("cursor-box"), "cursor-box edges stay refused")
 	var kill: Dictionary = service.give_kill_xp(0x42000000, 0x41f00000)
 	check(kill.get("ok", false) and int(kill.award) > 0 and int(kill.experience) == 500 + int(kill.award), "authored solo kill award reaches record")

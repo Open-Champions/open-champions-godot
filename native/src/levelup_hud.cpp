@@ -106,31 +106,65 @@ SkillDecision skill_screen(const SkillAsk &ask) {
   out.kind = skill_row ? 1 : 0;
   // Passive: low 32 bits of the row mask. Skill: the skill id. levelup.md:150-153.
   out.value = static_cast<std::uint32_t>(ask.ident & 0xffffffffu);
-  // Missing resource, outside cursor, confirm edge. levelup.md:94-107.
-  if (!ask.resource || ask.cursor == Cursor::Outside || (ask.edge & ask.confirm_mask) == 0)
+  out.gate = ask.gate;
+  // The first picture lookup at 0x1d47b4 leaves before the latch store at
+  // 0x1d5010. levelup.md:94-96, 107-111.
+  if (!ask.resource)
     return out;
-  // Page 5 with panel +0x30 zero latches pad+8 & 2. levelup.md:107-111.
-  std::uint32_t gate = ask.gate;
-  if (ask.panel30 == 0 && ask.page == 5)
-    gate = ask.held & 2u;
-  if (gate != 0)
+  // Page 5 with panel +0x30 zero latches pad+8 & 2 into 0x4f4878.
+  // levelup.md:107-111.
+  const bool latches = ask.panel30 == 0 && ask.page == 5;
+  const std::uint32_t latched = latches ? (ask.held & 2u) : ask.gate;
+  // Outside cursor and confirm edge. levelup.md:98-107. The order of those
+  // exits and the latch store is not given, so a call where the order would
+  // change the stored word is refused.
+  if (ask.cursor == Cursor::Outside || (ask.edge & ask.confirm_mask) == 0) {
+    if (latched != ask.gate)
+      throw Refusal("order of the page-5 latch store and the cursor/confirm exits was not executed");
     return out;
-  // Prerequisite walk 0x1d5530-0x1d576c. levelup.md:114-119.
+  }
+  out.gate = latched;
+  if (latched != 0)
+    return out;
+  // Prerequisite walk 0x1d5530-0x1d576c. levelup.md:114-119. The tests are on
+  // the prerequisite value first: -1 passes, 0 needs skill 60 or 61.
+  const int row_kind = skill_row ? 1 : 0;
   bool unlocked = false;
-  if (ask.pre_kind < 0)
+  bool zero_prerequisite = false;
+  if (ask.pre == SkillAsk::kNoPrerequisite) {
     unlocked = true;
-  else if (ask.pre == 0)
+  } else if ((ask.pre & 0xffffffffu) == 0xffffffffu) {
+    throw Refusal("prerequisite with a -1 low word and a nonzero high word: compare width was not executed");
+  } else if (ask.pre == 0) {
+    zero_prerequisite = true;
     unlocked = rank_of(ask.skill_rank, 60) >= 1 || rank_of(ask.skill_rank, 61) >= 1;
-  else if (ask.pre_kind == 0)
+  } else if (ask.pre_kind == 0) {
     unlocked = passive_of(ask.passive_rank, ask.pre) >= 1;
-  else
+  } else if (ask.pre_kind == 1) {
     unlocked = rank_of(ask.skill_rank, static_cast<int>(ask.pre & 0xffffffffu)) >= 1;
+  } else {
+    throw Refusal("prerequisite kind other than 0 or 1 was not executed");
+  }
   if (!unlocked) {
-    const int row_kind = skill_row ? 1 : 0;
+    // The alternatives sit on the prerequisite chains. levelup.md:121-138.
+    const Alternative *match = nullptr;
     for (const auto &alt : alternatives())
-      if (alt.class_id == ask.class_id && alt.kind == row_kind && alt.ident == ask.ident &&
-          rank_of(ask.skill_rank, alt.skill) >= 1)
-        unlocked = true;
+      if (alt.class_id == ask.class_id && alt.ident == ask.ident)
+        match = &alt;
+    if (match) {
+      if (zero_prerequisite)
+        throw Refusal("alternative unlocks after a failed prerequisite-0 check were not executed");
+      if (match->kind != row_kind)
+        throw Refusal("alternative ident on a row of the other kind was not executed");
+      if (match->kind == 0 && ask.pre_kind == 1) {
+        // The passive-0x40 compare is only on the passive-prerequisite chain.
+        // levelup.md:133-136.
+      } else if (match->kind == ask.pre_kind) {
+        unlocked = rank_of(ask.skill_rank, match->skill) >= 1;
+      } else {
+        throw Refusal("skill-row alternatives were executed on the skill-prerequisite chain only");
+      }
+    }
   }
   if (!unlocked || !ask.in_table)
     return out;

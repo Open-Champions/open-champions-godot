@@ -29,6 +29,9 @@ struct LedgerProbe {
   static std::uint32_t half(const Ledger &ledger, std::uint32_t offset) {
     return ledger.machine_->u16(ledger.machine_->u32(ledger.record() + 0x43d8) + offset);
   }
+  static void memory_u64(Ledger &ledger, std::uint32_t addr, std::uint64_t value) {
+    ledger.machine_->w64(addr, value);
+  }
 };
 } // namespace champions::menus
 
@@ -868,6 +871,7 @@ void observed_level_vectors() {
       hero.stats[i] = 10;
     book.adopt(hero);
     book.set_xp_rules(table, formulas);
+    book.set_local_menu_open(false);
     expect(book.give_xp(0) == 0 && book.level() == old_level && book.skill_points() == 41 &&
                book.stat_points() == 70 && book.acknowledged() == 2,
            "one below the exact word does not level");
@@ -931,6 +935,46 @@ void observed_level_vectors() {
            "the next level step stores once the menu is closed");
   }
   {
+    // Nothing stated g_localMenuOpen: the store is not decided.
+    Ledger book;
+    Ledger::Adopted hero;
+    hero.level = 5;
+    hero.acknowledged = 4;
+    hero.experience = 499;
+    for (int i = 0; i < 4; ++i)
+      hero.stats[i] = 10;
+    book.adopt(hero);
+    book.set_xp_rules(table, formulas);
+    expect(!book.local_menu_known() && book.give_xp(1) == 1 && !book.level_notice().stored &&
+               book.level_notice().calls == 1 && book.level_notice().undecided == 1,
+           "unknown menu state leaves the level message undecided");
+    book.set_local_menu_open(false);
+    expect(book.give_xp(100) == 1 && book.level_notice().stored && book.level_notice().undecided == 1,
+           "a stated closed menu stores the level message");
+  }
+  {
+    // Multi-level award with HP > 0. Each step's refill is on the record
+    // before the next player_recalcStats. levelup.md:31-41.
+    std::array<ClassFormula, 8> falling{};
+    for (auto &row : falling)  // mana 11 - L, health 39 - 6L from the seeded stats
+      row = {0u, 0x3f800000u, 0xbf800000u, 0xc0c00000u, 0x40400000u, 0u};
+    Ledger book;
+    book.set_xp_rules(table, falling);
+    LedgerProbe::record_word(book, 0xc0, 0x3f800000u);  // mana 1, health 1
+    expect(book.give_xp(600) == 2 && book.level() == 7, "two level steps");
+    // Step 6 refills to 3 / 5; step 7's recalc lowers health to -3 and mana to
+    // min(5, 4). Without the write-back mana would stay 1.
+    expect(book.hit_points() == 0xc0400000u && book.mana() == 0x40800000u,
+           "the refill of one step reaches the next recalc");
+    Ledger rising;
+    rising.set_xp_rules(table, formulas);
+    LedgerProbe::record_word(rising, 0xc0, 0x3f800000u);
+    // mana 11 + L, health 2L + 39 at level 8.
+    expect(rising.give_xp(700) == 3 && rising.level() == 8 && rising.hit_points() == 0x425c0000u &&
+               rising.mana() == 0x41980000u,
+           "multi-level award with health above 0 refills both currents");
+  }
+  {
     Ledger book;
     Ledger::Adopted hero;
     hero.level = 6;
@@ -962,7 +1006,7 @@ void observed_level_vectors() {
     ask.kind = 0;
     ask.need = 1;
     ask.ident = 1;
-    ask.pre_kind = -1;
+    ask.pre = champions::levelup_hud::SkillAsk::kNoPrerequisite;
     ask.cursor = champions::levelup_hud::Cursor::Inside;
     ask.edge = 0x40;
     ask.confirm_mask = 0x40;
@@ -980,6 +1024,51 @@ void observed_level_vectors() {
     expect(!missed.sent && !missed.recalc && book.skill_points() == 3, "outside cursor does not send");
     ask.cursor = champions::levelup_hud::Cursor::Edge;
     reject([&] { book.skill_screen(ask); }, "cursor-box edge stays refused");
+    // The page comes from the ledger. levelup.md:107-111.
+    ask.cursor = champions::levelup_hud::Cursor::Inside;
+    ask.page = 0;
+    reject([&] { book.skill_screen(ask); }, "a caller page that is not the ledger's is refused");
+    ask.page = 5;
+    book.set_page(3);
+    reject([&] { book.skill_screen(ask); }, "the skills screen needs page 5 open");
+    expect(book.skill_points() == 3, "refused pages leave the skill word");
+    book.set_page(5);
+    // The latch word persists in the ledger between calls.
+    ask.held = 2;
+    const auto latched = book.skill_screen(ask);
+    expect(!latched.sent && latched.gate == 2 && book.skill_latch() == 2 && book.skill_points() == 3,
+           "held bit 2 on page 5 latches the word");
+    ask.held = 0;
+    ask.panel30 = 1;
+    const auto skipped = book.skill_screen(ask);
+    expect(!skipped.sent && book.skill_latch() == 2 && book.skill_points() == 3,
+           "the kept word skips the next call");
+    ask.panel30 = 0;
+    const auto cleared = book.skill_screen(ask);
+    expect(cleared.sent && book.skill_latch() == 0 && book.skill_points() == 2,
+           "page 5 without bit 2 clears the word and sends");
+  }
+  {
+    // The screen's recalc runs before message 7 (levelup.md:160-173). With the
+    // passive-0x40 row the load word +0x124 reads that rank, so it shows which
+    // rank recalc saw: 135 + 15 * 2, not 15 * 3.
+    Ledger book;
+    book.set_xp_rules(table, formulas);
+    LedgerProbe::memory_u64(book, 0x4ef538, 0x40);  // class 0 passive row 0 is mask 0x40
+    expect(book.passive_level_at(0x40) == 2, "seeded passive 0x40 rank 2");
+    book.set_page(5);
+    champions::levelup_hud::SkillAsk ask;
+    ask.kind = 0;
+    ask.need = 1;
+    ask.ident = 0x40;
+    ask.pre = champions::levelup_hud::SkillAsk::kNoPrerequisite;
+    ask.cursor = champions::levelup_hud::Cursor::Inside;
+    ask.edge = 0x40;
+    ask.page = 5;
+    const auto sent = book.skill_screen(ask);
+    expect(sent.sent && sent.recalc && book.passive_level_at(0x40) == 3 && book.skill_points() == 3,
+           "passive 0x40 row sends and the handler raises the rank");
+    expect(book.record_word(0x124) == 0x43250000u, "recalc ran before the message-7 handler");
   }
 }
 

@@ -37,6 +37,9 @@ func _ready() -> void:
 	set_anchors_preset(PRESET_FULL_RECT)
 	if ClassDB.class_exists("ChampionsMenuService"):
 		service = ClassDB.instantiate("ChampionsMenuService")
+		# The host menu stands for g_localMenuOpen (0x41b69d) in the level-up
+		# message store; its original writer was not identified.
+		service.set_local_menu_open(false)
 	if ClassDB.class_exists("ChampionsUiLayoutService"):
 		layout_service = ClassDB.instantiate("ChampionsUiLayoutService")
 	if ClassDB.class_exists("ChampionsUiDynamicLayoutService"):
@@ -212,6 +215,7 @@ func open_screen(which: String) -> void:
 	if service == null:
 		return
 	open = true
+	service.set_local_menu_open(true)
 	mouse_filter = MOUSE_FILTER_STOP
 	opener.visible = false
 	host.visible = true
@@ -266,6 +270,8 @@ func close_menu() -> void:
 	var was_vendor := vendor_open
 	var resume := was_vendor and vendor_resume
 	open = false
+	if service != null:
+		service.set_local_menu_open(false)
 	vendor_open = false
 	vendor_resume = false
 	mouse_filter = MOUSE_FILTER_IGNORE

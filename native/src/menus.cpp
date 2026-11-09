@@ -661,11 +661,27 @@ void Ledger::spend_skill(int is_skill, std::uint32_t value) {
   throw Refusal("spend_skill is not the skills_screen sender");
 }
 
-void Ledger::set_local_menu_open(bool open) { local_menu_open_ = open; }
+void Ledger::set_local_menu_open(bool open) {
+  local_menu_open_ = open;
+  local_menu_known_ = true;
+}
+
+namespace {
+// The word skills_screen latches on page 5. levelup.md:107-111.
+constexpr std::uint32_t SKILL_LATCH = 0x4f4878;
+} // namespace
+
+std::uint32_t Ledger::skill_latch() const { return machine_->u32(SKILL_LATCH); }
 
 levelup_hud::SkillDecision Ledger::skill_screen(levelup_hud::SkillAsk ask) {
-  // The screen reads the owner's record. levelup.md:94-98, 140-158.
+  // The screen reads the panel page +0x50 and the owner's record.
+  // levelup.md:94-98, 107-111, 140-158.
+  if (page() != 5)
+    throw Refusal("skills_screen needs the level-up page 5 open on this ledger");
+  if (ask.page != page())
+    throw Refusal("the caller's panel page is not the ledger's page");
   ask.slot = 0;
+  ask.gate = skill_latch();
   ask.class_id = machine_->s32(record() + 0x50);
   ask.points = skill_points();
   ask.acknowledged = static_cast<int>(acknowledged());
@@ -678,13 +694,16 @@ levelup_hud::SkillDecision Ledger::skill_screen(levelup_hud::SkillAsk ask) {
   } catch (const levelup_hud::Refusal &error) {
     throw Refusal(error.what());
   }
-  if (!decision.recalc)
+  if (!decision.recalc) {
+    machine_->w32(SKILL_LATCH, decision.gate);
     return decision;
+  }
   if (!xp_ready_)
     throw Refusal("selected executable level-up rules were not supplied");
   auto before = memory_;
   try {
     ensure_recalc_supported();
+    machine_->w32(SKILL_LATCH, decision.gate);
     // The screen's own player_recalcStats (0x1d5950). Message 7 then goes to
     // inventory_onSkillPoint, which does not recalculate. levelup.md:160-173.
     recalc_level_stats();
@@ -798,6 +817,10 @@ int Ledger::give_xp(std::int32_t amount) {
           machine_->w32(r + 0xe8, step.skill_word);
           machine_->w8(r + 0xec, step.stat_byte);
           machine_->w8(r + 0x59, static_cast<std::uint32_t>(step.level));
+          // The previous step's refill is on the record before this recalc,
+          // as the original refills +0xac / +0xc0 inside each iteration.
+          machine_->w32(r + 0xac, step.health);
+          machine_->w32(r + 0xc0, step.mana);
           recalc_level_stats();
           step.max_health = max_hit_points();
           step.max_mana = max_mana();
@@ -815,7 +838,10 @@ int Ledger::give_xp(std::int32_t amount) {
     // owning machine; a zero force with the local menu open keeps the
     // previous message. hud-live-producers.md:120-122, 169-179.
     level_notice_.calls += result.steps;
-    if (result.steps > 0 && !local_menu_open_) {
+    if (result.steps > 0 && !local_menu_known_) {
+      // Nothing has stated g_localMenuOpen, so the store is not decided.
+      level_notice_.undecided += result.steps;
+    } else if (result.steps > 0 && !local_menu_open_) {
       level_notice_.stored = true;
       level_notice_.frames = levelup_hud::kLevelMessageFrames;
       level_notice_.force = levelup_hud::kLevelMessageForce;

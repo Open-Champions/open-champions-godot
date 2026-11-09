@@ -257,18 +257,23 @@ public:
   void spend_stat(int stat);
   void spend_skill(int is_skill, std::uint32_t value);
   // skills_screen sender for the owner's record. The record supplies class,
-  // points, acknowledged level, maximum mana and ranks; the caller supplies the
-  // tree row, cursor and pad. levelup.md:92-164. Cursor edges and virtual
-  // bodies stay refused.
+  // points, acknowledged level, maximum mana and ranks; the ledger supplies the
+  // panel page (it must be the level-up page 5) and keeps the latch word at
+  // 0x4f4878 between calls; the caller supplies the tree row, cursor and pad.
+  // levelup.md:92-164. Cursor edges and virtual bodies stay refused.
   levelup_hud::SkillDecision skill_screen(levelup_hud::SkillAsk ask);
-  // g_localMenuOpen 0x41b69d as the level-up message store sees it.
+  std::uint32_t skill_latch() const;
+  // g_localMenuOpen 0x41b69d as the level-up message store sees it. Until a
+  // caller states it, the store is not decided (LevelNotice::undecided).
   void set_local_menu_open(bool open);
+  bool local_menu_known() const { return local_menu_known_; }
   // What player_giveExp's hud_showMessage calls left on this machine.
   struct LevelNotice {
     int calls = 0;
     bool stored = false;
     std::uint16_t frames = 0;
     std::uint8_t force = 0;
+    int undecided = 0;  // calls made while the local menu state was unknown
   };
   const LevelNotice &level_notice() const { return level_notice_; }
   void grant_level();
@@ -346,6 +351,7 @@ private:
   bool live_record_ = false;
   bool xp_ready_ = false;
   bool local_menu_open_ = false;
+  bool local_menu_known_ = false;
   LevelNotice level_notice_{};
   XpTable xp_table_{};
   std::array<ClassFormula, 8> formulas_{};

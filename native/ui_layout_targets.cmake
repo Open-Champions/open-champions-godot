@@ -1,6 +1,6 @@
 add_library(champions-ui-layout src/ui_layout.cpp)
 target_include_directories(champions-ui-layout PUBLIC include)
-target_link_libraries(champions-ui-layout PUBLIC champions-ui-font)
+target_link_libraries(champions-ui-layout PUBLIC champions-ui-font champions-core)
 if(MSVC)
     target_compile_options(champions-ui-layout PRIVATE /W4 /utf-8 /fp:strict)
 else()

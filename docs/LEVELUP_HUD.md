@@ -23,13 +23,20 @@ Tests use authored tables (`i * 100`) and planted values only.
 - The stat byte `+0xec` gains 3 as a byte; 254 becomes 1 (levelup.md:50-51).
 - `player_recalcStats` runs after the level increment. Current health and
   mana become the new maxima only when health is above 0 (levelup.md:40-41,
-  60-61; hud-live-producers.md:108-111).
+  60-61; hud-live-producers.md:108-111). In a multi-level award each step's
+  refill is on the record (`+0xac` / `+0xc0`) before the next recalc, so that
+  recalc's clamps see the refilled currents (levelup.md:31-41).
 - Acknowledged level `+0x58` is not written (levelup.md:42, 61-62).
 - Each step asks `hud_showMessage` for 360 frames (`0x168`) and force 0. The
   ledger is the owning machine; with `g_localMenuOpen` set the zero force keeps
   the previous message (hud-live-producers.md:120-122, 174-176). The ledger
   records the calls, frames and force (`level_message_*` in the menu service).
   The message text is not known, so nothing draws it yet.
+- The writer of `g_localMenuOpen` `0x41b69d` is not in the notes. In play the
+  host menu (`godot/ui/game_menus.gd`) states it: closed at start, open while
+  a host menu screen is shown, closed on close. The menu service keeps that
+  state across a new ledger. Until something states it, the ledger does not
+  decide the store and counts the calls as `level_message_undecided`.
 
 A pending level survives `Ledger::save` / `Ledger::load` unapplied: both level
 bytes, experience and both point balances come back unchanged
@@ -39,17 +46,35 @@ bytes, experience and both point balances come back unchanged
 
 `levelup_hud::skill_screen` is the `skills_screen` `0x1d4660` sender.
 `Ledger::skill_screen` fills the record side (class `+0x50`, points `+0xe8`,
-acknowledged `+0x58`, maximum mana `+0xc4`, ranks); the caller supplies the
-tree row, cursor and pad.
+acknowledged `+0x58`, maximum mana `+0xc4`, ranks) and the panel side: the
+page is the ledger's own `+0x50`, which must be the level-up page 5 (a caller
+page that differs refuses), and the latch word `0x4f4878` is kept in the
+ledger between calls. The caller supplies the tree row, cursor and pad. The
+Godot `skill_screen(row)` binding requires every row, panel and pad field
+(`kind`, `need`, `ident`, `pre_kind`, `pre`, `page`, `resource`, `in_table`,
+`cursor`, `edge`, `held`, `panel30`) and refuses a row without one; only the
+confirm mask `0x40` is a constant.
 
 - A missing picture resource, a point outside the tree, an edge without the
   confirm mask `0x40`, or the page-5 held-bit-2 latch leave without sending
-  (levelup.md:94-112).
-- Prerequisite `-1` passes; prerequisite 0 passes on skill 60 or 61; otherwise
-  the passive mask or skill id needs rank 1 (levelup.md:114-119).
+  (levelup.md:94-112). The missing resource leaves before the latch store.
+  The order of the latch store against the cursor and confirm exits is not
+  given, so a call where that order would change the stored word refuses.
+- Prerequisite value `-1` (all 64 bits) passes, whatever its kind; value 0
+  passes on skill 60 or 61; otherwise a kind-0 prerequisite needs that passive
+  mask's rank 1 and a kind-1 prerequisite that skill id's rank 1
+  (levelup.md:114-119). Any other kind, and a `-1` low word with a nonzero
+  high word, refuse.
 - The nine executed alternatives are embedded by class, row kind and ident,
   including class 4 ident 95 from skill 18 and class 6 ident 90 from skill 86
-  (levelup.md:121-138). Class 1 ident 55 is not unlocked by passive `0x40`.
+  (levelup.md:121-138). Each applies only on the prerequisite chain it was
+  executed on: the two passive-`0x40` rows with a passive prerequisite, the
+  seven skill rows with a skill prerequisite. A passive-`0x40` row with a
+  skill prerequisite is not unlocked by its alternative (the `0x40` compare is
+  only on the passive chain, levelup.md:133-136). A skill alternative with a
+  passive prerequisite, any alternative after a failed prerequisite-0 check,
+  and an alternative ident on a row of the other kind refuse. Class 1 ident 55
+  is not unlocked by passive `0x40`.
 - Rank 20 does not send; acknowledged `< need + rank` does not send
   (levelup.md:140-143).
 - From there `player_recalcStats` runs even when the point word (`<= 0`) or the
@@ -73,10 +98,16 @@ These producers already existed and now follow the notes:
   (hud-live-producers.md:40-55). The Godot HUD view still omits a bar whose
   maximum is not above 0 or whose current is negative: the play scene uses a
   zero maximum to mean that the value is not available (for example play mana),
-  so drawing it would paint a value the scene does not have.
+  so drawing it would paint a value the scene does not have. The play
+  observation carries no flag that tells a real zero maximum from a missing
+  one, so in play a real zero maximum is not drawn and never saturates; the
+  saturation is reached only from native callers.
 - Green bar: `hudBaseLayers` draws it from acknowledged level only, from
-  `T[ack-1]..T[ack]`, with both differences wrapped as 32-bit integers
-  (hud-live-producers.md:114-118).
+  `T[ack-1]..T[ack]`, with both differences wrapped as 32-bit integers and
+  converted with the core `from_int` (`cvt.s.w`), not the host cast
+  (hud-live-producers.md:114-118). The Godot HUD view draws it only when
+  `experience_next > experience_base`, so in play the equal-threshold
+  saturation and wrapped (negative) spans are not drawn either.
 - Regen: `Tick::regen_health` / `Tick::regen_mana` (`native/src/player.cpp`)
   are `0x1b3b90` / `0x1b3900`: `maximum * 0.0001`, the passive, the object
   byte, the 17 equipment modifiers, the cap, class 0 without natural mana, and

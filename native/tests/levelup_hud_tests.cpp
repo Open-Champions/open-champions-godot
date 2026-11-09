@@ -168,20 +168,64 @@ void skills() {
   auto wrong_class = skill_row(6, 95);
   wrong_class.skill_rank = [](int id) { return id == 18 ? 1 : 0; };
   expect(!skill_screen(wrong_class).recalc, "the skill-18 alternative belongs to class 4");
-  // Every executed alternative row, with and without its rank.
+  // Every executed alternative row, with and without its rank, on the chain
+  // it was executed on: the passive-0x40 rows on the passive-prerequisite
+  // chain, the skill rows on the skill chain. levelup.md:118-119, 133-138.
   for (const auto &alt : alternatives()) {
     auto row = skill_row(alt.class_id, alt.ident);
     row.kind = alt.kind;
-    row.pre_kind = 0;
-    row.pre = 0x1234;  // a passive nobody holds
+    row.pre_kind = alt.kind;
+    row.pre = alt.kind == 0 ? 0x1234 : 999;  // a passive or a skill nobody holds
     const int skill = alt.skill;
     row.skill_rank = [skill](int id) { return id == skill ? 1 : 0; };
     const auto got = skill_screen(row);
     expect(got.sent && got.kind == (alt.kind == 0 ? 0 : 1) && got.value == alt.ident,
-           "alternative unlock sends the row");
+           "alternative unlock sends the row on its executed chain");
     row.skill_rank = [](int) { return 0; };
     expect(!skill_screen(row).sent, "alternative row without the extra rank does not send");
   }
+  // Mixed chains. The passive-0x40 compare is only on the passive-prerequisite
+  // chain, so a skill prerequisite does not see it (levelup.md:133-136).
+  for (const int cls : {2, 3}) {
+    auto passive40 = skill_row(cls, 0x40);
+    passive40.kind = 0;
+    passive40.pre_kind = 1;
+    passive40.pre = 999;
+    passive40.skill_rank = [](int id) { return id == 0x3b || id == 0x3d ? 1 : 0; };
+    const auto unseen = skill_screen(passive40);
+    expect(!unseen.sent && !unseen.recalc, "passive 0x40 row with a skill prerequisite is not unlocked by the alternative");
+  }
+  // A skill alternative on the passive-prerequisite chain was not executed.
+  auto skill_on_passive = skill_row(3, 33);
+  skill_on_passive.pre_kind = 0;
+  skill_on_passive.pre = 0x1234;
+  skill_on_passive.skill_rank = [](int id) { return id == 0x30 ? 1 : 0; };
+  reject([&] { skill_screen(skill_on_passive); }, "skill alternative on the passive chain is refused");
+  auto skill_on_passive_95 = skill_row(4, 95);
+  skill_on_passive_95.pre_kind = 0;
+  skill_on_passive_95.pre = 0x1234;
+  skill_on_passive_95.skill_rank = [](int id) { return id == 18 ? 1 : 0; };
+  reject([&] { skill_screen(skill_on_passive_95); }, "class 4 ident 95 on the passive chain is refused");
+  // A failed prerequisite 0 does not say which chain follows.
+  auto zero_then_alt = skill_row(6, 90);
+  zero_then_alt.pre = 0;
+  zero_then_alt.skill_rank = [](int id) { return id == 86 ? 1 : 0; };
+  reject([&] { skill_screen(zero_then_alt); }, "alternative after a failed prerequisite 0 is refused");
+  zero_then_alt.skill_rank = [](int id) { return id == 60 ? 1 : 0; };
+  expect(skill_screen(zero_then_alt).sent, "prerequisite 0 that passes needs no alternative");
+  // An alternative ident on a row of the other kind was not executed.
+  auto other_kind = skill_row(3, 33);
+  other_kind.kind = 0;
+  other_kind.pre_kind = 0;
+  other_kind.pre = 0x1234;
+  other_kind.skill_rank = [](int id) { return id == 0x30 ? 1 : 0; };
+  reject([&] { skill_screen(other_kind); }, "alternative ident on a passive row is refused");
+  // A row with no alternative is simply locked, on either chain.
+  auto plain = skill_row(3, 34);
+  plain.pre_kind = 0;
+  plain.pre = 0x1234;
+  plain.skill_rank = [](int) { return 1; };
+  expect(!skill_screen(plain).recalc, "a row without an alternative stays locked");
   expect(alternatives().size() == 9, "nine executed alternatives");
   // Class 1 ident 55: mask 0x40 does not send. levelup.md:133-136.
   auto ident55 = skill_row(1, 55);
@@ -191,7 +235,8 @@ void skills() {
   // Passive row: (slot, 0, low 32 bits of the mask), no float compare.
   auto passive = skill_row(0, 0x100000040ull);
   passive.kind = 0;
-  passive.pre_kind = -1;
+  passive.pre_kind = 0;
+  passive.pre = SkillAsk::kNoPrerequisite;
   passive.slot = 1;
   passive.virtual_float_planted = false;
   passive.max_mana = 0;
@@ -200,7 +245,8 @@ void skills() {
          "passive row sends slot, 0, low mask word");
   // Float compare c.ole.s against maximum mana.
   auto cost = skill_row(0, 33);
-  cost.pre_kind = -1;
+  cost.pre_kind = 1;
+  cost.pre = SkillAsk::kNoPrerequisite;
   cost.virtual_float = bits(11.f);
   const auto expensive = skill_screen(cost);
   expect(!expensive.sent && expensive.recalc, "11 against maximum 10 does not send and still recalcs");
@@ -245,6 +291,23 @@ void skills() {
   chain.pre = 7;
   chain.skill_rank = [](int id) { return id == 7 ? 1 : 0; };
   expect(skill_screen(chain).sent, "skill prerequisite needs that id's rank");
+  // Prerequisite -1 is a value: it passes on either kind; a negative kind with
+  // another value is not executed. levelup.md:114.
+  auto none = cost;
+  none.pre_kind = 0;
+  expect(skill_screen(none).sent, "prerequisite value -1 passes with kind 0");
+  none.pre_kind = 1;
+  expect(skill_screen(none).sent, "prerequisite value -1 passes with kind 1");
+  auto negative_kind = cost;
+  negative_kind.pre_kind = -1;
+  negative_kind.pre = 7;
+  negative_kind.skill_rank = [](int id) { return id == 7 ? 1 : 0; };
+  reject([&] { skill_screen(negative_kind); }, "prerequisite kind -1 with a real value is refused");
+  negative_kind.pre_kind = 2;
+  reject([&] { skill_screen(negative_kind); }, "prerequisite kind 2 is refused");
+  auto low_word = cost;
+  low_word.pre = 0x00000001ffffffffull;
+  reject([&] { skill_screen(low_word); }, "a -1 low word with a high word is refused");
   // Pad, page, panel gate, resource and table walk.
   auto edge = cost;
   edge.edge = 0;
@@ -253,7 +316,33 @@ void skills() {
   expect(!skill_screen(edge).sent, "edge 0x10 does not send");
   auto page = cost;
   page.held = 2;
-  expect(!skill_screen(page).recalc, "page 5 latches held bit 2");
+  const auto latch = skill_screen(page);
+  expect(!latch.recalc && latch.gate == 2, "page 5 latches held bit 2 and returns the word");
+  // The word persists: a page-0 call with the stored word still skips.
+  auto later = cost;
+  later.page = 0;
+  later.gate = latch.gate;
+  const auto held_over = skill_screen(later);
+  expect(!held_over.sent && !held_over.recalc && held_over.gate == 2, "the stored latch word skips the next call");
+  later.page = 5;
+  later.held = 0;
+  const auto cleared = skill_screen(later);
+  expect(cleared.sent && cleared.gate == 0, "page 5 without bit 2 clears the word and sends");
+  // An exit whose order against the latch store is unknown is refused only
+  // when the order would change the word.
+  auto unordered = cost;
+  unordered.held = 2;
+  unordered.edge = 0;
+  reject([&] { skill_screen(unordered); }, "confirm miss that would change the latch is refused");
+  unordered.edge = 0x40;
+  unordered.cursor = Cursor::Outside;
+  reject([&] { skill_screen(unordered); }, "outside cursor that would change the latch is refused");
+  unordered.gate = 2;
+  expect(skill_screen(unordered).gate == 2, "outside cursor with an unchanged latch leaves it");
+  auto no_art = cost;
+  no_art.held = 2;
+  no_art.resource = false;
+  expect(skill_screen(no_art).gate == 0, "missing resource leaves before the latch store");
   page.page = 0;
   expect(skill_screen(page).sent, "page 0 does not latch held bit 2");
   page.held = 0;
@@ -306,6 +395,17 @@ void hud_rules() {
   expect(green(half) == L::barClipRight(27, 50.f, 100.f) && green(half) == 76, "green bar from T[ack-1]..T[ack]");
   const auto equal = L::hudBaseLayers(12, 0, 1, 1, 1, 1, 450, 400, 400, 4);
   expect(green(equal) == 0x7fffffff, "equal thresholds divide by zero and saturate");
+  // cvt.s.w of differences above 2^24 goes through the core from_int, not the
+  // host's round-to-nearest cast. hud-live-producers.md:116-117.
+  auto as_float = [](std::uint32_t word) {
+    float out = 0;
+    std::memcpy(&out, &word, 4);
+    return out;
+  };
+  const auto wide = L::hudBaseLayers(12, 0, 1, 1, 1, 1, 16777218, 0, 16777219, 4);
+  const int core_fill = L::barClipRight(27, as_float(F::from_int(16777218u)), as_float(F::from_int(16777219u)));
+  const int host_fill = L::barClipRight(27, static_cast<float>(16777218), static_cast<float>(16777219));
+  expect(core_fill != host_fill && green(wide) == core_fill, "green differences convert with the core from_int");
 
   // hud_showMessage / hud_tickMessage, 360 frames and force 0. hud-live-producers.md:169-186.
   S::Hud hud;
