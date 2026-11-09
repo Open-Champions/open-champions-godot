@@ -23,7 +23,7 @@ Menu open(std::vector<std::string> names, const level_flow::State &world, bool n
   if (fixed_destination)
     throw Refused("the fixed-destination path 0x8e3c34 was read, not executed (round 6 :141, :180)");
   if (world.travel.ticks)
-    throw Refused("the executed menu opened with travel 0 (round 6 :210-214)");
+    throw Refused("the executed menu opened with travel 0 (tools/difftest_mission2_r6.py:441)");
   if (names.size() > DESTINATION_SLOTS)
     throw Refused("more than 15 destinations do not fit the 480-byte list");
   for (const auto &name : names)
@@ -39,7 +39,7 @@ std::uint8_t frame(Menu &menu, const Pad &pad, level_flow::State &world) {
   switch (menu.state) {
   case 0: {
     // :133-142. Executed: state 0 stores the current index (the last entry)
-    // and sets both pause words (:212-215; difftest_mission2_r6.py:477-479).
+    // and sets both pause words (:212-215; tools/difftest_mission2_r6.py:476-477).
     const auto here = qualified(world);
     const auto it = std::find(menu.names.begin(), menu.names.end(), here);
     if (it == menu.names.end())

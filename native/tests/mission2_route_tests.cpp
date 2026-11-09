@@ -566,7 +566,7 @@ void test_portal_arrival() {
     require(state.gates.names == std::vector<std::string>({"hub", "ord-p"}), "hub listed before the current level");
     auto menu = portal::open(state.gates.names, state);
     to_input(menu, state);
-    // Index 0, the first destination (difftest_mission2_r6.py:607).
+    // Index 0, the first destination (tools/difftest_mission2_r6.py:609).
     portal::Pad confirm;
     confirm.pressed = 0x40;
     require(portal::frame(menu, confirm, state) == 3 && state.travel.ticks == 1, "confirm row 0");
