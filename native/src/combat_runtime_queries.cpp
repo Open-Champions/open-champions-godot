@@ -153,6 +153,11 @@ Raw World::State::move(Address c, const Vec3 &v) {
     actor_domain(c);
   return movement.move_by(c, v);
 }
+// Creature_applyKnockback 0x115eb8. research-spells-r3 1e764d4
+// docs/spec/player-spells-numeric-r3.md:197-201 (Executed): a player in a net
+// game, or offline in PvP mode B, stores 0 without moving; otherwise the move
+// runs and a planted 30 steps to 28. Locked by
+// native/tests/player_damage_tests.cpp.
 void World::State::knockback(Address c, Raw scale) {
   actor(c);
   auto flags = u(c + 12);

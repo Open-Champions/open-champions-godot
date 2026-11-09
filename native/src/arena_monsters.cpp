@@ -2005,6 +2005,12 @@ void Model::die(Address c,Raw model) {
   knockback_speed(c,flags,{0x42c80000,0x43160000,0x43480000,0x439c4000});tick_virtual(c,27,{i(20)});write(c+12,4,u32(c+12)|0x2000);
   if(integer(call("obj_getPropInt",{i(c),i(0x52fa10),i(0)}))){call("anim_snapTopToEnd",{i(c+0x114)});return;}if(mem.load(c+0xa8,8)&UINT64_C(0x100000000))return;award_kill(c);
 }
+// Creature_processDamage 0x110d30. research-spells-r3 1e764d4
+// docs/spec/player-spells-numeric-r3.md:181-195 (Executed): no hit-point
+// subtraction here; the knock-back speeds are the three tables below (hit
+// 100/150/225/375, no pending 50/75/100/156.25, already dead 100/150/200/312.5).
+// Kill credit stays Unknown in that note (:194-195); award_kill is the earlier
+// contract. Locked by native/tests/player_damage_tests.cpp.
 void Model::process_damage(Address c,Raw model) {
   Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);
   if(!lt(0,u32(c+0xc8))){if(s16(mem.load(c+0x232,2))!=20){auto flags=u32(c+0x2dc);knockback_speed(c,flags,{0x42480000,0x42960000,0x42c80000,0x431c4000});if(flags==0x2000&&s16(mem.load(c+0x232,2))!=18)hit_reaction(c);}write(c+0x2dc,4,0);return;}

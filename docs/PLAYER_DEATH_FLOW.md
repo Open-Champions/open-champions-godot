@@ -59,6 +59,44 @@ native clip advancement is not evidence of a rendered death pose or pixel
 parity. There is no invented game-over/continue menu: the audited campaign
 branches contain none.
 
+## Player damage slot, death and knock-back (research-spells-r3)
+
+Evidence: `research-spells-r3` **1e764d4**, `docs/spec/player-spells-numeric-r3.md`
+lines 121–200, executed by `tools/difftest_spell_numeric_r3.py:440-631`
+(audits `research-spells-r5.md` and `research-spells-r5-fix.md`, both PASS).
+The combat World already ran these bodies in the live path. The campaign fight
+reaches them through `World::take_damage` (`Fight::diagnostic_lethal_hit`, and
+`damage_apply` on a player victim), the player tick's `Player_processDamage`
+call-out, and `Creature_applyKnockback` `0x115eb8` in its callback table. The
+public `player-damage` test now runs the note's synthetic cases through those
+same World entries on both probe seeds, 20973 and 7:
+
+- `Player_takeDamage` `0x1b5330` (`:121-140`). Pending `+0xc8` stores
+  `fadd(pending, amount)`, including for amount 0. The flag word `+0x2dc`
+  stores the OR. No hit points, state or speed are written. Recall
+  `0x41b51d`, menu lockout `0x41b4fc`, exit countdown `0x4f694a`, and a
+  nonzero jump-gate query each leave the write log empty.
+- `Player_processDamage` `0x1b2cc0` (`:143-163`). Pending is subtracted from
+  record `+0xac`. Object `+0x228` is unchanged. A result at or below 0 stores
+  0, state 4 and object flags `0x169`, and rebuilds the alive list once with
+  no seed draw. A survived hit stores `0x160`, keeps state 2 and draws one
+  seed step. Pending 0 leaves a record already at 0 unwritten and unkilled.
+- Knock-back (`:166-201`). The player table is 100/150/200/250, chosen by the
+  first set bit, also on a killing hit and when nothing is pending. The
+  creature hit, no-pending and dead tables are 100/150/225/375,
+  50/75/100/156.25 and 100/150/200/312.5. `Creature_applyKnockback` stores 0
+  for a player in a net game or in PvP mode B. Otherwise it moves, and a
+  planted 30 steps to 28.
+
+The note leaves these **Unknown**, and nothing here claims them from it: the
+hit direction `+0x2e0` (`:140`), the stagger threshold (`:178-179`), creature
+kill credit (`:194-195`), spatial queries, the holy-shield split and the real
+cast body (`:229-231`). The World still writes `+0x2e0`, `player_stagger`'s
+threshold and `award_kill`, using the earlier round-2 defence and monster
+contracts. They are unchanged and are not asserted by `player-damage`. In the
+Skelight creature rows the World runs the Skelight's own slot 27, where the
+note used a zero stand-in. Only the words the note measured are compared.
+
 ## Possessions and the remaining reload gate
 
 Death and fading do not debit XP, Gold, mana, bags or equipment. A valid normal
@@ -118,6 +156,9 @@ Normal campaign wipe does not call this individual revival routine.
 
 ## Validation routes
 
+- Public `player-damage` tests: the research-spells-r3 player damage slot,
+  death, knock-back tables and `Creature_applyKnockback` cases on the live
+  World entries, both probe seeds.
 - Public `player-death-flow` tests: timer/service gates, phases, restart
   retention, no guessed checkpoint heal, signed boundaries, all 24 death-clip
   selector cases on the real Player damage body, and actual World task order.

@@ -71,6 +71,15 @@ Raw World::State::resource_text(const std::string &lump,
   auto fn = services.resource;
   return fn(query);
 }
+// research-spells-r3 1e764d4 docs/spec/player-spells-numeric-r3.md:121-140
+// (Executed, slot 2): recall 0x41b51d, menu lockout 0x41b4fc, exit countdown
+// 0x4f694a and a nonzero jump-gate query 0x27dd68 drop the hit with no store;
+// otherwise +0xc8 stores fadd(pending, amount), even for 0, and +0x2dc stores
+// the OR. No hit points, state or speed are written here. The note leaves the
+// hit direction +0x2e0 and the holy-shield split Unknown (:140, :229-231); the
+// +0x2e0 store and the absorb below are the round-2/round-4 contracts named
+// in this file's header, unchanged and not claimed from that note.
+// Locked by native/tests/player_damage_tests.cpp.
 void World::State::take_damage_full(Address p, Address attacker, Raw flags,
                                     Raw amount) {
   if (s8m(G_RECALL) || s16m(p + 0x4b4) || u(p + 0x540))
@@ -287,6 +296,15 @@ void World::State::reaction(Address p) {
   start_anim(p, u(u(p + 0x24) + Raw(0x68 * cls) + 0x7c), 10, 0x3dcccccc,
              0x3dcccccc);
 }
+// research-spells-r3 1e764d4 docs/spec/player-spells-numeric-r3.md:143-179
+// (Executed): the first of 0x40000/0x80000/0x100000/0x200000 stores
+// 100/150/200/250 at +0x2e8, also on a killing hit and with no pending damage;
+// pending is subtracted from record +0xac (object +0x228 is untouched); a
+// result at or below 0 stores 0, state 4, object flags | 0x109 and rebuilds
+// the alive list once (player_death); pending 0 leaves even a record at 0
+// unkilled and unwritten. Which draw staggers is Unknown there (:178-179):
+// player_stagger's threshold is the round-2 DefenceModel, not that note.
+// Locked by native/tests/player_damage_tests.cpp.
 void World::State::process_damage_full(Address p) {
   if (!(u(p + 0x2dc) & 0x20000000) && (s8m(G_CUTSCENE) || dialog_open())) {
     w(p + 0x2dc, 0);

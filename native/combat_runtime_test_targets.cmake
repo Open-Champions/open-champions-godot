@@ -82,3 +82,10 @@ if(BUILD_TESTING)
     target_link_libraries(champions-player-wading-runtime-tests PRIVATE champions-combat-runtime champions-creature-water)
     add_test(NAME player-wading-runtime COMMAND champions-player-wading-runtime-tests)
 endif()
+if(BUILD_TESTING)
+    # research-spells-r3 1e764d4 player-spells-numeric-r3.md:121-200 on the
+    # live World entries (take_damage, process_damage, apply_knockback).
+    add_executable(champions-player-damage-tests tests/player_damage_tests.cpp)
+    target_link_libraries(champions-player-damage-tests PRIVATE champions-combat-runtime)
+    add_test(NAME player-damage COMMAND champions-player-damage-tests)
+endif()
