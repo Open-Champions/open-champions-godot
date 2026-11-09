@@ -462,6 +462,9 @@ func walk_exit_probe() -> bool:
 	var entered_without_change := 0
 	var navigation_stalls := 0
 	var sources_examined := 1
+	# Each candidate source load, with its act-transfer effect (removed cells and
+	# the word at 0x4f7118) and whether its script stopped at a refusal.
+	var source_loads: Array = []
 	var initial_source := transition_before
 	var multi_trigger_indices: Array[int] = []
 	var other_trigger_indices: Array[int] = []
@@ -486,7 +489,9 @@ func walk_exit_probe() -> bool:
 			if index == initial_source and pass_index == 0:
 				pass
 			else:
-				if not scene.load_real_level(index, true): continue
+				var source_loaded: bool = scene.load_real_level(index, true)
+				source_loads.append(source_load_row(index, source_loaded))
+				if not source_loaded: continue
 				scene.start_play()
 				help_close()
 				if scene.paused and scene.session_started: scene.resume_session()
@@ -551,9 +556,28 @@ func walk_exit_probe() -> bool:
 		"pending_script_level": pending.get("queued", false), "campaign_carried": scene.last_campaign_carried,
 		"campaign_image_restored": scene.last_campaign_image_restored,
 		"record_carried": record_carried, "quest_vars_before": int(quests_before.get("vars", 0)),
-		"quest_vars_after": int(quests_after.get("vars", 0))})
+		"quest_vars_after": int(quests_after.get("vars", 0)),
+		"source_loads": source_loads})
 	await capture("11-walk-exit-level-change")
 	return record_carried and arrival_at_marker and scene.real.current != transition_before
+
+func source_load_row(index: int, loaded: bool) -> Dictionary:
+	var entry: Dictionary = scene.last_campaign_entry
+	var counts: Dictionary = scene.controller.script_command_counts()
+	var row := {"index": index, "loaded": loaded,
+		"act_changed": bool(entry.get("campaign_act_changed", false)),
+		"act_reset": bool(entry.get("campaign_act_reset", false)),
+		"carried_cells": int(entry.get("campaign_carried_cells", 0)),
+		"act_change_removed": int(entry.get("campaign_act_removed", 0)),
+		"act_mark_4f7118": int(entry.get("campaign_act_mark", 0)),
+		"items_crossed_act": bool(entry.get("campaign_items_crossed_act", false)),
+		"save_latch": int(entry.get("save_latch", -1)),
+		"complete_commands": bool(entry.get("requires_complete_commands", false)),
+		"script_stopped": loaded and bool(counts.get("script_stopped", false)),
+		"last_refusal": str(counts.get("last_refusal", "")) if loaded else ""}
+	if not loaded:
+		row["refusal"] = str(entry.get("error", scene.status_label.text))
+	return row
 
 func load_scripted_exit_source(indices: Array[int], kind: String) -> bool:
 	for index in indices:

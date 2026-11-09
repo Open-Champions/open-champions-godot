@@ -3,6 +3,7 @@
 #include "champions/frame_clock.hpp"
 #include "champions/arena_executable.hpp"
 #include "champions/campaign_fight.hpp"
+#include "champions/campaign_entry.hpp"
 #include "champions/mission_menu_table.hpp"
 #include "champions/combat_play.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
@@ -137,6 +138,13 @@ private:
   // Presentation identity: advances whenever a session player record is replaced.
   std::uint64_t player_record_revision_ = 0;
   std::uint64_t inventory_record_revision_ = 0;
+  // The front end's Flow::save_latch_ (0x4f8f28), forwarded by
+  // ui/frontend_menus.gd. 0 is the latch Flow is constructed with
+  // (frontend.hpp save_latch_), which is also its value before any front end
+  // has booted, because only the front end's card screen stores it.
+  int save_latch_ = 0;
+  champions::simulation::rta::script_commands::BagCarryGuard bag_carry_guard() const;
+  champions::simulation::rta::script_commands::ActCarry act_carry() const;
   void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
                               const champions::simulation::rta::player_state::Record &);
   champions::simulation::rta::player_state::Record observed_player() const;
@@ -313,6 +321,8 @@ public:
   godot::Dictionary script_story_status() const;
   godot::Dictionary loading_prerequisite_state() const;
   godot::Dictionary script_level_request() const;
+  // The front end reports its card latch after every flow change.
+  godot::Dictionary set_save_latch(int64_t latch);
   godot::Dictionary script_mission_menu_state() const;
   godot::Dictionary script_mission_menu_tick(int64_t pad_bits, int64_t fade);
   godot::Array script_exit_targets() const;

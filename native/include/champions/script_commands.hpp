@@ -493,6 +493,14 @@ public:
   // when level flow resets the act. Copies the cleared record back into the
   // binder.
   level_flow::ChangeResult change_level(const level_flow::ChangeOptions &);
+  // Unkept flag-39 cells the last change_level removed (0 when it did not
+  // clear). Recorded so a caller can report the act-change effect.
+  int act_change_removed() const { return act_change_removed_; }
+  // Set on the destination of an act transfer that carried live cells and
+  // kept along later carried entries (campaign_entry.hpp). Wave 37 refused
+  // that route, so its scripts were never run there.
+  bool items_crossed_act() const { return items_crossed_act_; }
+  void set_items_crossed_act(bool crossed) { items_crossed_act_ = crossed; }
   // One missionMenu_run tick. State 0 stores 1 in the binder's g_paused word
   // 0x41b4f4. The state-8 tick copies the chosen level into the binder's
   // pending name 0x41b6d0 with 0xff at 0x41b720, and into level flow's
@@ -698,6 +706,8 @@ private:
   bool faulted_ = false;
   bool refusal_stopped_ = false;
   bool complete_commands_ = false;
+  int act_change_removed_ = 0;
+  bool items_crossed_act_ = false;
   std::string last_refusal_;
   bool counted_wait_ = false;
   bool counted_complete_ = false;

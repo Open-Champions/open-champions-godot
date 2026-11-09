@@ -32,10 +32,19 @@ the old journal and quest-variable values, while retaining mission/medal
 flags and player records. Same-act entry preserves that progress and leaves
 classified live bags untouched. A cross-act entry removes unkept flag-39
 cells through `inventory_removeItem` (`research-inventory-reset` `ce2e086`,
-`docs/inventory-reset.md`). The bridge supports one local player. Imported
-inventory, a live cell with no definition, a campaign-model bag, and an
-unbound source act still refuse before selection or loading. It does not
-silently retain old-act quests.
+`docs/inventory-reset.md`). Live cells travel only under the session's
+bag-carry guard (a player record is held, no starting items are pending, and
+the inventory revision matches the record revision); without it any live cell
+refuses as before. The card latch is the front end's `Flow::save_latch_`,
+forwarded to the session and mirrored at 0x4f8f28; a latch of 1 stores the act
+and skips the clear. The bridge supports one local player. Imported
+inventory, a live cell with no definition, a flag-39 cell whose definition
+name cannot be read in the destination's memory, a campaign-model bag, a
+missing latch reading, and an unbound source act still refuse before
+selection or loading. A level reached by an act transfer that carried live
+cells, and later carried entries from it, stop at the first unsupported
+script command, as mission 2 does. It does not silently retain old-act
+quests.
 
 `Host::require_complete_commands` is enabled for all four documented
 mission-2 story level identities. An unsupported command stops the script

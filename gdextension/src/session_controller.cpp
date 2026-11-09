@@ -134,6 +134,7 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
+  ClassDB::bind_method(D_METHOD("set_save_latch", "latch"), &ChampionsSessionController::set_save_latch);
   ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits", "level_name", "balance", "world", "resource_lumps"),
                        &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)),
                        DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()), DEFVAL(Dictionary()));
@@ -878,6 +879,21 @@ rta::player_state::Record ChampionsSessionController::observed_player() const {
   return p;
 }
 
+rta::script_commands::BagCarryGuard ChampionsSessionController::bag_carry_guard() const {
+  return {bool(player_), starting_items_pending_, inventory_record_revision_, player_record_revision_};
+}
+rta::script_commands::ActCarry ChampionsSessionController::act_carry() const {
+  return {bool(scripts_) && bag_carry_guard().holds(), save_latch_};
+}
+Dictionary ChampionsSessionController::set_save_latch(int64_t latch) {
+  try {
+    if (latch != 0 && latch != 1)
+      throw std::runtime_error("The card latch 0x4f8f28 is a 0 or 1 byte.");
+    save_latch_ = int(latch);
+    Dictionary result; result["ok"] = true; result["save_latch"] = latch; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
 Dictionary ChampionsSessionController::set_player_character(const Dictionary &character) {
   try {
     if (!player_tables_) throw std::runtime_error("Select the RTA US v2.00 executable for player formulas and XP thresholds.");
@@ -1091,18 +1107,13 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     if (!post_action.empty()) next->variables().set_post_action(post_action);
     if (live_player)
       bind_player_to_scripts(*next, *live_player);
-    if (scripts_ && player_ && !starting_items_pending_ &&
-        inventory_record_revision_ == player_record_revision_) {
-      // Inventory uses the same stable player-record addresses as the menu
-      // branch. Carry its raw bags and in-record equipment pointers across
-      // level hosts; campaign's name/flag projection cannot reconstruct them.
-      const auto &old_memory = scripts_->variables().memory;
-      auto &new_memory = next->variables().memory;
-      const auto record = rta::combat_runtime::PLAYERS;
-      for (const auto span : {std::pair<unsigned, unsigned>{0x130, 3 * 0x1208},
-                             {0x43f0, 0x50}, {0x4a7c, 1}, {0x4a84, 4}})
-        new_memory.write(record + span.first, old_memory.read(record + span.first, span.second));
-    }
+    // Inventory uses the same stable player-record addresses as the menu
+    // branch. Its raw bags and in-record equipment pointers cross level hosts
+    // only under the bag-carry guard; an act transfer refuses live cells
+    // without it (campaign_entry.hpp).
+    const auto carry = act_carry();
+    if (scripts_ && carry.bags_carried)
+      rta::script_commands::carry_live_bags(*next, *scripts_);
     // A fresh stream from the play session's configured shared seed; the
     // fixtures keep their own journaled seeds, so it is bound only while the
     // control session is the one that will play.
@@ -1120,8 +1131,12 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       campaign_entry = rta::script_commands::prepare_campaign_entry(
           *next, carried ? scripts_.get() : nullptr, *act_tables,
           level_name.to_lower().utf8().get_data(), mission2_story(level_name),
-          live_player && live_player->imported,
+          live_player && live_player->imported, carry,
           fight_ && fight_->death_view().running);
+      // Wave 37 refused an act transfer that carries live cells, so no
+      // level on that route ever ran its script with them. Stop at the first
+      // unsupported command there instead of running past it.
+      if (campaign_entry.items_crossed_act) next->require_complete_commands(true);
     }
     for (const auto &name_value : resource_lumps.keys()) {
       const String name = name_value;
@@ -1330,6 +1345,12 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     result["campaign_image_restored"] = campaign_image_restored;
     result["campaign_act_changed"] = campaign_entry.changed;
     result["campaign_act_reset"] = campaign_entry.reset;
+    result["campaign_carried_cells"] = int64_t(campaign_entry.carried_cells);
+    result["campaign_act_removed"] = int64_t(campaign_entry.removed);
+    result["campaign_act_mark"] = int64_t(campaign_entry.mark);
+    result["campaign_items_crossed_act"] = campaign_entry.items_crossed_act;
+    result["save_latch"] = int64_t(save_latch_);
+    result["requires_complete_commands"] = scripts_->requires_complete_commands();
     result["script_stopped"] = scripts_->faulted();
     result["script_diagnostic"] = String::utf8(scripts_->last_fault().c_str());
     result["executable"] = bool(executable_);
@@ -2086,7 +2107,7 @@ Dictionary ChampionsSessionController::script_level_request() const {
     try {
       if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
       rta::script_commands::require_campaign_act_transfer(
-          *scripts_, *script_act_tables_, name, player_ && player_->imported);
+          *scripts_, *script_act_tables_, name, player_ && player_->imported, act_carry());
     } catch (const std::exception &error) {
       result["queued"] = false;
       result["error"] = String::utf8(error.what());
@@ -2120,7 +2141,7 @@ Dictionary ChampionsSessionController::script_mission_menu_state() const {
       if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
       const auto destination = rta::script_commands::mission2_story_destination(campaign);
       rta::script_commands::require_campaign_act_transfer(
-          *scripts_, *script_act_tables_, destination, player_ && player_->imported);
+          *scripts_, *script_act_tables_, destination, player_ && player_->imported, act_carry());
     } catch (const std::exception &error) { second_refusal = String::utf8(error.what()); }
   }
   out["second_story_refusal"] = second_refusal;
@@ -2178,7 +2199,7 @@ Dictionary ChampionsSessionController::script_mission_menu_tick(int64_t pad_bits
       if (!script_act_tables_) throw std::runtime_error("Campaign act tables are unbound.");
       const auto destination = rta::script_commands::mission2_story_destination(scripts_->campaign());
       rta::script_commands::require_campaign_act_transfer(
-          *scripts_, *script_act_tables_, destination, player_ && player_->imported);
+          *scripts_, *script_act_tables_, destination, player_ && player_->imported, act_carry());
     }
     rta::quests::MenuInputs inputs;
     // -1: the real scene uses the executed hud_stepFade(4) body at state 6,

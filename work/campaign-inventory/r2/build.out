@@ -1,0 +1,10 @@
+mac-template_debug exit 0
+level-texture-template_debug exit 0
+creature-template_debug exit 0
+native exit 2
+== native-build.log: 1 errors, 3 warnings; make: *** [all] Error 2
+== mac-template_debug-build.log: 0 errors, 2 warnings; [100%] Built target champions-archive-extension
+== level-texture-template_debug-build.log: 0 errors, 0 warnings; [100%] Built target champions-level-texture-preview
+== creature-template_debug-build.log: 0 errors, 0 warnings; [100%] Built target champions-creature-animation
+== native-build2.log: 0 errors, 1 warnings; exit 0
+== native-build3.log: 0 errors, 4 warnings; [100%] Built target champions-ps2-save-tests

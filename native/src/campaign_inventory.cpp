@@ -43,7 +43,8 @@ std::uint32_t count_at(int slot, int bag) {
 }
 
 // inventory-reset.md:75-82. The client's inventory_removeItem slides the tail
-// and the equipment pointers. A null definition is not a classified cell.
+// and the equipment pointers. clear_act_change_inventory has already checked
+// every cell with unclassified_cell, so each flag-39 name here is readable.
 int remove_unkept(Variables &variables, int slot) {
   auto &memory = variables.memory;
   int removed = 0;
@@ -61,10 +62,9 @@ int remove_unkept(Variables &variables, int slot) {
         ++index;
         continue;
       }
-      const auto definition = memory.u32(cell);
-      if (definition == 0)
-        throw std::runtime_error("flag-39 cell has no definition; keep or drop is refused");
-      const auto name = memory.cstr(memory.u32(definition));
+      const auto name = memory.cstr(memory.u32(memory.u32(cell)));
+      if (name.empty())
+        throw std::runtime_error("flag-39 cell name is unreadable; keep or drop is refused");
       if (quests::quest_item_kept(name)) {
         ++index;
         continue;
@@ -108,24 +108,29 @@ std::uint64_t raw_u64(const std::vector<std::uint8_t> &raw, std::size_t offset) 
 }
 } // namespace
 
-std::vector<std::vector<std::string>> documented_story_acts() {
-  // docs/story-route.md:242-255 and :273-278. Mission 1 names and both hubs
-  // are act 0. innovat1 and the rest of that chain are act 1. Each later
-  // mission row is its own act. Evil names share the story act.
-  return {
-      {"hub", "hub2", "blood1", "strife", "drundar", "drunarm", "drunare"},
-      {"innovat1", "inmine1", "inmine2", "innovat2"},
-      {"islc1"},
-      {"wat1"},
-      {"tormenta"},
-      {"swamp1", "swamp2"},
-      {"valor"},
-      {"fire1"},
-      {"storm1"},
-      {"fay2", "fay1"},
-      {"nit1"},
-      {"bossgood", "bossevil"},
-  };
+std::string unclassified_cell(const builtins::Memory &memory, int players) {
+  if (players < 0 || players > quests::PLAYERS)
+    return "player count is outside 0..4";
+  for (int slot = 0; slot < players; ++slot)
+    for (int bag = 0; bag < si::BAGS; ++bag) {
+      const auto count = memory.s32(count_at(slot, bag));
+      if (count < 0 || count > si::BAG_SLOTS)
+        return "bag count is outside 0..64";
+      for (int index = 0; index < count; ++index) {
+        const auto cell = cell_at(slot, bag, index);
+        const auto definition = memory.u32(cell);
+        if (definition == 0)
+          return "a live cell has no definition, so it is not a classified item";
+        if (!flag39(memory.u64(cell + 8)))
+          continue;
+        const auto name_at = memory.u32(definition);
+        if (name_at == 0)
+          return "a flag-39 cell's definition has no name pointer in this memory, so keep or drop is refused";
+        if (memory.cstr(name_at).empty())
+          return "a flag-39 cell's definition name cannot be read in this memory, so keep or drop is refused";
+      }
+    }
+  return {};
 }
 
 int clear_act_change_inventory(Variables &variables) {
@@ -133,6 +138,9 @@ int clear_act_change_inventory(Variables &variables) {
   const auto players = memory.s32(si::G_NUM_PLAYERS);
   if (players < 0 || players > quests::PLAYERS)
     throw std::runtime_error("player count is outside 0..4");
+  const auto unclassified = unclassified_cell(memory, players);
+  if (!unclassified.empty())
+    throw std::runtime_error("act-change clear refused before any edit: " + unclassified);
   int removed = 0;
   for (int slot = 0; slot < players; ++slot)
     removed += remove_unkept(variables, slot);
@@ -142,47 +150,28 @@ int clear_act_change_inventory(Variables &variables) {
   return removed;
 }
 
-Result apply_campaign_travel(Variables &variables, const std::vector<std::vector<std::string>> &acts,
-                             const Request &request) {
-  Result result;
-  result.act = request.act;
-  // inventory-reset.md:59-63. A nonzero frontend word skips save_actChanged.
-  // The delay slot makes the clear compare see 0. The word itself is not stored.
-  if (request.frontend)
-    return result;
-  const auto found = quests::find_act(request.pending, request.act, acts);
-  if (found >= 0 && found != request.act) {
-    result.changed = 1;
-    result.act = found;
-    variables.memory.w32(ACT_WORD, static_cast<std::uint32_t>(found));
-  }
-  // inventory-reset.md:86-94. The latch and a running death task store the
-  // new act and skip the clear. 0x4f7118 stays 0.
-  result.cleared = result.changed != 0 && !request.card_latch && !request.death_task;
-  if (result.cleared)
-    result.removed = clear_act_change_inventory(variables);
-  return result;
-}
-
-bool share_copy_unexecuted(const std::vector<std::uint8_t> &record) {
+std::string share_copy_unexecuted(const std::vector<std::uint8_t> &record) {
   constexpr std::size_t bag2 = 0x130 + 2 * 0x1208;
   constexpr std::size_t count_at = bag2 + 0x1200;
   if (record.size() < count_at + 4)
-    return false;
+    return "saved record is shorter than its bag-2 count";
   const auto count = static_cast<std::int32_t>(raw_u32(record, count_at));
   if (count < 0 || count > 64)
-    return true;
+    return "saved bag-2 count is outside 0..64";
   for (int index = 0; index < count; ++index) {
     const auto cell = bag2 + static_cast<std::size_t>(index) * 0x48;
     if (cell + 16 > record.size())
-      return true;
+      return "saved bag-2 cell runs past the record";
     const auto flags = raw_u64(record, cell + 8);
     if (!flag39(flags))
       continue;
-    if ((flags & FLAG_STACK) != 0 || raw_u32(record, cell) == 0)
-      return true;
+    if ((flags & FLAG_STACK) != 0)
+      return "inventory_shareQuestItems flag bit 8 on a copied cell is Unknown";
+    // A saved cell holds a definition row index; row 0 is the first item.
+    if (static_cast<std::int32_t>(raw_u32(record, cell)) < 0)
+      return "a saved bag-2 flag-39 cell has a negative definition row, so it has no definition to copy";
   }
-  return false;
+  return {};
 }
 
 void share_quest_items(Variables &variables, int source_slot) {

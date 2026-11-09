@@ -62,7 +62,10 @@ Native rules added here, each thrown as `ps2_save::Unknown`:
 - `apply_load` runs `inventory_shareQuestItems(0)` when the word at 0x4f85b4
   is 1 and the inventory service is bound (`research-inventory-reset`
   `ce2e086`, `docs/inventory-reset.md`). It still refuses before any write
-  when that service is unbound, and when a copied bag-2 cell has flag bit 8.
+  when that service is unbound, when a copied bag-2 cell has flag bit 8, and
+  when a copied cell's saved definition row is negative (row 0 is the first
+  item). The share runs after the pending name and before the autosave
+  countdown, research step 7 (`docs/audio-save.md:129-138` at `ce2e086`).
   A negative difficulty byte (the width of its sign-extended store is not
   documented) and a qualified level name that would reach the pending-level
   marker at 0x41b720 also refuse before any write.

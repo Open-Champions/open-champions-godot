@@ -987,6 +987,144 @@ void native_import() {
 // docs/death-reload.md:12-42 and tools/difftest_death_reload.py:40-129.
 // Real Flow and save_load share one native memory; camera is a recording
 // service boundary, never evidence of a restored camera or playable world.
+// save_load's inventory_shareQuestItems(0) step (inventory-reset.md:96-111,
+// audio-save.md:129-138). The bound service is a minimal inventory: remove
+// slides a bag, give appends the stored cell to the bag its definition's
+// category byte +0x1d names.
+struct ShareInventory {
+  std::shared_ptr<builtins::Memory> memory = std::make_shared<builtins::Memory>();
+  builtins::Variables variables{memory};
+  Bytes stored = Bytes(ITEM_SIZE, 0);
+  std::vector<std::string> calls;
+  std::uint32_t cell(int slot, int bag, int index) const {
+    return PLAYERS + std::uint32_t(slot) * std::uint32_t(RECORD_SIZE) + std::uint32_t(BAG_ITEM_AT) +
+           std::uint32_t(bag) * std::uint32_t(BAG_STRIDE) + std::uint32_t(index) * std::uint32_t(ITEM_SIZE);
+  }
+  std::uint32_t count(int slot, int bag) const {
+    return PLAYERS + std::uint32_t(slot) * std::uint32_t(RECORD_SIZE) + std::uint32_t(BAG_COUNT_AT) +
+           std::uint32_t(bag) * std::uint32_t(BAG_STRIDE);
+  }
+  ShareInventory() {
+    variables.inventory_service = [this](const std::string &name,
+                                         const std::vector<builtins::Variables::InventoryValue> &args)
+        -> builtins::Variables::InventoryResult {
+      calls.push_back(name);
+      auto arg = [&](std::size_t i) { return std::get<std::uint32_t>(args.at(i)); };
+      auto &m = *memory;
+      if (name == "inventory_removeItem") {
+        const int slot = int(arg(0)), index = int(arg(1)), bag = int(arg(2));
+        const auto n = m.s32(count(slot, bag));
+        for (int i = index; i + 1 < n; ++i)
+          m.write(cell(slot, bag, i), m.read(cell(slot, bag, i + 1), ITEM_SIZE));
+        m.write(cell(slot, bag, n - 1), Bytes(ITEM_SIZE, 0));
+        m.w32(count(slot, bag), std::uint32_t(n - 1));
+        return 0u;
+      }
+      if (name == "stack_record_store") {
+        stored.at(arg(0)) = std::uint8_t(arg(1));
+        return 0u;
+      }
+      if (name == "inventory_giveItem") {
+        const int slot = int(arg(0));
+        const auto definition = get32(stored, 0);
+        const int bag = m.s8(definition + 0x1d);
+        const auto n = m.s32(count(slot, bag));
+        m.write(cell(slot, bag, n), stored);
+        m.w32(count(slot, bag), std::uint32_t(n + 1));
+        return std::uint32_t(n);
+      }
+      throw std::runtime_error("unexpected inventory call " + name);
+    };
+  }
+};
+
+Bytes two_player_share_image(std::int32_t row, std::uint64_t flags) {
+  auto in = ref_inputs();
+  auto aria = ref_record();
+  const auto bag2 = BAG_ITEM_AT + 2 * BAG_STRIDE;
+  put32(aria, BAG_COUNT_AT + 2 * BAG_STRIDE, 1);
+  put32(aria, bag2, definition_pointer(row));
+  put16(aria, bag2 + 4, 3);
+  put32(aria, bag2 + 8, std::uint32_t(flags));
+  put32(aria, bag2 + 12, std::uint32_t(flags >> 32));
+  auto bram = ref_bram();
+  put32(bram.record, BAG_COUNT_AT + 2 * BAG_STRIDE, 2);
+  put32(bram.record, bag2, definition_pointer(9));
+  put32(bram.record, bag2 + 12, std::uint32_t((std::uint64_t(1) << 39) >> 32)); // Bram's old quest cell
+  put32(bram.record, bag2 + ITEM_SIZE, definition_pointer(10));                  // a plain bag-2 cell
+  in.num_players = 2;
+  in.players = {LiveCharacter{aria, 0x4D8AF0, 0x1234, fv(1, 2, 3)}, bram};
+  return build_slot(in);
+}
+
+void share_on_load() {
+  constexpr std::uint64_t BIT39 = std::uint64_t(1) << 39;
+  const auto second = PLAYERS + std::uint32_t(RECORD_SIZE);
+  {
+    ShareInventory inv;
+    inv.memory->word(SHARE_QUEST_ITEMS, 1);
+    inv.memory->w8(definition_pointer(5) + 0x1d, 2);
+    apply_load(inv.variables, two_player_share_image(5, BIT39));
+    auto &m = *inv.memory;
+    CHECK(m.s32(inv.count(1, 2)) == 2);
+    CHECK(m.word(inv.cell(1, 2, 0)) == definition_pointer(10)); // the plain cell stays first
+    CHECK(m.word(inv.cell(1, 2, 1)) == definition_pointer(5) && m.u16(inv.cell(1, 2, 1) + 4) == 3);
+    CHECK(m.s32(inv.count(0, 2)) == 1 && m.word(inv.cell(0, 2, 0)) == definition_pointer(5));
+    CHECK(m.word(second + 0x43F0) == second + BAG_ITEM_AT); // Bram's equipment is not the copy
+    CHECK(std::count(inv.calls.begin(), inv.calls.end(), "inventory_removeItem") == 1 &&
+          std::count(inv.calls.begin(), inv.calls.end(), "inventory_giveItem") == 1);
+    // Research step 7 runs after the pending name and before the countdown.
+    CHECK(cstr(m, PENDING_LEVEL) == "crypt" && m.word(AUTOSAVE_COUNTDOWN) == 99);
+  }
+  {
+    // Row 0 is the first definition, not a missing one.
+    ShareInventory inv;
+    inv.memory->word(SHARE_QUEST_ITEMS, 1);
+    inv.memory->w8(definition_pointer(0) + 0x1d, 2);
+    apply_load(inv.variables, two_player_share_image(0, BIT39));
+    CHECK(inv.memory->s32(inv.count(1, 2)) == 2 && inv.memory->word(inv.cell(1, 2, 1)) == definition_pointer(0));
+  }
+  {
+    // Flag bit 8 on the copied cell refuses before any write and calls nothing.
+    ShareInventory inv;
+    inv.memory->word(SHARE_QUEST_ITEMS, 1);
+    inv.memory->w8(definition_pointer(5) + 0x1d, 2);
+    const auto before = inv.memory->nonzero_bytes();
+    bool caught = false;
+    try {
+      apply_load(inv.variables, two_player_share_image(5, BIT39 | (std::uint64_t(1) << 8)));
+    } catch (const Unknown &error) {
+      caught = std::string(error.what()).find("flag bit 8") != std::string::npos;
+    }
+    CHECK(caught && inv.calls.empty());
+    CHECK(inv.memory->nonzero_bytes() == before);
+  }
+  {
+    // A negative saved row (the pointer one row before the table) has no
+    // definition and gets its own refusal.
+    ShareInventory inv;
+    inv.memory->word(SHARE_QUEST_ITEMS, 1);
+    const auto image = two_player_share_image(-1, BIT39);
+    CHECK(std::int32_t(get32(image, PLAYERS_AT + POSE_SIZE + BAG_ITEM_AT + 2 * BAG_STRIDE)) == -1);
+    const auto before = inv.memory->nonzero_bytes();
+    bool caught = false;
+    try {
+      apply_load(inv.variables, image);
+    } catch (const Unknown &error) {
+      caught = std::string(error.what()).find("negative definition row") != std::string::npos;
+    }
+    CHECK(caught && inv.calls.empty() && inv.memory->nonzero_bytes() == before);
+  }
+  {
+    // With the share word clear, nothing is shared.
+    ShareInventory inv;
+    inv.memory->w8(definition_pointer(5) + 0x1d, 2);
+    apply_load(inv.variables, two_player_share_image(5, BIT39));
+    CHECK(inv.calls.empty() && inv.memory->s32(inv.count(1, 2)) == 2 &&
+          inv.memory->word(inv.cell(1, 2, 0)) == definition_pointer(9));
+  }
+}
+
 void death_save_runtime() {
   namespace D = player_death_flow;
   for (bool qualified : {false, true}) for (int act : {-1, 0, -2}) { // literal != -1 branch, not checkpoint validity
@@ -1145,6 +1283,7 @@ int main() {
     config();
     native_import();
     native_inventory();
+    share_on_load();
     death_save_runtime();
     death_world_request_boundary();
   } catch (const std::exception &error) {

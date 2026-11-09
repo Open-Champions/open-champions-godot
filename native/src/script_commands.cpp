@@ -1083,7 +1083,9 @@ void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
   mirror();
   // inventory-reset.md:59-94. The frontend word skips the act call. The latch
-  // byte stores the act and skips the clear. Neither word is written here.
+  // byte stores the act and skips the clear. Neither word is written here:
+  // prepare_campaign_entry mirrors the front end's Flow::save_latch_ into
+  // 0x4f8f28 before this call (campaign_entry.hpp).
   const bool saved_frontend = flow_.frontend;
   if (variables_->memory.u32(campaign_inventory::FRONTEND_WORD) != 0)
     flow_.frontend = true;
@@ -1095,8 +1097,9 @@ level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &opt
   quests::mirror_to_variables(*campaign_, *variables_, player_currents_known_);
   if (result.act_changed)
     variables_->memory.w32(campaign_inventory::ACT_WORD, static_cast<std::uint32_t>(campaign_->act()));
+  act_change_removed_ = 0;
   if (result.reset_act)
-    campaign_inventory::clear_act_change_inventory(*variables_);
+    act_change_removed_ = campaign_inventory::clear_act_change_inventory(*variables_);
   return result;
 }
 bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {

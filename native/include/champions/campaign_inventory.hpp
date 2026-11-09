@@ -3,8 +3,9 @@
 //
 // Observed rules, research-inventory-reset ce2e086
 // docs/inventory-reset.md:40-110 (audit research-inventory-reset-r2-fix.md PASS).
-// The act of each documented story name is research-story-route-r3 019a155
-// docs/story-route.md:240-278.
+// Which act a level belongs to is not decided here: the client reads the act
+// tables from the executable (quests::read_act_tables) and level flow's
+// begin_change decides an act change; Host::change_level then runs this clear.
 //
 // An act change removes unkept flag-39 cells through the client's
 // inventory_removeItem, so equipment and weapon pointers follow that slide.
@@ -28,35 +29,20 @@ inline constexpr std::uint32_t FRONTEND_WORD = 0x41b510;  // loaded as a word
 inline constexpr std::uint32_t CARD_LATCH = 0x4f8f28;
 inline constexpr std::uint64_t FLAG_STACK = std::uint64_t(1) << 8;
 
-struct Request {
-  std::string pending;
-  int act = -1;
-  bool frontend = false;
-  bool card_latch = false;
-  bool death_task = false;
-};
+// Why a live cell cannot be kept or removed in this memory, or "" when every
+// cell of every slot below players can. A count outside 0..64 or a zero
+// definition word is not a classified item. A flag-39 cell also needs its
+// definition's name: the keep decision is made on that name
+// (docs/quests.md:163-169, inventory-reset.md:75-81), and no research says
+// what happens when it cannot be read, so a zero name pointer or an empty
+// name refuses instead of removing the cell.
+std::string unclassified_cell(const builtins::Memory &memory, int players);
 
-struct Result {
-  int changed = 0;  // save_actChanged's result; 0 when the frontend skips the call
-  int act = -1;     // stored act
-  bool cleared = false;
-  int removed = 0;
-};
-
-// docs/story-route.md:240-278. Prefixes only. hub is a prefix of hub2, and
-// both are act 0, so hub2 from inside act 0 is not an act change.
-std::vector<std::vector<std::string>> documented_story_acts();
-
-// Same-act travel leaves the bags. An act change, including the first level
-// from act -1, clears when the latch and the death task are clear. The
-// frontend word skips the act call and the clear, and is not written.
-Result apply_campaign_travel(builtins::Variables &variables,
-                             const std::vector<std::vector<std::string>> &acts,
-                             const Request &request);
-
-// Bags, quest-list counts, and quest-variable values. Names of variables stay.
-// Used by apply_campaign_travel and by Host::change_level when level flow's
-// reset_act is set.
+// The act-change clear, run by Host::change_level when level flow's reset_act
+// is set: unkept flag-39 cells through inventory_removeItem, quest-list
+// counts, and quest-variable values (names stay), then 1 at 0x4f7118. Checks
+// every slot with unclassified_cell before the first edit and refuses then.
+// Returns the number of removed cells.
 int clear_act_change_inventory(builtins::Variables &variables);
 
 // inventory_shareQuestItems 0x1c4fa8. Bag 2 flag-39 cells only. Copies go
@@ -64,7 +50,10 @@ int clear_act_change_inventory(builtins::Variables &variables);
 // cell is Unknown (inventory-reset.md:109-111) and refuses before any edit.
 void share_quest_items(builtins::Variables &variables, int source_slot);
 
-// True when a saved record's bag 2 has a flag-39 cell whose copy rule is not
-// executed (flag bit 8, or a null definition).
-bool share_copy_unexecuted(const std::vector<std::uint8_t> &record);
+// Why a saved record's bag 2 has a flag-39 cell this client will not copy,
+// or "" when every such cell can be copied. A saved cell holds a definition
+// row index (ps2_save.cpp encode_saved_record), so row 0 is a real item; a
+// negative row has no definition. Flag bit 8 is Unknown
+// (inventory-reset.md:109-111).
+std::string share_copy_unexecuted(const std::vector<std::uint8_t> &record);
 } // namespace champions::simulation::rta::campaign_inventory

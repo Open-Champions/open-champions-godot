@@ -44,6 +44,8 @@ var _level_change_loading := false
 var _refused_level_request := ""
 var last_campaign_carried := false
 var last_campaign_image_restored := false
+# The act-transfer fields of the last enable_level_script result.
+var last_campaign_entry := {}
 var last_level_script_attached := false
 var hud_art_counts: Dictionary = {}
 var hud_extras_counts: Dictionary = {}
@@ -275,6 +277,7 @@ func load_real_level(index: int, carry_campaign := false, previous := "", entran
 	last_level_script_attached = false
 	last_campaign_carried = false
 	last_campaign_image_restored = false
+	last_campaign_entry = {}
 	if record_departing_state and not restoring_real_level and real.current >= 0 and controller.get_play_capabilities().get("level_script_enabled", false):
 		var departing: Dictionary = controller.save_level_object_directory(str(real.levels[real.current].stem))
 		if not departing.get("ok", false) or not departing.get("readable", false):
@@ -629,7 +632,14 @@ func attach_level_script(carry_campaign := false) -> bool:
 		else:
 			var image: PackedByteArray = real.read_entry(level.gob, "", name)
 			if not image.is_empty(): resource_lumps[name] = image
+	if frontend != null: frontend.forward_save_latch()
 	var result: Dictionary = controller.enable_level_script(script, objects, carry_campaign, real.dialog_data(real.current), volume_bits, str(level.stem), balance, world, resource_lumps)
+	last_campaign_entry = {}
+	for key in ["campaign_act_changed", "campaign_act_reset", "campaign_carried_cells", "campaign_act_removed",
+			"campaign_act_mark", "campaign_items_crossed_act", "save_latch", "requires_complete_commands",
+			"script_stopped", "script_diagnostic"]:
+		if result.has(key): last_campaign_entry[key] = result[key]
+	if not result.get("ok", false): last_campaign_entry["error"] = str(result.get("error", ""))
 	last_campaign_carried = bool(result.get("campaign_carried", false))
 	last_campaign_image_restored = bool(result.get("campaign_image_restored", false))
 	last_level_script_attached = bool(result.get("ok", false))
@@ -645,7 +655,8 @@ func _show_script_refusal() -> void:
 	if controller == null: return
 	var state: Dictionary = controller.script_command_counts()
 	if state.get("requires_complete_commands", false) and state.get("script_stopped", false):
-		status_label.text = "Mission 2 script stopped: " + str(state.get("last_refusal", "unsupported behavior"))
+		var stopped_kind := "Script after an act change with items" if bool(last_campaign_entry.get("campaign_items_crossed_act", false)) else "Mission 2 script"
+		status_label.text = stopped_kind + " stopped: " + str(state.get("last_refusal", "unsupported behavior"))
 
 func _refresh_exit_targets() -> void:
 	if real_exit_choice == null or controller == null: return

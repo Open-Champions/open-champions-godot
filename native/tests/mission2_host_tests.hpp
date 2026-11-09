@@ -125,23 +125,29 @@ void test_act_entry() {
   const auto before = source.save_campaign();
   source.variables().memory.w32(si::bag_count_at(0, 0), 1);
   bool refused = false;
-  try { sc::require_campaign_act_transfer(source, tables, "authored-next", false); }
+  try { sc::require_campaign_act_transfer(source, tables, "authored-next", false, {true, 0}); }
   catch (const std::runtime_error &) { refused = true; }
-  check(refused && source.save_campaign() == before, "nonempty live inventory refuses without changing campaign state");
+  check(refused && source.save_campaign() == before,
+        "a carried live count whose cell has no definition refuses without changing campaign state");
+  refused = false;
+  try { sc::require_campaign_act_transfer(source, tables, "authored-next", false, {false, 0}); }
+  catch (const std::runtime_error &) { refused = true; }
+  check(refused && source.save_campaign() == before,
+        "a live count without the session's bag-carry guard refuses without changing campaign state");
   source.variables().memory.w32(si::bag_count_at(0, 0), 0);
   refused = false;
-  try { sc::require_campaign_act_transfer(source, tables, "authored-next", true); }
+  try { sc::require_campaign_act_transfer(source, tables, "authored-next", true, {false, 0}); }
   catch (const std::runtime_error &) { refused = true; }
   check(refused, "unknown imported inventory refuses even with zero modeled bag counts");
   sc::Host same;
   same.load_campaign(before);
-  const auto same_entry = sc::prepare_campaign_entry(same, &source, tables, "authored-same", true, false);
+  const auto same_entry = sc::prepare_campaign_entry(same, &source, tables, "authored-same", true, false, {false, 0});
   check(!same_entry.reset && same.campaign().record(0).quest_count == 1 &&
             same.variables().quest_get("authored-progress") == 7,
         "same-act entry preserves journal and quest variable values");
   sc::Host next;
   next.load_campaign(before);
-  const auto changed = sc::prepare_campaign_entry(next, &source, tables, "authored-next", true, false);
+  const auto changed = sc::prepare_campaign_entry(next, &source, tables, "authored-next", true, false, {false, 0});
   check(changed.changed && changed.reset && changed.act == 1, "cross-act entry uses the native act-change contract");
   check(next.campaign().record(0).quest_count == 0 && next.variables().quest_get("authored-progress") == 0,
         "act change clears both journal and binder quest variable value");
@@ -154,7 +160,7 @@ void test_act_entry() {
   // destinations deliberately have no retail mission order or identifiers.
   sc::Host later;
   later.load_campaign(before);
-  const auto later_entry = sc::prepare_campaign_entry(later, &source, tables, "authored-next", false, false);
+  const auto later_entry = sc::prepare_campaign_entry(later, &source, tables, "authored-next", false, false, {false, 0});
   check(later_entry.changed && later_entry.reset && later_entry.act == 1,
         "a non-mission-2 destination also applies its researched act boundary");
   check(later.campaign().record(0).quest_count == 0 &&
@@ -180,21 +186,21 @@ void test_act_entry() {
   const auto candidate_before = refused_next.save_campaign();
   source.variables().memory.w32(si::bag_count_at(0, 0), 1);
   refused = false;
-  try { sc::prepare_campaign_entry(refused_next, &source, tables, "authored-next", false, false); }
+  try { sc::prepare_campaign_entry(refused_next, &source, tables, "authored-next", false, false, {false, 0}); }
   catch (const std::runtime_error &) { refused = true; }
   check(refused && refused_next.save_campaign() == candidate_before,
         "later cross-act inventory refuses before changing the candidate campaign");
   source.variables().memory.w32(si::bag_count_at(0, 0), 0);
   sc::Host ordinary_same;
   ordinary_same.load_campaign(before);
-  const auto ordinary_entry = sc::prepare_campaign_entry(ordinary_same, &source, tables, "authored-same", false, false);
+  const auto ordinary_entry = sc::prepare_campaign_entry(ordinary_same, &source, tables, "authored-same", false, false, {false, 0});
   check(!ordinary_entry.changed && !ordinary_entry.reset && ordinary_entry.act == 0 &&
             ordinary_same.campaign().record(0).quest_count == 1 &&
             ordinary_same.variables().quest_get("authored-progress") == 7,
         "ordinary same-act entry does not clear campaign progress");
   source.campaign().set_act(-1);
   refused = false;
-  try { sc::require_campaign_act_transfer(source, tables, "authored-next", false); }
+  try { sc::require_campaign_act_transfer(source, tables, "authored-next", false, {false, 0}); }
   catch (const std::runtime_error &) { refused = true; }
   check(refused, "unbound source act refuses instead of guessing an act");
 }

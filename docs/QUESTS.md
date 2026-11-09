@@ -65,7 +65,10 @@ The campaign model's bag filter still drops those names without equipment
 pointers. The live binder path removes them through `inventory_removeItem`,
 so the equipment and weapon pointers follow the slide
 (`research-inventory-reset` `ce2e086`, `docs/inventory-reset.md`). No keep
-name outside that list was added.
+name outside that list was added. The name is read through the cell's
+definition in the destination host's memory; a zero name pointer or an empty
+name refuses before any cell is removed, because no research covers an
+unreadable name.
 
 ## Menu, hub and acts
 
@@ -91,7 +94,10 @@ acts 0..n−1, a non-empty prefix of the pending level, case-sensitive.
 flow's `begin_change` makes it, the campaign takes level flow's act, and the
 campaign's clear (quest lists, flag-39 items, quest-variable values) runs
 exactly when level flow resets the act: the act changed, the card latch is
-clear and no death task is running. Level flow's prefix match also accepts
+clear and no death task is running. In the client the latch is the front
+end's `Flow::save_latch_` (0x4f8f28), which `ui/frontend_menus.gd` forwards
+to the session after every flow change and `prepare_campaign_entry` mirrors
+into the destination host before `Host::change_level`. Level flow's prefix match also accepts
 an empty prefix. The retail table has none (`difftest_quests` checks, and the
 measure below counts 0), so the two rules agree on real data.
 

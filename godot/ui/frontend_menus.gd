@@ -445,7 +445,20 @@ func _scene() -> Dictionary:
 	var result: Dictionary = service.layout()
 	return result if result.get("ok", false) else {}
 
+# memcard_saveScreen's latch 0x4f8f28 lives in the native flow (Flow::save_latch_).
+# The session reads it when an act change decides whether the act-change clear
+# runs (docs/QUESTS.md), so the flow's value is forwarded after every change.
+var forwarded_save_latch := -1
+func forward_save_latch() -> void:
+	if not booted or not view.has("save_latch") or scene == null or scene.get("controller") == null:
+		return
+	if not scene.controller.has_method("set_save_latch"):
+		return
+	var forwarded: Dictionary = scene.controller.set_save_latch(int(view.save_latch))
+	forwarded_save_latch = int(forwarded.get("save_latch", -1)) if forwarded.get("ok", false) else -1
+
 func _refresh() -> void:
+	forward_save_latch()
 	visible = active()
 	if scene != null and scene.has_method("_show_menu") and scene.is_inside_tree():
 		scene._show_menu(scene.flow)

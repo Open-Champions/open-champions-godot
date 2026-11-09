@@ -1,13 +1,18 @@
 #include "champions/campaign_entry.hpp"
 #include "champions/campaign_inventory.hpp"
+#include "champions/frontend.hpp"
 #include "champions/script_commands.hpp"
 #include "champions/script_items.hpp"
 #include <cstdint>
+#include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace ci = champions::simulation::rta::campaign_inventory;
+namespace fe = champions::frontend;
+namespace lf = champions::simulation::rta::level_flow;
 namespace q = champions::simulation::rta::quests;
 namespace sc = champions::simulation::rta::script_commands;
 namespace si = champions::simulation::rta::script_items;
@@ -78,9 +83,9 @@ struct World {
   }
 };
 
-void arm_progress(sc::Host &host) {
+void arm_progress(sc::Host &host, unsigned players = 2) {
   auto &memory = host.variables().memory;
-  memory.word(si::G_NUM_PLAYERS, 2u);
+  memory.word(si::G_NUM_PLAYERS, players);
   const auto rec = si::rec(0);
   memory.w32(rec + 0xe4, 1234);
   memory.w32(rec + 0x5c, 50);
@@ -124,109 +129,412 @@ std::string name_at(sc::Host &host, int slot, int bag, int index) {
 void expect_untouched(sc::Host &host, const std::string &label) {
   const auto &memory = host.variables().memory;
   check(memory.s32(si::bag_count_at(0, 0)) == 2 && name_at(host, 0, 0, 0) == "questgem" &&
-            name_at(host, 0, 0, 1) == "sword",
+            name_at(host, 0, 0, 1) == "sword" && memory.s32(si::bag_count_at(0, 1)) == 2 &&
+            memory.s32(si::bag_count_at(0, 2)) == 2,
         label + " bags stay");
   check(memory.u32(si::rec(0) + 0x43f0) == si::bag_entry(0, 0, 0), label + " equipment stays");
   check(memory.s32(si::rec(0) + 0x43d0) == 1 && memory.cstr(si::rec(0) + 0x41d0) == "Aquest",
         label + " quest stays");
   check(memory.u8(0x86da80 + 15) == 5 && memory.u8(0x86da80 + 21) == 9, label + " variable values stay");
   check(memory.u32(ci::ACT_MARK) == 0, label + " mark stays 0");
+  // +0x4bbf is row 0, not a mission row, and does not travel in the campaign
+  // image (quests_bridge.cpp MISSION_AT); +0x4bcc is mission row 1.
   check(memory.s32(si::rec(0) + 0xe4) == 1234 && memory.s32(si::rec(0) + 0x5c) == 50 &&
-            memory.u8(si::rec(0) + 0x59) == 3 && memory.u8(si::rec(0) + 0x4bbf) == 3 &&
-            memory.u8(si::rec(0) + 0x4bcc) == 3 && memory.u8(si::rec(0) + 0x4c0d) == 1,
+            memory.u8(si::rec(0) + 0x59) == 3 && memory.u8(si::rec(0) + 0x4bcc) == 3 &&
+            memory.u8(si::rec(0) + 0x4c0d) == 1,
         label + " gold experience mission medal and level stay");
 }
 
-void test_travel_gates() {
-  const auto acts = ci::documented_story_acts();
-  auto run = [&](ci::Request request, const auto &body) {
-    World world;
-    world.plant(0, sample_cells());
-    world.plant(1, {{"othergem", BIT39, 0, -1, -1, false, 0, 1, 0}});
-    world.plant(2, {{"canary", BIT39, 0, -1, -1, false, 0, 1, 0}});
-    arm_progress(world.host);
-    if (request.act == -1)
-      world.host.variables().memory.w32(ci::ACT_WORD, 0xffffffffu);
-    const auto result = ci::apply_campaign_travel(world.host.variables(), acts, request);
-    body(result, world.host);
-  };
 
-  run({"strife", 0, false, false, false}, [](const ci::Result &result, sc::Host &host) {
-    check(result.changed == 0 && result.act == 0 && !result.cleared, "same act returns 0 and stores 0");
-    expect_untouched(host, "same act");
-  });
-  run({"hub2", 0, false, false, false}, [](const ci::Result &result, sc::Host &host) {
-    check(result.changed == 0 && result.act == 0 && !result.cleared &&
-              host.variables().memory.s32(ci::ACT_WORD) == 0,
-          "hub2 from act 0 stores 0");
-    expect_untouched(host, "hub2");
-  });
-  run({"inmine2", 1, false, false, false}, [](const ci::Result &result, sc::Host &host) {
-    check(result.changed == 0 && result.act == 1 && !result.cleared, "mission 2 chain stays in act 1");
-    check(host.variables().memory.u32(ci::ACT_MARK) == 0, "same-act chain does not store the mark");
-  });
-  run({"innovat1", 0, false, false, false}, [](const ci::Result &result, sc::Host &host) {
-    const auto &memory = host.variables().memory;
-    check(result.changed == 1 && result.act == 1 && result.cleared && memory.s32(ci::ACT_WORD) == 1,
-          "act change stores 1");
-    check(memory.u32(ci::ACT_MARK) == 1, "act change stores 1 at 0x4f7118");
-    check(memory.s32(si::bag_count_at(0, 0)) == 1 && name_at(host, 0, 0, 0) == "sword",
+// The act table is the executable's in the client (quests::read_act_tables).
+// This fixture is the documented one: research-story-route-r3 019a155
+// docs/story-route.md:242-255 (the table) and :271-279 (between two story
+// levels). Mission-1 names and both hubs are act 0 (hub is a prefix of hub2),
+// the innovat1/inmine1/inmine2/innovat2 chain is act 1, each later mission row
+// is one act, and an evil name shares its row's act.
+q::ActTables story_tables() {
+  q::ActTables tables;
+  tables.names = {
+      {"hub", "hub2", "blood1", "strife", "drundar", "drunarm", "drunare"},
+      {"innovat1", "inmine1", "inmine2", "innovat2"},
+      {"islc1"}, {"wat1"}, {"tormenta"}, {"swamp1", "swamp2"}, {"valor"},
+      {"fire1"}, {"storm1"}, {"fay2", "fay1"}, {"nit1"}, {"bossgood", "bossevil"},
+  };
+  for (const auto &act : tables.names) {
+    lf::Act flow;
+    for (const auto &name : act)
+      flow.push_back({name, 0});
+    tables.flow.push_back(std::move(flow));
+  }
+  return tables;
+}
+
+// session_controller.cpp mission2_story: the names the session marks mission 2.
+bool mission2_story(const std::string &level) {
+  return level == "innovat1" || level == "inmine1" || level == "inmine2" || level == "innovat2";
+}
+
+// The front end's real latch after a card error: a slot is chosen (latch 1),
+// the save fails and keeps it, and circle returns to play with it still 1
+// (frontend.cpp SaveGame, save_result; inventory-reset.md:87-90).
+int latch_after_card_error() {
+  auto tap = [](fe::Flow &flow, std::uint32_t bits) {
+    flow.frame(static_cast<std::uint16_t>(bits));
+    flow.frame(0);
+  };
+  fe::Flow flow;
+  tap(flow, fe::CROSS);  // boot card
+  tap(flow, fe::CROSS);  // logo
+  for (int i = 0; i < 5; ++i)
+    tap(flow, fe::CROSS);
+  tap(flow, fe::CROSS);
+  tap(flow, fe::CROSS);
+  for (int i = 0; i < 20; ++i)
+    tap(flow, fe::RIGHT);
+  tap(flow, fe::CROSS);
+  flow.set_name("S");
+  tap(flow, fe::DOWN);
+  tap(flow, fe::CROSS);
+  flow.request_save();
+  tap(flow, fe::CROSS);
+  check(flow.save_latch() == 1, "choosing a slot sets the front end's latch");
+  flow.save_result(false, "disk full");
+  tap(flow, fe::CIRCLE);
+  check(flow.screen() == fe::Screen::Playing && flow.save_latch() == 1,
+        "a card error leaves the latch at 1 after returning to play");
+  return flow.save_latch();
+}
+
+// One local player at a story act with the sample cells, journal and progress.
+struct Source {
+  World world;
+  explicit Source(int act) {
+    auto &host = world.host;
+    host.start_single_player();
+    world.plant(0, sample_cells());
+    arm_progress(host, 1);
+    host.campaign().set_act(act);
+    host.campaign().set_acts(story_tables().names);
+  }
+  sc::Host &host() { return world.host; }
+};
+
+// The session's entry for one level host: a destination built from the
+// carried campaign image, the bag copy under the guard, then the client's
+// prepare_campaign_entry (session_controller.cpp enable_level_script).
+struct Entry {
+  sc::Host next;
+  sc::CampaignEntry result;
+  std::string refusal;
+};
+void enter(Entry &entry, Source &source, const std::string &level, const sc::BagCarryGuard &guard, int latch,
+           bool death_task = false, bool definitions = true,
+           const std::function<void(sc::Host &)> &before = {}) {
+  entry.next.load_campaign(source.host().save_campaign());
+  if (definitions)
+    entry.next.variables().memory.write(BASE, source.host().variables().memory.read(BASE, 0x4000));
+  const sc::ActCarry carry{guard.holds(), latch};
+  if (carry.bags_carried)
+    sc::carry_live_bags(entry.next, source.host());
+  if (before)
+    before(entry.next);
+  try {
+    entry.result = sc::prepare_campaign_entry(entry.next, &source.host(), story_tables(), level,
+                                              mission2_story(level), false, carry, death_task);
+  } catch (const std::runtime_error &error) {
+    entry.refusal = error.what();
+  }
+}
+
+const sc::BagCarryGuard HELD{true, false, 3, 3};
+
+void test_live_travel() {
+  check(HELD.holds(), "the guard holds for a held record whose inventory was written for it");
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "strife", HELD, 0);
+    check(entry.refusal.empty() && !entry.result.changed && !entry.result.reset && entry.result.act == 0,
+          "same act: no act change");
+    expect_untouched(entry.next, "same act");
+    check(entry.next.campaign().record(0).quest_count == 1 && !entry.result.items_crossed_act,
+          "same act keeps the journal and starts no act-transfer chain");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "hub2", HELD, 0);
+    check(entry.refusal.empty() && !entry.result.changed && entry.result.act == 0 &&
+              entry.next.variables().memory.s32(ci::ACT_WORD) == 0,
+          "hub2 from act 0 stays act 0 (hub is a prefix of hub2)");
+    expect_untouched(entry.next, "hub2");
+  }
+  {
+    Source source(1);
+    Entry entry;
+    enter(entry, source, "inmine2", HELD, 0);
+    check(entry.refusal.empty() && !entry.result.changed && !entry.result.reset && entry.result.act == 1 &&
+              entry.result.removed == 0 && entry.result.mark == 0,
+          "the mission-2 chain stays in act 1 and does not clear");
+    expect_untouched(entry.next, "mission 2 chain");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0);
+    const auto &memory = entry.next.variables().memory;
+    check(entry.refusal.empty(), "act change with classified cells is accepted: " + entry.refusal);
+    check(entry.result.changed && entry.result.reset && entry.result.act == 1 && memory.s32(ci::ACT_WORD) == 1,
+          "act change stores act 1");
+    check(entry.result.carried_cells == 6 && entry.result.removed == 1 && entry.result.mark == 1 &&
+              memory.u32(ci::ACT_MARK) == 1,
+          "the entry reports six carried cells, one removed, and 1 at 0x4f7118");
+    check(memory.s32(si::bag_count_at(0, 0)) == 1 && name_at(entry.next, 0, 0, 0) == "sword",
           "unkept flag-39 cell is removed and the ordinary item slides");
     check(memory.u32(si::rec(0) + 0x43f0) == 0, "removed cell's equipment slot is cleared");
     check(memory.u32(si::rec(0) + 0x43f0 + 8) == si::bag_entry(0, 0, 0),
           "later equipment pointer follows the slide");
     check(memory.u32(si::rec(0) + 0x4434) == 0 && memory.u8(si::rec(0) + 0x4a86) == 5,
           "active weapon word clears and the weapon class becomes 5");
-    check(memory.u32(si::rec(0) + 0x443c) == si::bag_entry(0, 0, 0),
-          "second weapon pointer follows the slide");
+    check(memory.u32(si::rec(0) + 0x443c) == si::bag_entry(0, 0, 0), "second weapon pointer follows the slide");
     check(memory.u16(si::bag_entry(0, 0, 0) + 0x22) == 8, "slid stamp drops by one");
-    check(name_at(host, 0, 2, 0) == "pickaxe" && name_at(host, 0, 2, 1) == "bloodstonefay",
+    check(name_at(entry.next, 0, 2, 0) == "pickaxe" && name_at(entry.next, 0, 2, 1) == "bloodstonefay",
           "kept names stay");
     check(memory.s32(si::bag_count_at(0, 1)) == 2, "ordinary and bit-38 cells stay");
-    check(memory.s32(si::bag_count_at(1, 0)) == 0, "the other joined player's unkept cell is removed");
-    check(name_at(host, 2, 0, 0) == "canary" && memory.s32(si::rec(2) + 0x43d0) == 1 &&
-              memory.cstr(si::rec(2) + 0x41d0) == "Canary",
-          "a record at or above the player count is not walked");
-    check(memory.s32(si::rec(0) + 0x43d0) == 0 && memory.cstr(si::rec(0) + 0x41d0) == "NoQuests" &&
-              memory.s32(si::rec(1) + 0x43d0) == 0,
-          "quest counts become 0 and the used title is the placeholder");
-    check(memory.cstr(0x86da80) == "currentMission" && memory.u8(0x86da80 + 15) == 0 &&
-              memory.cstr(0x86da80 + 16) == "step" && memory.u8(0x86da80 + 21) == 0,
-          "quest variable names stay and their values become 0");
-    check(memory.s32(si::rec(0) + 0xe4) == 1234 && memory.s32(si::rec(1) + 0xe4) == 9 &&
-              memory.s32(si::rec(0) + 0x5c) == 50 && memory.u8(si::rec(0) + 0x59) == 3 &&
-              memory.u8(si::rec(0) + 0x4bbf) == 3 && memory.u8(si::rec(0) + 0x4c0d) == 1,
+    check(memory.s32(si::rec(0) + 0x43d0) == 0 && memory.cstr(si::rec(0) + 0x41d0) == "NoQuests",
+          "the quest count becomes 0 and the used title is the placeholder");
+    check(memory.s32(si::rec(0) + 0xe4) == 1234 && memory.s32(si::rec(0) + 0x5c) == 50 &&
+              memory.u8(si::rec(0) + 0x59) == 3 && memory.u8(si::rec(0) + 0x4bcc) == 3 &&
+              memory.u8(si::rec(0) + 0x4c0d) == 1,
           "gold experience level mission and medal stay");
-  });
-  run({"innovat1", 0, false, true, false}, [](const ci::Result &result, sc::Host &host) {
-    check(result.changed == 1 && result.act == 1 && !result.cleared, "card latch stores the act and skips the clear");
-    expect_untouched(host, "latch");
-    check(host.variables().memory.s32(ci::ACT_WORD) == 1, "latch still stores act 1");
-  });
-  run({"innovat1", 0, false, false, true}, [](const ci::Result &result, sc::Host &host) {
-    check(result.changed == 1 && result.act == 1 && !result.cleared, "death task stores the act and skips the clear");
-    expect_untouched(host, "death");
-  });
-  {
-    World world;
-    world.plant(0, sample_cells());
-    arm_progress(world.host);
-    world.host.variables().memory.w32(ci::FRONTEND_WORD, 1u);
-    const auto result = ci::apply_campaign_travel(world.host.variables(), acts,
-                                                   {"innovat1", 0, true, false, false});
-    check(result.changed == 0 && result.act == 0 && !result.cleared, "frontend skips the act call");
-    expect_untouched(world.host, "frontend");
-    check(world.host.variables().memory.u32(ci::FRONTEND_WORD) == 1 &&
-              world.host.variables().memory.s32(ci::ACT_WORD) == 0,
-          "frontend word is not stored and the act stays");
+    check(entry.result.items_crossed_act && entry.next.items_crossed_act(),
+          "an act transfer that carried cells starts the act-transfer chain");
+    sc::Host later;
+    later.load_campaign(entry.next.save_campaign());
+    const auto chained = sc::prepare_campaign_entry(later, &entry.next, story_tables(), "inmine1", true, false,
+                                                    {true, 0});
+    check(!chained.changed && chained.items_crossed_act, "a later carried same-act entry stays on the chain");
+    sc::Host fresh;
+    const auto unchained = sc::prepare_campaign_entry(fresh, nullptr, story_tables(), "inmine1", true, false,
+                                                      {true, 0});
+    check(!unchained.items_crossed_act, "an entry without a previous host leaves the chain");
   }
-  run({"blood1", -1, false, false, false}, [](const ci::Result &result, sc::Host &host) {
-    check(result.changed == 1 && result.act == 0 && result.cleared &&
-              host.variables().memory.s32(ci::ACT_WORD) == 0 &&
-              host.variables().memory.u32(ci::ACT_MARK) == 1,
-          "from act -1 stores 0 and the clear runs");
-    check(name_at(host, 0, 0, 0) == "sword", "from act -1 removes the unkept cell");
-  });
+  {
+    Source source(0);
+    const auto latch = latch_after_card_error();
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, latch);
+    check(entry.refusal.empty() && entry.result.changed && !entry.result.reset && entry.result.act == 1 &&
+              entry.next.variables().memory.s32(ci::ACT_WORD) == 1 && entry.result.removed == 0 &&
+              entry.result.mark == 0,
+          "the front end's latch left at 1 stores the act and skips the clear");
+    check(entry.next.variables().memory.u8(ci::CARD_LATCH) == 1, "the latch is mirrored at 0x4f8f28");
+    expect_untouched(entry.next, "latch");
+    check(entry.next.campaign().record(0).quest_count == 1, "the latch keeps the journal");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0, true);
+    check(entry.refusal.empty() && entry.result.changed && !entry.result.reset && entry.result.act == 1 &&
+              entry.result.removed == 0,
+          "a running death task stores the act and skips the clear");
+    expect_untouched(entry.next, "death task");
+  }
+  {
+    Source source(0);
+    source.host().variables().memory.w32(ci::FRONTEND_WORD, 1u);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0);
+    const auto &memory = entry.next.variables().memory;
+    check(entry.refusal.empty() && !entry.result.changed && !entry.result.reset && entry.result.act == 0,
+          "the frontend word skips the act call");
+    check(memory.u32(ci::FRONTEND_WORD) == 1 && memory.s32(ci::ACT_WORD) == 0,
+          "the frontend word is not stored and the act stays");
+    expect_untouched(entry.next, "frontend");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, -1);
+    check(entry.refusal.find("card latch 0x4f8f28 has no reading") != std::string::npos,
+          "an act transfer without a latch reading refuses");
+    expect_untouched(entry.next, "no latch reading");
+    check(entry.next.campaign().act() == 0, "no latch reading leaves the destination act");
+  }
+}
+
+// Host::change_level is the client's act change. From act -1 the first level
+// clears (inventory-reset.md:83-85); slots below g_numPlayers are walked.
+void test_change_level_from_unbound() {
+  World world;
+  world.plant(0, sample_cells());
+  world.plant(1, {{"othergem", BIT39, 0, -1, -1, false, 0, 1, 0}});
+  world.plant(2, {{"canary", BIT39, 0, -1, -1, false, 0, 1, 0}});
+  arm_progress(world.host);
+  auto &host = world.host;
+  const auto tables = story_tables();
+  host.campaign().set_acts(tables.names);
+  host.campaign().set_act(-1);
+  host.level().acts = tables.flow;
+  host.level().act = -1;
+  host.variables().memory.w32(ci::ACT_WORD, 0xffffffffu);
+  host.level().pending.request("blood1");
+  const auto change = host.change_level({});
+  const auto &memory = host.variables().memory;
+  check(change.act_changed && change.reset_act && host.campaign().act() == 0 && memory.s32(ci::ACT_WORD) == 0 &&
+            memory.u32(ci::ACT_MARK) == 1 && host.act_change_removed() == 2,
+        "from act -1 the first level stores act 0, clears, and removes two cells");
+  check(name_at(host, 0, 0, 0) == "sword", "from act -1 removes slot 0's unkept cell");
+  check(memory.s32(si::bag_count_at(1, 0)) == 0, "the other joined player's unkept cell is removed");
+  check(name_at(host, 2, 0, 0) == "canary" && memory.s32(si::rec(2) + 0x43d0) == 1 &&
+            memory.cstr(si::rec(2) + 0x41d0) == "Canary",
+        "a record at or above the player count is not walked");
+  check(memory.s32(si::rec(0) + 0x43d0) == 0 && memory.cstr(si::rec(0) + 0x41d0) == "NoQuests" &&
+            memory.s32(si::rec(1) + 0x43d0) == 0,
+        "quest counts become 0 and the used title is the placeholder");
+  check(memory.cstr(0x86da80) == "currentMission" && memory.u8(0x86da80 + 15) == 0 &&
+            memory.cstr(0x86da80 + 16) == "step" && memory.u8(0x86da80 + 21) == 0,
+        "quest variable names stay and their values become 0");
+  check(memory.s32(si::rec(0) + 0xe4) == 1234 && memory.s32(si::rec(1) + 0xe4) == 9 &&
+            memory.s32(si::rec(0) + 0x5c) == 50 && memory.u8(si::rec(0) + 0x59) == 3 &&
+            memory.u8(si::rec(0) + 0x4bbf) == 3 && memory.u8(si::rec(0) + 0x4c0d) == 1,
+        "gold experience level mission and medal stay");
+
+  // Without readable names the clear refuses before its first edit.
+  World bare;
+  bare.plant(0, sample_cells());
+  arm_progress(bare.host, 1);
+  bare.host.variables().memory.write(BASE, std::vector<std::uint8_t>(0x4000, 0));
+  bare.host.campaign().set_acts(tables.names);
+  bare.host.campaign().set_act(-1);
+  bare.host.level().acts = tables.flow;
+  bare.host.level().act = -1;
+  bare.host.level().pending.request("blood1");
+  bool refused = false;
+  try {
+    bare.host.change_level({});
+  } catch (const std::runtime_error &error) {
+    refused = std::string(error.what()).find("refused before any edit") != std::string::npos;
+  }
+  check(refused && bare.host.variables().memory.s32(si::bag_count_at(0, 0)) == 2 &&
+            bare.host.variables().memory.u32(ci::ACT_MARK) == 0,
+        "Host::change_level refuses an unreadable flag-39 name and removes nothing");
+}
+
+// session_controller.cpp: creating a character (starting items pending) and
+// loading or clearing a companion (revision bump) do not write the bags, so
+// the previous host's cells are not the new character's.
+void test_bag_carry_guard() {
+  const sc::BagCarryGuard created{true, true, 3, 4};
+  const sc::BagCarryGuard companion{true, false, 3, 4};
+  const sc::BagCarryGuard cleared{false, false, 4, 4};
+  check(!created.holds() && !companion.holds() && !cleared.holds(),
+        "creation, companion load and a cleared record each fail the guard");
+  for (const auto &[guard, label] : {std::pair{created, "character creation"},
+                                     std::pair{companion, "companion load"},
+                                     std::pair{cleared, "no player record"}}) {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", guard, 0);
+    check(entry.refusal == "Act transfer with inventory is refused: live bag carry and flag-39 migration are unported.",
+          std::string(label) + ": the act transfer refuses as wave 37 did");
+    check(entry.next.variables().memory.s32(si::bag_count_at(0, 0)) == 0 &&
+              entry.next.variables().memory.s32(si::bag_count_at(0, 2)) == 0 &&
+              entry.next.variables().memory.u32(si::rec(0) + 0x43f0 + 8) == 0,
+          std::string(label) + ": the destination is not given the old cells");
+    check(entry.next.campaign().act() == 0 && entry.next.variables().memory.u32(ci::ACT_MARK) == 0,
+          std::string(label) + ": the refusal leaves the destination's act and mark");
+    bool preflight = false;
+    try {
+      sc::require_campaign_act_transfer(source.host(), story_tables(), "innovat1", false, {guard.holds(), 0});
+    } catch (const std::runtime_error &) {
+      preflight = true;
+    }
+    check(preflight, std::string(label) + ": the session's preflight refuses too");
+    Entry same;
+    enter(same, source, "strife", guard, 0);
+    check(same.refusal.empty() && same.next.variables().memory.s32(si::bag_count_at(0, 0)) == 0,
+          std::string(label) + ": a same-act entry carries no old cells either");
+  }
+  // An empty inventory still crosses without the guard, as at wave 37.
+  Source empty(0);
+  for (int bag = 0; bag < si::BAGS; ++bag)
+    empty.host().variables().memory.w32(si::bag_count_at(0, bag), 0);
+  Entry entry;
+  enter(entry, empty, "innovat1", created, 0);
+  check(entry.refusal.empty() && entry.result.changed && entry.result.reset && !entry.result.items_crossed_act,
+        "with no live cells the act transfer runs without the guard and starts no chain");
+}
+
+// The keep decision reads the definition's name in the destination memory.
+void test_unreadable_names() {
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0, false, false);
+    check(entry.refusal.find("has no name pointer in this memory") != std::string::npos,
+          "without definitions in the destination the act transfer refuses: " + entry.refusal);
+    const auto &memory = entry.next.variables().memory;
+    check(memory.s32(si::bag_count_at(0, 0)) == 2 && memory.s32(si::bag_count_at(0, 2)) == 2 &&
+              memory.u32(ci::ACT_MARK) == 0 && entry.next.campaign().act() == 0 &&
+              entry.next.campaign().record(0).quest_count == 1,
+          "the refusal removes nothing and leaves the act and journal");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0, false, true, [](sc::Host &next) {
+      auto &memory = next.variables().memory;
+      const auto definition = memory.u32(si::bag_entry(0, 0, 0));
+      memory.w8(memory.u32(definition), 0);  // questgem's name reads as ""
+    });
+    check(entry.refusal.find("name cannot be read in this memory") != std::string::npos,
+          "an empty flag-39 name refuses instead of being removed: " + entry.refusal);
+    check(entry.next.variables().memory.s32(si::bag_count_at(0, 0)) == 2, "the unreadable cell stays");
+  }
+  {
+    // A cell without flag 39 is never removed, so its name is not needed.
+    Source source(0);
+    for (const auto bag : {0, 2})
+      for (int index = 0; index < 2; ++index) {
+        const auto cell = si::bag_entry(0, bag, index);
+        source.host().variables().memory.w64(cell + 8, 0);
+      }
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0, false, false);
+    check(entry.refusal.empty() && entry.result.reset && entry.result.removed == 0,
+          "cells without flag 39 cross without readable names");
+  }
+}
+
+void test_listed_refusals() {
+  {
+    Source source(0);
+    source.host().variables().memory.word(si::G_NUM_PLAYERS, 2u);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0);
+    check(entry.refusal == "Act transfer supports one local player.", "a second local player refuses");
+    expect_untouched(entry.next, "two players");
+  }
+  {
+    Source source(0);
+    auto record = source.host().campaign().record(0);
+    record.bags[1].push_back({"authored-item", 0});
+    source.host().campaign().set_record(0, record);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0);
+    check(entry.refusal == "Act transfer with campaign-model bags is refused: they have no equipment pointers to slide.",
+          "a campaign-model bag refuses: " + entry.refusal);
+  }
+  {
+    Source source(0);
+    source.host().variables().memory.w32(si::bag_entry(0, 1, 0), 0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, 0);
+    check(entry.refusal.find("has no definition, so it is not a classified item") != std::string::npos,
+          "a live cell with no definition refuses");
+  }
 }
 
 void test_share() {
@@ -300,86 +608,15 @@ void test_share() {
         "flag bit 8 refuses before the other bag is edited");
 }
 
-void test_entry_carry() {
-  q::ActTables tables;
-  tables.names = ci::documented_story_acts();
-  for (const auto &act : tables.names) {
-    champions::simulation::rta::level_flow::Act flow;
-    for (const auto &name : act)
-      flow.push_back({name, 0});
-    tables.flow.push_back(std::move(flow));
-  }
-  World source;
-  source.host.start_single_player();
-  source.host.campaign().set_act(0);
-  source.host.campaign().set_acts(tables.names);
-  source.plant(0, {{"questgem", BIT39, 0, 0, 0, false, 1, 1, 0},
-                   {"sword", 0, 0, 2, -1, true, 4, 1, 2}});
-  source.host.variables().quest_set("authored-progress", 7);
-  source.host.variables().memory.string(si::rec(0) + 0x41d0, "authored-title");
-  source.host.variables().memory.string(si::rec(0) + 0x41f0, "authored-body");
-  source.host.variables().memory.w32(si::rec(0) + 0x43d0, 1);
-  const auto image = source.host.save_campaign();
-  const auto definitions = source.host.variables().memory.read(BASE, 0x4000);
-  auto share_definitions = [&](sc::Host &host) { host.variables().memory.write(BASE, definitions); };
-
-  sc::Host same;
-  same.load_campaign(image);
-  share_definitions(same);
-  // The session copies bags before entry. Same-act entry must leave them.
-  same.variables().memory.word(si::G_NUM_PLAYERS, 1u);
-  // Re-plant through a temporary host is unnecessary: copy the source bytes.
-  same.variables().memory.write(si::rec(0) + 0x130, source.host.variables().memory.read(si::rec(0) + 0x130, 3 * 0x1208));
-  same.variables().memory.write(si::rec(0) + 0x43f0, source.host.variables().memory.read(si::rec(0) + 0x43f0, 0x50));
-  const auto same_entry = sc::prepare_campaign_entry(same, &source.host, tables, "strife", false, false);
-  check(!same_entry.changed && !same_entry.reset && same.campaign().record(0).quest_count == 1 &&
-            same.variables().quest_get("authored-progress") == 7 &&
-            same.variables().memory.s32(si::bag_count_at(0, 0)) == 2,
-        "same-act entry leaves the copied bags and the quests");
-
-  sc::Host next;
-  next.load_campaign(image);
-  share_definitions(next);
-  const auto changed = sc::prepare_campaign_entry(next, &source.host, tables, "innovat1", false, false);
-  check(changed.changed && changed.reset && changed.act == 1, "classified cells cross the act");
-  check(next.variables().memory.s32(si::bag_count_at(0, 0)) == 1, "the unkept cell is removed on the destination");
-  const auto def = next.variables().memory.u32(si::bag_entry(0, 0, 0));
-  check(def && next.variables().memory.cstr(next.variables().memory.u32(def)) == "sword",
-        "the ordinary item remains");
-  check(next.variables().memory.u32(si::rec(0) + 0x43f0 + 8) == si::bag_entry(0, 0, 0),
-        "destination equipment pointer follows the slide");
-  check(next.campaign().record(0).quest_count == 0 && next.variables().quest_get("authored-progress") == 0,
-        "the act change still clears the journal and the variable value");
-  check(next.variables().memory.u32(ci::ACT_MARK) == 1, "the destination stores the act-change mark");
-
-  source.host.variables().memory.w8(ci::CARD_LATCH, 1);
-  sc::Host held;
-  held.load_campaign(image);
-  share_definitions(held);
-  const auto latched = sc::prepare_campaign_entry(held, &source.host, tables, "innovat1", false, false);
-  check(latched.changed && !latched.reset && held.campaign().record(0).quest_count == 1 &&
-            held.variables().memory.s32(si::bag_count_at(0, 0)) == 2 &&
-            held.variables().memory.u32(ci::ACT_MARK) == 0,
-        "the card latch keeps the copied bags and the journal");
-  source.host.variables().memory.w8(ci::CARD_LATCH, 0);
-
-  source.host.variables().memory.w32(ci::FRONTEND_WORD, 1u);
-  sc::Host front;
-  front.load_campaign(image);
-  share_definitions(front);
-  const auto skipped = sc::prepare_campaign_entry(front, &source.host, tables, "innovat1", false, false);
-  check(!skipped.changed && !skipped.reset && front.campaign().act() == 0 &&
-            front.variables().memory.u32(ci::FRONTEND_WORD) == 1 &&
-            front.variables().memory.s32(si::bag_count_at(0, 0)) == 2,
-        "the frontend word skips the act call and leaves the bags");
-}
-
 } // namespace
 
 int main() {
-  test_travel_gates();
+  test_live_travel();
+  test_change_level_from_unbound();
+  test_bag_carry_guard();
+  test_unreadable_names();
+  test_listed_refusals();
   test_share();
-  test_entry_carry();
   if (failed) {
     std::cerr << failed << " failed\n";
     return 1;
