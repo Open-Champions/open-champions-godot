@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — gates being recorded (2026-11-09).
+STATUS: DONE (2026-11-09). Section 6 Observed rows implemented or locked by synthetic tests; Release build, GDExtensions, focused tests PASS; full CTest 260/260 (two load timeouts pass alone); strict Godot 54/54; FULL_SAVE_LOAD 300/300 and FULL_TRACE unchanged; journeys 80/81 with pickup 10→11 and unchanged step/result pairs. Populated-page draws, parchment crop and pixel parity stay refused.
 
 # Play quest log, round 1 — 2026-11-08/09
 
@@ -45,3 +45,27 @@ New CTest `quest-log` (`champions-quest-log-tests`, synthetic keys `A`, `B`, `Q0
 - **Full synthetic combat: 2,645 checks, 0 failures** (`matrix/playable_wave_smoke_full_combat.log`).
 - **FULL_SAVE_LOAD: PASS, 300/300.** Continued and uninterrupted presentation SHA-256 both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical to wave 37.
 - **FULL_TRACE: PASS, unchanged**, 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. Expected: the change touches neither combat nor the trace.
+- **Journeys: PASS against the wave-37 shape.** Unchanged `tools/run_loop_playthrough.py`, headless then rendered, standard input closed, read-only disc `../../private-validation/rta-disc` (`work/ql/playthrough/`, `playthrough.out`; first run kept as `playthrough-run1/`). Both runs gave the same result:
+
+| Variant | Steps | Refused rows | Refusal kinds | Exit | Pickup | Walk ticks | Log errors | Captures |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Headless | 80 | 27 | 6 | 1 | **10→11**, produced/walked/picked up | 52 | 0 | 0 |
+| Rendered | 81 | 28 | 6 | 1 | **10→11**, produced/walked/picked up | 52 | 0 | 38 |
+
+Disc files 994 before and 994 after, both runs. Compared with death-reload round 1's journey (`play-death-reload/work/death-reload/playthrough`, which wave 37 matched step for step), the step name/result pairs are identical at every index in both variants, and so are the six refusal kinds. Wrapper exit 1 is still the retained full-journey refusal (`player_death`, `saved_level_reloaded` false). `rendered_pickup_verified` remains false.
+
+Every difference, explained:
+
+1. **`journal_after_dialog.refusal` text, and its refusal-map key.** Old: `journal layout refused: font, wrap, entry positions, empty-state position and parchment crop unresolved`. New: the precise reasons, i.e. a loaded font's wrap return Unknown (`quest-log.md` 76, 288), the `0x1802e0` stores Unknown (75, 289), and the parchment crop Unknown (74, 290). Intended. The step is still `layout_refused` with `entry_count` 1, `art_ready` true, and 0 text, glyph and sprite submissions, so the journey's unchanged check (`godot/tests/loop_playthrough.gd:823-826`, prefix `journal layout refused:`) passes. The journey reaches the journal with one quest, so the new empty-page draw is not exercised there; the native `quest-log` test covers its calls.
+2. **`dialog_choice_close.choices_taken`, and with it `hub_trigger_mission_menu.script_executed_commands` `addQuest` / `setMissionAvailable`.** Here: headless 4 (`addQuest` 2, `setMissionAvailable` 3), rendered 3 (1, 2), the same in both runs. Death-reload r1: 5 (3, 4) in both variants. This depends on load, not on this change. The close loop presses Enter every 8 displayed frames (`godot/tests/loop_playthrough.gd:783-793`), and the dialog and HUD controls advance on wall-clock accumulators capped at 4 frames per displayed frame (`godot/ui/text_hud.gd:91-99`). So the number of choices that land before the dialog closes depends on frame rate. These runs had a mini load average of 110–170 from other agents (journal-step fps 86/99 headless and 25/33 rendered here, against 144/124 in the baseline). Other journeys on the same wave-37 base `70d2de19`, read with `work/ql/choices.py`, range from 3 to 6: `play-give-item` 5/5, `play-levelup-hud` and `play-mission2-route` 5/6, `play-vendors-r2` 4/3, `play-char-appearance` and `play-story-route` 3/3. All have unchanged step/result pairs. Nothing this branch changes runs in that loop. The journal only computes while visible, `quest_journal_calls` is called only by the visible journal with an empty list, `quest_clear_all` runs only on an act change, and `quest_log` is otherwise unused.
+3. **Host-only fields** `fps`, `memory_bytes` and `swing_wall_msec` differ as in every wave (wall clock and allocator).
+
+## Commits
+
+- `9e6d1b6a` native page calls, `quest_clear_all`, CTest `quest-log`; Release build and focused tests.
+- `e33d4116` controller `quest_journal_calls`, journal empty-page draw and precise refusal, `docs/QUESTS.md`; GDExtensions.
+- `69e9a787`, `7baa6755` and this report: the gate records.
+
+## Boundaries
+
+No push, PR, sibling-repository edit, `~/champions-re` or playable-integration access, or process killed by name (only my own rsync PID). No test, baseline, fixture or runner was weakened or edited. Synthetic fixtures only. No game text is tracked; `NoQuests` is the placeholder identifier the repo already used (`quests::QUEST_PLACEHOLDER`). No value was invented: wrap returns are supplied by the caller and refused in the session. The mini's `build/` was deleted at the end. Its `godot/.godot` import cache stays for later runs.
