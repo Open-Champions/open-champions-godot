@@ -1,0 +1,9 @@
+ 6:45  up 48 days, 16:02, 2 users, load averages: 74.65 78.63 77.30
+Test project ~/malik-champions/open-champions/worktrees/play-campaign-inventory/build/native
+    Start 23: messages-exact
+1/1 Test #23: messages-exact ...................   Passed   29.22 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  29.23 sec
+exit 0
