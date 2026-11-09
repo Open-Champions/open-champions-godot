@@ -1,6 +1,8 @@
 #include "champions/spell_numerics.hpp"
 #include "champions/combat_damage.hpp"
 #include "champions/creature_hp.hpp"
+#include <cstddef>
+#include <utility>
 
 namespace champions::simulation::rta::spell_numeric {
 namespace {
@@ -21,9 +23,10 @@ struct Hand {
   std::uint32_t flags = 0;
 };
 
-Hand last_hit(const World &world) {
+Hand last_hit(const World &world, std::size_t first) {
   Hand hand;
-  for (const auto &event : world.events) {
+  for (auto index = first; index < world.events.size(); ++index) {
+    const auto &event = world.events[index];
     if (event.empty())
       continue;
     const auto *name = std::get_if<combat::Text>(&event[0].value);
@@ -48,14 +51,21 @@ Delivery deliver_creature_hit(World &world, Obj &victim, Obj *attacker, Raw dmin
   // damage_apply 0x1e8230, then Creature_takeDamage 0x116638 when the victim
   // is not carrying the player flag. A player-flagged victim (including 0x60)
   // still receives the handed amount from damage_apply; the player slot is
-  // not entered. player-spells-numeric-r3.md:38-66 and :114-118.
+  // not entered. player-spells-numeric-r3.md:33-36 and :52-55.
   // Death and knock-back are Creature_processDamage 0x110d30 and are not called.
-  Delivery out;
-  world.events.clear();
+  // The hook is swapped for this call only and restored on every exit. Earlier
+  // events stay; only the events this call appends are read.
+  struct Hook {
+    World &world;
+    decltype(World::take_damage_fn) saved;
+    ~Hook() { world.take_damage_fn = std::move(saved); }
+  } hook{world, std::move(world.take_damage_fn)};
   world.take_damage_fn = [](Obj &, Raw, Obj *, std::uint32_t) {};
+  const auto first = world.events.size();
+  Delivery out;
   out.result = combat::damage_apply(world, victim, attacker, dmin, dmax, attack, flags, descriptor,
                                     no_crit);
-  const auto hand = last_hit(world);
+  const auto hand = last_hit(world, first);
   out.handed = hand.present;
   out.amount = hand.amount;
   out.handed_flags = hand.flags;
@@ -79,24 +89,5 @@ Delivery deliver_cold_hit(World &world, Obj &victim, Obj *attacker, std::int32_t
   const auto desc = cold_descriptor(cold_low, cold_high);
   return deliver_creature_hit(world, victim, attacker, ZERO, ZERO, 100000, 0, &desc, 0, memory,
                              creature, attacker_address);
-}
-
-void bash_stun(creature_hp::Memory &memory, creature_hp::Address creature, std::uint16_t frames,
-               int flash, int boss_rank) {
-  // Creature_stun 0x118a58 and base state 0x3c2688.
-  // player-spells-numeric-r3.md:69-75. Flash colours are the probe's halfwords
-  // from +0x90 (research-spells-r4.md, stun trace).
-  const auto state = static_cast<std::int32_t>(static_cast<std::int16_t>(memory.load(creature + 0x232, 2)));
-  if (boss_rank != 0 || state == 0x14)
-    return;
-  memory.store(creature + 0x31c, 2, frames);
-  memory.store(creature + 0x232, 2, 0x13);
-  if (!flash)
-    return;
-  const std::pair<unsigned, Raw> colours[] = {
-      {0x90, 0x3a}, {0x92, 0x9b}, {0x94, 0x9a}, {0x96, 0x48},
-      {0x98, 0x3a}, {0x9a, 0x9b}, {0x9c, 0x9a}};
-  for (const auto &colour : colours)
-    memory.store(creature + colour.first, 2, colour.second);
 }
 } // namespace champions::simulation::rta::spell_numeric

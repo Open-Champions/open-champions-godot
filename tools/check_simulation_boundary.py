@@ -59,8 +59,10 @@ def simulation_paths(root):
     paths += [root / "native/src/level_play.cpp", root / "native/include/champions/level_play.hpp"]
     paths += [root / "native/src/combat_play.cpp", root / "native/include/champions/combat_play.hpp"]
     paths += [root / "native/src/play_animation.cpp", root / "native/include/champions/play_animation.hpp"]
-    if len(paths) != 80 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 80 simulation sources and headers")
+    # Cast payment shared by player.cpp, plus the ID 55 product and the fixtures.
+    paths += [root / "native/src/spell_numerics.cpp", root / "native/include/champions/spell_numerics.hpp"]
+    if len(paths) != 82 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 82 simulation sources and headers")
     return paths
 
 

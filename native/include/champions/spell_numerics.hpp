@@ -6,50 +6,93 @@
 
 namespace champions::simulation::rta::spell_numeric {
 // Observed spell numerics from research-spells-r3 cf8320e,
-// docs/spec/player-spells-numeric-r3.md. Synthetic inputs only.
-// The player damage slot, death, knock-back, spatial queries, and the real
-// cast body stay outside this entry (same note, lines 63-66 and 129-130).
-// Spells round 5 (player damage / knock-back) is not used.
+// docs/spec/player-spells-numeric-r3.md. The player damage slot, death,
+// knock-back, spatial queries and the real cast body stay outside this note
+// (lines 63-66 and 129-130). Spells round 5 is not used.
 
-// ID 55 owner amount. player-spells-numeric-r3.md:81-88.
+// ID 55 grouped heal product.
 // float32(float32(maximum * 0x3c71aa2e) * float32(float32(percent) * 0x3c23d70a))
-// `percent` is the integer statistic, converted with from_int before the
-// hundredth multiply. maximum is record +0xb0 for a player owner.
-inline Raw owner_heal_product(Raw maximum, Raw percent_integer) {
+// research-spells-r3 ran it for the owner amount only: statistic 0 and the
+// owner record +0xb0, stored at spell +0x1c (player-spells-numeric-r3.md:81-89).
+// skills_b also uses this grouping for the non-owner share (statistic 2 and the
+// recipient +0xb0). That share comes from the earlier skills_b contract; this
+// note does not cover it.
+inline Raw heal_grouped_product(Raw maximum, Raw percent_integer) {
   constexpr Raw kRate = 0x3c71aa2eu;
   constexpr Raw kHundredth = 0x3c23d70au;
   return mul(mul(maximum, kRate), mul(from_int(percent_integer), kHundredth));
 }
 
-// One add of that cached amount onto record +0xac. The cap that decides
-// whether the run adds is the earlier healing body, not this product.
-inline Raw add_cached_heal(Raw current, Raw product) { return add(current, product); }
+// One add of a heal amount onto record +0xac (player-spells-numeric-r3.md:81-83).
+inline Raw add_heal(Raw current, Raw amount) { return add(current, amount); }
 
-// Post-cast debit after a zero cast return. player-spells-numeric-r3.md:97-107
-// and :125-127. Recast already above zero, and the prediction copy, do not
-// debit. One pattern below the cost still subtracts; the helper does not
-// refuse it. `recast_field` is the skill halfword (30 for the probed records).
-struct Payment {
-  Raw mana = 0;
-  std::uint16_t recast = 0;
-  bool debited = false;
+// Player_castSkill 0x1a42b8 payment. Tick::cast_skill (player.cpp) calls these
+// four functions; no other copy of the debit exists.
+//
+// Observed (player-spells-numeric-r3.md:94-108; difftest_spell_numeric_r3.py:
+// 310-367): skill kind 0, skill recast 30, skill flag bit 0 clear, the cast slot
+// returning 0. Mana exactly the cost, one pattern below it and 1000 all debit;
+// recast 1 blocks; the prediction copy (0x20000) blocks.
+//
+// Recast is the signed halfword at player +0x4ae.
+inline bool recast_blocks(std::uint16_t recast_halfword) {
+  return static_cast<std::int16_t>(recast_halfword) > 0;
+}
+// The prediction copy returns only when skill +4 bit 0 is clear.
+inline bool copy_blocks(bool prediction_copy, std::uint32_t skill_flags) {
+  return prediction_copy && !(skill_flags & 1u);
+}
+
+// Payment inputs that research-spells-r3 did not run. Tick::cast_skill still
+// pays in these cases. That behaviour comes from the player-tick contract and its
+// pinned player vectors, not from this note. The note says the real cast body
+// "remain[s] the player-tick contract" (player-spells-numeric-r3.md:110-112).
+enum Unprobed : std::uint8_t {
+  kObserved = 0,
+  // Recast below zero, e.g. 0xffff. The note ran recast 0 and 1 only (:100-103;
+  // difftest :362 and :364).
+  kRecastNegative = 1u << 0,
+  // A prediction copy whose skill has bit 0 set gets past the copy gate. The
+  // note ran bit 0 clear only (:95; difftest :354).
+  kCopyBit0Set = 1u << 1,
+  // The cast slot returned a spell. The note stubbed the slot to return 0 (:96-97).
+  // Payment with the real cast body is Unknown (:110).
+  kNonZeroCast = 1u << 2,
+  // Skill kind other than 0. Kind 1 scales the cost by 0x3c888888; the note ran
+  // kind 0 only (:95; difftest :354).
+  kKindNotZero = 1u << 3,
 };
-inline Payment debit_after_zero_cast(Raw mana, Raw cost, std::uint16_t recast_now,
-                                    std::uint16_t recast_field, bool prediction_copy) {
-  if (recast_now > 0 || prediction_copy)
-    return Payment{mana, recast_now, false};
-  return Payment{sub(mana, cost), recast_field, true};
+
+struct Payment {
+  Raw mana = 0;           // New record +0xc0.
+  Raw cost = 0;           // The amount subtracted.
+  std::uint8_t unprobed = kObserved;
+};
+
+// Debit after the cast slot returns. `slot5` is the skill's slot-5 float, `kind`
+// is skill +8, `recast_before` the +0x4ae halfword read at entry, `skill_flags`
+// skill +4 read at the copy gate. One subtract, with no below-cost refusal
+// (player-spells-numeric-r3.md:106).
+inline Payment cast_payment(Raw mana, Raw slot5, std::int32_t kind, std::uint16_t recast_before,
+                            bool prediction_copy, std::uint32_t skill_flags,
+                            std::uint32_t cast_return) {
+  Payment out;
+  out.cost = kind == 1 ? mul(slot5, 0x3c888888u) : slot5;
+  out.mana = sub(mana, out.cost);
+  if (static_cast<std::int16_t>(recast_before) < 0)
+    out.unprobed |= kRecastNegative;
+  if (prediction_copy && (skill_flags & 1u))
+    out.unprobed |= kCopyBit0Set;
+  if (cast_return != 0)
+    out.unprobed |= kNonZeroCast;
+  if (kind != 0)
+    out.unprobed |= kKindNotZero;
+  return out;
 }
 
-// ID 49. frames is statistic 2 times 60 (player-spells-numeric-r3.md:70-75).
-// The probed boss case is rank 1. The body skips every nonzero boss-rank
-// return (ref_creature.py slot30_stun). A derived slot 27 stays unknown;
-// this store is the base state body 0x3c2688.
-inline std::uint16_t bash_frames(std::int32_t statistic2) {
-  const auto product = std::int64_t(statistic2) * 60;
-  return static_cast<std::uint16_t>(static_cast<std::uint32_t>(product) & 0xffffu);
-}
-
+// Synthetic fixtures below. The client does not call them. They chain the live
+// combat::damage_apply and creature_hp::Model::take_damage so that the test
+// can compare them with the note.
 struct Delivery {
   int result = 0;
   bool handed = false;
@@ -59,8 +102,8 @@ struct Delivery {
   bool player_slot_refused = false;
 };
 
-// Creature hit-point delivery. +0xc8 and +0x2dc are written by
-// Creature_takeDamage, not by a second guess. player-spells-numeric-r3.md:43-61.
+// Creature hit-point delivery (player-spells-numeric-r3.md:38-61). `world` keeps
+// its events and its take-damage hook: the hook is swapped for the call only.
 Delivery deliver_creature_hit(combat::World &world, combat::Obj &victim, combat::Obj *attacker,
                              Raw dmin, Raw dmax, std::int64_t attack, std::uint32_t flags,
                              const combat::Descriptor *descriptor, std::int64_t no_crit,
@@ -70,7 +113,4 @@ Delivery deliver_creature_hit(combat::World &world, combat::Obj &victim, combat:
 Delivery deliver_cold_hit(combat::World &world, combat::Obj &victim, combat::Obj *attacker,
                          std::int32_t cold_low, std::int32_t cold_high, creature_hp::Memory &memory,
                          creature_hp::Address creature, creature_hp::Address attacker_address);
-
-void bash_stun(creature_hp::Memory &memory, creature_hp::Address creature, std::uint16_t frames,
-               int flash, int boss_rank);
 } // namespace champions::simulation::rta::spell_numeric

@@ -860,12 +860,16 @@ void Model::healing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
     percent=stat_for(word(mem,offset(spell,8)),0,level_byte(mem,spell),owner,20);
     most=word(mem,offset(word(mem,offset(spell,0xc)),0x22c));
   }
-  // ID 55 owner product. research-spells-r3 docs/spec/player-spells-numeric-r3.md:81-88.
-  mem.store(offset(spell,0x1c),4,spell_numeric::owner_heal_product(most, percent));
+  // Grouped product. research-spells-r3 docs/spec/player-spells-numeric-r3.md:81-89
+  // observed the player-owner branch only (statistic 0, record +0xb0). The
+  // creature-owner branch (+0x22c) is outside that note.
+  mem.store(offset(spell,0x1c),4,spell_numeric::heal_grouped_product(most, percent));
 }
 Raw Model::heal_share(Address spell, Raw most) {
   auto percent=stat_for(word(mem,offset(spell,8)),2,level_byte(mem,spell),word(mem,offset(spell,0xc)),20);
-  return spell_numeric::owner_heal_product(most, percent);
+  // Non-owner share: statistic 2 and the recipient +0xb0. Same grouping, from the
+  // earlier skills_b contract; research-spells-r3 does not run this amount.
+  return spell_numeric::heal_grouped_product(most, percent);
 }
 void Model::healing_run(Address spell, Raw, Raw) {
   auto skill=word(mem,offset(spell,8));
@@ -915,8 +919,9 @@ void Model::healing_run(Address spell, Raw, Raw) {
         auto hp=word(mem,offset(rec,0xac));
         auto amount=word(mem,offset(rec,REC_OBJ))==word(mem,offset(spell,0xc)) ?
           word(mem,offset(spell,0x1c)) : heal_share(spell,word(mem,offset(rec,0xb0)));
-        // One add of the cached owner product. player-spells-numeric-r3.md:83-84 and :123.
-        mem.store(offset(rec,0xac),4,spell_numeric::add_cached_heal(hp, amount));
+        // One add. Only the owner branch (the cached +0x1c) is the amount
+        // player-spells-numeric-r3.md:81-89 observed; heal_share is not.
+        mem.store(offset(rec,0xac),4,spell_numeric::add_heal(hp, amount));
       }
       if (early()) heal_tint(mem,word(mem,offset(rec,REC_OBJ)));
     }
