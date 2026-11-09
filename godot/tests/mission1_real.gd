@@ -47,6 +47,8 @@ func run() -> void:
 		scene.level_script.set_pressed_no_signal(true)
 		check(scene.load_real_level(index), "destination terrain loads")
 		var initial: Dictionary = scene.controller.script_mission1_status()
+		# docs/mission1-levels.md:404-428: two admitted newWorld sites per level, demo branch refused.
+		check(int(initial.get("travel_sites", -1)) == 2 and int(initial.get("travel_demo_refused", -1)) == 1, "travel sites validated, demo branch refused")
 		if initial.get("ok", false) and int(initial.branch) == 0:
 			var counts: Dictionary = scene.controller.script_command_counts()
 			check(not initial.objects_validated and int(counts.objects_registered) == 0, "refused preStart cannot adopt objects")

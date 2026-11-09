@@ -1,4 +1,5 @@
 #include "champions/script_commands.hpp"
+#include "champions/mission1_levels.hpp"
 #include "champions/objects.hpp"
 #include "champions/vendor_stock.hpp"
 #include "champions/quests_bridge.hpp"
@@ -1829,6 +1830,21 @@ void Host::gate_entry(const std::string &entry) {
   counts_.entry_refusals += 1;
   last_refusal_ = "refused entry " + *reason;
   throw RefusedResult(last_refusal_);
+}
+
+Stop Host::mission1_travel(unsigned index) {
+  if (!mission1_ || index >= mission1_->travel.size()) return Stop::Refused;
+  const auto &site = mission1_->travel[index];
+  if (site.demo_branch) {
+    remember(RefusedResult(std::string("Mission 1: ") +
+        mission1_levels::open_reason(mission1_levels::Open::DemoBranch)));
+    return Stop::Refused;
+  }
+  // research-strife-drundar de4aafe docs/mission1-levels.md:410-417: with
+  // demoRunning 0, exitzone requests the arena; newWorld5d32 requests its
+  // destination. The client's demoRunning returns 0 (script_builtins.cpp
+  // utility_dispatch), so the demoRunning-0 request is the one admitted.
+  return mission1_site(site.offset);
 }
 
 Stop Host::run(const std::string &entry) {

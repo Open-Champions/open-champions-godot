@@ -26,6 +26,10 @@ Dictionary ChampionsSessionController::script_mission1_status() const {
   out["stage2_callbacks"] = int64_t(c->census.stage2);
   out["catapult_callbacks"] = int64_t(c->census.catapults);
   out["switch_pairs"] = int64_t(c->census.switches);
+  int64_t travel = 0, demo = 0;
+  for (const auto &t : c->travel) (t.demo_branch ? demo : travel) += 1;
+  out["travel_sites"] = travel;     // admitted newWorld sites (docs/mission1-levels.md:410-417)
+  out["travel_demo_refused"] = demo; // demoRunning branch, not executed (425-428)
   out["local_count"] = int64_t(scripts_->mission1_local_count());
   out["count_predicate"] = scripts_->mission1_local_count() == (strife ? 2 : 8);
   Array flags;
@@ -67,6 +71,7 @@ Dictionary ChampionsSessionController::script_mission1_action(const String &acti
   else if (action == "restore") stop = scripts_->restore_mission1_addressed();
   else if (action == "count_gate") stop = scripts_->mission1_count_gate();
   else if (action == "bridge") stop = scripts_->mission1_bridge_request(unsigned(index));
+  else if (action == "travel") stop = scripts_->mission1_travel(unsigned(index));
   out["ok"] = stop == Stop::Complete;
   out["refused"] = stop == Stop::Refused;
   out["fault"] = stop == Stop::Fault;

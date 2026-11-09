@@ -16,6 +16,7 @@ include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/ui_text_gaps_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/level_object_state.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/mission1_scripts.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/mission1_levels.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/loading_equipment.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
