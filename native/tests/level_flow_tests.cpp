@@ -2168,14 +2168,16 @@ void death_reload_r2_cases() {
     done.game_complete = true;
     auto r = save_game(s, {0x42}, {}, done);
     CHECK(r.outcome == SaveGame::Built && !r.level_stored);
-    CHECK(s.states.blobs.at("aa") == Blob{0x41} && s.saved->level == "aa");
+    // The header names gameComplete, not the level (save-format.md:37).
+    CHECK(s.states.blobs.at("aa") == Blob{0x41} &&
+          s.saved->level == GAME_COMPLETE_NAME && s.saved->level != "aa");
     // Outside every act save_game's own act-row test still applies: the
     // completed-game skip belongs to save_build, so nothing is built
     // (save-world.md:255-260; save-format.md:55-60).
     s.level = "SYN_NOWHERE";
     s.quest_values["SYN_Q"] = 8;
     CHECK(save_game(s, {0x43}, {}, done).outcome == SaveGame::NoActRow &&
-          s.states.entries.size() == 1 && s.saved->level == "aa" &&
+          s.states.entries.size() == 1 && s.saved->level == GAME_COMPLETE_NAME &&
           !s.saved->quest_values.count("SYN_Q"));
     // The missionmenurun task goes to save_build directly (save-world.md
     // :253-254): there a completed game skips save_findAct and builds the
@@ -2184,12 +2186,22 @@ void death_reload_r2_cases() {
     menu.mission_menu_task = true;
     auto built = save_game(s, {0x44}, {}, menu);
     CHECK(built.outcome == SaveGame::Built && !built.level_stored &&
-          s.saved->level == "SYN_NOWHERE" && s.states.entries.size() == 1);
+          s.saved->level == GAME_COMPLETE_NAME && s.states.entries.size() == 1 &&
+          s.saved->quest_values.at("SYN_Q") == 8);
     menu.game_complete = false;
     s.quest_values["SYN_Q"] = 9;
     s.level = "SYN_NOWHERE_TOO";
     CHECK(save_game(s, {0x45}, {}, menu).outcome == SaveGame::BuildNoAct &&
-          s.saved->level == "SYN_NOWHERE" && s.saved->quest_values.at("SYN_Q") == 8);
+          s.saved->level == GAME_COMPLETE_NAME &&
+          s.saved->quest_values.at("SYN_Q") == 8);
+    // A death reload from the gameComplete header is not researched: refused,
+    // with nothing requested.
+    s.level = "aa";
+    for (auto &p : s.players)
+      p.hp = 0;
+    const auto pending_before = s.pending.name;
+    CHECK(message_has([&] { party_wipe(s, 2); }, "names gameComplete") &&
+          s.pending.name == pending_before && !s.loaded_from_save);
   }
   // C2. Act -1 goes to save_build directly too (save-world.md:253-254).
   {

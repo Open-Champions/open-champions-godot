@@ -518,6 +518,9 @@ struct Transient {
 // frozen directory copy. research-death-reload@98ea7a6
 // docs/death-reload-client-path.md:55-73,137-143 (Inferred there, from
 // research-save-world@31a0ca6 docs/save-world.md:285-301).
+// With the game complete, save_build writes this fixed name to header +0x00
+// instead of the level name (research-saves@8d43286 docs/save-format.md:37).
+inline constexpr char GAME_COMPLETE_NAME[] = "gameComplete";
 struct Checkpoint {
   std::string level, sub;
   int act = -1, difficulty = 1;

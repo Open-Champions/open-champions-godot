@@ -1264,9 +1264,13 @@ SaveGameResult save_game(State &s, const Blob &blob, const Blob &camera,
                       "current act; that store was not executed "
                       "(research-saves@8d43286 docs/save-format.md:236-242)");
   r.outcome = SaveGame::Built;
-  s.saved = Checkpoint{s.level,   s.sub,          s.act,   s.difficulty,
-                       s.spawn,   s.players,      s.quest_values,
-                       s.gates,   camera};
+  // With the game complete, header +0x00 gets the fixed 13-byte name
+  // gameComplete instead of the level name (research-saves@8d43286
+  // docs/save-format.md:37; ps2_save.cpp writes COMPLETE_NAME the same way).
+  s.saved = Checkpoint{o.game_complete ? std::string(GAME_COMPLETE_NAME) : s.level,
+                       s.sub,          s.act,   s.difficulty,
+                       s.spawn,        s.players, s.quest_values,
+                       s.gates,        camera};
   // save_build's level store into the live directory, skipped when the game
   // is complete (save-world.md:269-275). At act -1 a non-hub name has no
   // current-act row, so nothing is stored (save-format.md:236-242).
@@ -1305,6 +1309,11 @@ Wipe wipe_from(State &s, const Checkpoint *cp, unsigned players) {
     s.pending.request(s.level, ORIENT_RESTORE);
     return Wipe::Restart;
   }
+  if (cp && cp->level == GAME_COMPLETE_NAME)
+    throw Unsupported(
+        "death reload refused: the live header names gameComplete, the "
+        "completed-game header name (research-saves@8d43286 "
+        "docs/save-format.md:37); what reloading it does is not researched");
   if (!cp)
     throw MissingResource(
         "death reload refused: the live save buffer holds no checkpoint (no "
