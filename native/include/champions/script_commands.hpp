@@ -446,6 +446,9 @@ public:
   Stop restore_mission1_addressed();
   Stop mission1_count_gate();
   Stop mission1_bridge_request(unsigned index);
+  // Contract travel site `index` through the existing newWorld binder. A demo
+  // branch is refused (docs/mission1-levels.md:425-428).
+  Stop mission1_travel(unsigned index);
   std::int32_t mission1_local_count() const;
   const std::vector<Spawn> &spawns() const { return spawns_; }
   // Script trigger(portal, 0) reaches virtual slot 3 on the named object.

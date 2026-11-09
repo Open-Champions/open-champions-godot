@@ -53,6 +53,22 @@ struct Reader {
   std::string text(std::uint32_t off, const std::string &name, unsigned n, unsigned arg = 0) {
     return call(off, name, n, {arg}).strings.at(arg);
   }
+  // Public owner of an addressed site, resolved from this image.
+  std::uint32_t owner(std::uint32_t at) {
+    std::uint32_t found = 0;
+    bool any = false;
+    for (const auto &p : m.publics()) if (std::uint32_t(p.second) <= at) {
+      found = std::max(found, std::uint32_t(p.second)); any = true;
+    }
+    require(any); entry(found); return found;
+  }
+  // newWorld(destination) at `off`. A demo-branch site is validated and kept
+  // out of the admitted sites (docs/mission1-levels.md:425-428).
+  void travel(std::uint32_t off, bool demo) {
+    const auto site = call(off, "newWorld", 1, {0});
+    if (demo) c.sites.erase(off);
+    c.travel.push_back({off, owner(off), site.strings.at(0), demo});
+  }
 };
 std::string prop(const level_flow::Record &r, const char *key) {
   const auto p = r.prop(key);
@@ -130,13 +146,11 @@ std::optional<Contract> Contract::inspect(const amx::Machine &m) {
     const auto complete = r.call(0x16f4, "setv", 2, {0});
     require(complete.strings.at(0) == out.stage_keys[3] && complete.arguments[1] == 1);
     require(r.text(0x1720, "callScript", 1) == r.entry(0x17f8));
-    for (const auto at : {0x1c90u,0x1df0u,0x1ed4u,0x1f00u,0x1f44u}) {
-      // Public owner of each addressed effect, resolved from this image.
-      std::uint32_t owner = 0;
-      for (const auto &p : m.publics()) if (std::uint32_t(p.second) <= at)
-        owner = std::max(owner, std::uint32_t(p.second));
-      r.entry(owner);
-    }
+    for (const auto at : {0x1c90u,0x1df0u,0x1ed4u,0x1f00u,0x1f44u}) r.owner(at);
+    // Travel: newWorld5d32 at 0x490; exitzone's demo branch at 0x1ae8 and its
+    // demoRunning-0 request at 0x1b94 (tools/ref_mission1_levels.py:228-230).
+    r.travel(0x490, false); r.travel(0x1ae8, true); r.travel(0x1b94, false);
+    require(out.travel[1].owner == out.travel[2].owner && out.travel[0].owner != out.travel[2].owner);
   } else {
     for (const auto at : {0x18cu,0x1c8u,0x204u}) r.call(at, "setMonsterVal", 3, {0});
     require(out.sites.at(0x18c).strings == out.sites.at(0x1c8).strings &&
@@ -185,12 +199,11 @@ std::optional<Contract> Contract::inspect(const amx::Machine &m) {
     r.cells(0xa7c, {0x35,0xb10});
     const auto saved = r.call(0xb00, "setv", 2, {0});
     require(saved.strings.at(0) == out.door_flag && saved.arguments[1] == 1);
-    for (const auto at : {0x868u,0x1c54u}) {
-      std::uint32_t owner = 0;
-      for (const auto &p : m.publics()) if (std::uint32_t(p.second) <= at)
-        owner = std::max(owner, std::uint32_t(p.second));
-      r.entry(owner);
-    }
+    for (const auto at : {0x868u,0x1c54u}) r.owner(at);
+    // Travel: exitzone's demo branch at 0x1a18 and its demoRunning-0 request
+    // at 0x1ac4; newWorld5d32 at 0x1c20 (tools/ref_mission1_levels.py:231-233).
+    r.travel(0x1a18, true); r.travel(0x1ac4, false); r.travel(0x1c20, false);
+    require(out.travel[0].owner == out.travel[1].owner && out.travel[1].owner != out.travel[2].owner);
   }
   } catch (const std::exception &) {
     throw std::runtime_error("Mission 1 addressed contract mismatch near code cell " + std::to_string(r.last));

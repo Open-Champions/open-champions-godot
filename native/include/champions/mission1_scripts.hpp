@@ -23,6 +23,14 @@ struct Switch {
   std::uint32_t key_entry = 0, action_entry = 0;
   std::string persistent, effect;
 };
+// A newWorld site (research-strife-drundar de4aafe tools/ref_mission1_levels.py:227-237,
+// docs/mission1-levels.md:404-428). The destination is read from the image.
+// A demo-branch site is recorded but not admitted: it was not executed.
+struct Travel {
+  std::uint32_t offset = 0, owner = 0;
+  std::string destination;
+  bool demo_branch = false;
+};
 struct Census {
   std::size_t records = 0, selected = 0, not_created = 0, hostiles = 0;
   std::size_t stage1 = 0, stage2 = 0, catapults = 0, switches = 0;
@@ -38,6 +46,7 @@ public:
   std::map<std::uint32_t, std::string> entries;
   std::vector<std::string> stage_keys, scouts, bridges;
   std::vector<Switch> switches;
+  std::vector<Travel> travel;
   std::map<std::uint32_t, std::string> restore_keys;
   std::string counter_key, door_flag;
   Census census;
