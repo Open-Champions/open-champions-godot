@@ -4,8 +4,9 @@ STATUS: PASS. Twelve-row menu table and acts, row-0 confirm, tested cursor rules
 
 Branch `codex/play-story-route` from wave 38 VERIFIED `16b66176`. Code commit
 `5f5b4ad6`. Research pin `t3/research-story-route-r3` `3c7987c`,
-`docs/story-route.md` sections 6-8 (audits `research-story-route-r4.md`,
-`research-story-route-r5r6.md`, `research-story-route-r6-fix.md`, PASS).
+`docs/story-route.md` sections 6-8 (audits: `research-story-route-r4.md`;
+`research-story-route-r5r6.md` was VERDICT FIX (SR6-1), closed by
+`research-story-route-r6-fix.md` with PASS).
 Contract note: `docs/STORY_ROUTE.md`.
 
 ## What the client had
@@ -61,7 +62,9 @@ Missions 3-5 (sections 7-8):
   run in). The scene turns on `require_complete_commands` and the gate there.
 - The host checks the gate at every entry start: `run`, `run_start` /
   `run_prestart`, post actions, deferred calls and `callScript`
-  (`Variables::before_entry`). 75 entries may start; any other entry is
+  (`Variables::before_entry`). 75 entries may start (71 executed, four of
+  them only inside their callers, and the 4 `islc1` racer wrappers
+  statically parsed, `:442-450`; fix round 1, SR1-2); any other entry is
   refused before it runs and stops the script (`Counts::entry_refusals`).
   Thirteen named entries keep their own reason: `brokeFinalWall` x3
   (`:728-736`), `holeCheck` x3 (`:738-743`), side-level `start` x6
@@ -69,9 +72,11 @@ Missions 3-5 (sections 7-8):
   started from an object record are refused (`:549-552`, `:945-947`).
   Dialog opening is refused (`:412-421`, `:442-450`, `:465-474`, `:782-802`).
 - The listed entries run through the existing commands. In these levels
-  `newWorld(0)` reads the data-segment string, because the research executed
-  those travel entries and recorded their level (`:638-670`, `:832-848`);
-  the private probe confirms the requested names. The mission 2
+  `newWorld(0)` reads the data-segment string. Research ran the listed
+  travel entries and recorded the pending level each wrote (`:430-440`,
+  `:638-670`, `:832-848`); that they pass offset 0 is a client observation
+  on the disc, and the private probe reproduces every recorded level (fix
+  round 1, SR1-3). The mission 2
   null-destination refusal is unchanged for ungated levels.
 - `playerHasItem` is the client's `inventory_countItemByName` over the bag
   (the item count is a real client service; `:469-474`, `:686-706`).
@@ -94,7 +99,9 @@ entries.
 (`work/play-story-route-r1/probe.log`): **212/213**. Menu table 5/5, all 75
 listed and 13 refused entries are publics of their shipped levels, and the
 executed mission 3, 4 and 5 cases match: starts, conditions, the five islc1,
-six wat1, six return and eight tormenta travels, gnome entrances, the
+six wat1, six return and eight tormenta travels, the kill-free gnome
+entrances (the kill states were wrongly counted here; see fix round 1,
+SR1-1), the
 25-call `shardCheck` count with the client's empty bag on all six side
 levels, completions on four records, and the 17 hub/hub2 availability writes.
 Quest titles are compared with each other at run time and never printed.
@@ -218,3 +225,44 @@ python3 tools/run_loop_playthrough.py --godot <Godot> --game-folder ../../privat
 - Who restores `0x8e2f10`, the menu draw, the loader body, arrival, dialog
   selection and object use in mission 3-5 levels, and missions 6-12 stay
   refused. No continuous hub-to-mission-5 session was run.
+
+## Fix round 1 (audit `play-story-route-r1.md`, VERDICT FIX: 1 MEDIUM, 6 LOW)
+
+2026-11-09. Base `16b66176`, round 1 tip `7363f97f`. Code commit `28b3bb51`,
+docs commit `d90561f8`. Research pin unchanged (`t3/research-story-route-r3`
+`3c7987c`). Logs in `work/play-story-route-fix1/` (mini home path rewritten
+to `~/`).
+
+| Finding | Fix | Evidence |
+|---|---|---|
+| **SR1-1 MEDIUM**, loose `m3-gnome` check hid the client's stop at `killMonster` | The probe splits the four kill states (`startedQuest` 1, `finishedQuest` absent or 0) out of `m3-gnome`. `m3-gnome-kill` asserts the research outcome: `ran(stop)`, exactly 8 `killMonster` calls, pending `islc2`, the entrance door, missions untouched (`docs/story-route.md:454-463`). `m3-gnome-kill-client-stop` asserts what the client does: `stops_at(killMonster)`, one refused call, none executed, pending still the sentinel, missions untouched. The stop is disclosed as a mission 3 play gap in `docs/STORY_ROUTE.md`, in the `failQuest` comment in `story_route.cpp`, and below. `killMonster` is not ported (it is under separate research). | Probe: `m3-gnome` 6/6 (kill-free), `m3-gnome-kill` **0/6** (reported as failures), `m3-gnome-kill-client-stop` 6/6. The client stops at the first `killMonster` in all six kill cases, before `islc2`. |
+| SR1-2, "75 executed" | Report, header and contract now say: 71 executed (`failQuest`, `endMission` and the two `steppedOnTrigger` only inside their callers) and 4 statically parsed (the `islc1` racer wrappers, `:442-450`). The `Kind::Wrapper` comment no longer calls all wrappers a static parse. The audit chain now reads: r5r6 was VERDICT FIX (SR6-1), closed by r6-fix with PASS. | New test `test_entry_basis`: 71 executed, plus exactly the four racer wrappers marked as a static parse. |
+| SR1-3, offset-0 basis | `script_commands.cpp` and `docs/STORY_ROUTE.md` now say that research recorded the original binder's pending level for each listed travel entry (`:430-440`, `:638-670`, `:832-848`). That the shipped entries pass offset 0 is a client disc observation, confirmed by the probe. Behaviour is unchanged. The optional `Kind::Travel` restriction was not taken: the host gate sees entry names, not kinds. Only listed entries can start in a gated level. | Probe `m3-travel` 5/5, `m4-travel` 6/6, `m4-back` 6/6, `m5-travel` 8/8. |
+| SR1-4, mission 4 "no store calls" | `Availability` gains `store_known` (false for the four mission 4 entries: section 7 is silent, `:504-510`) and `client_store_stop` (a disc observation, not research: `setMissidce3` and `setMissic4` stop at the client's refused `activateStore`). Mission 4 `store_calls` stays false as "not claimed". The probe now checks each mission 4 row against the list (no either-outcome acceptance). New test `test_hub_research_table` checks every list entry against a literal research-cited table (mission, quest, store pair, neither or Unknown; `:504-510`, `:861-878`, `:868-876`). | Probe `m4-offer` 4/4 against the per-row flags. `m56-offer` 13/13. The new test passes. |
+| SR1-5, line citations | `REQUEST_ORIENT` now cites `:103-105, :257`. `Request::offered` and the contract cite `:336-338`. `S7_DONE` 476-485, `S8_WATER1` 623-634, `S8_IFF46` 745-748, `S8_GOLQ` 804-807, store calls `:868-876`, hub ranges `:861-878`. Other ranges that ran into the next heading were also shortened: `:728-736`, `:465-474`, `:303-309`. | Each range was checked against `docs/story-route.md` at `3c7987c`. Each now starts on its paragraph and ends inside it. |
+| SR1-6, watmedal/tormedal | Described as the mission 4 and 5 medal levels. Research did not run them (`:562-563`). They are not among the gated levels, and their load is refused (SR1-7). | Probe `medal-bonus-refused`: `watmedal` and `tormedal` are the mission 4 and 5 medal-column names, and both refuse. |
+| SR1-7, medal/bonus loads | New `story_route::table_match` (story, evil, medal or bonus column) and `load_refusal`. Story and evil names of missions 6-12 still refuse through `in_level_refusal`. Medal and bonus names of missions 3-12 now refuse, citing `docs/story-route.md:268` and `:562-563`. `script_level_request` uses `load_refusal`. Missions 1 and 2 medal and bonus keep the policy they had before this branch. `table_mission` is unchanged. | New test `test_medal_bonus_refused` (all twelve rows, both columns, story and evil unchanged). Probe `medal-bonus-refused` 22/22 on the disc's table. |
+
+Only additions were made to tests and baselines. The existing `story-route`
+checks are unchanged, the new checks take it from 635 to 789, and no vector,
+baseline or harness changed. The probe changes are stricter, never looser:
+the kill states left the old either-outcome check, and the mission 4 rows are
+now checked per row.
+
+### Disclosed gaps after fix round 1
+
+- **Mission 3:** `islgnome` `entrance1`-`entrance3` with the gnome quest
+  started and not finished stop at the client's unported `killMonster`
+  before `islc2` is requested (`m3-gnome-kill` 0/6). In play, the client
+  cannot leave `islgnome` through those entrances in that state.
+- **Mission 5:** `tormenta` `start` stops at `autoPropSetState` before
+  `setMissionAvailable(5, 1)` (`m5-start` 0/1), as in round 1.
+
+### Fix round 1 gates (Mac mini)
+
+| Gate | Result |
+|---|---|
+| Release `cmake --build build/native -j 4` | PASS, exit 0 (`work/play-story-route-fix1/build.log`). One build directory. `df` before the build: 34 GiB free. |
+| GDExtensions `template_debug`, Release, `-j 4` | PASS, exit 0 for the archive extension, level-texture and creature-animation (`ext-build.log`, `tex-build.log`, `anim-build.log`). |
+| Focused CTest `story-route`, `quests`, `script-commands`, `dialog`, `mission2-route`, `mission1-scripts`, `script-items` | PASS 7/7 (`ctest-focused.log`). `story-route` 789 checks. |
+| Private probe `champions-story-route-probe <disc>`, counts only | **234/241**, exit 1 (`probe.log`). The seven failures are the two disclosed gaps: `m3-gnome-kill` #1-6 and `m5-start` #1. Their client-stop groups pass, 6/6 and 1/1. Every other group passes. Round 1's 212/213 maps to this as follows: the 12 old `m3-gnome` cases became 6 + 6 + 6 (+6 cases), and `medal-bonus-refused` is new (+22). |
