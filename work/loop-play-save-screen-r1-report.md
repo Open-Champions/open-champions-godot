@@ -79,7 +79,19 @@ real timestamps (doc:27-29, 321-323). Every other unexecuted branch throws `Unkn
    -j 3`, 47.39 s (`work/pss/focused.log`); `memcard-screen` 118 checks. Registered tests:
    260 (259 + `memcard-screen`).
 3. Full CTest: pending.
-4. Strict Godot matrix: pending.
-5. FULL_SAVE_LOAD: pending.
-6. FULL_TRACE: pending.
+4. **Strict Godot matrix: PASS, 54/54**, exit 0. `python3 -u tools/godot_matrix.py matrix
+   --godot ~/malik-champions/runtime/Godot.app/Contents/MacOS/Godot --captures --timeout 1200`
+   (`work/pss/matrix.out`, `work/pss/matrix/results.json`). The unchanged `check-log` found
+   0 diagnostic errors in all 105 logs. A first run was 29/54: the mini copy had been seeded
+   from a sibling worktree's `.godot`, which lacked the imported
+   `res://assets/open_champions_avatar.png` (58 identical load errors, kept in
+   `work/pss/matrix-stale-import.out`). One headless `--import` (`work/pss/editor-import.log`,
+   exit 0) fixed the cache; no file, test or allowlist changed before the 54/54 rerun.
+   Full synthetic combat: 2,645 checks, 0 failures.
+5. **FULL_SAVE_LOAD: PASS, 300/300.** Continued and uninterrupted presentation SHA-256
+   `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, identical to each
+   other and to wave 37. No change: this round adds a separate native contract and does not
+   touch the session save/load path that fixture drives.
+6. **FULL_TRACE: PASS, unchanged**, 36,402 bytes, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline edited.
 7. Journeys: pending.
