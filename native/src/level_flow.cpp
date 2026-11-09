@@ -763,19 +763,25 @@ StoreResult LevelStates::store(const std::string &name, const Act &rows,
       break;
     offset += entries[index].second;
   }
-  if (index == entries.size() || index == SEARCHED) {
-    if (entries.size() >= ENTRIES)
-      throw Unsupported("a 12th level-state directory entry overlaps the "
-                        "data area; that path was not executed");
+  if (index == entries.size()) {
+    // A free slot: 0..9, or gap slot 10 after ten keys.
     entries.push_back({name, size});
     index = entries.size() - 1;
+  } else if (index == SEARCHED) {
+    // All ten slots and the gap are written: the writer addresses slot 10
+    // again, rewriting its body with its kept size under the ghost name
+    // (save-world.md:35-39, 196, Executed). The miss's own name is not
+    // written anywhere.
+    if (entries.size() != ENTRIES)
+      throw Error("level-state directory has more than eleven entries");
   }
   out.entry = true;
+  const auto &key = entries[index].first;
   const auto kept = entries[index].second;
   if (offset <= LIMIT && kept <= LIMIT - offset) {
     if (blob.size() > kept)
       throw Error("serialized state exceeds act allocation");
-    blobs[name] = blob;
+    blobs[key] = blob;
     out.writer_offset = offset;
   }
   return out;
@@ -819,15 +825,16 @@ RestoreDecision LevelStates::restore_decision(const std::string &name) const {
 RestoreDecision LevelStates::require_restorable(const std::string &name,
                                                 bool check_cleared) const {
   if (check_cleared && cleared_slot0) {
-    // save-world.md:194: save_clearBuffer(0) keeps slot 0 (Executed).
+    // save-world.md:194-195: save_clearBuffer(0) keeps slot 0 (Executed).
     if (*cleared_slot0 == name)
       throw Unsupported(
           "death reload refused: an act change since the checkpoint ran "
           "save_clearBuffer(0), which keeps directory slot 0 '" + name +
-          "' with its first 15000 bytes and the act-0 row-0 size "
-          "(research-save-world@31a0ca6 docs/save-world.md:194); this "
-          "client cleared the whole directory, so it cannot restore that "
-          "body and does not load it fresh");
+          "' with its first act-0 row-0 bytes and that row's size "
+          "(research-save-world@31a0ca6 docs/save-world.md:194-195); only "
+          "the exact row-0 name already at that size with a body that fits "
+          "was restored there, so this client dropped the slot and neither "
+          "restores a cut body nor loads it fresh");
     if (entries.size() >= SEARCHED)
       throw Unsupported(
           "death reload refused: the slot 0 kept by an act-change clear "
@@ -843,9 +850,8 @@ RestoreDecision LevelStates::require_restorable(const std::string &name,
         "0..9, so the original loader stops at gap slot 10, which holds '" +
         entries[SEARCHED].first + "', and restores that body for every "
         "missing name (research-save-world@31a0ca6 docs/save-world.md:44-52)"
-        "; the port must choose a gap-slot policy (save-world.md:314-316) "
-        "and none is chosen, so neither the gap body nor a fresh load is "
-        "used");
+        "; the chosen gap-slot policy (save-world.md:314-316) is to refuse, "
+        "so neither the gap body nor a fresh load is used");
   return d;
 }
 void GateList::reset(const std::string &hub) {
@@ -1079,15 +1085,33 @@ begin_change(State &s, const ChangeOptions &o,
     }
   }
   r.reset_act = r.act_changed && !o.card_latch && !o.death_task;
-  if (r.reset_act) {
-    // save_clearBuffer(0) keeps slot 0 (save-world.md:194); this client drops
-    // it and records the key, so a later death reload into it refuses.
-    auto kept = s.states.entries.empty() ? s.states.cleared_slot0
-                                         : std::optional<std::string>(
-                                               s.states.entries.front().first);
-    s.states = {};
-    s.states.cleared_slot0 = kept;
+  if (r.reset_act && !o.clear_block) {
+    // save_clearBuffer(0) keeps slot 0's name and first act-0 row-0 bytes and
+    // sets its size to that row's (save-world.md:194-195, Executed). Only the
+    // `hub` case was restored there, so only it is kept; see
+    // LevelStates::cleared_slot0.
+    LevelStates kept;
+    if (s.states.entries.empty()) {
+      kept.cleared_slot0 = s.states.cleared_slot0;
+    } else {
+      const auto &slot0 = s.states.entries.front();
+      const auto body = s.states.blobs.find(slot0.first);
+      const bool restorable =
+          !s.acts.empty() && !s.acts[0].empty() &&
+          slot0.first == s.acts[0][0].first &&
+          slot0.second == s.acts[0][0].second && body != s.states.blobs.end() &&
+          body->second.size() <= s.acts[0][0].second;
+      if (restorable) {
+        kept.entries = {slot0};
+        kept.blobs[slot0.first] = body->second;
+      } else {
+        kept.cleared_slot0 = slot0.first;
+      }
+    }
+    s.states = std::move(kept);
     s.save_buffer.clear();
+  }
+  if (r.reset_act) {
     s.gates.reset(o.hub);
     for (auto &q : s.quest_values)
       q.second = 0;
@@ -1208,25 +1232,44 @@ SaveGameResult save_game(State &s, const Blob &blob, const Blob &camera,
   SaveGameResult r;
   if (o.players > 4)
     throw Error("player count exceeds four");
-  // 1. One counted living player: below g_numPlayers, built, HP above 0.
+  // 1. One counted living player: below g_numPlayers, object pointer +0x43d8
+  // set, object flag 8 clear, HP above 0 (0x218170-0x2181a0).
   bool living = false;
-  for (unsigned i = 0; i < o.players; ++i)
-    living |= (!o.object_test || s.players[i].active) && s.players[i].hp > 0;
+  for (unsigned i = 0; i < o.players; ++i) {
+    const auto &p = s.players[i];
+    living |= (!o.object_test || (p.object_built && !p.object_flag8)) && p.hp > 0;
+  }
   if (!living)
     return r;
-  // 3. No act row is a prefix of the level name: CheckPoint text, no build,
-  // and the level's state is not stored. A completed game skips the lookup.
   const auto qualified = qualified_name(s.level, s.sub);
-  if (!o.game_complete && find_act(s.acts, qualified, s.act) < 0) {
+  // 2. Act -1 or the missionmenurun task: save_build directly, no message.
+  const bool direct = s.act < 0 || o.mission_menu_task;
+  // 3. Otherwise no act row is a prefix of the level name: CheckPoint text,
+  // no build, and the level's state is not stored. No completed-game flag is
+  // read on this path (0x2181e0-0x218218).
+  if (!direct && find_act(s.acts, qualified, s.act) < 0) {
     r.outcome = SaveGame::NoActRow;
     return r;
   }
+  // save_build: unless the game is complete, its own save_findAct missing
+  // writes nothing (save-format.md:55-58).
+  if (!o.game_complete && find_act(s.acts, qualified, s.act) < 0) {
+    r.outcome = SaveGame::BuildNoAct;
+    return r;
+  }
+  // With act -1 a hub* name forces row 0 of no current act; that store was
+  // not executed (save-format.md:236-242 executes only a named act).
+  if (!o.game_complete && s.act < 0 && qualified.compare(0, 3, "hub") == 0)
+    throw Unsupported("save_build at act -1 for a hub* name reads row 0 of no "
+                      "current act; that store was not executed "
+                      "(research-saves@8d43286 docs/save-format.md:236-242)");
   r.outcome = SaveGame::Built;
   s.saved = Checkpoint{s.level,   s.sub,          s.act,   s.difficulty,
                        s.spawn,   s.players,      s.quest_values,
                        s.gates,   camera};
   // save_build's level store into the live directory, skipped when the game
-  // is complete (save-world.md:269-275).
+  // is complete (save-world.md:269-275). At act -1 a non-hub name has no
+  // current-act row, so nothing is stored (save-format.md:236-242).
   if (!o.game_complete)
     r.level_stored = s.states
                          .store(qualified, act_rows(s), o.card_state,
@@ -1248,13 +1291,17 @@ void card_load(State &s, Checkpoint header, LevelStates directory) {
   s.states = std::move(directory);
 }
 namespace {
-Wipe wipe_from(State &s, const Checkpoint *cp) {
+Wipe wipe_from(State &s, const Checkpoint *cp, unsigned players) {
   // research-death-reload@98ea7a6 docs/death-reload-client-path.md:88-91.
+  if (players > 4)
+    throw Error("player count exceeds four");
   if (s.transient.alternate_death)
     return Wipe::Wait;
   if (find_act(s.acts, s.level, s.act) < 0) {
-    for (auto &p : s.players)
-      p.hp = p.max_hp;
+    // Step 5b: +0xb0 to +0xac for slots below g_numPlayers only
+    // (0x1e76dc-0x1e7710).
+    for (unsigned i = 0; i < players; ++i)
+      s.players[i].hp = s.players[i].max_hp;
     s.pending.request(s.level, ORIENT_RESTORE);
     return Wipe::Restart;
   }
@@ -1281,11 +1328,12 @@ Wipe wipe_from(State &s, const Checkpoint *cp) {
   return Wipe::Reload;
 }
 } // namespace
-Wipe party_wipe(State &s) {
-  return wipe_from(s, s.saved ? &*s.saved : nullptr);
+Wipe party_wipe(State &s, unsigned players) {
+  return wipe_from(s, s.saved ? &*s.saved : nullptr, players);
 }
-Wipe party_wipe(State &s, const std::optional<Checkpoint> &cp) {
-  return wipe_from(s, cp ? &*cp : nullptr);
+Wipe party_wipe(State &s, const std::optional<Checkpoint> &cp,
+                unsigned players) {
+  return wipe_from(s, cp ? &*cp : nullptr, players);
 }
 bool death_task_done(const State &s, const std::string &requested) {
   return s.pending.name.empty() && qualified_name(s.level, s.sub) == requested;

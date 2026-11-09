@@ -381,10 +381,62 @@ void reference_cases() {
   se.quest_values["q"] = 5;
   se.pending.request("bb");
   d = begin_change(se, {});
+  // save_clearBuffer(0) keeps slot 0 (save-world.md:194-195). Slot 0 is 'aa',
+  // not the act-0 row-0 name, whose kept restore was not executed: the
+  // client drops it and records the key.
   CHECK(d.act_changed && se.quest_values["q"] == 0 &&
-        se.states.entries.empty());
+        se.states.entries.empty() && se.states.cleared_slot0 == "aa");
   for (auto &player : se.players)
     CHECK(player.recall_dest == "None");
+  {
+    // The executed case: slot 0 is `hub` at row 0's size with a body that
+    // fits. It survives the clear with its body; every other key is gone, and
+    // `hub` restores (save-world.md:194).
+    State sh;
+    sh.acts = acts;
+    sh.act = 0;
+    sh.level = "aa";
+    sh.states.store("hub", acts[0], 0, 0, false, Blob(100, 0x48));
+    sh.states.store("aa", acts[0], 0, 0, false, {0x41});
+    sh.pending.request("bb");
+    CHECK(begin_change(sh, {}).act_changed);
+    CHECK(sh.states.entries ==
+              (std::vector<std::pair<std::string, std::uint32_t>>{{"hub", 100}}) &&
+          sh.states.blobs.size() == 1 && sh.states.blobs.at("hub") == Blob(100, 0x48) &&
+          !sh.states.cleared_slot0);
+    sh.pending.request("hub");
+    auto back = begin_change(sh, {});
+    CHECK(!back.act_changed && back.had_saved_state && back.saved_bytes &&
+          sh.states.blobs.at("hub") == Blob(100, 0x48));
+    // Block byte 0x4f8f2a set: the buffer is untouched, the other act-reset
+    // work still runs (save-format.md:296-297).
+    State sb;
+    sb.acts = acts;
+    sb.act = 0;
+    sb.level = "aa";
+    sb.quest_values["q"] = 2;
+    sb.states.store("aab", acts[0], 0, 0, false, {0x42});
+    sb.pending.request("bb");
+    ChangeOptions blocked;
+    blocked.clear_block = true;
+    CHECK(begin_change(sb, blocked).reset_act && sb.states.stored("aab") &&
+          sb.states.stored("aa") && !sb.states.cleared_slot0 &&
+          sb.quest_values["q"] == 0);
+    // Kept-slot cases whose restore was not executed are dropped and recorded:
+    // a body larger than the row-0 size, and a hub sub-area in slot 0.
+    for (const auto &[key, body] :
+         std::vector<std::pair<std::string, std::size_t>>{{"hub", 0}, {"hub_west", 4}}) {
+      State sx;
+      sx.acts = acts;
+      sx.act = 0;
+      sx.level = "aa";
+      sx.states.entries = {{key, 100}};
+      sx.states.blobs[key] = Blob(body ? body : 101, 0x01);
+      sx.pending.request("bb");
+      begin_change(sx, {});
+      CHECK(sx.states.entries.empty() && sx.states.cleared_slot0 == key);
+    }
+  }
   Trigger t(f(10), f(20), 5, 4, "go");
   CHECK(t.contains(v(10, 16, 100)));
   CHECK(t.contains(v(15, 20, -100)));
@@ -520,16 +572,22 @@ void robustness_and_state() {
   for (int i = 0; i < 10; ++i)
     CHECK(states.store("s" + std::to_string(i), {{"s" + std::to_string(i), 1}})
               .written());
-  // The 11th key is appended after ten (docs/exits-r4-travel.md:37-38);
-  // only a 12th, which would overlap the data area, refuses.
+  // The 11th key is appended after ten (docs/exits-r4-travel.md:37-38). A
+  // 12th key rewrites the slot-10 body under the ghost name, with its kept
+  // size (research-save-world@31a0ca6 docs/save-world.md:35-39, 196).
   {
     auto eleventh = states.store("eleven", {}, 0, 0, true);
     CHECK(eleventh.written() && *eleventh.writer_offset == 10 &&
           states.entries.size() == 11 &&
           states.entries.back().second == 35000);
   }
-  refuses([&] { states.store("twelve", {}, 0, 0, true); });
-  CHECK(states.entries.size() == 11);
+  {
+    auto twelfth = states.store("twelve", {}, 0, 0, true, {0x0c});
+    CHECK(twelfth.written() && *twelfth.writer_offset == 10);
+  }
+  CHECK(states.entries.size() == 11 && states.entries.back().first == "eleven" &&
+        states.entries.back().second == 35000 &&
+        states.blobs.at("eleven") == Blob{0x0c} && !states.blobs.count("twelve"));
   CHECK(states.store("s0", {}, 0, 0x800, true).skipped);
   State s;
   s.acts = acts;
@@ -546,7 +604,7 @@ void robustness_and_state() {
   CHECK(cp);
   s.players[0].hp = 0;
   s.quest_values["q"] = 0;
-  CHECK(party_wipe(s, cp) == Wipe::Reload);
+  CHECK(party_wipe(s, cp, 4) == Wipe::Reload);
   CHECK(s.players[0].hp == 12 && s.quest_values["q"] == 9 &&
         s.loaded_from_save && s.spawn.rank == 3 &&
         s.spawn.pos[0] == v(1, 2, 3));
@@ -554,11 +612,11 @@ void robustness_and_state() {
   s.sub = "drop";
   s.players[0].hp = 0;
   CHECK(!checkpoint(s, {}, {}));
-  CHECK(party_wipe(s, {}) == Wipe::Restart);
+  CHECK(party_wipe(s, {}, 4) == Wipe::Restart);
   CHECK(s.players[0].hp == 20 && s.pending.name == "outside" &&
         s.pending.orientation == 0xfd);
   s.transient.alternate_death = true;
-  CHECK(party_wipe(s, {}) == Wipe::Wait);
+  CHECK(party_wipe(s, {}, 4) == Wipe::Wait);
   s = {};
   s.acts = acts;
   s.act = 0;
@@ -1125,15 +1183,21 @@ void travel_r4_cases() {
     CHECK(states.store("hub", {}, 0, 0, true).written());
   }
   // save_levelStateStored is a key lookup; an 11-entry directory whose
-  // 11th key is asked for was not run.
+  // 11th key is asked for was not run. A store of the ghost's own name misses
+  // slots 0..9 and rewrites the gap body with its kept size, keeping the
+  // directory (research-save-world@31a0ca6 docs/save-world.md:35-39, 196).
   {
     LevelStates states;
     states.entries = full_plus;
     CHECK(states.stored("SYN_K9"));
     refuses([&] { (void)states.stored("strife"); });
     refuses([&] { (void)states.stored("SYN_ABSENT"); });
-    refuses([&] { states.store("strife", t[0]); });
-    CHECK(states.entries.size() == 11);
+    std::size_t gap_offset = 0;
+    for (const auto &e : full)
+      gap_offset += e.second;
+    auto again = states.store("strife", t[0], 0, 0, false, {0x5e});
+    CHECK(again.written() && *again.writer_offset == gap_offset);
+    CHECK(states.entries == full_plus && states.blobs.at("strife") == Blob{0x5e});
   }
   // mainloop_loadRequestedWorld through the split (:51-85; difftest
   // :295-466). Orientation byte is synthetic.
@@ -1976,6 +2040,7 @@ void death_reload_r2_cases() {
     run.state.acts = acts;
     for (unsigned i = 0; i < 2; ++i) {
       run.state.players[i].active = true;
+      run.state.players[i].object_built = true;
       run.state.players[i].hp = 10;
       run.state.players[i].max_hp = 20;
     }
@@ -2011,7 +2076,7 @@ void death_reload_r2_cases() {
     // Die in aab, which was never stored: no departure store for it.
     for (auto &p : s.players)
       p.hp = 0;
-    CHECK(party_wipe(s) == Wipe::Reload);
+    CHECK(party_wipe(s, 2) == Wipe::Reload);
     CHECK(s.pending.name == "aa" && s.pending.orientation == ORIENT_RESTORE);
     CHECK(s.loaded_from_save && s.quest_values["SYN_Q"] == 4 &&
           s.players[0].persistent == Blob{0x51} && s.players[0].hp == 10);
@@ -2046,37 +2111,48 @@ void death_reload_r2_cases() {
     fresh_run(run);
     auto &s = run.state;
     s.level = "aa";
+    s.act = 0;
     // A living record at slot = g_numPlayers behind a dead party counts not.
     s.players[0].hp = 0;
     auto none = save_game(s, {0x10}, {}, {1});
     CHECK(none.outcome == SaveGame::NoLivingPlayer && !s.saved &&
           s.states.entries.empty());
-    // A record with HP but no built object counts not either.
+    // A record with HP but no built object counts not either, nor one whose
+    // object has flag 8 set (save-world.md:247-249). The peer bit `active`
+    // is a different test and does not count here.
     s.players[0].hp = 10;
-    s.players[0].active = false;
+    s.players[0].object_built = false;
     CHECK(save_game(s, {0x10}, {}, {1}).outcome == SaveGame::NoLivingPlayer);
-    s.players[0].active = true;
-    // No act row is a prefix: CheckPoint text, no build, nothing stored.
+    s.players[0].object_built = true;
+    s.players[0].object_flag8 = true;
+    CHECK(save_game(s, {0x10}, {}, {1}).outcome == SaveGame::NoLivingPlayer);
+    s.players[0].object_flag8 = false;
+    // No act row is a prefix: CheckPoint text, no build, nothing stored. The
+    // slot passed the living test although its peer bit is clear.
+    s.players[0].active = false;
     s.level = "SYN_NOWHERE";
     auto norow = save_game(s, {0x10}, {}, {1});
     CHECK(norow.outcome == SaveGame::NoActRow && !s.saved &&
           s.states.entries.empty());
+    s.players[0].active = true;
     // A death with no checkpoint in a found level refuses (uninitialised
     // buffer Unknown); in a level outside every act it restarts (step 5b).
     s.level = "aa";
     s.players[0].hp = 0;
-    CHECK(message_has([&] { party_wipe(s); }, "holds no checkpoint"));
+    CHECK(message_has([&] { party_wipe(s, 2); }, "holds no checkpoint"));
     s.level = "SYN_NOWHERE";
     s.players[0].persistent = {0x77};
     s.quest_values["SYN_Q"] = 3;
-    CHECK(party_wipe(s) == Wipe::Restart);
-    CHECK(s.players[0].hp == 20 && s.players[1].hp == 20 &&
+    // Step 5b refills only slots below g_numPlayers (0x1e76dc-0x1e7710).
+    s.players[1].hp = 3;
+    CHECK(party_wipe(s, 1) == Wipe::Restart);
+    CHECK(s.players[0].hp == 20 && s.players[1].hp == 3 &&
           s.players[0].persistent == Blob{0x77} && s.quest_values["SYN_Q"] == 3 &&
           s.pending.name == "SYN_NOWHERE" && s.pending.orientation == ORIENT_RESTORE &&
           !s.loaded_from_save);
     // Alternate death waits for the script (phase 10).
     s.transient.alternate_death = true;
-    CHECK(party_wipe(s) == Wipe::Wait);
+    CHECK(party_wipe(s, 2) == Wipe::Wait);
   }
   // C. Completed game: the build skips the level store, so the level keeps
   // the body the directory already held (save-world.md:269-275).
@@ -2093,10 +2169,48 @@ void death_reload_r2_cases() {
     auto r = save_game(s, {0x42}, {}, done);
     CHECK(r.outcome == SaveGame::Built && !r.level_stored);
     CHECK(s.states.blobs.at("aa") == Blob{0x41} && s.saved->level == "aa");
-    // Even outside every act a completed game builds (no save_findAct).
+    // Outside every act save_game's own act-row test still applies: the
+    // completed-game skip belongs to save_build, so nothing is built
+    // (save-world.md:255-260; save-format.md:55-60).
     s.level = "SYN_NOWHERE";
-    CHECK(save_game(s, {0x43}, {}, done).outcome == SaveGame::Built &&
-          s.states.entries.size() == 1);
+    s.quest_values["SYN_Q"] = 8;
+    CHECK(save_game(s, {0x43}, {}, done).outcome == SaveGame::NoActRow &&
+          s.states.entries.size() == 1 && s.saved->level == "aa" &&
+          !s.saved->quest_values.count("SYN_Q"));
+    // The missionmenurun task goes to save_build directly (save-world.md
+    // :253-254): there a completed game skips save_findAct and builds the
+    // header with no level store; an incomplete one writes nothing.
+    SaveGameOptions menu = done;
+    menu.mission_menu_task = true;
+    auto built = save_game(s, {0x44}, {}, menu);
+    CHECK(built.outcome == SaveGame::Built && !built.level_stored &&
+          s.saved->level == "SYN_NOWHERE" && s.states.entries.size() == 1);
+    menu.game_complete = false;
+    s.quest_values["SYN_Q"] = 9;
+    s.level = "SYN_NOWHERE_TOO";
+    CHECK(save_game(s, {0x45}, {}, menu).outcome == SaveGame::BuildNoAct &&
+          s.saved->level == "SYN_NOWHERE" && s.saved->quest_values.at("SYN_Q") == 8);
+  }
+  // C2. Act -1 goes to save_build directly too (save-world.md:253-254).
+  {
+    Run run;
+    fresh_run(run);
+    auto &s = run.state;
+    SaveGameOptions two_players;
+    two_players.players = 2;
+    s.level = "SYN_NOWHERE";
+    CHECK(save_game(s, {0x10}, {}, two_players).outcome == SaveGame::BuildNoAct &&
+          !s.saved);
+    // A found level: the header is built, and with no current act a non-hub
+    // name has no row, so nothing is stored (save-format.md:236-242).
+    s.level = "aa";
+    auto r = save_game(s, {0x10}, {}, two_players);
+    CHECK(r.outcome == SaveGame::Built && !r.level_stored && s.saved &&
+          s.saved->level == "aa" && s.states.entries.empty());
+    // A hub* name at act -1 forces row 0 of no act: not executed, refused.
+    s.level = "hub";
+    CHECK(message_has([&] { save_game(s, {0x10}, {}, two_players); },
+                      "save_build at act -1 for a hub* name"));
   }
   // D. Act change after the checkpoint (save-world.md:194, 293-296).
   {
@@ -2117,14 +2231,15 @@ void death_reload_r2_cases() {
     CHECK(s.act == 1 && s.states.entries.empty() && s.states.cleared_slot0 == "aa");
     for (auto &p : s.players)
       p.hp = 0;
-    CHECK(party_wipe(s) == Wipe::Reload && s.pending.name == "aa");
+    CHECK(party_wipe(s, 2) == Wipe::Reload && s.pending.name == "aa");
     ChangeOptions death;
     death.death_task = true;
     CHECK(message_has([&] { adapter.change(death, {}, two); },
                       "save_clearBuffer(0), which keeps directory slot 0 'aa'"));
   }
   {
-    // Slot 0 a different level: the checkpoint level comes back fresh.
+    // Slot 0 is `hub`, the executed keep: it survives the clear with its
+    // body, and the checkpoint level comes back fresh.
     Run run;
     fresh_run(run);
     auto &s = run.state;
@@ -2137,10 +2252,12 @@ void death_reload_r2_cases() {
     CHECK(s.states.entries.size() == 1 && save_game(s, {0x10}, {}, {2}).level_stored);
     s.pending.request("bb");
     adapter.change({}, {}, two);
-    CHECK(s.states.cleared_slot0 == "hub" && !s.states.stored("aa"));
+    CHECK(s.states.entries.size() == 1 && s.states.stored("hub") &&
+          s.states.blobs.at("hub") == Blob{0x01} && !s.states.cleared_slot0 &&
+          !s.states.stored("aa"));
     for (auto &p : s.players)
       p.hp = 0;
-    CHECK(party_wipe(s) == Wipe::Reload);
+    CHECK(party_wipe(s, 2) == Wipe::Reload);
     run.restored.clear();
     ChangeOptions death;
     death.death_task = true;
@@ -2148,7 +2265,7 @@ void death_reload_r2_cases() {
     // The header restored act 0, so this load sees no act change; aa misses
     // with the gap empty and comes back fresh.
     CHECK(s.level == "aa" && s.act == 0 && run.restored.empty() &&
-          s.states.cleared_slot0 == "hub");
+          !s.states.cleared_slot0 && s.states.stored("hub"));
   }
   // E. Gap slot during a death reload refuses with the precise reason.
   {
@@ -2169,7 +2286,7 @@ void death_reload_r2_cases() {
     s.saved->level = "aab";
     for (auto &p : s.players)
       p.hp = 0;
-    CHECK(party_wipe(s) == Wipe::Reload && s.pending.name == "aab");
+    CHECK(party_wipe(s, 2) == Wipe::Reload && s.pending.name == "aab");
     ChangeOptions death;
     death.death_task = true;
     CHECK(message_has([&] { adapter.change(death, {}, two); },
@@ -2203,7 +2320,7 @@ void death_reload_r2_cases() {
       p.recall_dest = "SYN_LATER";
       p.hp = 0;
     }
-    CHECK(party_wipe(s) == Wipe::Reload && s.pending.name == "bb" && s.act == 0);
+    CHECK(party_wipe(s, 4) == Wipe::Reload && s.pending.name == "bb" && s.act == 0);
     run.built.clear();
     Placement four;
     four.players = 4;
@@ -2216,7 +2333,7 @@ void death_reload_r2_cases() {
       CHECK(p.recall_dest == "SYN_DEST");
     for (auto &p : s.players)
       p.hp = 0;
-    CHECK(party_wipe(s) == Wipe::Reload);
+    CHECK(party_wipe(s, 4) == Wipe::Reload);
     run.built.clear();
     four.medal_slot = 2;
     adapter.change(death, {}, four);

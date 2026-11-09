@@ -333,7 +333,10 @@ struct LevelStates {
   // 0x8ab590 to the data at 0x8ab698 holds eleven 0x18-byte entries. The key
   // search covers the first ten; a new key is appended, as an 11th entry
   // after ten (research-exits-r3@e86f3de tools/ref_exit_travel.py:109-128).
-  // A 12th entry would overlap the data and was not run, so it refuses.
+  // Every later miss (a twelfth key, or the gap's own name, which the
+  // ten-slot search never compares) rewrites the slot-10 body at its offset
+  // with its kept size and keeps the ghost name: no 12th entry is written
+  // (research-save-world@31a0ca6 docs/save-world.md:35-39, 196, Executed).
   static constexpr std::size_t SEARCHED = 10, ENTRIES = 11;
   std::vector<std::pair<std::string, std::uint32_t>> entries;
   // Owner serialization handed to the writer. Retail object, decal and
@@ -356,17 +359,22 @@ struct LevelStates {
   // Client policy for that rule. A gap restore is the original's behaviour
   // (save-world.md:44-52), but the port must choose a gap-slot policy and
   // must not present slot 10 as an eleventh saved level (save-world.md
-  // :314-316; client-path.md:153-157). No policy is chosen, so it refuses
-  // with the key and the gap name. With cleared_slot0 checks on (a death
+  // :314-316; client-path.md:153-157). The chosen policy is to refuse, with
+  // the key and the gap name. With cleared_slot0 checks on (a death
   // reload), the key an act-change clear kept in slot 0 (below) also
   // refuses, and so does any key once the dropped slot shifts the client's
   // slot 9 onto the original's gap.
   RestoreDecision require_restorable(const std::string &,
                                      bool check_cleared_slot0) const;
   // save_clearBuffer(0) keeps directory slot 0 with its name, its first
-  // 15000 bytes and the act-0 row-0 size; every other key is gone
-  // (save-world.md:194, Executed). This client clears the whole directory on
-  // an act change (begin_change), so it records the slot-0 key it dropped.
+  // act-0 row-0 bytes (15000 in the retail table) and that row's size; every
+  // other key is gone (save-world.md:194-195, Executed). begin_change keeps
+  // slot 0 only in the case whose restore was executed: the exact act-0
+  // row-0 name (`hub`), already that size, with a body that fits. Otherwise
+  // (a larger body, a name such as `blood1` whose size the clear cuts, or a
+  // hub sub-area such as `hub_west`, none restored there) it drops the whole
+  // directory and records the slot-0 key here, so a death reload into it
+  // refuses.
   std::optional<std::string> cleared_slot0;
 };
 struct GateList {
@@ -459,7 +467,15 @@ struct PushTrigger {
 };
 struct PlayerRecord {
   std::int32_t hp = 0, max_hp = 0, cooldown = 0;
+  // Placement's peer test (exits-r4-travel.md:107-117, 0x13dd40): a slot that
+  // is not active is not built on arrival.
   bool active = false;
+  // save_game's object test (save-world.md:247-249, Executed; 0x218170-
+  // 0x2181a0): the record's object pointer at +0x43d8 is set, and that
+  // object's flag 8 (+0xc & 8). A different test from `active`; owners that
+  // do not track the player object leave object_built false and use
+  // SaveGameOptions::object_test off.
+  bool object_built = false, object_flag8 = false;
   std::string recall_dest = "None";
   Vec3 recall_position{};
   Blob persistent; // owner serialization: stats/bags/gold/medals; kept verbatim
@@ -534,6 +550,11 @@ struct State {
 struct ChangeOptions {
   bool death_task = false, card_latch = false, fixed_state_size = false,
        defer_recall_clear = false;
+  // g_saveClearBlock 0x4f8f2a: when set, save_clearBuffer leaves the buffer
+  // (directory included) untouched (research-saves@8d43286
+  // docs/save-format.md:296-297; save-world.md:194, Executed). Nothing in
+  // this client sets it.
+  bool clear_block = false;
   int card_state = 0;
   std::string hub = "hub";
   Blob old_blob;
@@ -582,16 +603,23 @@ RecallEvent recall_tick(State &, unsigned players, bool cutscene_active,
                         const std::string &hub);
 // save_game 0x218128 then save_build 0x221914 (save-world.md:241-275,
 // Executed). players: g_numPlayers; only slots below it count, and a slot
-// counts when it is active (object built) with HP above 0. object_test off
-// counts HP alone, for owners that do not track the player object.
+// counts when its object is built, that object's flag 8 is clear and HP is
+// above 0 (PlayerRecord::object_built, object_flag8). object_test off counts
+// HP alone, for owners that do not track the player object.
+// mission_menu_task: the `missionmenurun` task is running (save-world.md:253).
 struct SaveGameOptions {
   unsigned players = 4;
-  bool game_complete = false, object_test = true;
+  bool game_complete = false, object_test = true, mission_menu_task = false;
   int card_state = 0;
 };
 enum class SaveGame {
   NoLivingPlayer, // nothing happens (save-world.md:247-252)
   NoActRow,       // CheckPoint text, no build, no store (save-world.md:255-260)
+  // Reached save_build directly (act -1 or the mission-menu task,
+  // save-world.md:253-254); save_build's own save_findAct found no act and
+  // the game is not complete, so nothing is written (research-saves@8d43286
+  // docs/save-format.md:55-58, Executed).
+  BuildNoAct,
   Built,
 };
 struct SaveGameResult {
@@ -599,9 +627,11 @@ struct SaveGameResult {
   bool level_stored = false; // the current level's body went into the directory
 };
 // Builds the header into State::saved and, unless the game is complete,
-// stores the current level into the live directory. A completed game skips
-// save_findAct and the level store, so that level keeps whatever body the
-// directory already held (save-world.md:269-275; client-path.md:69-71).
+// stores the current level into the live directory. save_game's own act-row
+// test (step 3) is unconditional: only act -1 and the mission-menu task skip
+// it (step 2). A completed game skips save_build's save_findAct and the level
+// store, so that level keeps whatever body the directory already held
+// (save-world.md:269-275; save-format.md:55-60; client-path.md:69-71).
 SaveGameResult save_game(State &, const Blob &level_state, const Blob &camera,
                          const SaveGameOptions & = {});
 // Earlier entry point: save_game without the object test. Returns the header
@@ -621,10 +651,13 @@ enum class Wipe { Wait, Reload, Restart };
 // for the script (phase 10). Found with no header ever built or card-loaded
 // refuses: the original's uninitialised-buffer behaviour is Unknown
 // (client-path.md:183).
-Wipe party_wipe(State &);
+// players: g_numPlayers 0x4d8ae0. The step-5b refill copies +0xb0 to +0xac
+// only for slots below it (deathTask 0x1e76dc-0x1e7710); later slots keep
+// their HP.
+Wipe party_wipe(State &, unsigned players);
 // Same, with an explicit header instead of State::saved. The directory still
 // comes from State::states.
-Wipe party_wipe(State &, const std::optional<Checkpoint> &);
+Wipe party_wipe(State &, const std::optional<Checkpoint> &, unsigned players);
 // deathTask phase 2 (client-path.md:99): the task ends once the pending
 // request is empty and the loaded qualified name matches the requested one.
 bool death_task_done(const State &, const std::string &requested);
