@@ -634,6 +634,8 @@ func run() -> void:
 			tap(DOWN)
 			tap(CROSS)
 	var created_player: Dictionary = scene.controller.get_observation()
+	# The created character, for the death step's fresh scene (no card holds it).
+	var created_character: Dictionary = (fe.view.get("character", {}) as Dictionary).duplicate(true)
 	var expected_character := int(created_player.get("player_class", -1)) == 6 \
 		and int(created_player.get("player_model", -1)) == 11
 	mark("character_created", fe.screen() if expected_character else "refused",
@@ -1963,19 +1965,36 @@ func run() -> void:
 	var checkpoint_path := save_path
 	var checkpoint_saved := false
 	var checkpoint_scripted := false
+	var checkpoint_attempted := false
+	var checkpoint_character := false
+	var checkpoint_status := ""
 	if not death_loaded and revisited and refused_without_output:
+		checkpoint_attempted = true
+		checkpoint_character = not created_character.is_empty() and \
+			cold.controller.set_player_character(created_character).get("ok", false)
 		# The death task and its reload need the level script's shared World.
 		cold.level_script.set_pressed_no_signal(true)
 		checkpoint_scripted = cold.load_real_level(level_before) and \
 			cold.controller.get_play_capabilities().get("level_script_enabled", false)
+		if checkpoint_scripted:
+			# Creature HP and the shared-World player exist once play runs, as
+			# for the journey's own in-play save.
+			cold.start_play()
+			scene = cold
+			fe = cold.frontend
+			advance(0, 30)
 		checkpoint_path = out_dir.path_join("death-checkpoint.ocplay")
 		for suffix in ["", ".level", ".campaign", ".worldstate", ".player", ".fight"]:
 			if FileAccess.file_exists(checkpoint_path + suffix): DirAccess.remove_absolute(checkpoint_path + suffix)
 		checkpoint_saved = checkpoint_scripted and cold.save_session_file(checkpoint_path)
 		death_loaded = checkpoint_saved and cold.load_session_file(checkpoint_path)
-	if death_loaded:
+		checkpoint_status = str(cold.status_label.text)
+	# Without a card checkpoint the death still runs on the scripted level:
+	# its reload then meets the empty live buffer and refuses with that reason.
+	var death_ready: bool = death_loaded or checkpoint_scripted
+	if death_ready:
 		var checkpoint_position: Vector3 = cold.controller.get_presentation().get("current_position", Vector3.ZERO)
-		cold.start_play()
+		if not (cold.play_mode and cold.session_started and not cold.stopped): cold.start_play()
 		cold.diagnostic_player_death = true
 		scene = cold
 		fe = cold.frontend
@@ -2043,12 +2062,22 @@ func run() -> void:
 			"phase": dead.get("fight_death_phase", -1), "record_values_retained": retained,
 			"reload_refused": not str(dead.get("fight_death_error", "")).is_empty(),
 			"reload_requested": reload_requested, "death_error": str(dead.get("fight_death_error", "")),
-			"respawn_completed": reloaded}
+			"respawn_completed": reloaded, "checkpoint_loaded": death_loaded,
+			"checkpoint_attempted": checkpoint_attempted, "checkpoint_saved": checkpoint_saved,
+			"checkpoint_status": checkpoint_status, "checkpoint_character": checkpoint_character,
+			"hit_queued": queued.get("ok", false), "hit_error": str(queued.get("error", "")),
+			"fight_ready_before": death_before.get("fight_player_ready", false),
+			"fight_failed": dead.get("fight_failed", false), "campaign_fight": dead.get("campaign_fight", false),
+			"fight_error": str(dead.get("fight_error", "")), "fight_failed_before": death_before.get("fight_failed", false),
+			"session_playing": cold.play_mode and cold.session_started and not cold.stopped}
 		death_fields.merge(reload_fields)
 		mark("player_death", "reloaded" if reloaded else ("blocked_death_reload" if sequence else "refused"), death_fields)
 		await capture("13-player-death-reloaded" if reloaded else "13-player-reload-refused")
 	else:
-		mark("player_death", "refused", {"saved_level_reloaded": false})
+		mark("player_death", "refused", {"saved_level_reloaded": false,
+			"checkpoint_attempted": checkpoint_attempted, "checkpoint_scripted": checkpoint_scripted,
+			"checkpoint_saved": checkpoint_saved, "checkpoint_status": checkpoint_status,
+			"revisited": revisited, "journey_save_refused": refused_without_output})
 	cold.queue_free()
 	scene = null
 	fe = null
