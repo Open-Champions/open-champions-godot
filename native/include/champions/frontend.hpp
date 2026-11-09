@@ -48,6 +48,15 @@ inline constexpr int SOE_LOGO_FRAMES = 240;
 inline constexpr int INTRO_PRESS_AFTER = 30;
 // recall_execute sets g_menuInputLockout 0x41b4fc to 60 (docs/engine.md P17).
 inline constexpr int RECALL_LOCKOUT = 60;
+// The card latch g_cardXferLatch 0x4f8f28 has nine stores in the original
+// (research-save-world 31a0ca6 docs/issues/sync-breakers.md:287): set when a
+// save slot is chosen (0x218ba4, 0x218c18) or a load slot is chosen
+// (0x2195a8); cleared by save_init at boot (0x2170dc), when the load screen
+// opens (memcard_requestLoad, 0x217760), when the "saved" box closes
+// (0x2190d0) and at the three ends of a load (0x219810, 0x219884, 0x219a18).
+// Where the client leaves a card screen in a way the original has no store
+// for, the flow holds this value instead of guessing 0 or 1.
+inline constexpr int LATCH_UNKNOWN = -1;
 // The lockout clears when no pad holds a button under this mask (docs/mainloop.md).
 inline constexpr std::uint32_t LOCKOUT_HELD_MASK = 0xff0fffffu;
 // Character creation (docs/player.md, docs/data-tables.md 4; rig route Ran).
@@ -177,9 +186,17 @@ public:
   void set_class_start_stats(const std::array<std::array<std::int32_t, 4>, CLASSES> &rows);
   void set_name(const std::string &name);
   void import_result(bool ok, const Character &character, const std::string &error = {});
+  // A load the host refused (or whose file chooser was cancelled). The client
+  // has no memory card, so this is never the original's load error exit; the
+  // latch the original would hold is unknown (LATCH_UNKNOWN).
   void load_result(bool ok, const std::string &error = {});
   void options_loaded(std::optional<std::vector<std::uint8_t>> file);
+  // save_result(false) is a memory-card error: sub-state 9, latch kept at 1.
   void save_result(bool ok, const std::string &error = {});
+  // A save the client refused for its own reasons (a state it cannot save, a
+  // cancelled file chooser, a host write failure). The original would not have
+  // failed there, so it is not a card error: the latch becomes LATCH_UNKNOWN.
+  void save_refused(const std::string &reason);
   void recall_executed(); // recall_execute: closes the pause menu, lockout 60
   // After exit_session: the exit code the pause menu's countdown leads to is not
   // documented, so the host restarts the front end with frontend_start(0).
@@ -209,6 +226,8 @@ public:
   int num_players() const { return num_players_; }
   int difficulty_index() const { return difficulty_; }
   int frames_on_screen() const { return frames_; }
+  // 0x4f8f28: 0 or 1 where the original's value is traced, LATCH_UNKNOWN (-1)
+  // where the client cannot say which value the original would hold.
   int save_latch() const { return save_latch_; }
   int load_from_frontend() const { return load_from_frontend_; }
   int last_exit_code() const { return exit_code_; }
@@ -241,7 +260,7 @@ private:
   int lockout_ = 0;
   int num_players_ = 1;
   int difficulty_ = 1; // the executable image holds 1 (docs/script-items.md)
-  int save_latch_ = 0; // 0x4f8f28
+  int save_latch_ = 0; // 0x4f8f28; save_init clears it at boot (0x2170dc)
   int load_from_frontend_ = 0; // 0x8e1ab8
   int exit_code_ = 0;
   int gated_music_ = 0;

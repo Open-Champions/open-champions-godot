@@ -996,6 +996,14 @@ struct ShareInventory {
   builtins::Variables variables{memory};
   Bytes stored = Bytes(ITEM_SIZE, 0);
   std::vector<std::string> calls;
+  // What the share sees when its first service call runs (PCR2-4): the load
+  // state written before research step 7 must already be there, and the
+  // autosave countdown after it must not.
+  bool seen = false;
+  std::string pending_at_share;
+  int loaded_at_share = -1;
+  std::uint32_t countdown_at_share = ~0u;
+  long long quest_at_share = -999;
   std::uint32_t cell(int slot, int bag, int index) const {
     return PLAYERS + std::uint32_t(slot) * std::uint32_t(RECORD_SIZE) + std::uint32_t(BAG_ITEM_AT) +
            std::uint32_t(bag) * std::uint32_t(BAG_STRIDE) + std::uint32_t(index) * std::uint32_t(ITEM_SIZE);
@@ -1009,6 +1017,17 @@ struct ShareInventory {
                                          const std::vector<builtins::Variables::InventoryValue> &args)
         -> builtins::Variables::InventoryResult {
       calls.push_back(name);
+      if (!seen) {
+        seen = true;
+        pending_at_share = cstr(*memory, PENDING_LEVEL);
+        loaded_at_share = memory->u8(LOADED_FROM_SAVE);
+        countdown_at_share = memory->word(AUTOSAVE_COUNTDOWN);
+        try {
+          quest_at_share = variables.quest_get("opened");
+        } catch (const std::exception &) {
+          quest_at_share = -998;
+        }
+      }
       auto arg = [&](std::size_t i) { return std::get<std::uint32_t>(args.at(i)); };
       auto &m = *memory;
       if (name == "inventory_removeItem") {
@@ -1075,6 +1094,14 @@ void share_on_load() {
           std::count(inv.calls.begin(), inv.calls.end(), "inventory_giveItem") == 1);
     // Research step 7 runs after the pending name and before the countdown.
     CHECK(cstr(m, PENDING_LEVEL) == "crypt" && m.word(AUTOSAVE_COUNTDOWN) == 99);
+    // The order itself (audio-save.md:129-139): when the share runs, the
+    // quest variables (step 5), the loaded flag (6) and the pending name (7)
+    // are written and the countdown (step 8) is not. With the share at its
+    // round-1 place, after the records and before vars_set, these fail.
+    CHECK(inv.seen && inv.pending_at_share == "crypt");
+    CHECK(inv.loaded_at_share == 1);
+    CHECK(inv.quest_at_share == 7);
+    CHECK(inv.countdown_at_share == 0);
   }
   {
     // Row 0 is the first definition, not a missing one.

@@ -292,6 +292,17 @@ func run() -> void:
 	v = fe.open_save_screen()
 	visited[fe.screen()] = true
 	check(fe.screen() == "save-game" and scene.paused, "save screen pauses")
+	# A save the client cannot write is its own refusal, not a card error: the
+	# original's latch is unknown, so the flow and the session hold -1.
+	var blocker := dir.path_join("latch-blocker")
+	var blocker_file := FileAccess.open(blocker, FileAccess.WRITE)
+	blocker_file.store_string("x")
+	blocker_file.close()
+	fe.queue_path("save_session", blocker.path_join("refused.ocplay"))
+	tap(CROSS)
+	check(fe.screen() == "save-game" and int(fe.view.save_latch) == -1, "client save refusal: latch unknown, not a card error")
+	check(fe.forwarded_save_latch == -1, "session holds the unknown latch")
+	fe.queue_path("save_session", save_path)
 	tap(CROSS)
 	check(FileAccess.file_exists(save_path), "session saved through the save screen")
 	check(fe.screen() == "saved" and int(fe.view.save_latch) == 1, "saved box, latch 1")
@@ -306,6 +317,23 @@ func run() -> void:
 	tap(CROSS)
 	tap(CROSS)
 	check(fe.screen() == "playing" and scene.session_started and not scene.paused, "pause -> load restores the session")
+	check(int(fe.view.save_latch) == 0 and fe.forwarded_save_latch == 0, "a finished load leaves the latch 0")
+	# A load the client refuses: latch unknown. Opening the load screen again
+	# stores 0, as memcard_requestLoad does (0x217760).
+	tap(START)
+	tap(DOWN)
+	tap(DOWN)
+	fe.queue_path("load_session", dir.path_join("absent.ocplay"))
+	tap(CROSS)
+	tap(CROSS)
+	check(fe.screen() == "load-game" and int(fe.view.save_latch) == -1 and fe.forwarded_save_latch == -1, "client load refusal: latch unknown")
+	tap(CIRCLE)
+	check(fe.screen() == "pause" and int(fe.view.save_latch) == -1, "backing out keeps the unknown latch")
+	tap(CROSS)
+	check(fe.screen() == "load-game" and int(fe.view.save_latch) == 0 and fe.forwarded_save_latch == 0, "opening the load screen stores latch 0")
+	tap(CIRCLE)
+	tap(CIRCLE)
+	check(fe.screen() == "playing" and not scene.paused, "back to play")
 
 	# Exit prompt: opens on no; left then cross leaves to the front end.
 	tap(START)

@@ -205,6 +205,55 @@ int latch_after_card_error() {
   return flow.save_latch();
 }
 
+// The front end in play, as latch_after_card_error reaches it.
+void flow_tap(fe::Flow &flow, std::uint32_t bits) {
+  flow.frame(static_cast<std::uint16_t>(bits));
+  flow.frame(0);
+}
+fe::Flow flow_in_play() {
+  fe::Flow flow;
+  flow_tap(flow, fe::CROSS);
+  flow_tap(flow, fe::CROSS);
+  for (int i = 0; i < 5; ++i)
+    flow_tap(flow, fe::CROSS);
+  flow_tap(flow, fe::CROSS);
+  flow_tap(flow, fe::CROSS);
+  for (int i = 0; i < 20; ++i)
+    flow_tap(flow, fe::RIGHT);
+  flow_tap(flow, fe::CROSS);
+  flow.set_name("S");
+  flow_tap(flow, fe::DOWN);
+  flow_tap(flow, fe::CROSS);
+  return flow;
+}
+
+// The client refuses the save for its own reasons (pickups.cpp: inventory
+// reload is not implemented). That is not a card error, so the front end has
+// no reading of the original's latch, and circle returns to play with none.
+int latch_after_client_refusal(fe::Flow &flow) {
+  flow.request_save();
+  flow_tap(flow, fe::CROSS);
+  flow.save_refused("Saving refused: inventory reload is not implemented.");
+  flow_tap(flow, fe::CIRCLE);
+  check(flow.screen() == fe::Screen::Playing && flow.save_latch() == fe::LATCH_UNKNOWN,
+        "a client save refusal leaves no latch reading after returning to play");
+  return flow.save_latch();
+}
+
+// Opening the load screen from the pause menu stores 0 (memcard_requestLoad
+// 0x217760); backing out stores nothing more.
+int latch_after_opening_load(fe::Flow &flow) {
+  flow_tap(flow, fe::START);
+  flow_tap(flow, fe::DOWN);
+  flow_tap(flow, fe::DOWN);
+  flow_tap(flow, fe::CROSS);
+  check(flow.screen() == fe::Screen::LoadGame && flow.save_latch() == 0, "the load screen opens with latch 0");
+  flow_tap(flow, fe::CIRCLE);
+  flow_tap(flow, fe::CIRCLE);
+  check(flow.screen() == fe::Screen::Playing && flow.save_latch() == 0, "back in play with latch 0");
+  return flow.save_latch();
+}
+
 // One local player at a story act with the sample cells, journal and progress.
 struct Source {
   World world;
@@ -361,6 +410,38 @@ void test_live_travel() {
           "an act transfer without a latch reading refuses");
     expect_untouched(entry.next, "no latch reading");
     check(entry.next.campaign().act() == 0, "no latch reading leaves the destination act");
+  }
+}
+
+// PCR2-1: the session's latch comes from the real front end. After a client
+// save refusal the next act change refuses before any edit; once the load
+// screen has stored 0, the act change clears as with no save at all.
+void test_latch_from_front_end() {
+  auto flow = flow_in_play();
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, latch_after_client_refusal(flow));
+    check(entry.refusal.find("card latch 0x4f8f28 has no reading") != std::string::npos,
+          "after a client save refusal the act transfer refuses: " + entry.refusal);
+    expect_untouched(entry.next, "client save refusal");
+    check(entry.next.campaign().act() == 0 && entry.next.variables().memory.u32(ci::ACT_MARK) == 0 &&
+              entry.next.campaign().record(0).quest_count == 1,
+          "the refused transfer leaves the act, 0x4f7118 and the journal");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "strife", HELD, flow.save_latch());
+    check(entry.refusal.empty() && !entry.result.changed, "a same-act entry does not read the latch");
+  }
+  {
+    Source source(0);
+    Entry entry;
+    enter(entry, source, "innovat1", HELD, latch_after_opening_load(flow));
+    check(entry.refusal.empty() && entry.result.changed && entry.result.reset && entry.result.removed == 1 &&
+              entry.result.mark == 1 && entry.next.variables().memory.u8(ci::CARD_LATCH) == 0,
+          "after the load screen stores 0 the act change clears: " + entry.refusal);
   }
 }
 
@@ -612,6 +693,7 @@ void test_share() {
 
 int main() {
   test_live_travel();
+  test_latch_from_front_end();
   test_change_level_from_unbound();
   test_bag_carry_guard();
   test_unreadable_names();

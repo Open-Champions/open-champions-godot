@@ -481,7 +481,12 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       // state 11, row 3 -> credits music and credits_load (state 15). Dispatch is by key.
       sound(menu_sound::select);
       if (id == "new_game") go(Screen::GameType);
-      else if (id == "load_game") { load_return_ = Screen::Main; load_from_frontend_ = 1; go(Screen::LoadGame); }
+      else if (id == "load_game") {
+        load_return_ = Screen::Main;
+        load_from_frontend_ = 1;
+        save_latch_ = 0; // memcard_requestLoad clears the latch when it opens (0x217760)
+        go(Screen::LoadGame);
+      }
       else if (id == "options") { options_return_ = Screen::Main; go(Screen::Options, 1); }
       else if (id == "credits") {
         music("credits_music", "mx_endcredits_ext_l.vag", 3); // 0x1e16f4, flags 3
@@ -551,8 +556,16 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
     break;
   case Screen::LoadGame:
     move_cursor(repeat);
-    if (confirm && id == "session") request("load_session");
-    else if (confirm && id == "ps2") { import_context_ = "load"; request("import_ps2", "load"); }
+    // Accepting a load slot stores latch 1 (0x2195a8, Executed). Both entries
+    // are the client's load slots: a host session file or a PS2 card slot.
+    if (confirm && id == "session") {
+      save_latch_ = 1;
+      request("load_session");
+    } else if (confirm && id == "ps2") {
+      save_latch_ = 1;
+      import_context_ = "load";
+      request("import_ps2", "load");
+    }
     else if (pressed & CANCEL) go(load_return_, load_return_ == Screen::Pause ? 2 : 1);
     break;
   case Screen::SaveGame:
@@ -651,6 +664,7 @@ void Flow::frame(std::uint16_t buttons, std::uint8_t stick_x, std::uint8_t stick
       } else if (id == "load") {
         load_return_ = Screen::Pause;
         load_from_frontend_ = 0;
+        save_latch_ = 0; // memcard_requestLoad clears the latch when it opens (0x217760)
         go(Screen::LoadGame);
       } else if (id == "options") {
         options_return_ = Screen::Pause;
@@ -695,8 +709,14 @@ void Flow::import_result(bool ok, const Character &c, const std::string &error) 
     throw Refusal("no import was requested");
   if (!ok) {
     error_ = error.empty() ? "import refused" : error;
+    // A refused PS2 load slot is a client refusal, not a card error exit.
+    if (screen_ == Screen::LoadGame) save_latch_ = LATCH_UNKNOWN;
     return;
   }
+  // A PS2 load slot that imported ends the load: every documented end of the
+  // load screen stores 0 (0x219810, 0x219884, 0x219a18). The host then enters
+  // the saved level as a fresh entry, which does not read the latch.
+  if (screen_ == Screen::LoadGame) save_latch_ = 0;
   character_ = c;
   character_.imported = true;
   if (import_context_ == "char")
@@ -708,9 +728,17 @@ void Flow::load_result(bool ok, const std::string &error) {
   if (screen_ != Screen::LoadGame)
     throw Refusal("no load was requested");
   if (!ok) {
+    // The host refused the load (or its chooser was cancelled). That is not
+    // the original's load error exit (0x219a18), so its value is not known.
     error_ = error.empty() ? "load refused" : error;
+    save_latch_ = LATCH_UNKNOWN;
     return;
   }
+  // The host reports success after it has entered the saved level (or, for a
+  // save without a level, finished the load). The load screen clears the latch
+  // when the loaded level has been entered (0x219884) and when a load ends
+  // without a level change (0x219810).
+  save_latch_ = 0;
   paused_ = false;
   request("pause", {}, 0);
   go(Screen::Playing);
@@ -774,6 +802,16 @@ void Flow::save_result(bool ok, const std::string &error) {
     return;
   }
   go(Screen::Saved);
+}
+
+void Flow::save_refused(const std::string &reason) {
+  if (screen_ != Screen::SaveGame)
+    throw Refusal("no save was requested");
+  // The client refused to write the save. The original has no such outcome:
+  // it would have written the card (sub-state 4, latch 0 once the box closes)
+  // or hit a card error (sub-state 9, latch 1). Which one is not known.
+  error_ = reason.empty() ? "save refused" : reason;
+  save_latch_ = LATCH_UNKNOWN;
 }
 
 void Flow::return_to_frontend() {

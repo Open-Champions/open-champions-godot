@@ -141,7 +141,9 @@ private:
   // The front end's Flow::save_latch_ (0x4f8f28), forwarded by
   // ui/frontend_menus.gd. 0 is the latch Flow is constructed with
   // (frontend.hpp save_latch_), which is also its value before any front end
-  // has booted, because only the front end's card screen stores it.
+  // has booted, because only the front end's card screens store it (save_init
+  // clears it at boot, 0x2170dc). -1 is forwarded after a client save or load
+  // refusal, where the original's value is unknown.
   int save_latch_ = 0;
   champions::simulation::rta::script_commands::BagCarryGuard bag_carry_guard() const;
   champions::simulation::rta::script_commands::ActCarry act_carry() const;

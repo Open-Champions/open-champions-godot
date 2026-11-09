@@ -228,6 +228,7 @@ protected:
     ClassDB::bind_method(D_METHOD("load_result", "ok", "error"), &ChampionsFrontendService::load_result, DEFVAL(String()));
     ClassDB::bind_method(D_METHOD("options_loaded", "ok", "file"), &ChampionsFrontendService::options_loaded);
     ClassDB::bind_method(D_METHOD("save_result", "ok", "error"), &ChampionsFrontendService::save_result, DEFVAL(String()));
+    ClassDB::bind_method(D_METHOD("save_refused", "reason"), &ChampionsFrontendService::save_refused);
     ClassDB::bind_method(D_METHOD("recall_executed"), &ChampionsFrontendService::recall_executed);
     ClassDB::bind_method(D_METHOD("set_dialog_open", "open"), &ChampionsFrontendService::set_dialog_open);
     ClassDB::bind_method(D_METHOD("return_to_frontend"), &ChampionsFrontendService::return_to_frontend);
@@ -354,6 +355,10 @@ public:
   }
   Dictionary save_result(bool ok, const String &error) {
     return guarded([&] { flow_->save_result(ok, text_of(error)); });
+  }
+  // A save the client refused for its own reasons: not a card error.
+  Dictionary save_refused(const String &reason) {
+    return guarded([&] { flow_->save_refused(text_of(reason)); });
   }
   Dictionary recall_executed() { return guarded([&] { flow_->recall_executed(); }); }
   // dialog_isOpen: offline the start button cannot open the pause menu and its recall and exit

@@ -887,8 +887,10 @@ rta::script_commands::ActCarry ChampionsSessionController::act_carry() const {
 }
 Dictionary ChampionsSessionController::set_save_latch(int64_t latch) {
   try {
-    if (latch != 0 && latch != 1)
-      throw std::runtime_error("The card latch 0x4f8f28 is a 0 or 1 byte.");
+    // 0 or 1, or Flow's LATCH_UNKNOWN (-1) after a client save or load refusal;
+    // an act transfer refuses -1 (require_campaign_act_transfer).
+    if (latch != 0 && latch != 1 && latch != -1)
+      throw std::runtime_error("The card latch 0x4f8f28 is a 0 or 1 byte, or -1 for no reading.");
     save_latch_ = int(latch);
     Dictionary result; result["ok"] = true; result["save_latch"] = latch; return result;
   } catch (const std::exception &e) { return failure(e); }

@@ -710,6 +710,92 @@ void save_vectors() {
   reject([&] { f.session_exit(2); }, "unknown exit code refused");
 }
 
+// The latch stores the client has a point for (research-save-world 31a0ca6
+// docs/issues/sync-breakers.md:287; research-save-screen docs/save-screen.md
+// 256-279), and the unknown value where it has none.
+void latch_store_vectors() {
+  auto f = to_main();
+  for (int i = 0; i < 5; ++i)
+    tap(f, CROSS);
+  tap(f, CROSS);
+  tap(f, CROSS);
+  for (int i = 0; i < 20; ++i)
+    tap(f, RIGHT);
+  tap(f, CROSS);
+  f.set_name("S");
+  tap(f, DOWN);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::Playing && f.save_latch() == 0, "boot leaves the latch 0 (save_init)");
+  f.request_save();
+  tap(f, CROSS);
+  expect(f.save_latch() == 1, "save slot chosen: latch 1");
+  f.save_refused("Saving refused: reload is not implemented");
+  expect(f.screen() == Screen::SaveGame && f.save_latch() == LATCH_UNKNOWN &&
+             f.last_error().find("reload is not implemented") != std::string::npos,
+         "a client save refusal is not a card error: latch unknown");
+  tap(f, CROSS);
+  expect(f.save_latch() == 1, "a retried slot stores 1 again");
+  f.save_result(true);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::Playing && f.save_latch() == 0, "the retried save clears it when the box closes");
+  f.request_save();
+  tap(f, CROSS);
+  f.save_refused("cancelled");
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::Playing && f.save_latch() == LATCH_UNKNOWN, "backing out keeps the unknown latch");
+  reject([&] { f.save_refused("x"); }, "unrequested save refusal refused");
+  // Pause -> load: memcard_requestLoad clears the latch when it opens.
+  tap(f, START);
+  tap(f, DOWN);
+  tap(f, DOWN);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::LoadGame && f.save_latch() == 0, "opening the load screen stores 0 (0x217760)");
+  tap(f, CROSS);
+  expect(f.save_latch() == 1 && has(f.take_requests(), "load_session"), "load slot chosen: latch 1 (0x2195a8)");
+  f.load_result(false, "Load refused: absent");
+  expect(f.screen() == Screen::LoadGame && f.save_latch() == LATCH_UNKNOWN, "a client load refusal: latch unknown");
+  tap(f, CROSS);
+  f.load_result(true);
+  expect(f.screen() == Screen::Playing && f.save_latch() == 0, "a finished load clears the latch (0x219884)");
+  // The PS2 load slot.
+  tap(f, START);
+  tap(f, DOWN);
+  tap(f, DOWN);
+  tap(f, CROSS);
+  tap(f, DOWN);
+  tap(f, CROSS);
+  expect(f.save_latch() == 1 && has(f.take_requests(), "import_ps2"), "PS2 load slot chosen: latch 1");
+  f.import_result(false, Character{}, "not a slot");
+  expect(f.screen() == Screen::LoadGame && f.save_latch() == LATCH_UNKNOWN, "a refused PS2 load: latch unknown");
+  tap(f, CIRCLE);
+  expect(f.screen() == Screen::Pause && f.save_latch() == LATCH_UNKNOWN, "backing out of the load keeps it unknown");
+  tap(f, CROSS);
+  expect(f.screen() == Screen::LoadGame && f.save_latch() == 0, "reopening the load screen stores 0");
+  tap(f, DOWN);
+  tap(f, CROSS);
+  Character loaded;
+  loaded.level_name = "strife";
+  f.import_result(true, loaded);
+  expect(f.screen() == Screen::Playing && f.save_latch() == 0, "an imported PS2 load ends the load: latch 0");
+  // From the title: opening the load screen stores 0 there too.
+  f.request_save();
+  tap(f, CROSS);
+  f.save_refused("x");
+  tap(f, CIRCLE);
+  tap(f, START);
+  for (int i = 0; i < 4; ++i)
+    tap(f, DOWN);
+  tap(f, CROSS);
+  tap(f, LEFT);
+  tap(f, CROSS);
+  expect(has(f.take_requests(), "exit_session"), "exit to the title");
+  f.return_to_frontend();
+  expect(f.screen() == Screen::Main && f.save_latch() == LATCH_UNKNOWN, "leaving play does not store the latch");
+  tap(f, DOWN);
+  tap(f, CROSS);
+  expect(f.screen() == Screen::LoadGame && f.save_latch() == 0, "the title's load screen stores 0");
+}
+
 void notes_vectors() {
   Flow f;
   bool sound = false, unknown = false;
@@ -1184,6 +1270,7 @@ int main() {
   import_vectors();
   pause_vectors();
   save_vectors();
+  latch_store_vectors();
   notes_vectors();
   layout_geometry_vectors();
   layout_screen_vectors();

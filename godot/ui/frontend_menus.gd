@@ -330,7 +330,7 @@ func _choose(kind: String, action: Callable) -> void:
 func _report_refusal(kind: String, reason: String) -> void:
 	match kind:
 		"load_session": view = service.load_result(false, reason)
-		"save_session": view = service.save_result(false, reason)
+		"save_session": view = service.save_refused(reason)
 		"import_ps2": view = service.import_result({"ok": false, "error": reason})
 	_refresh()
 
@@ -343,7 +343,9 @@ func _load_session(path: String) -> bool:
 
 func _save_session(path: String) -> bool:
 	var ok: bool = scene != null and scene.save_session_file(path)
-	view = service.save_result(ok, "" if ok else str(scene.status_label.text))
+	# The client has no memory card: a save it does not write is its own
+	# refusal, never the original's card error (Flow::save_refused).
+	view = service.save_result(true) if ok else service.save_refused(str(scene.status_label.text) if scene != null else "no play scene")
 	_handle(view.get("requests", []))
 	_refresh()
 	return ok
@@ -448,6 +450,8 @@ func _scene() -> Dictionary:
 # memcard_saveScreen's latch 0x4f8f28 lives in the native flow (Flow::save_latch_).
 # The session reads it when an act change decides whether the act-change clear
 # runs (docs/QUESTS.md), so the flow's value is forwarded after every change.
+# -1 (Flow LATCH_UNKNOWN) is forwarded too: after a client save or load
+# refusal the original's value is unknown, and the session refuses act changes.
 var forwarded_save_latch := -1
 func forward_save_latch() -> void:
 	if not booted or not view.has("save_latch") or scene == null or scene.get("controller") == null:
