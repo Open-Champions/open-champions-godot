@@ -1,6 +1,6 @@
 # Play loading readiness, round 7
 
-STATUS: DONE. The arrival stage moves from the r5/r6 pins to round 7 at `f8c780b` through the opt-in `through_round = 7`. The delete frees, the request selects its route, setState writes the clip entry, and the loader runs to `loadscreen_stop`. Every refusal the research keeps stays refused. Every gate passed. CTest was 259/259 in one run, with no rerun. The matrix was 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, and FULL_TRACE was unchanged. Live arrival stays refused, and the live loader applies no prefix.
+STATUS: DONE, fix round included (PLR7-1 to PLR7-3; see the last section). The arrival stage moves from the r5/r6 pins to round 7 at `f8c780b` through the opt-in `through_round = 7`. The delete frees, the request selects its route, setState writes the clip entry, and the loader runs to `loadscreen_stop`. Every refusal the research keeps stays refused. Every gate passed. CTest was 259/259 in one run, with no rerun. The matrix was 54/54, combat 2,645/0, FULL_SAVE_LOAD 300/300, and FULL_TRACE was unchanged. Live arrival stays refused, and the live loader applies no prefix.
 
 Research pin: `research-loading-readiness` `f8c780b34e772d71ed9a3b9fd2350226739dc6ca` (`docs/loading-arrival-r7.md` with its Round-8 and Round-9 fixes sections, and `tools/difftest_arrival_stage_r7.py`, `_r8.py`, `_r9.py`). Audits: `research-loading-readiness-r7.md`, `-r7-fix.md`, and `-r7-fix2.md`, which is PASS with LOWs R10-1 to R10-3 and the carried R8-10. Client base: the PASS tip of `codex/play-loading-r5`, `9cdead61` (audit `play-loading-r5-fix.md`, PASS, with one follow-up item). Branch `codex/play-loading-r7`.
 
@@ -206,3 +206,37 @@ All gates ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pla
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3, 1 s | 22.2 → 22.2 |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 96 s, `template_release` 94 s; level texture 20 s / 19 s; creature animation `template_debug` 62 s. `lipo -archs` gives `x86_64 arm64` for all five libraries | 22.2 → 11.5 |
 | Full CTest `-j 3` | **PASS, 259/259** (259 registered, as in round 7), exit 0, 802 s, one run, no rerun, no timeout. `messages-exact` 7 s, `player-exact` 56 s, `session-facing-exact` 138 s | 11.5 → 6.2 |
+| Strict Godot matrix: `tools/godot_matrix.py matrix --captures --timeout 1200`, after `Godot --headless --path godot --import` (3 s, exit 0) | **54/54 PASS**, exit 0, 148 s. `check-log` finds 0 diagnostic errors in all 105 matrix logs | 5.9 → 10.4 |
+| Combat (`playable_wave_smoke_full_combat`) | **2,645 checks, 0 failures** | (in matrix) |
+| FULL_SAVE_LOAD | **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 are both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, as in rounds 5 and 7 | (in matrix) |
+| FULL_TRACE | **PASS, unchanged**: 36,402 bytes, SHA-256 `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659` | (in matrix) |
+| Journeys: unchanged `tools/run_loop_playthrough.py`, headless then rendered | Headless **80** steps, rendered **81**. Both exit 1, the retained full-journey refusal, as before. 0 log errors, 6 refusal kinds each, pickup verified, 0 diagnostic retries, rendered captures **38**. The refusal lists are identical to every round-5 and round-7 run. Disc files **994 before / 994 after**. 108 s | 10.3 → 10.5 |
+| Round-5 control journey (the optional step-18 control) | Exit 1, 107 s, 0 log errors. Disc files 994 after | 9.3 → 9.3 |
+
+**Mutations** (`work/plr7-fix/mutations.txt`, each restored with `git checkout`). After the run the tree was rebuilt: `git diff` was empty and `script-commands` passed.
+
+| Mutation | Checks that fail |
+|---|---|
+| N1: accept any first entry that is not `name=` (the old rule) | 5 (the four new first-entry refusals, and the later two-lists check, which then sees a freed object) |
+| N2: drop the capacity-0 length refusal | 2 (both new length refusals) |
+
+**Journeys against earlier runs** (`compare_journey.py`, every key of every step except the host-only `fps` and `memory_bytes`; outputs `work/plr7-fix/journey-compare*.txt`). Against round 7's first run and its rerun, the step counts, step order, refusal lists and captures are identical. Headless differs only at step 65 `swing_wall_msec`. Rendered differs at step 18 `choices_taken`, step 27 `script_executed_commands` (which follows it: `addQuest` = choices − 2, `setMissionAvailable` = choices − 1, in every run) and step 66 `swing_wall_msec`.
+
+**Step-18 variance, again.** Rendered took 5 choices, against 6 in both round-7 runs. As the audit's follow-up asked, I ran one more round-5 control (`work/plr7-fix/gates-journey-control.sh`). It uses round 5's tree and its own GDExtension libraries (built 02:43–02:53 that day), with the same command, into `work/plr7-fix/control-r5-now/`.
+
+| Run | headless choices | rendered choices |
+|---|---|---|
+| round 5 baseline | 4 | 3 |
+| round 5 fix, first | 5 | 3 |
+| round 5 fix, rerun | 4 | 3 |
+| round 7 | 5 | 6 |
+| round 7, rerun | 5 | 6 |
+| control: round 5's build, during round 7 | 5 | 4 |
+| round 7 fix round | 5 | 5 |
+| **control: round 5's build, now** | **5** | **6** |
+
+**Round 5's own build now took 6 rendered choices.** The audit noted that the earlier control had not reproduced 6. This one does. So the same round-5 build has given 3, 4 and 6 rendered choices, and this branch has given 5 and 6. The count is frame timing (the driver presses Enter every 8 process frames, `godot/tests/loop_playthrough.gd:784-792`), not this change. The new control's headless run matches the fix round's headless run except at step 65 `swing_wall_msec`. Its rendered run matches the earlier control except at steps 18, 27 and 66. The control wrote only to `work/plr7-fix/control-r5-now/`. `git status` of the round-5 copy shows only the untracked `godot/tests/mission1_real.gd.uid`, which the round-7 copy (seeded from it) also has.
+
+The mini's `build/` (6.4 GiB) was deleted after the gates. `df -h ~/malik-champions` then showed 51 GiB free.
+
+Nothing was pushed and no PR was opened. No process was killed by name. Nothing was installed. On the mini, work stayed inside `~/malik-champions`, with no `/tmp`. The private disc was read only, by the journeys. No disc text is in the tracked files.
