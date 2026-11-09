@@ -407,8 +407,10 @@ public:
     std::optional<bool> equipment_pending, peers_ready, stores_complete, save_gate_ready;
     std::vector<std::string> refusals;
   };
-  // report_arrival_limits names the round-4 Unknowns without changing the
-  // booleans above. 366b65a:docs/loading-arrival-r4.md:184-207.
+  // report_arrival_limits names the round-4 Unknowns
+  // (366b65a:docs/loading-arrival-r4.md:184-207) and the round-6 ones
+  // (56a6760:docs/loading-arrival-r6.md:181-185) without changing the
+  // booleans above.
   LoadingReadiness loading_readiness(const std::string &destination,
                                      bool report_arrival_limits = false);
   loading_equipment::Runtime &equipment_loading() { return *equipment_loading_; }

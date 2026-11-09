@@ -1429,6 +1429,16 @@ Host::LoadingReadiness Host::loading_readiness(const std::string &destination,
     out.refusals.push_back("object load");
     out.refusals.push_back("resource bootstrap");
     out.refusals.push_back("cutscene runtime");
+    // Round 6 runs the synthetic stages past those five, but the live loader
+    // still applies none of them. What stays Unknown:
+    // 56a6760:docs/loading-arrival-r6.md:181-185.
+    out.refusals.push_back("live route selection (which destination script the loader runs)");
+    out.refusals.push_back("dbg_printf/warm-up after the 0x322e6c promote");
+    out.refusals.push_back("anim_push 0x170838 with a nonzero clip");
+    out.refusals.push_back("AutoProp slot 19 0x23d7ac with a nonzero value");
+    out.refusals.push_back("deleteMonster with a property list");
+    out.refusals.push_back("cut_setup at 0x14f498 onward");
+    out.refusals.push_back("level-name bytes the loader stores");
   }
   return out;
 }

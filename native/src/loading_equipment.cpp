@@ -1,6 +1,7 @@
 #include "champions/loading_equipment.hpp"
 #include <limits>
 #include <tuple>
+#include <variant>
 
 namespace champions::simulation::rta::loading_equipment {
 namespace {
@@ -307,10 +308,331 @@ void reset_arrival_queue(builtins::Memory &m) {
   m.word(kSaveInhibit, 0);
   m.byte(kPostAction, 0);
 }
+std::uint64_t arrival_hide_mask(const builtins::Memory &m, std::uint32_t model,
+                                std::uint32_t bits) {
+  // 56a6760:docs/loading-arrival-r6.md:82-84: the halfword at +0x10 is loaded
+  // first; a null model faults there (load address 0x10).
+  if (!model) reject("hide mask null model (0x179550 faults at load address 0x10)");
+  const auto flag = m.u16(model + 0x10);
+  std::uint64_t mask = ~m.u64(model + 8);
+  // r6:92-98: flag bit 0x2 walks 16-byte {show, hide} records from the byte at
+  // +0x21 shifted up by 4; flags 0 and 1 keep the complement.
+  if (flag & 2) {
+    const std::uint32_t base = model + (std::uint32_t(m.read(model + 0x21)) << 4);
+    for (std::uint32_t bit = 0; bit < 32; ++bit)
+      if (bits & (1u << bit)) {
+        mask |= m.u64(base + 16 * bit);
+        mask &= ~m.u64(base + 16 * bit + 8);
+      }
+  }
+  return mask;
+}
+
+namespace {
+// Round-6 constants. Addresses: 56a6760:docs/loading-arrival-r5.md and
+// docs/loading-arrival-r6.md; layouts the notes leave to their difftests are
+// cited at 56a6760:tools/difftest_arrival_stage_r5.py / _r6.py.
+constexpr std::uint32_t kNet = 0x402791, kPlayerObject = 0x4dcec8;
+constexpr std::uint32_t kLevel = 0x41b721, kCamera = 0x4f8450;
+constexpr std::uint32_t kLumps = 0x7b9480, kLumpCount = 0x41bf7c;
+constexpr std::uint32_t kAutoPropTable = 0x5133c0, kGameObjectTable = 0x5122a8;
+constexpr std::uint32_t kLight = 0x4039ac, kDrawFrame = 0x44fdd0;
+
+struct Queue { std::uint32_t front, back, parity; };
+[[noreturn]] void finish(ArrivalPrefix &out, std::uint32_t boundary, const char *reason,
+                         builtins::Memory &m, Queue want) {
+  if (m.word(kDeferCount) != want.front || m.word(kDeferQueued) != want.back ||
+      m.word(kParity) != want.parity)
+    reject("arrival prefix disturbed the deferred queue");
+  out.boundary = boundary;
+  out.refusal = reason;
+  throw amx::HostFault(reason);
+}
+// 0x17306c (r5:97-99): the data pointer when the 16-byte record name matches
+// and flag bit 0 is clear. Only the one-record table was executed
+// (r5:101-108; record layout difftest_arrival_stage_r5.py:144-160).
+std::optional<std::uint32_t> resident_lump(builtins::Memory &m, const std::string &name) {
+  const auto count = m.word(kLumpCount);
+  if (count > 1) reject("lump table beyond one record was not executed");
+  if (count == 0 || name.empty() || name.size() >= 16) return std::nullopt;
+  if (m.cstr(kLumps, 16) != name || (m.word(kLumps + 0x14) & 1)) return std::nullopt;
+  return m.word(kLumps + 0x10);
+}
+objects::GameObject *one_object(builtins::Variables &v, const std::string &name,
+                                std::int64_t limit, const char *why) {
+  const auto found = v.find(name, limit);
+  if (found.size() > 1) reject(why);
+  return found.empty() ? nullptr : found.front();
+}
+// showMonster 0x144db8 / hideMonster 0x144c00 with one creature object
+// (56a6760:docs/loading-arrival-r6.md:115-125). The grid bodies are the
+// host's obj_updateGridCell / obj_moveOffGrid services, as in the builtins.
+void show_hide(builtins::Variables &v, ArrivalPrefix &out, const std::string &name, bool hide) {
+  auto &m = v.memory;
+  auto *obj = one_object(v, name, 0x200, "show or hide with more than one object was not executed");
+  if (obj) {
+    if (!(m.word(obj->addr + 0xc) & 0x20))
+      reject("show or hide of a non-creature object was not executed");
+    if (!v.scene_service) reject("grid service unbound");
+    v.scene_service(hide ? "obj_moveOffGrid" : "obj_updateGridCell", {obj->addr});
+    out.callees.push_back(hide ? 0x14ef48 : 0x14f028);
+    const auto flags = m.word(obj->addr + 0xc);
+    m.word(obj->addr + 0xc, hide ? flags | 0x8000u : flags & ~0x8000u);
+    const auto bits = m.read(obj->addr + 0x231);
+    m.byte(obj->addr + 0x231, hide ? std::uint8_t(bits | 8) : std::uint8_t(bits & 0xf7));
+  }
+  out.executed.push_back(hide ? 0x144c00 : 0x144db8);
+}
+
+void run_arrival_r6(builtins::Variables &v, const ArrivalControl &c, ArrivalPrefix &out) {
+  auto &m = v.memory;
+  // r5:18-21: player count 1, difficulty 1, network byte 0, player object 0.
+  if (m.read(kNet) || m.word(kPlayerObject))
+    reject("arrival fixture inputs differ (network byte or player object)");
+  m.word(kPlayers, 1);
+  m.word(kDifficulty, 1);
+  reset_arrival_queue(m);
+  if (c.route == 2) {
+    if (c.quest_title.empty() || c.quest_text.empty() || c.var_name.empty() ||
+        c.post_name.empty() || c.cut_name.empty() || c.replacement_name.empty() ||
+        c.delete_name.empty())
+      reject("arrival prefix arguments were not supplied");
+    if (c.first_frame < -1 || c.first_frame > 1)
+      reject("cut_runFrame argument was not executed");
+    for (int slot = 0; slot < 4; ++slot) {
+      m.byte(v.player_record(slot) + 0x4c1a, c.choice_bit ? 2 : 0);
+      if (c.completion_set) {
+        const auto where = v.mission_byte(slot, 1, c.mission);
+        m.byte(where, m.read(where) | 2);
+      }
+    }
+    m.word(v.player_record(0) + kQuestCount, c.quest_list_full ? 8u : 0u);
+  }
+  out = {};
+  if (c.route != 1) out.missing_entry = -1;
+
+  if (c.route == 1) {
+    if (c.lump_name.empty() || c.show_name.empty() || c.hide_names.size() != 3 ||
+        c.var_name.empty())
+      reject("arrival prefix arguments were not supplied");
+    // r5:97-108: lump_load 0x173558, lookup 0x17306c; a miss or flag bit 0
+    // reaches cd_findFile 0x1724fc, which is not entered.
+    out.callees.push_back(0x173558);
+    out.callees.push_back(0x17306c);
+    if (!resident_lump(m, c.lump_name))
+      finish(out, 0x1724fc, "cd_findFile", m, {0, 0, 0});
+    out.executed.push_back(0x14222c);
+    // Order: 56a6760:tools/difftest_arrival_stage_r5.py:35-37.
+    for (int k = 0; k < 2; ++k) { (void)v.quest_get(c.var_name); out.executed.push_back(0x143500); }
+    show_hide(v, out, c.show_name, false);
+    for (const auto &name : c.hide_names) show_hide(v, out, name, true);
+    for (int k = 0; k < 6; ++k) { (void)v.quest_get(c.var_name); out.executed.push_back(0x143500); }
+    // r5:34 and 106-108: the entry returns, no post action, queue 0. The
+    // loader call after this route was not executed.
+    if (m.read(kPostAction)) reject("route 1 published a post action");
+    finish(out, 0x322e6c, "loader call after route 1", m, {0, 0, 0});
+  }
+
+  if (c.route == 0) {
+    if (c.object_name.empty() || c.deferred_names.size() != 2 || c.remove_items.size() != 17 ||
+        c.var_name.empty())
+      reject("arrival prefix arguments were not supplied");
+    m.word(kSaveInhibit, static_cast<std::uint32_t>(c.save_inhibit));
+    out.executed.push_back(0x1473b4);
+    v.mission_set_available(1, c.mission, c.available_on);
+    out.executed.push_back(0x1420d0);
+    v.mission_set_complete(1, c.mission, -1);
+    out.executed.push_back(0x1420a4);
+    // Object load 0x142320 (r5:45-49): world_findObjectsByName with limit
+    // 0x64; slot 18 only for object flag 0x10000000.
+    auto *obj = one_object(v, c.object_name, 0x64, "object load with more than one object was not executed");
+    if (obj && (m.word(obj->addr + 0xc) & 0x10000000)) {
+      // r5:47-49: table 0x5133c0 slot 18 is 0x23d680.
+      if (m.word(obj->addr + 0x48) != kAutoPropTable)
+        reject("object load slot 18 outside AutoProp was not executed");
+      out.callees.push_back(0x23d680);
+      // r5:67-74: signed argument 0 < States enters; otherwise it returns.
+      if (0 < m.s32(obj->addr + 0x120)) {
+        // r5:61-65: +0x178 = argument, +0x17c = 0, 8-byte +0x180 = 0.
+        m.w32(obj->addr + 0x178, 0);
+        m.w32(obj->addr + 0x17c, 0);
+        m.w64(obj->addr + 0x180, 0);
+        out.callees.push_back(0x179550);
+        const auto model = m.word(obj->addr + 0x90);
+        // r6:101-103: null model faults; the names are not queued.
+        if (!model)
+          finish(out, 0x179550, "hide mask null model (fault at load address 0x10)", m, {0, 0, 0});
+        // The setState variant argument is not given; only flag-clear
+        // headers were executed on this path (r6:103-105).
+        if (m.u16(model + 0x10) & 2)
+          finish(out, 0x179550, "prop hide-mask record walk was not executed", m, {0, 0, 0});
+        m.w64(obj->addr + 0xc8, arrival_hide_mask(m, model, 0));
+        // r6:105-107: a zero clip word is not stored and anim_push is skipped.
+        if (m.word(obj->addr + 0x128))
+          finish(out, 0x170838, "anim_push with a nonzero clip", m, {0, 0, 0});
+        out.callees.push_back(0x23d7ac);
+        if (c.slot19_value)
+          finish(out, 0x23d7ac, "slot 19 with a nonzero value", m, {0, 0, 0});
+      }
+    }
+    out.executed.push_back(0x142320);
+    // r5:51-56: append, player count, append, quest read, quest write.
+    v.queue_deferred(c.deferred_names[0]);
+    out.executed.push_back(0x144160);
+    (void)m.word(kPlayers);
+    out.executed.push_back(0x143534);
+    v.queue_deferred(c.deferred_names[1]);
+    out.executed.push_back(0x144160);
+    (void)v.quest_get(c.var_name);
+    out.executed.push_back(0x143500);
+    v.quest_set(c.var_name, c.var_first);
+    out.executed.push_back(0x143540);
+    // r5:58-61 and r6:107-108: with an object the entry was executed only to
+    // this stop.
+    if (obj) finish(out, 0x14598c, "removePlayerItem after object load", m, {0, 2, 0});
+    // r6:37-44: 17 calls, player -1, one search per current player, no hit.
+    if (!v.inventory_service) reject("removePlayerItem inventory search unbound");
+    for (const auto &item : c.remove_items) {
+      for (std::uint32_t slot = 0; slot < m.word(kPlayers); ++slot) {
+        const auto result = v.inventory_service("inventory_findItemBySubstring", {slot, item});
+        const auto *pair = std::get_if<std::array<std::uint32_t, 2>>(&result);
+        if (!pair) reject("findItemBySubstring requires index and bag");
+        if ((*pair)[0] != 0xffffffffu)
+          finish(out, 0x1c1cb0, "removePlayerItem with an inventory hit", m, {0, 2, 0});
+      }
+      out.executed.push_back(0x14598c);
+    }
+    // r6:50-59: three reads, setPlayerFlag(0..3, 4, 0), two reads, return.
+    for (int k = 0; k < 3; ++k) { (void)v.quest_get(c.var_name); out.executed.push_back(0x143500); }
+    for (int slot = 0; slot < 4; ++slot) { v.player_set_flag(slot, 4, 0); out.executed.push_back(0x1416d4); }
+    for (int k = 0; k < 2; ++k) { (void)v.quest_get(c.var_name); out.executed.push_back(0x143500); }
+    if (m.read(kPostAction)) reject("route 0 published a post action");
+    // r6:63-69: the loader's 0x322e6c is one 0x1eda24 pass. The front is 0,
+    // so it promotes the two names and runs none of them.
+    if (m.word(kDeferCount) != 0 || m.word(kDeferQueued) != 2 || m.word(kParity) != 0)
+      reject("arrival prefix disturbed the deferred queue");
+    v.run_deferred();
+    out.callees.push_back(0x1eda24);
+    out.loader_promoted = true;
+    // r6:76-78 and 181-185: dbg_printf 0x355490 and the warm-up loop are not
+    // entered; the 48 0x145690 tests belong to a later pass.
+    finish(out, 0x355490, "dbg_printf/warm-up", m, {2, 0, 1});
+  }
+
+  // Route 2: the round-4 prefix (366b65a:docs/loading-arrival-r4.md:154-179).
+  (void)v.mission_complete(1, c.mission);
+  out.executed.push_back(0x142084);
+  if (!c.completion_set) {
+    (void)v.choice_get(0x4c1a);
+    out.executed.push_back(0x142044);
+    v.quest_add(c.quest_title, c.quest_text);
+    out.executed.push_back(0x1433c8);
+  }
+  v.mission_set_available(1, c.mission, c.available_on);
+  out.executed.push_back(0x1420d0);
+  v.quest_set(c.var_name, c.var_first);
+  out.executed.push_back(0x143540);
+  v.quest_set(c.var_name, c.var_second);
+  out.executed.push_back(0x143540);
+  v.set_post_action(c.post_name);
+  out.executed.push_back(0x143ee4);
+  (void)v.choice_get(0x4c1b);
+  out.executed.push_back(0x142010);
+  m.byte(kPostAction, 0);
+  m.byte(kInPost, 1);
+  out.post_action = true;
+  (void)v.quest_get(c.var_name);
+  out.executed.push_back(0x143500);
+  // cut_start (r5:115-151). Offline and no player object were checked above.
+  const auto level = m.cstr(kLevel, 16);
+  if (level.empty()) finish(out, 0x143f1c, "cutscene runtime: level name absent", m, {0, 0, 0});
+  const auto lump = resident_lump(m, level + ".lmp");
+  if (!lump) finish(out, 0x17365c, "cutscene runtime: resource not resident", m, {0, 0, 0});
+  // One-entry lump image {count, label, data, size}:
+  // difftest_arrival_stage_r5.py:144-160 and r6 arm_cut.
+  if (!*lump || m.u16(*lump) != 1 || m.cstr(m.word(*lump + 4), 64) != c.cut_name + ".cut")
+    finish(out, 0x17365c, "cutscene runtime: resource not resident", m, {0, 0, 0});
+  const auto header = m.word(*lump + 8);
+  // r5:120-121 and 158-161: the header word is read with no null test; only
+  // header word 0 was executed.
+  if (!header || m.word(header) != 0)
+    finish(out, 0x19b4dc, "cutscene runtime: header word not 0", m, {0, 0, 0});
+  const auto camera = m.word(kCamera);
+  if (!camera) finish(out, 0x19b4dc, "cutscene runtime: no camera object", m, {0, 0, 0});
+  for (const std::uint32_t call : {0x3b7ef0u, 0x3b7ef0u, 0x17365cu, 0x19b4dcu, 0x322934u,
+                                   0x1eb000u, 0x19a62cu, 0x18617cu, 0x2072e8u, 0x18619cu,
+                                   0x3a59a8u, 0x3a59a8u, 0x3a59a8u, 0x19e4a0u, 0x19e4a0u})
+    out.callees.push_back(call);
+  // r5:136-151, the finals on both seeds.
+  m.w32(0x506048, 10);
+  m.w32(0x506080, m.word(kDrawFrame));
+  for (const std::uint32_t a : {0x44fd2cu, 0x44fd28u, 0x44fcfcu, 0x44fd00u, 0x44fce8u}) m.w32(a, 0);
+  m.w8(0x44fcd2, 0);
+  m.w8(0x44fcec, 0);
+  m.w32(0x44fce0, 1);
+  m.w8(0x44fcd0, 1);
+  m.w8(0x44fcd1, 1);
+  m.w32(0x7d8a04, 0x44e10000);
+  m.w32(0x41b4fc, 0x3c);
+  m.w8(0x4f66a8, 1);
+  m.w32(0x83d198, 0);
+  m.w32(0x83d18c, 0);
+  m.w32(camera + 0x34, 0); // 0x2072e8(0); +0x38, +0x3c and +0x98 untouched
+  m.w32(0x44fdb8, 2);
+  m.w32(0x44fce4, header);
+  out.executed.push_back(0x143f1c);
+  // r5:153-156: one quest write, then the replacement is published.
+  v.quest_set(c.var_name, c.var_after_cut);
+  out.executed.push_back(0x143540);
+  v.set_post_action(c.replacement_name);
+  out.executed.push_back(0x143ee4);
+  // The post action returns: 0x1edac0 clears the in-post byte after it
+  // (56a6760:tools/ref_natives.py:973-981, compared in r4:144-147).
+  m.byte(kInPost, 0);
+  out.quest_count = static_cast<int>(m.word(v.player_record(0) + kQuestCount));
+  if (c.first_frame >= 0) {
+    // r6:144-149: cut_runFrame 0x199944, light_setScale 0x14a480 stores 0
+    // at 0x4039ac, cut_setup 0x19a6cc; setup byte 0x44fcd2 is not stored.
+    out.callees.push_back(0x199944);
+    out.callees.push_back(0x14a480);
+    m.w32(kLight, 0);
+    out.callees.push_back(0x19a6cc);
+    finish(out, 0x14f498, "cut_setup", m, {0, 0, 0});
+  }
+  // r5:155-156 and r6:127-136: the replacement's only native is
+  // deleteMonster 0x144b44.
+  m.byte(kPostAction, 0);
+  m.byte(kInPost, 1);
+  auto *obj = one_object(v, c.delete_name, 0x200, "delete with more than one object was not executed");
+  if (obj) {
+    if (!(m.word(obj->addr + 0xc) & 0x20))
+      reject("delete of a non-creature object was not executed");
+    // r6:138-140: a property list takes the walk this fixture skips.
+    if (m.word(obj->addr + 0x2c) || obj->props)
+      finish(out, 0x3b91d8, "delete with a property list", m, {0, 0, 0});
+    // GameObject_dtor 0x14cf90 through the three handle clears; no free and
+    // no name-count store (r6:129-136).
+    out.callees.push_back(0x14cf90);
+    m.w32(obj->addr + 0x48, kGameObjectTable);
+    for (int k = 0; k < 3; ++k) out.callees.push_back(0x1a1698);
+  }
+  out.executed.push_back(0x144b44);
+  m.byte(kInPost, 0);
+  // r5:156: the two registered cut tasks are not run.
+  finish(out, 0x199944, "cut_runFrame tasks", m, {0, 0, 0});
+}
+}
+
 void run_arrival_prefix(builtins::Variables &v, const ArrivalControl &c, ArrivalPrefix &out) {
   // 366b65a:docs/loading-arrival-r4.md:154-191. Difficulty one and one player
   // are the initialized-record controls. An unlisted route is "route state".
   if (c.route < 0 || c.route > 2) throw amx::HostFault("route state");
+  if (c.through_round != 4 && c.through_round != 6) reject("arrival round was not audited");
+  if (c.through_round == 6) {
+    if (c.mission < 0 || c.mission > 12 || (c.available_on != 0 && c.available_on != 1))
+      reject("arrival prefix arguments were not supplied");
+    run_arrival_r6(v, c, out);
+  }
   if (c.mission < 0 || c.mission > 12 || (c.available_on != 0 && c.available_on != 1))
     reject("arrival prefix arguments were not supplied");
   auto &m = v.memory;

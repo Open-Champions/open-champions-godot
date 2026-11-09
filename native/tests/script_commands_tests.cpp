@@ -1909,6 +1909,380 @@ void test_loading_r4_arrival() {
         "naming arrival limits does not change readiness booleans");
 }
 
+// 56a6760:docs/loading-arrival-r5.md and docs/loading-arrival-r6.md. Every
+// name and value below is a synthetic control; addresses are the notes'.
+std::string run_arrival(le::ArrivalControl control, builtins::Variables &v, le::ArrivalPrefix &got) {
+  try {
+    le::run_arrival_prefix(v, control, got);
+    return std::string();
+  } catch (const a::HostFault &error) {
+    return std::string(error.what());
+  }
+}
+
+bool stored_at(const builtins::Memory &m, std::uint32_t address, std::size_t from = 0) {
+  for (std::size_t k = from; k < m.writes.size(); ++k) {
+    const auto [at, size] = m.writes[k];
+    if (at <= address && address < at + size) return true;
+  }
+  return false;
+}
+
+std::vector<std::uint32_t> repeat(std::vector<std::uint32_t> head, std::uint32_t address, int n) {
+  for (int k = 0; k < n; ++k) head.push_back(address);
+  return head;
+}
+
+void test_loading_r6_hide_mask() {
+  // r6:82-98: complement of +8; flag bit 0x2 walks records at +0x21 << 4.
+  builtins::Memory m;
+  bool faulted = false;
+  try { (void)le::arrival_hide_mask(m, 0, 0); } catch (const a::HostFault &) { faulted = true; }
+  check(faulted, "a null hide-mask model faults");
+  const std::uint32_t empty = 0x00c00000;
+  check(le::arrival_hide_mask(m, empty, 0) == ~std::uint64_t(0), "hidden 0 gives the full complement");
+  auto plant = [&](std::uint32_t block, std::uint16_t flag) {
+    m.w64(block + 8, 0x5);
+    m.w16(block + 0x10, flag);
+    m.w8(block + 0x21, 4);
+    m.w64(block + 0x30, 4); m.w64(block + 0x38, 8);   // decoy
+    m.w64(block + 0x40, 1); m.w64(block + 0x48, 2);   // record 0 at 4 << 4
+    m.w64(block + 0x50, 4); m.w64(block + 0x58, 8);   // decoy
+    return block;
+  };
+  const auto flag0 = le::arrival_hide_mask(m, plant(0x00c01000, 0), 1);
+  const auto flag1 = le::arrival_hide_mask(m, plant(0x00c02000, 1), 1);
+  const auto set = le::arrival_hide_mask(m, plant(0x00c03000, 2), 1);
+  check(flag0 == 0xfffffffffffffffaull && flag1 == 0xfffffffffffffffaull,
+        "flags 0 and 1 keep the complement with records present");
+  check(set == 0xfffffffffffffff9ull && set != 0xfffffffffffffff6ull,
+        "flag bit 0x2 applies the record at the shifted base, not a decoy");
+  check(le::arrival_hide_mask(m, 0x00c03000, 0) == 0xfffffffffffffffaull,
+        "no selected bit leaves the complement");
+}
+
+void test_loading_r6_arrival() {
+  sc::Host host;
+  auto &v = host.variables();
+  auto &m = v.memory;
+  le::ArrivalPrefix got;
+  le::ArrivalControl base;
+  base.through_round = 6;
+  base.mission = 3;
+  base.save_inhibit = 9;
+  base.available_on = 1;
+  base.quest_title = "authored_quest";
+  base.quest_text = "authored_text";
+  base.var_name = "authored_var";
+  base.var_first = 4;
+  base.var_second = 6;
+  base.post_name = "authored_post";
+  base.object_name = "authored_prop";
+  base.deferred_names = {"authored_def_a", "authored_def_b"};
+  for (int k = 0; k < 17; ++k) base.remove_items.push_back("authored_item_" + std::to_string(k));
+  base.lump_name = "authored_lump";
+  base.show_name = "authored_show";
+  base.hide_names = {"authored_hide1", "authored_hide2", "authored_hide3"};
+  base.cut_name = "cutnam";
+  base.var_after_cut = 7;
+  base.replacement_name = "authored_repl";
+  base.delete_name = "authored_del";
+  auto queue = [&] {
+    return std::array<std::uint32_t, 3>{m.word(0x86da78), m.word(0x86da7c), m.word(0x4f8690)};
+  };
+  using Q = std::array<std::uint32_t, 3>;
+
+  {
+    le::ArrivalControl five = base;
+    five.through_round = 5;
+    check(run_arrival(five, v, got) == "arrival round was not audited", "only rounds 4 and 6 run");
+  }
+
+  // ---- Route 0, empty name table (r5:51-56, r6:37-78).
+  std::vector<std::string> searched;
+  bool hit = false;
+  v.inventory_service = [&](const std::string &service, const std::vector<builtins::Variables::InventoryValue> &args)
+      -> builtins::Variables::InventoryResult {
+    check(service == "inventory_findItemBySubstring" && args.size() == 2 &&
+              std::get<std::uint32_t>(args[0]) == 0,
+          "removePlayerItem searches the one current player");
+    searched.push_back(std::get<std::string>(args[1]));
+    return std::array<std::uint32_t, 2>{hit ? 0u : 0xffffffffu, 0u};
+  };
+  const std::uint32_t bag0 = v.player_record(0) + 0x130 + 0x1200;
+  m.w32(bag0, 1); m.w32(bag0 + 0x1208, 3); m.w32(bag0 + 2 * 0x1208, 3);
+  for (int slot = 0; slot < 4; ++slot) m.byte(v.player_record(slot) + 0x4c28, 0x10 | 0x01);
+  const auto mark = m.writes.size();
+  base.route = 0;
+  const auto route0_full = repeat(
+      repeat(repeat(repeat({0x1473b4, 0x1420d0, 0x1420a4, 0x142320, 0x144160, 0x143534,
+                            0x144160, 0x143500, 0x143540}, 0x14598c, 17), 0x143500, 3),
+             0x1416d4, 4), 0x143500, 2);
+  check(run_arrival(base, v, got) == "dbg_printf/warm-up" && got.boundary == 0x355490 &&
+            got.executed == route0_full && got.loader_promoted &&
+            got.callees == std::vector<std::uint32_t>{0x1eda24} && !got.post_action &&
+            queue() == Q{2, 0, 1},
+        "route 0 runs to the loader promote and refuses before dbg_printf");
+  check(searched == base.remove_items, "seventeen removePlayerItem searches, in order");
+  check(m.word(bag0) == 1 && m.word(bag0 + 0x1208) == 3 && m.word(bag0 + 2 * 0x1208) == 3 &&
+            !stored_at(m, bag0, mark) && !stored_at(m, bag0 + 0x1208, mark) &&
+            !stored_at(m, bag0 + 2 * 0x1208, mark),
+        "no bag-count word is stored");
+  bool flags_clear = true;
+  for (int slot = 0; slot < 4; ++slot)
+    flags_clear = flags_clear && m.read(v.player_record(slot) + 0x4c28) == 0x01;
+  check(flags_clear, "setPlayerFlag clears bit 4 on all four records, past the live player");
+  check(m.cstr(0x86b278 + 0x50 * 64) == "authored_def_a" &&
+            m.cstr(0x86b278 + 0x50 * 65) == "authored_def_b" &&
+            v.quest_get("authored_var") == 4 && m.word(0x50605c) == 9,
+        "the two promoted names stay unrun in the front half");
+  hit = true;
+  check(run_arrival(base, v, got) == "removePlayerItem with an inventory hit" &&
+            got.boundary == 0x1c1cb0 && queue() == Q{0, 2, 0},
+        "an inventory hit refuses before inventory_removeItem");
+  hit = false;
+  {
+    auto unbound = std::move(v.inventory_service);
+    v.inventory_service = {};
+    check(run_arrival(base, v, got) == "removePlayerItem inventory search unbound",
+          "removePlayerItem needs the inventory search");
+    v.inventory_service = std::move(unbound);
+  }
+  m.byte(0x402791, 1);
+  check(run_arrival(base, v, got) == "arrival fixture inputs differ (network byte or player object)",
+        "a network session is outside the fixture");
+  m.byte(0x402791, 0);
+
+  // ---- Route 0 with an AutoProp (r5:58-74, r6:101-111).
+  const auto route0_head = std::vector<std::uint32_t>{
+      0x1473b4, 0x1420d0, 0x1420a4, 0x142320, 0x144160, 0x143534, 0x144160, 0x143500, 0x143540};
+  auto prop = v.new_object({"authored_prop"}, 0x10000000);
+  const auto at = prop->addr;
+  auto seal = [&] {
+    m.w32(at + 0x48, 0x5133c0);
+    m.w32(at + 0x178, 0xa5a5a5a5); m.w32(at + 0x17c, 0xa5a5a5a5);
+    m.w64(at + 0x180, 0xa5a5a5a5a5a5a5a5ull); m.w64(at + 0xc8, 0xa5a5a5a5a5a5a5a5ull);
+    m.w32(at + 0x90, 0); m.w32(at + 0x128, 0);
+  };
+  auto untouched = [&] {
+    return m.word(at + 0x178) == 0xa5a5a5a5 && m.word(at + 0x17c) == 0xa5a5a5a5 &&
+           m.u64(at + 0x180) == 0xa5a5a5a5a5a5a5a5ull;
+  };
+  for (const std::int32_t states : {0, -1}) {
+    seal();
+    m.w32(at + 0x120, std::uint32_t(states));
+    check(run_arrival(base, v, got) == "removePlayerItem after object load" &&
+              got.boundary == 0x14598c && got.executed == route0_head &&
+              got.callees == std::vector<std::uint32_t>{0x23d680} && untouched() &&
+              queue() == Q{0, 2, 0},
+          "States not above argument 0 (signed) returns and the entry stops at removePlayerItem");
+  }
+  seal();
+  m.w32(at + 0x120, 100);
+  check(run_arrival(base, v, got) == "hide mask null model (fault at load address 0x10)" &&
+            got.boundary == 0x179550 && m.word(at + 0x178) == 0 && m.word(at + 0x17c) == 0 &&
+            m.u64(at + 0x180) == 0 && m.u64(at + 0xc8) == 0xa5a5a5a5a5a5a5a5ull &&
+            queue() == Q{0, 0, 0} &&
+            got.executed == std::vector<std::uint32_t>{0x1473b4, 0x1420d0, 0x1420a4},
+        "States 100 stores the three zeros and faults on a null model before any append");
+  const std::uint32_t header = 0x00c10000;
+  m.w64(header + 8, 0x5);
+  m.w16(header + 0x10, 0);
+  seal();
+  m.w32(at + 0x90, header);
+  const auto before_mask = m.writes.size();
+  check(run_arrival(base, v, got) == "removePlayerItem after object load" &&
+            got.boundary == 0x14598c && got.executed == route0_head &&
+            got.callees == std::vector<std::uint32_t>{0x23d680, 0x179550, 0x23d7ac} &&
+            m.u64(at + 0xc8) == 0xfffffffffffffffaull && !stored_at(m, at + 0x128, before_mask) &&
+            queue() == Q{0, 2, 0},
+        "a planted header stores the show mask, skips the zero clip and appends");
+  seal();
+  m.w32(at + 0x90, header);
+  m.w32(at + 0x128, 1);
+  check(run_arrival(base, v, got) == "anim_push with a nonzero clip" && got.boundary == 0x170838 &&
+            queue() == Q{0, 0, 0},
+        "a nonzero clip stays refused");
+  seal();
+  m.w32(at + 0x90, header);
+  {
+    le::ArrivalControl passable = base;
+    passable.slot19_value = 1;
+    check(run_arrival(passable, v, got) == "slot 19 with a nonzero value" &&
+              got.boundary == 0x23d7ac && queue() == Q{0, 0, 0},
+          "slot 19 with a nonzero value stays refused");
+  }
+  seal();
+  m.w32(at + 0x90, header);
+  m.w16(header + 0x10, 2);
+  check(run_arrival(base, v, got) == "prop hide-mask record walk was not executed" &&
+            got.boundary == 0x179550,
+        "the prop path refuses a header with flag bit 0x2");
+  m.w16(header + 0x10, 0);
+  seal();
+  m.w32(at + 0x48, 0x5122a8);
+  check(run_arrival(base, v, got) == "object load slot 18 outside AutoProp was not executed",
+        "slot 18 outside the AutoProp table stays refused");
+  auto twin = v.new_object({"authored_prop"}, 0);
+  check(run_arrival(base, v, got) == "object load with more than one object was not executed",
+        "two objects of the name stay refused");
+
+  // ---- Route 1 (r5:97-108, r6:115-125).
+  base.route = 1;
+  m.w32(0x41bf7c, 0);
+  check(run_arrival(base, v, got) == "cd_findFile" && got.boundary == 0x1724fc &&
+            got.executed.empty() && got.callees == std::vector<std::uint32_t>{0x173558, 0x17306c} &&
+            queue() == Q{0, 0, 0},
+        "route 1 with no lump refuses at cd_findFile");
+  m.string(0x7b9480, "authored_lump");
+  m.w32(0x7b9480 + 0x10, 0x00c20000);
+  m.w32(0x7b9480 + 0x14, 1);
+  m.w32(0x41bf7c, 1);
+  check(run_arrival(base, v, got) == "cd_findFile" && got.boundary == 0x1724fc,
+        "a resident record with flag bit 0 also reaches cd_findFile");
+  m.w32(0x7b9480 + 0x14, 0);
+  const auto route1 = repeat(repeat(repeat({0x14222c, 0x143500, 0x143500, 0x144db8}, 0x144c00, 3), 0x143500, 6), 0, 0);
+  std::vector<std::pair<std::string, std::uint32_t>> grid;
+  v.scene_service = [&](const std::string &service, const std::vector<builtins::Variables::ServiceValue> &args) {
+    grid.emplace_back(service, std::get<std::uint32_t>(args.at(0)));
+    return 0u;
+  };
+  check(run_arrival(base, v, got) == "loader call after route 1" && got.boundary == 0x322e6c &&
+            got.executed == route1 && got.callees == std::vector<std::uint32_t>{0x173558, 0x17306c} &&
+            grid.empty() && queue() == Q{0, 0, 0},
+        "a resident lump returns through show and hide with no grid call");
+  std::vector<std::shared_ptr<builtins::Obj>> actors;
+  for (const auto *name : {"authored_show", "authored_hide1", "authored_hide2", "authored_hide3"})
+    actors.push_back(v.new_object({name}, 0x20));
+  m.w32(actors[0]->addr + 0xc, 0x20 | 0x8000);
+  m.byte(actors[0]->addr + 0x231, 8);
+  check(run_arrival(base, v, got) == "loader call after route 1" && got.executed == route1 &&
+            got.callees == std::vector<std::uint32_t>{0x173558, 0x17306c, 0x14f028, 0x14ef48, 0x14ef48, 0x14ef48},
+        "one object per name relinks the shown one and moves three off the grid");
+  check(grid.size() == 4 && grid[0] == std::make_pair(std::string("obj_updateGridCell"), actors[0]->addr) &&
+            grid[1] == std::make_pair(std::string("obj_moveOffGrid"), actors[1]->addr) &&
+            grid[3] == std::make_pair(std::string("obj_moveOffGrid"), actors[3]->addr),
+        "show and hide call the grid services in order");
+  bool shown = (m.word(actors[0]->addr + 0xc) & 0x8000) == 0 && (m.read(actors[0]->addr + 0x231) & 8) == 0;
+  for (int k = 1; k < 4; ++k)
+    shown = shown && (m.word(actors[k]->addr + 0xc) & 0x8000) && (m.read(actors[k]->addr + 0x231) & 8);
+  check(shown, "the shown object clears flag 0x8000 and bit 3; hidden ones set both");
+  m.w32(actors[1]->addr + 0xc, 0);
+  check(run_arrival(base, v, got) == "show or hide of a non-creature object was not executed",
+        "a non-creature object stays refused");
+  m.w32(actors[1]->addr + 0xc, 0x20);
+
+  // ---- Route 2 (r5:115-161, r6:127-153).
+  base.route = 2;
+  m.string(0x41b721, "authored");
+  m.string(0x7b9480, "authored.lmp");
+  const std::uint32_t image = 0x00c30000, label = 0x00c30100, data = 0x00c30200;
+  m.w32(0x7b9480 + 0x10, image);
+  m.w32(0x7b9480 + 0x14, 0);
+  m.w32(0x41bf7c, 1);
+  m.w16(image, 1);
+  m.w32(image + 4, label);
+  m.w32(image + 8, data);
+  m.w32(image + 12, 16);
+  m.string(label, "cutnam.cut");
+  m.w32(data, 0);
+  const std::uint32_t camera = 0x00c40000;
+  m.w32(0x4f8450, camera);
+  m.w32(0x44fdd0, 0x400);
+  auto seal_camera = [&] {
+    for (const std::uint32_t off : {0x34u, 0x38u, 0x3cu, 0x98u}) m.w32(camera + off, 0xa5a5a5a5);
+  };
+  const auto route2 = std::vector<std::uint32_t>{
+      0x142084, 0x142044, 0x1433c8, 0x1420d0, 0x143540, 0x143540, 0x143ee4, 0x142010,
+      0x143500, 0x143f1c, 0x143540, 0x143ee4, 0x144b44};
+  const auto cut_calls = std::vector<std::uint32_t>{
+      0x3b7ef0, 0x3b7ef0, 0x17365c, 0x19b4dc, 0x322934, 0x1eb000, 0x19a62c, 0x18617c,
+      0x2072e8, 0x18619c, 0x3a59a8, 0x3a59a8, 0x3a59a8, 0x19e4a0, 0x19e4a0};
+  auto finals = [&] {
+    return m.word(0x506048) == 10 && m.word(0x506080) == 0x400 && m.word(0x44fd2c) == 0 &&
+           m.word(0x44fd28) == 0 && m.word(0x44fcfc) == 0 && m.word(0x44fd00) == 0 &&
+           m.word(0x44fce8) == 0 && m.read(0x44fcd2) == 0 && m.read(0x44fcec) == 0 &&
+           m.word(0x44fce0) == 1 && m.read(0x44fcd0) == 1 && m.read(0x44fcd1) == 1 &&
+           m.word(0x7d8a04) == 0x44e10000 && m.word(0x41b4fc) == 0x3c && m.read(0x4f66a8) == 1 &&
+           m.word(0x83d198) == 0 && m.word(0x83d18c) == 0 && m.word(0x44fdb8) == 2 &&
+           m.word(0x44fce4) == data && m.word(data) == 0 && m.word(camera + 0x34) == 0 &&
+           m.word(camera + 0x38) == 0xa5a5a5a5 && m.word(camera + 0x3c) == 0xa5a5a5a5 &&
+           m.word(camera + 0x98) == 0xa5a5a5a5;
+  };
+  for (int slot = 0; slot < 4; ++slot) m.byte(v.mission_byte(slot, 1, 3), 0x10);
+  m.word(v.player_record(0) + 0x43d0, 0);
+  seal_camera();
+  check(run_arrival(base, v, got) == "cut_runFrame tasks" && got.boundary == 0x199944 &&
+            got.executed == route2 && got.callees == cut_calls && finals() &&
+            got.quest_count == 1 && v.quest_get("authored_var") == 7 &&
+            m.read(0x86fa80) == 0 && m.read(0x4f8698) == 0 && queue() == Q{0, 0, 0},
+        "route 2 applies the cut_start finals and the replacement returns on an empty table");
+  auto doomed = v.new_object({"authored_del"}, 0x20);
+  const auto names = v.object_names.count;
+  seal_camera();
+  m.w32(doomed->addr + 0x48, 0);
+  const auto before_delete = m.writes.size();
+  auto with_dtor = cut_calls;
+  with_dtor.insert(with_dtor.end(), {0x14cf90, 0x1a1698, 0x1a1698, 0x1a1698});
+  check(run_arrival(base, v, got) == "cut_runFrame tasks" && got.executed == route2 &&
+            got.callees == with_dtor && m.word(doomed->addr + 0x48) == 0x5122a8 &&
+            v.object_names.count == names && v.find("authored_del", 0x200).size() == 1 &&
+            stored_at(m, doomed->addr + 0x48, before_delete),
+        "delete with no property list runs the dtor store and frees nothing");
+  doomed->props = std::make_shared<std::vector<std::string>>(std::vector<std::string>{"authored=1"});
+  check(run_arrival(base, v, got) == "delete with a property list" && got.boundary == 0x3b91d8,
+        "delete with a property list stays refused");
+  doomed->props = nullptr;
+  m.w32(doomed->addr + 0x2c, 0x00c50000);
+  check(run_arrival(base, v, got) == "delete with a property list", "a property pointer stays refused");
+  m.w32(doomed->addr + 0x2c, 0);
+  for (const int argument : {1, 0}) {
+    le::ArrivalControl frame = base;
+    frame.first_frame = argument;
+    seal_camera();
+    m.w32(0x4039ac, 0x11111111);
+    const auto reason = run_arrival(frame, v, got);
+    std::size_t post = 0;
+    for (std::size_t k = 0; k < m.writes.size(); ++k)
+      if (m.writes[k].first == 0x4f8698) post = k;
+    check(reason == "cut_setup" && got.boundary == 0x14f498 && finals() &&
+              m.word(0x4039ac) == 0 && post + 2 == m.writes.size() &&
+              m.writes.back() == std::make_pair(std::uint32_t(0x4039ac), std::size_t(4)) &&
+              !stored_at(m, 0x44fcd2, post + 1) && m.read(0x86fa80) != 0,
+          "the first cut_runFrame stores the light word and refuses at cut_setup");
+  }
+  {
+    le::ArrivalControl frame = base;
+    frame.first_frame = 2;
+    check(run_arrival(frame, v, got) == "cut_runFrame argument was not executed",
+          "only frame arguments 0 and 1 run");
+  }
+  m.w32(data, 1);
+  check(run_arrival(base, v, got) == "cutscene runtime: header word not 0" &&
+            got.boundary == 0x19b4dc, "a nonzero header word stays refused");
+  m.w32(data, 0);
+  m.string(label, "other.cut");
+  check(run_arrival(base, v, got) == "cutscene runtime: resource not resident" &&
+            got.boundary == 0x17365c, "a missing cut resource is not ignored");
+  m.string(label, "cutnam.cut");
+  m.w32(0x4dcec8, 0x00c60000);
+  check(run_arrival(base, v, got) == "arrival fixture inputs differ (network byte or player object)",
+        "a player object is outside the fixture");
+  m.w32(0x4dcec8, 0);
+  base.route = 3;
+  check(run_arrival(base, v, got) == "route state", "live route selection stays refused");
+  (void)twin;
+
+  auto named = host.loading_readiness("synthetic_destination", true);
+  for (const char *reason : {"live route selection (which destination script the loader runs)",
+                             "dbg_printf/warm-up after the 0x322e6c promote",
+                             "anim_push 0x170838 with a nonzero clip",
+                             "AutoProp slot 19 0x23d7ac with a nonzero value",
+                             "deleteMonster with a property list", "cut_setup at 0x14f498 onward",
+                             "level-name bytes the loader stores", "normal deferred census"})
+    check(has_reason(named.refusals, reason), std::string("live readiness names ") + reason);
+}
+
 void test_prestart_before_objects() {
   auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
   sc::Host host;
@@ -2215,6 +2589,8 @@ int main(int argc, char **argv) {
   test_loading_r3_resources();
   test_loading_r4_selection();
   test_loading_r4_arrival();
+  test_loading_r6_hide_mask();
+  test_loading_r6_arrival();
   test_prestart_before_objects();
   test_stub_objects();
   test_refused_result_stops_entry();

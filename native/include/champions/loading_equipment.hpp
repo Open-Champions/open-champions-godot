@@ -55,8 +55,38 @@ void reset_arrival_queue(builtins::Memory &);
 // Arguments are the caller's synthetic controls, not a private script.
 // The call fills `out`, then throws the unexecuted boundary. Route ordinals
 // outside 0..2 throw "route state" and do not invent an order.
+//
+// through_round 6 extends the same three prefixes with the audited round-5/6
+// stages (research-loading-readiness@56a6760:docs/loading-arrival-r5.md and
+// docs/loading-arrival-r6.md; audits r5r6-fix / r6-fix PASS). Round 4 stays
+// the default and is unchanged. Every extra argument is the caller's
+// synthetic control: names, quest values and the slot-19 value argument are
+// never copied from a private script.
 struct ArrivalControl {
   int route = 0;
+  int through_round = 4; // 4 or 6; anything else is refused
+  // Route 0 (r5:51-56, r6:37-54): 0x142320 argument, two 0x144160 names,
+  // 17 removePlayerItem names. var_name/var_first are the read and write.
+  std::string object_name;
+  std::vector<std::string> deferred_names;
+  std::vector<std::string> remove_items;
+  // AutoProp slot 19 0x23d7ac value argument. Only 0 was executed
+  // (r6:101-108, 181-185). Its source is not in the arrival notes.
+  std::uint32_t slot19_value = 0;
+  // Route 1 (r5:97-108, r6:115-125): 0x14222c lump argument, one show and
+  // three hide names.
+  std::string lump_name;
+  std::string show_name;
+  std::vector<std::string> hide_names;
+  // Route 2 (r5:115-156, r6:127-149): 0x143f1c argument, the quest value the
+  // post action writes after cut_start, the replacement post action and its
+  // deleteMonster name. first_frame -1 runs the replacement; 0 or 1 runs the
+  // first cut_runFrame with that argument instead.
+  std::string cut_name;
+  int var_after_cut = 0;
+  std::string replacement_name;
+  std::string delete_name;
+  int first_frame = -1;
   bool completion_set = false;
   bool choice_bit = false;
   bool quest_list_full = false;
@@ -77,8 +107,20 @@ struct ArrivalPrefix {
   const char *refusal = "";
   bool post_action = false;
   int quest_count = 0;
+  // through_round 6 only: original callees the stages report reaching, in
+  // order (grid, dtor, handle-clear, hide-mask, cut_start, frame calls).
+  // A callee listed here ran as the research records it; callees whose
+  // stores the notes do not give (0x1a1698, 0x23d7ac) are listed, not modeled.
+  std::vector<std::uint32_t> callees;
+  bool loader_promoted = false;
 };
 void run_arrival_prefix(builtins::Variables &, const ArrivalControl &, ArrivalPrefix &);
+// 56a6760:docs/loading-arrival-r6.md:82-98 (model_buildHideMask 0x179550):
+// complement of the double at model +8; only when the halfword at +0x10 has
+// bit 0x2 do selected 16-byte records at (+0x21 << 4) or/clear it. A null
+// model faults on the +0x10 load ("hide mask null model").
+std::uint64_t arrival_hide_mask(const builtins::Memory &, std::uint32_t model,
+                                std::uint32_t bits);
 class Runtime {
 public:
   explicit Runtime(builtins::Memory &memory) : m(memory) {}
