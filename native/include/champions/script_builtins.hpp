@@ -206,6 +206,9 @@ public:
   // selects another one. Loading remains the caller's responsibility.
   std::shared_ptr<amx::Machine> script_machine;
   amx::Address entry_pri = 0;
+  // Optional: called with the public's name after run_script finds it and
+  // before it executes. It may throw (a HostFault) to refuse the entry.
+  std::function<void(const std::string &)> before_entry;
   void set_script(std::shared_ptr<amx::Machine>);
   amx::Address run_script(const std::optional<std::string> &);
   void queue_deferred(const std::string &);

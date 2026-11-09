@@ -82,6 +82,9 @@ struct Counts {
   std::uint64_t missing_entries = 0;
   // Entries stopped because the script used a refused command's answer.
   std::uint64_t refusal_stops = 0;
+  // Entries the story-route gate refused before they started (EntryGate).
+  // Each also stops the level script, as refusal_stops counts.
+  std::uint64_t entry_refusals = 0;
   std::uint64_t objects_registered = 0;
   std::uint64_t objects_refused = 0;
   // With an executable (set_executable), each record goes through the object
@@ -247,6 +250,17 @@ struct DialogCounts {
   // talker records (dialogScript) the object factory makes no object for.
   std::uint64_t camera_steps = 0, camera_views = 0, no_object_talker_records = 0;
   std::map<std::string, std::uint64_t> mouth; // dialog_startTalkAnim paths
+};
+
+// An opt-in boundary on which public entries a level may start
+// (story_route.hpp supplies one per mission 3-5 story level). entry returns a
+// refusal reason, or nullopt to let the entry start. object_use is true when
+// the entry is started from an object record (run_object_entry). A refused
+// entry stops the script as a refused command does. A nonempty
+// dialog_refusal refuses every dialog open in the level with that reason.
+struct EntryGate {
+  std::function<std::optional<std::string>(const std::string &entry, bool object_use)> entry;
+  std::string dialog_refusal;
 };
 
 // One level script. Not copied: its command closures capture this.
@@ -447,6 +461,10 @@ public:
   void require_complete_commands(bool on = true) { complete_commands_ = on; }
   bool requires_complete_commands() const { return complete_commands_; }
   const std::string &last_refusal() const { return last_refusal_; }
+  // Applies to every entry start: run, run_start/run_prestart, post actions,
+  // deferred calls and callScript. Not reset by load().
+  void set_entry_gate(std::optional<EntryGate> gate) { entry_gate_ = std::move(gate); }
+  bool has_entry_gate() const { return entry_gate_.has_value(); }
   // Object-driven script starter (Trigger_run / obj_runActionScripts): sets
   // the selected object and active player globals around a named public.
   // The index is the original objects.ob record index; a record that made no
@@ -744,6 +762,10 @@ private:
   bool refusal_stopped_ = false;
   bool complete_commands_ = false;
   std::string last_refusal_;
+  std::optional<EntryGate> entry_gate_;
+  int object_entry_depth_ = 0;
+  // Throws RefusedResult when the gate refuses this entry.
+  void gate_entry(const std::string &entry);
   bool counted_wait_ = false;
   bool counted_complete_ = false;
   amx::Cell last_value_ = 0;

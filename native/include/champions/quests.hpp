@@ -113,6 +113,11 @@ struct MenuWorld {
   bool pause = false;
   bool slot_active = true;
   int fade = 0;
+  // 0x231078(0): the story column of row 0 accepts even when mission 1's
+  // available bit is clear; later rows need their bit. Campaign::tick_menu
+  // sets it. research-story-route-r3 3c7987c docs/story-route.md:260-262,
+  // tools/ref_story_route.py:112-117. The older field-machine vectors leave it.
+  bool row0_open = false;
   bool mission_available(int mission) const;
   bool mission_complete(int mission) const;
   int mission_medal(int mission) const;

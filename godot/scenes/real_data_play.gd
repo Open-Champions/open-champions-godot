@@ -187,7 +187,17 @@ func mission_menu_select_story(mission: int) -> bool:
 	if mission == 2 and not str(state.get("second_story_refusal", "")).is_empty():
 		status_label.text = "Mission selection refused: " + str(state.second_story_refusal)
 		return false
-	if mission not in [1, 2] or not state.get("open", false) or not available:
+	# Missions 3-12 use their table row (research-story-route-r3 3c7987c,
+	# docs/story-route.md:228-268). Missions 3-5 preflight the act transfer;
+	# missions 6-12 are requested and the level is then refused.
+	var rows: Array = state.get("rows", [])
+	if mission >= 3 and mission <= rows.size():
+		var row: Dictionary = rows[mission - 1]
+		available = bool(row.get("available", false))
+		if available and not str(row.get("story_refusal", "")).is_empty():
+			status_label.text = "Mission selection refused: " + str(row.story_refusal)
+			return false
+	if mission < 1 or mission > max(2, rows.size()) or not state.get("open", false) or not available:
 		status_label.text = "Mission selection refused: this story mission is locked."
 		return false
 	mission_menu_target = mission - 1
