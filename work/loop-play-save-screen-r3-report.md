@@ -66,3 +66,35 @@ caller outside itself, its test and its CMake line.
    '^(memcard-screen|frontend-exact|ps2-save|ps2-class-restore|menus-exact|native-save)$'
    -j 3`, standard input closed (`work/pss3/focused.log`). `memcard-screen` 211
    checks (round 2: 166). 260 tests registered (unchanged).
+3. **Full CTest:** running (recorded in the next commit).
+4. **GDExtensions: PASS.** The round-2 script with logs in `work/pss3`
+   (`~/malik-champions/runtime/godot-cpp`, `-DCMAKE_BUILD_TYPE=Release`,
+   `CMAKE_OSX_ARCHITECTURES=arm64;x86_64`, `-j 4`, one reused `build/gdx`,
+   removed at the end): archive and level-texture `template_debug` /
+   `template_release`, creature-animation `template_debug`, all PASS, 1,017 s
+   wall. `lipo -archs` reports `x86_64 arm64` for all five libraries, each
+   rebuilt this run (06:04–06:14) (`work/pss3/gdext.out`, `*-configure.log`,
+   `*-build.log`). It ran next to the native build, then next to CTest (two heavy
+   jobs at most).
+5. **Strict Godot matrix: PASS, 54/54**, exit 0, 260 s, on the first run.
+   Before it, one `--headless --path godot --import` (exit 0, 6 s,
+   `work/pss3/godot-import.log`) was run, as round 2's audit asked. The cache
+   was already present. The import changed no tracked file. It left one
+   untracked Godot `godot/tests/mission1_real.gd.uid`, which is not committed
+   and was deleted after the Godot runs. `python3 -u tools/godot_matrix.py matrix
+   --godot ~/malik-champions/runtime/Godot.app/Contents/MacOS/Godot --out
+   work/pss3/matrix --captures --timeout 1200`, standard input closed
+   (`work/pss3/matrix.out`, `matrix/results.json`). The unchanged `check-log`
+   finds 0 errors in all 105 logs (`work/pss3/check-log.out`). Case names, order
+   and status are identical to wave 38's `results.json` (saved in round 2 as
+   `work/pss2/w38-matrix-results.json`) and to round 2's run. Nothing was
+   filtered or allowlisted.
+6. **Combat: PASS, 2,645 checks, 0 failures** (`PLAYABLE_PLAY_RESULT`,
+   `matrix/playable_wave_smoke_full_combat.log`), the same as wave 38 and round 2.
+7. **FULL_SAVE_LOAD: PASS, 300/300.** Continued and uninterrupted presentation
+   SHA-256 `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`,
+   identical to each other and to round 2 and waves 37/38.
+8. **FULL_TRACE: PASS, unchanged**, 36,402 bytes, headless, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`. No baseline
+   was edited.
+9. **Journeys:** running (recorded in the next commit).
