@@ -29,3 +29,4 @@ These three refusals and the gap were added by this branch in round 1; no pre-br
 
 - Native Release configure/build `-j 4`: **PASS**, exit 0 (`work/r3/build.log`; an incremental rebuild after the last sync recompiled `levelup_hud.cpp` only, exit 0, `work/r3/build2.log`). GDExtensions: **PASS**, exit 0; archive and level-texture `template_debug` / `template_release`, creature-animation `template_debug`, all `lipo -archs` = `x86_64 arm64` (`work/r3/gdext.log`).
 - Focused CTest (`levelup-hud|menus|ui-layout|strings|hud`): **PASS 7/7** (`work/r3/focused-ctest.log`). `levelup-hud` 190 checks (137 in round 2), `menus-exact` 338 (331).
+- Strict Godot matrix `--captures --timeout 1200` (exit status and log diagnostics as gates): **PASS 54/54**, exit 0, first run (`work/r3/matrix/results.json`). `menu_smoke` 135 checks, 0 failures (115 in round 2). It ran alongside the full CTest.
