@@ -254,8 +254,11 @@ inline constexpr std::uint32_t CREATION_FORMAT = 0x53ff68,
                                CREATION_FORMAT_MARKED = 0x53ff58,
                                CREATION_IMPORT_LITERAL = 0x53fd38,
                                CREATION_RACE_BYTE = 0x8e2c91;
-// The 0.2 blend word is loaded at 0x225584 (CCA:345-348). The spec does not
-// publish its bits, so callers read it from the owner's executable.
+// The 0.2 blend word is loaded at 0x225584 (CCA:345-348). It is caller input:
+// a consumer reads it from the owner's executable; no consumer exists yet.
+// Research pins compiled decimal literals as truncated, 0.2 = 0x3e4ccccc
+// (core.md:67, float-divergence.md:96 @ 7931517), which gives the executed
+// count-1 rate 0x3daaaaab through anim_start's 1/(s*60) (animation.md:240).
 inline constexpr std::uint32_t CREATION_BLEND_SITE = 0x225584;
 inline constexpr std::uint32_t CREATION_FLAGS = 3;  // addiu 3 at 0x225580
 // Thirteen race slots, twelve distinct addresses (REF:326-329).
@@ -279,14 +282,15 @@ std::optional<CreationStart> creation_restart(std::uint16_t object_0x11a,
 std::string creation_clip_name(const std::string &name, const std::string &format);
 // anim_start(blend, state, clip, 3): time 0, weight 0; on an empty state the
 // blend is forced to 0 (rate 1); with one cell present the cell keeps the blend
-// (the spec's executed rate there is 0x3daaaaab). No anim_advance is added
-// (CCA:651-654).
+// (the spec's executed rate there is 0x3daaaaab). The install itself writes no
+// time; the preview is stepped by preview_run_pass below.
 anim_clock::Track *install_creation_clip(anim_clock::AnimState &state, anim_clock::ClipPtr clip,
                                          Raw blend_word);
 
 // inventory_selectIdleAnim 0x1c3f08 (CCA:389-402): lump by model, clip by
 // weapon class, flags 0x43, 0.1 blend (forced off for cell 0).
 // The 0.1 blend word is loaded at 0x1c4078; forced off for cell 0 (CCA:396).
+// Caller input like the creation word (truncated 0.1 is 0x3dcccccc, core.md:67).
 inline constexpr std::uint32_t INVENTORY_BLEND_SITE = 0x1c4078;
 inline constexpr std::uint32_t INVENTORY_FLAGS = 0x43;
 inline constexpr std::array<std::uint32_t, 12> INVENTORY_LUMPS{{

@@ -340,9 +340,14 @@ void poses() {
   refuses([] { ca::creation_clip_name("r", "x%s"); }, "format must lead with %s");
 
   // CCA:343-348 install: sentinels cleared; the blend is forced to 0 on an
-  // empty state and kept at count 1. Blend words are synthetic here; the
-  // original word at 0x225584 is caller input from the executable.
-  const Raw blend = 0x3e800000; // synthetic 0.25
+  // empty state and kept at count 1, where the executed rate is 0x3daaaaab.
+  // The blend stays caller input. Its word is the research's compiled 0.2:
+  // decimal literals were truncated, 0.2 is 0x3e4ccccc (research
+  // docs/spec/core.md:67, docs/issues/float-divergence.md:96 @ 7931517), and
+  // anim_start's rate is 1.0 / (s * 60.0) (docs/spec/animation.md:240, :253).
+  // The round-1 0x3daaaaaa came from the rounded 0x3e4ccccd, which is not the
+  // compiled word.
+  const Raw blend = 0x3e4ccccc;
   ac::AnimState empty(8);
   plant(empty.tracks[0]);
   auto *t = ca::install_creation_clip(empty, clip(), blend);
@@ -353,10 +358,9 @@ void poses() {
   one.tracks[0].clip = clip();
   plant(one.tracks[1]);
   t = ca::install_creation_clip(one, clip(), blend);
-  namespace rta = champions::simulation::rta;
-  check(t == &one.tracks[1] && t->time == ZERO && t->weight == ZERO &&
-            t->rate == rta::div(ONE, rta::mul(blend, ac::SIXTY)) && t->rate != ONE && one.count == 2,
-        "creation install keeps the blend at count 1");
+  check(t == &one.tracks[1] && t->time == ZERO && t->weight == ZERO && t->rate == 0x3daaaaab &&
+            t->flags == 3 && one.count == 2,
+        "creation install keeps the blend at count 1 (executed 0x3daaaaab)");
 
   // CCA:389-400 inventory stand.
   check(ca::inventory_lump_address(0) == 0x538488 && ca::inventory_lump_address(11) == 0x538528, "lump table");
@@ -365,16 +369,18 @@ void poses() {
     check(own ? ca::inventory_idle_address(c) != 0x538598 : ca::inventory_idle_address(c) == 0x538598,
           "inventory idle class");
   }
+  // The 0.1 word is the truncated 0x3dcccccc (core.md:67); cell 0 forces it off.
+  const Raw inventory_blend = 0x3dcccccc;
   ac::AnimState inv(8);
   plant(inv.tracks[0]);
   auto idle = clip();
-  t = ca::inventory_select_idle(inv, idle, blend);
+  t = ca::inventory_select_idle(inv, idle, inventory_blend);
   check(t && t->time == ZERO && t->weight == ZERO && t->rate == ONE && t->flags == 0x43, "inventory install");
   inv.tracks[0].time = 0x11111111;
-  check(!ca::inventory_select_idle(inv, idle, blend) && inv.tracks[0].time == 0x11111111, "same clip keeps its frame");
+  check(!ca::inventory_select_idle(inv, idle, inventory_blend) && inv.tracks[0].time == 0x11111111, "same clip keeps its frame");
   ac::AnimState fresh(8);
   plant(fresh.tracks[0]);
-  ca::inventory_select_idle(fresh, clip(), blend);
+  ca::inventory_select_idle(fresh, clip(), inventory_blend);
   ac::AnimSystem system;
   ca::inventory_draw_step(system, fresh);
   check(fresh.tracks[0].time == 0x3f7fffff && fresh.tracks[0].weight == ONE, "first inventory frame");
