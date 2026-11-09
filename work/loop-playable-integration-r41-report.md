@@ -1,4 +1,4 @@
-STATUS: IN PROGRESS — wave 41 (2026-11-09). Merges, caller checks and privacy check recorded; gates pending.
+STATUS: VERIFIED — wave 41 (2026-11-09). Three audited tips integrated; one textual conflict (`native/src/script_commands.cpp`, two new functions in one spot), resolved by keeping both unchanged. Release build plus template_debug and template_release GDExtensions; native CTest 267/267 (no timeouts), strict Godot 55/55 (wave 40's 54 + `char_appearance_smoke`), combat 2,645/0, FULL_SAVE_LOAD 300/300, FULL_TRACE unchanged (36,402 bytes, `9c7922b2…`). Journeys 80/81 with pickup 10→11, ending at the death-reload refusal, and equal to wave 40 step by step (refused rows 27/28). Refusal kinds 8/8 (wave 40: 8/6): the frame-rate-dependent hub-action retry count rose, which a same-build rerun confirmed. Private story-route probe 234/241, identical to wave 40. Disc 994/994. No non-merge code changes.
 
 # Playable integration wave 41 — 2026-11-09
 
