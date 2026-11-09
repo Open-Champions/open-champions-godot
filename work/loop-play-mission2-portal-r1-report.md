@@ -1,4 +1,4 @@
-STATUS: PENDING
+STATUS: PASS — 2026-11-09. The round-6 jump-gate portal is carried in the native client, end to end through the real `Loader` and `SessionAdapter`. That covers menu selection with the refused current level, the 181 travel frames and the name/`0xff` write, cancel, the handoff, arrival at the hub's own gate, and the 0x1e4 destination block. State 6 and later, the net and fixed-destination paths, and main-loop steps 2/4/5 stay refused or unclaimed. Gates on the mini: Release `-j 4` plus five universal extensions; focused 12/12 (`mission2-route` 1,215 checks); CTest 267/267 with no timeouts; strict Godot 55/55; combat 2,645/0; FULL_SAVE_LOAD 300/300; FULL_TRACE unchanged (36,402 bytes, `9c7922b2…`); journeys equal to wave 41 at every step/result pair (80/81, refused rows 27/28, pickup 10→11); probe 234/241, identical to wave 41.
 
 # Play mission 2 portal, round 1 — 2026-11-09
 
@@ -161,4 +161,88 @@ writes the request 181 counter calls after confirm. Round 6 has 8 fade-out
 frames and 1 begin-travel frame before state 5's 181 (`:229-232`).
 `GateTravel` and its tests are unchanged.
 
-GATES_PENDING
+## Gates (Mac mini)
+
+Evidence is under ignored `work/play-mission2-portal-r1/`, copied back with
+the mini home path rewritten to `~`. Script: `gates.sh` there, which is wave
+41's `gates.sh` with the `W` and `E` paths changed and one `focused` stage
+added (`diff` shows only those lines). Each build step checks for at least
+30 GB free: 35 GB at the first check, 44 GB before the final rebuild.
+Parallelism was `-j 4` and `ctest -j 3`. CTest and the matrix ran together,
+then the journeys and the probe in sequence. The mini load average was
+about 30–100 from other agents. PIDs started: build+ext 32854, CTest 79399,
+matrix 79400, journeys+probe 8809. All exited on their own, and none was
+killed. Standard input was closed for CTest, Godot and the probe.
+
+1. **Release build + GDExtensions: PASS.** Fresh configure. First the
+   `champions-mission2-route-tests` target alone, which found two test-only
+   compile errors (`flow::Raw`) and a missing authored `msel.lmp`. Both were
+   fixed before the first commit. Then the full native build: exit 0, 227 s.
+   The comment-only citation commit `ed5b2f67` was synced, touched and
+   rebuilt: two objects, exit 0. No compiler warnings. The 11 `ignoring
+   duplicate libraries` linker notes are identical in text to wave 41
+   (`diff` of the warning lines is empty). Extensions: exit 0, 372 s.
+   Archive and level-texture, each `template_debug` and `template_release`,
+   and creature-anim `template_debug` all report `x86_64 arm64`, the same as
+   wave 41. Warning counts per log are the same as wave 41: 6, 6, 4, 4 and
+   0. The GDExtension does not link `champions-mission2-route`.
+2. **Focused: PASS, 12/12**, 194 s: `mission2-route` (1,215 checks; was
+   1,019), `level-flow-exact`, `level-play`, `story-route`,
+   `script-commands`, `quests`, `mission2-actors`, `ps2-save`,
+   `native-save`, `native-save-access`, `native-save-partition` and
+   `native-save-indexed`.
+3. **Full CTest `-j 3`: PASS, 267/267**, exit 0, 1,299 s. The count is the
+   same as wave 41: no test was added; `mission2-route` grew in place. **No
+   test timed out, so none was rerun.** Longest under load: `netplay` 223 s,
+   `session-facing-exact` 212 s, `native-save-indexed` 164 s.
+4. **Strict Godot matrix: 55/55 PASS**, exit 0, 571 s, run after one
+   headless import (exit 0, 0 error lines; the class cache includes
+   `NativeFxRenderer`). The unchanged `check-log` reports `logs=107
+   failing=0`.
+5. **Combat: 2,645 checks, 0 failures**
+   (`matrix/playable_wave_smoke_full_combat.log`).
+6. **FULL_SAVE_LOAD: PASS, 300/300.** The continued and uninterrupted
+   presentation hashes are both
+   `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`.
+7. **FULL_TRACE: unchanged.** 36,402 bytes, SHA-256
+   `9c7922b2df46aba6542a230d9c60baa04de2f4113982bd533ae79adc33b0c659`,
+   headless renderer. No baseline was edited.
+8. **Journeys.** Unchanged `tools/run_loop_playthrough.py`, headless then
+   rendered, read-only disc, 110 s. The wrapper exits 1, which is the
+   retained `player_death` refusal. Disc files: 994 before, 994 after.
+   Compared with wave 41 by wave 41's own `compare.py`:
+
+   | Variant | Steps | Step/result pairs differing | Refused rows | Refusal kinds | Pickup | Captures |
+   |---|---|---|---|---|---|---|
+   | Headless | 80 | 0 | 27 (= w41) | 8 (= w41) | 10→11, 52 walk ticks, 0 retries | 0 |
+   | Rendered | 81 | 0 | 28 (= w41) | 8 (= w41) | 10→11, 52 walk ticks, 0 retries | 38 |
+
+   Every difference is listed here:
+   - **`portal_arrival`: no change.** It is `blocked_no_real_source` (38
+     candidate levels) in both variants. It was the same in wave 41 and in
+     wave 41's rerun. The step needs a loadable level with `Portal`
+     records, then calls the live controller's `script_gate_confirm`. Its
+     refusals (`session_controller.cpp:2357`, `:2878`) are untouched, as
+     instructed for superseded refusals. The new module is native-only, and
+     the live host still has no gate discovery. So the round-6 port cannot
+     reach this row. Wiring it into the live host is the decision listed
+     above.
+   - **Hub-action retry count, rendered only:** `… hub action beyond
+     documented <path> offers is Unknown count=1` became `count=3`. Headless
+     stays at `count=2`. This count follows the frame rate of the dialog
+     steps (wave 41 report, difference 1). Rendered `dialog_prompt` /
+     `dialog_choice_close` ran at 157/149 fps here. Wave 41 ran at 93/77
+     with count 1, and its rerun at 107/122 with count 2. No dialog, hub or
+     `setMissionAvailable` code changed.
+   - **Host only:** `fps`, `memory_bytes`, and `enemy_fight.swing_wall_msec`
+     (headless 39,592→29,041, rendered 41,961→31,203). Fight HP, drops and
+     awards are identical.
+9. **Story-route probe: 234/241**, exit 1. Apart from the disc-count lines,
+   the output is line for line wave 41's `probe.log` (`diff` empty). The
+   seven failures are the same disclosed `m3-gnome-kill` #1-6 and
+   `m5-start` #1. Disc files: 994 before, 994 after.
+
+Privacy: no file this branch changed contains a `/Users/` path. The mini
+`build/` (6.5 GB) was deleted afterwards; 34 GB was free and the tree is
+1.2 GB. No push, PR, install, `/tmp` use on the mini, private-disc write,
+research or `playable-integration` edit, or process-name kill.
