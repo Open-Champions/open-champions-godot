@@ -341,6 +341,9 @@ public:
   void quest_remove(const std::string &);
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
+  // Optional. Called after a script built-in (setv, addv, vars_set) stores a
+  // quest variable, with the name as the script passed it.
+  std::function<void(const std::string &)> on_script_quest_store;
 private:
   // Complete scene utilities/audio handlers; external audio remains scene_service.
   amx::Cell utility_dispatch(const std::string &, amx::Machine &);

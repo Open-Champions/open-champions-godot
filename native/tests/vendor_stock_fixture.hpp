@@ -1,6 +1,8 @@
 #pragma once
 #include "champions/vendor_stock.hpp"
 #include <algorithm>
+#include <map>
+#include <memory>
 
 // Synthetic item tables for the vendor-stock contract. No retail names or bytes.
 namespace champions::simulation::rta::items::vendor_fixture {
@@ -10,6 +12,8 @@ struct Options {
   bool bit40 = false;
   // Flags bit 40 on the ordinary weapon definitions named here only.
   std::vector<std::string> bit40_names;
+  // When not empty, only these ordinary definitions stay eligible.
+  std::vector<std::string> ordinary_names;
 };
 inline Tables tables(const Options &options = {}) {
   Tables t;
@@ -31,6 +35,10 @@ inline Tables tables(const Options &options = {}) {
     d->damage_bits = subtype == 3 ? 8u : 1u;
     d->flags = flags;
     if (!options.ordinary && !preset)
+      d->flags |= 0x10000u;
+    if (!preset && !options.ordinary_names.empty() &&
+        std::find(options.ordinary_names.begin(), options.ordinary_names.end(),
+                  d->name) == options.ordinary_names.end())
       d->flags |= 0x10000u;
     if (options.bit40 && category == 0 && !preset)
       d->flags |= 1ull << 40;
@@ -81,6 +89,24 @@ inline VendorFixedText fixed_text() {
   fixed.cell = [](std::uint32_t) { return std::string("o0"); };
   return fixed;
 }
+// A residue source as an executed probe would supply it: zero bytes, except
+// an optional tag of the candidate's ordinal + 1 at +0x44 (never compared).
+inline VendorResidueSource residue(bool tag = false) {
+  return [tag](const VendorResidueCall &call, const Item &) {
+    std::array<std::uint8_t, ITEM_SIZE> stale{};
+    if (tag) {
+      const auto ordinal = static_cast<std::uint32_t>(call.ordinal + 1);
+      stale[0x44] = static_cast<std::uint8_t>(ordinal);
+      stale[0x45] = static_cast<std::uint8_t>(ordinal >> 8);
+      stale[0x46] = call.special ? 1 : 0;
+      stale[0x47] = static_cast<std::uint8_t>(call.category + 1);
+    }
+    return stale;
+  };
+}
+// Every input supplied: both seeds, difficulty 1, one class-0 player, the
+// synthetic fixed text, a private quest table, a zero-filled probe image of
+// the stock arrays, and zero executed residue.
 inline VendorStock ready(std::uint32_t shared, std::uint32_t cosmetic,
                          const Options &options = {}) {
   VendorStock stock(tables(options));
@@ -88,6 +114,18 @@ inline VendorStock ready(std::uint32_t shared, std::uint32_t cosmetic,
   stock.set_difficulty(1);
   stock.set_party(1, {0, 0, 0, 0});
   stock.set_fixed(fixed_text());
+  auto table = std::make_shared<std::map<std::string, std::int32_t>>();
+  VendorQuestVariables bound;
+  bound.read = [table](const std::string &name) {
+    return table->try_emplace(name, 0).first->second;
+  };
+  bound.present = [table](const std::string &name) { return table->count(name) != 0; };
+  bound.store = [table](const std::string &name, std::int32_t value) {
+    (*table)[name] = value;
+  };
+  stock.bind_quest_variables(bound);
+  stock.fill_storage(0);
+  stock.set_executed_residue(residue());
   return stock;
 }
 } // namespace champions::simulation::rta::items::vendor_fixture

@@ -40,6 +40,7 @@
 
 namespace champions::simulation::rta::items {
 class VendorStock;
+struct VendorLoad;
 }
 
 namespace champions::simulation::rta::script_commands {
@@ -298,7 +299,22 @@ public:
   void set_executable(level_factory::Executable);
   // Opt-in session stock. Without it a matching destination still refuses
   // generation. research-vendor-stock@fdf6752:docs/spec/vendor-stock.md:326-336.
-  void set_vendor_stock(items::VendorStock *stock) { vendor_stock_ = stock; }
+  // Binding routes storeLevel through this host's quest table 0x86da80
+  // (creating read), and marks a script store of storeLevel unestablished.
+  void set_vendor_stock(items::VendorStock *stock);
+  // The cosmetic seed 0x404460 the stock pass draws its three special rolls
+  // from (docs/spec/vendor-stock.md:165-171). Without it a pass refuses.
+  void bind_cosmetic_seed(CosmeticRandom *seed) { cosmetic_seed_ = seed; }
+  // The ordered stock point of a load: after deferred dispatch, equipment
+  // warm-up and the peer barrier, before loading-screen stop 0x3224d8
+  // (docs/spec/vendor-stock.md:17-25). The session flow calls it from
+  // SessionHooks::shop_stock. It supplies both seeds, difficulty 0x4f719c,
+  // the party (0x4d8ae0 and class +0x50 of each record) and storeLevel from
+  // the session, then starts a stepped pass. A missing input refuses.
+  void stock_on_load(const std::string &destination);
+  // One step of the pass stock_on_load started. True once nothing is
+  // pending. On completion the shared seed is written back.
+  bool step_vendor_stock();
   // The selected level and its monsters.bal payload, read from the owner's
   // game folder at run time. The executable supplies the level table. Until
   // both are present, a constructed creature's statistics remain unknown.
@@ -657,6 +673,18 @@ private:
   SeedPolicy seed_policy_ = SeedPolicy::Exact;
   std::unique_ptr<level_factory::Executable> exe_;
   items::VendorStock *vendor_stock_ = nullptr;
+  CosmeticRandom *cosmetic_seed_ = nullptr;
+  // The stock result recorded for the current load. loading_readiness only
+  // reads it. docs/spec/vendor-stock.md:17-25.
+  struct StockLoad {
+    std::string destination;
+    bool matched = false, pending = false, generated = false;
+    std::vector<std::string> refusals;
+    std::uint32_t shared_at_begin = 0;
+  };
+  std::optional<StockLoad> stock_load_;
+  std::uint32_t cosmetic_at_begin_ = 0;
+  void record_stock(const items::VendorLoad &);
   struct BalanceRow {
     std::uint16_t hash = 0;
     std::array<std::uint32_t, 5> factors{};
