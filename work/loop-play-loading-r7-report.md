@@ -1,6 +1,6 @@
 # Play loading readiness, round 7
 
-STATUS: IN PROGRESS (build gates done; CTest, matrix and journeys pending).
+STATUS: IN PROGRESS (build and CTest gates done; matrix and journeys pending).
 
 Research pin: `research-loading-readiness` `f8c780b34e772d71ed9a3b9fd2350226739dc6ca` (`docs/loading-arrival-r7.md` with its Round-8 and Round-9 fixes sections, and `tools/difftest_arrival_stage_r7.py`, `_r8.py`, `_r9.py`). Audits: `research-loading-readiness-r7.md`, `-r7-fix.md`, and `-r7-fix2.md`, which is PASS with LOWs R10-1 to R10-3 and the carried R8-10. Client base: the PASS tip of `codex/play-loading-r5`, `9cdead61` (audit `play-loading-r5-fix.md`, PASS, with one follow-up item). Branch `codex/play-loading-r7`.
 
@@ -117,6 +117,7 @@ Everything ran on the Mac mini in `~/malik-champions/open-champions/worktrees/pl
 | Native Release configure and build, `-j 4`, clean `build/native` | **PASS**, exit 0, 1 s + 114 s. 0 warnings in the changed files (10 in the whole build, all in other files, as in round 5) | 11.9 → 20.5 |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 110 s, `template_release` 100 s; level texture 21 s / 20 s; creature animation `template_debug` 80 s. `lipo -archs` gives `x86_64 arm64` for all five libraries, each rebuilt at 07:17–07:20 that day (`ext-status.txt`) | 39.9 → 73.3 |
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3 (`script-commands`, `-measure-usage`, `-measure-empty`), 1 s (`focused.log`). The first focused run, before the test fix below, failed one check | 20.5 → 20.5 |
+| Full CTest `-j 3` | **PASS, 259/259** (259 registered, as in round 5), exit 0, 954 s, one run. No test timed out, so no test was rerun. Round 5's slow trio passed inside the parallel run: `messages-exact` 7 s, `player-exact` 62 s, `session-facing-exact` 196 s (`ctest.log`, `ctest-status.txt`) | 64.5 → 39.1 |
 
 **The one failing first run.** `a host property list removes the name the same way` failed once. The test had made that object with the name both as a `new_object` name and as a `name=` host prop. `new_object` registers `name=` props itself (`script_builtins.cpp:327-329`), so the name was in the table twice, and the delete correctly refused it as naming two objects. The fix was to the test only: the object now gets its name from its prop alone, as loaded objects do. The code was not changed. That fix is in `3b77dc8b`.
 
