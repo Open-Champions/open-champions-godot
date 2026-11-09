@@ -1,6 +1,6 @@
 # Play loading readiness, round 5
 
-STATUS: DONE. Rounds 5 and 6 add Observed arrival stages to the synthetic prefixes. Live arrival stays refused. Every gate passed. The full CTest needed one serial rerun of three exact-vector tests that had timed out under mini load (details below). Journeys match wave 37 at 80/81 steps with pickup 10→11.
+STATUS: DONE (fix round for audit `play-loading-r5`, VERDICT FIX: PLR5-1 to PLR5-4 fixed, see "Fix round"). Round 5 status, unchanged: DONE. Rounds 5 and 6 add Observed arrival stages to the synthetic prefixes. Live arrival stays refused. Every gate passed. The full CTest needed one serial rerun of three exact-vector tests that had timed out under mini load (details below). Journeys match wave 37 at 80/81 steps with pickup 10→11.
 
 Research pin: `research-loading-readiness` `56a6760` (rounds 5 and 6; audits `research-loading-readiness-r5r6-fix.md` and `research-loading-readiness-r6-fix.md`, final verdict PASS). Client base: wave 37 VERIFIED `70d2de19`. Branch `codex/play-loading-r5`.
 
@@ -191,7 +191,7 @@ All on the mini, in the worktree above, with one `build/` root. Builds used `-j 
 | Native Release configure and build | **PASS**, exit 0, 2 s + 394 s. 0 warnings in the changed files (10 in the whole build, all in other files) | 92.9 → 93.0 |
 | GDExtensions | **PASS**, each exit 0. Archive `template_debug` 329 s and `template_release` 432 s; level texture 76 s / 82 s; creature animation `template_debug` 210 s. `lipo -archs` gives `x86_64 arm64` for all five libraries (`build-status.txt`) | 93.0 → 90.8 |
 | Focused `ctest -R ^script-commands` | **PASS**, 3/3 (`script-commands`, `-measure-usage`, `-measure-empty`), 1 s (`focused.log`). The bare test binary also gives `script-commands ok` (`tests-fixed.out`) | 2.1 → 2.1 |
-CTEST_ROW
+| Full CTest `-j 3` | **PASS, 259/259** (259 registered, as in round 5), run twice with no rerun of any single test and no timeout. **Run 1** (1,520 s, exit 0): its `ctest.log` stops at test 94. My own gate-C log scrub (`sed -i` over `work/plr5-fix/*.log`) replaced the file while CTest was still writing to it. CTest's own record of that run shows 259 tests, 255 `Test Passed` + 4 `Test Pass Reason`, no `LastTestsFailed.log`, and an empty failed section in `CTestCostData.txt` (`ctest-summary.txt`, `ctest-costdata.txt`). Because that log is incomplete, I ran it again. **Run 2** (1,836 s, exit 0, complete `ctest-full2.log`): `100% tests passed, 0 tests failed out of 259`. Round 5's three timeouts all passed inside the parallel run: `messages-exact` 115 s, `player-exact` 181 s, `session-facing-exact` 402 s. `player-exact`'s headroom against its inner 180 s subprocess limit is thin, which supports the separate timeout recommendation in PLR5-4 | run 1: 2.1 → 65.0; run 2: 61.2 → 85.5 |
 | Strict Godot matrix: `tools/godot_matrix.py matrix --captures --timeout 1200` after `Godot --headless --path godot --import` (3 s, exit 0) | **54/54 PASS**, exit 0, 170 s. The unchanged `check-log` finds 0 diagnostic errors in all 105 matrix logs. Same case list as round 5 and wave 37 | 2.3 → 67.9 |
 | Combat (`playable_wave_smoke_full_combat`) | **2,645 checks, 0 failures** | (in matrix) |
 | FULL_SAVE_LOAD | **PASS, 300/300**. Continued and uninterrupted presentation SHA-256 are both `cb2309ab23d3e2906b5b9d4e95e5577c354869fce3d86cce9fe592a0d2c8d573`, as in round 5 | (in matrix) |
@@ -218,4 +218,10 @@ CTEST_ROW
 - `gdextension/src/session_controller.cpp`: comment only.
 - `native/tests/script_commands_tests.cpp`: `test_loading_r6_hide_mask` and `test_loading_r6_arrival`, with synthetic fixtures only. `test_loading_r4_*` is unchanged.
 
-No test, baseline, fixture or tool was weakened or edited. Nothing was pushed and no PR was opened. I did not touch `~/champions-re` or playable-integration. No process was killed by name. The private disc was read only. The mini's `build/` was deleted after the gates.
+Fix round (`e947eb4`):
+
+- `loading_equipment.hpp`: the reworded `callees` comment and the new `ArrivalPrefix::unmodeled`.
+- `loading_equipment.cpp`: the GameObject-table gate on the delete, the `unmodeled` entries, and the comment flagging the no-free reliance.
+- `script_commands_tests.cpp`: 52 lines added, 0 removed (`git diff dd7a01e2`). The old `+0x48 = 0` plant now sets up the zero-table refusal case, and the passing delete plants `0x5122a8` before its mark. The other additions are the finals sentinels and `finals_stored`, the three table refusals, and the `unmodeled` checks. No base (`70d2de19`) test line is changed.
+
+No test, baseline, fixture or tool was weakened or edited. Nothing was pushed and no PR was opened. I did not touch `~/champions-re` or playable-integration. No process was killed by name. The private disc was read only. The mini's `build/` was deleted after the gates (in round 5, and again after the fix round).
